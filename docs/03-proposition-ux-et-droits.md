@@ -117,6 +117,12 @@ Limites constatées ou déduites :
 - une vue d'export par destinataire ajoute une table de synthèse par destinataire au document
   SOURCE.
 
+### Décision d'Antoine (14 octobre 2026) : les deux
+
+Par défaut, une **table d'export plate** unique, préparée par le propriétaire SOURCE et contrôlée
+par le widget. En **option avancée**, la vue d'export filtrée par destinataire (colonnes cochées,
+filtre de lignes) générée par le widget.
+
 ### Ce qui reste hors de portée
 
 - Une fois envoyée, une donnée est chez la CIBLE : révoquer arrête les envois, pas ce qui est déjà
