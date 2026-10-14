@@ -11,21 +11,25 @@ export const apply = actions => (actions.length ? grist.docApi.applyUserActions(
 
 // Instantané des métadonnées du document (tables et colonnes), lu en deux requêtes : chaque
 // écran ou passage de synchro le lit une fois, puis le relit après une écriture qui change le
-// schéma. Les tables de résumé et les tables cachées de Grist sont ignorées.
+// schéma. Les tables de résumé (vues d'export) et les tables cachées de Grist ne sont pas
+// listées, mais `has` et `columns` les connaissent.
 export async function readSchema() {
   const [tables, columns] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Tables_column')]);
-  const byId = new Map(tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => [tb.tableId, tb]));
+  const byId = new Map(tables.map(tb => [tb.tableId, tb]));
+  const colById = new Map(columns.map(c => [c.id, c]));
   return {
-    tableIds: [...byId.keys()].sort(),
+    tableIds: tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => tb.tableId).sort(),
     has: tableId => byId.has(tableId),
     table: tableId => byId.get(tableId),
     // Colonnes d'une table, dans l'ordre de leur création ; null si la table n'existe pas.
+    // `visible` : colonne affichée d'une Référence, dans la table visée.
     columns(tableId) {
       const table = byId.get(tableId);
       if (!table) return null;
       return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
         id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, label: c.label, description: c.description,
         displayCol: c.displayCol, rules: Array.isArray(c.rules) ? c.rules.slice(1) : [],
+        visible: (colById.get(c.visibleCol) || {}).colId || '',
       }));
     },
   };
@@ -44,7 +48,8 @@ async function rest(method, path, body) {
   const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
   const response = await fetch(`${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    // Grist exige l'un de ces en-têtes pour toute écriture sans cookie (protection CSRF).
+    headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
@@ -135,11 +140,12 @@ export async function collapseForms(tableIds) {
 
 // Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
 // celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
-export async function tuckUnderWidgetPage(tableIds) {
+// `viewRefs` : autres pages à ranger (celle d'une vue d'export, qui n'est pas une page principale).
+export async function tuckUnderWidgetPage(tableIds, viewRefs = []) {
   const viewRef = await widgetViewRef();
   if (!viewRef) return;
   const [tables, allPages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Pages')]);
-  const views = new Set(tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.primaryViewId));
+  const views = new Set([...tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.primaryViewId), ...viewRefs]);
   const moving = allPages.filter(p => views.has(p.viewRef));
   const pages = allPages.filter(p => !views.has(p.viewRef)).sort((a, b) => a.pagePos - b.pagePos);
   const at = pages.findIndex(p => p.viewRef === viewRef);

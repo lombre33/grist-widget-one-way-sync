@@ -127,12 +127,12 @@ export function copyField(value) {
   return el('div', { class: 'copy-field' }, area, button);
 }
 
-// Liste à cocher, filtrable au clavier (choix de plusieurs tables). `onChange` reçoit les valeurs
-// cochées, dans l'ordre de la liste.
-export function checkList({ items, placeholder = t('common.filter'), onChange }) {
+// Liste à cocher, filtrable au clavier (tables, colonnes). `checked` : valeurs cochées au départ.
+// `onChange` reçoit les valeurs cochées, dans l'ordre de la liste.
+export function checkList({ items, checked = [], placeholder = t('common.filter'), onChange }) {
   const filter = el('input', { class: 'search-input', type: 'search', placeholder, 'aria-label': placeholder, autocomplete: 'off' });
   const list = el('div', { class: 'check-list', role: 'group' });
-  const chosen = new Set();
+  const chosen = new Set(checked);
   const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const render = () => {
     const words = fold(filter.value).split(/\s+/).filter(Boolean);

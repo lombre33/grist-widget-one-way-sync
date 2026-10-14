@@ -22,7 +22,7 @@ const TEAM = `${env.grist}/o/${env.team}`;
 // --- Widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées
 // (config.js) et à la politique de sécurité (index.html), comme le ferait une instance qui
 // héberge sa propre copie.
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   try {
@@ -100,8 +100,9 @@ const shot = async name => { if (process.env.CAPTURES) await page.screenshot({ p
 
 // --- Documents
 const source = await newDocWithWidget('Source', [
-  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }]],
-  ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
+  // Interne n'est pas cochée à l'invitation : elle ne doit arriver qu'une fois ajoutée à l'export.
+  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }, { id: 'Interne', type: 'Text' }]],
+  ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'], Interne: ['i1', 'i2', 'i3'] }],
   ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
@@ -149,6 +150,7 @@ try {
   await shot('02-source-tables');
   await dialogButton('Continuer').click();
   await dialog().getByText('Le widget doit ajouter').waitFor();
+  await dialog().getByRole('checkbox', { name: 'Interne' }).uncheck();
   await shot('03-source-preparation');
   await dialogButton('Préparer pour la synchro').click();
   await dialog().getByText('Prêt à envoyer : 2 tables').waitFor();
@@ -223,7 +225,7 @@ try {
   await widget().getByText('Actif').first().waitFor();
   await shot('13-source-actif');
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
-  assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts', 'Synchro_Contacts', 'Synchro_Villes', 'Villes']);
+  assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts_summary_id_sync', 'Synchro_Contacts', 'Synchro_Villes', 'Villes_summary_id_sync']);
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length >= 3, 'lignes reçues dans le journal');
   step('SOURCE : quatre webhooks créés, lignes existantes envoyées');
 
@@ -243,7 +245,8 @@ try {
     assert.ok(at >= 0, 'page du widget repliée');
     return list.slice(at + 1).filter(p => p.indentation === 1).map(p => p.name).sort();
   };
-  assert.deepEqual(await tucked(source.doc), ['Synchro_Contacts', 'Synchro_Villes']);
+  assert.deepEqual((await tucked(source.doc)).filter(name => name.startsWith('Synchro_')), ['Synchro_Contacts', 'Synchro_Villes']);
+  assert.equal((await tucked(source.doc)).length, 4, 'vues d\'export rangées aussi');
   assert.deepEqual(await tucked(target.doc), ['Journal_Communes', 'Journal_Contacts']);
   const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
   assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
@@ -283,6 +286,30 @@ try {
   // --- Journal nettoyé à chaque passage : une version par ligne et la dernière liste
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).filter(r => r.id_sync).length === 4, 'journal nettoyé');
   step('CIBLE : journal nettoyé');
+
+  // --- Colonne ajoutée à l'export : la CIBLE la crée et la remplit seule
+  await openWidget(source.url);
+  await button('Colonnes').click();
+  await dialog().getByRole('checkbox', { name: 'Interne' }).first().check();
+  await dialogButton('Enregistrer').click();
+  await dialog().waitFor({ state: 'detached' });
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Interne === 'i1'), 'colonne ajoutée reçue');
+  step('SOURCE puis CIBLE : colonne ajoutée à l\'export, créée et remplie dans la destination');
+
+  // --- Arrêts : la CIBLE efface ses journaux, la SOURCE révoque et efface ses tables techniques
+  await button('Arrêter la réception').click();
+  await dialogButton('Arrêter la réception').click();
+  await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'journaux effacés');
+  assert.equal((await records(target.doc, 'Contacts')).length, 3, 'destination gardée');
+  await openWidget(source.url);
+  await button('Révoquer').click();
+  await dialogButton('Révoquer').click();
+  await widget().getByText('Aucun destinataire').waitFor();
+  const left = (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort();
+  assert.deepEqual(left, ['Contacts', 'Table1', 'Villes'], 'tables techniques effacées');
+  assert.equal((await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 0);
+  step('CIBLE puis SOURCE : réception arrêtée, révocation et tables techniques effacées');
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

@@ -2,12 +2,15 @@
 // formulaire de réception), produire le code de réponse, puis consolider chaque Journal dans sa
 // table de destination tant que la page est ouverte par un éditeur.
 import {
-  APPLIED_COL, AUTHOR_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, parseFormLink, parseInvitation,
-  planConsolidation, planPurge, recentChanges, toTableId,
+  APPLIED_COL, AUTHOR_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, expandRows, parseFormLink, parseInvitation,
+  planConsolidation, planPurge, recentChanges, sentColumns, toTableId,
 } from './core.js';
 import { apply, collapseForms, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
-import { JOURNAL_PREFIX, createReceivingTables, destColumns, readNote, receivedTables, upgradeJournal, writeNote } from './tables.js';
-import { copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
+import {
+  JOURNAL_PREFIX, addDestColumnsActions, createReceivingTables, destColumns, readNote, receivedTables, removeTechnicalTables,
+  upgradeJournal, writeNote,
+} from './tables.js';
+import { confirmDialog, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
 
@@ -39,18 +42,28 @@ async function readLastVisit() {
 // Un seul lot d'écritures, donc tout ou rien : destination, marques et nettoyage du Journal.
 // La note du journal donne les noms de colonnes choisis (`map`), la colonne de rattachement
 // (`match`) et la colonne qui nomme les lignes dans l'historique (`label`).
+// Une colonne nouvelle dans la vue d'export de la SOURCE est d'abord ajoutée à la destination.
 async function consolidate(schema, { journal, dest }) {
   const note = readNote(schema, journal) || {};
-  const [journalRows, destRows] = await Promise.all([fetchRows(journal), fetchRows(dest)]);
-  const copyCols = copyColumns(schema.columns(journal), schema.columns(dest), note.map);
+  const journalRows = expandRows(await fetchRows(journal));
+  const sent = sentColumns(journalRows, note.columns || []);
+  const added = addDestColumnsActions(schema, dest, sent, note.map);
+  if (added.length) {
+    await apply(added);
+    schema = await readSchema();
+  }
+  const destRows = await fetchRows(dest);
+  // Journal d'avant la vue d'export : les colonnes envoyées sont celles du Journal.
+  const from = sent.length ? sent.map(c => ({ colId: c.id })) : schema.columns(journal);
+  const copyCols = copyColumns(from, schema.columns(dest), note.map);
   const { actions, stats } = planConsolidation({
     journalRows, destRows, copyCols, destTable: dest, journalTable: journal, matchCol: note.match || '',
   });
   const writes = [...actions, ...planPurge(journalRows, journal)];
   await apply(writes);
-  const after = writes.length ? await fetchRows(journal) : journalRows;
+  const after = writes.length ? expandRows(await fetchRows(journal)) : journalRows;
   const labelCol = copyCols.some(([from]) => from === note.label) ? note.label : (copyCols[0] || [])[0];
-  return { ...stats, rows: after.length, labelCol, recent: recentChanges(after, labelCol, lastVisit, HISTORY_MAX) };
+  return { ...stats, rows: after.length, labelCol, labelCols: copyCols.map(([c]) => c), recent: recentChanges(after, labelCol, lastVisit, HISTORY_MAX) };
 }
 
 function summary(s) {
@@ -80,7 +93,7 @@ export async function consolidateAll() {
         const at = Date.now() / 1000;
         try {
           const stats = await consolidate(schema, pair);
-          results.set(pair.journal, { at, text: summary(stats), rows: stats.rows, recent: stats.recent, labelCol: stats.labelCol });
+          results.set(pair.journal, { at, text: summary(stats), rows: stats.rows, recent: stats.recent, labelCol: stats.labelCol, labelCols: stats.labelCols });
           changed ||= stats.added + stats.updated + stats.removed > 0 || !before || Boolean(before.error || !before.rows !== !stats.rows);
           readOnly = false;
         } catch (e) {
@@ -161,7 +174,22 @@ function syncCard(group) {
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
       el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
-        icon('paste'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link'))));
+        icon('paste'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
+      el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => stopReceiving(group) },
+        icon('trash'), t('recv.action.stop'))));
+}
+
+// Arrêter de recevoir : efface les journaux (et leurs formulaires, donc la clé d'écriture) ; les
+// tables de destination et leurs lignes restent.
+async function stopReceiving(group) {
+  const ok = await confirmDialog({
+    title: t('recv.stop.title', { name: group.name }), body: t('recv.stop.body', { tables: group.pairs.map(p => p.journal).join(', ') }),
+    confirmLabel: t('recv.action.stop'), danger: true,
+  });
+  if (!ok) return;
+  await removeTechnicalTables(group.pairs.map(p => p.journal));
+  for (const p of group.pairs) results.delete(p.journal);
+  await renderTarget();
 }
 
 // Dernières lignes reçues depuis la visite précédente (toutes les tables de l'envoi), au plus 20,
@@ -183,7 +211,7 @@ async function labelDialog(group) {
   const schema = await readSchema();
   const pickers = group.pairs.map((pair) => {
     const note = readNote(schema, pair.journal) || {};
-    const cols = copyColumns(schema.columns(pair.journal), schema.columns(pair.dest), note.map).map(([from]) => from);
+    const cols = (results.get(pair.journal) || {}).labelCols || [];
     const current = (results.get(pair.journal) || {}).labelCol || cols[0];
     return { pair, note, field: pickField({ items: cols.map(c => ({ value: c, label: c })), value: current, label: pair.dest }) };
   });
@@ -303,9 +331,9 @@ function receiveWizard(group = null) {
     for (const p of plans) {
       await createReceivingTables({
         journal: p.journal, dest: p.dest, map: p.map,
-        columns: p.tb.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false })),
+        columns: p.tb.columns,
         note: {
-          id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret, from: invitation.from,
+          id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret, from: invitation.from, columns: p.tb.columns,
           ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}),
         },
       });

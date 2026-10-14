@@ -11,6 +11,9 @@ export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la 
 export const AUTHOR_COL = 'Sync_Par'; // e-mail de la personne qui a ajouté la ligne (user.Email)
 export const RECEIVED_COL = 'Sync_Recu'; // date d'arrivée de la ligne dans le Journal (NOW())
 export const STATE_COL = 'Sync_Etat'; // effet de la version recopiée : ajout, modif, suppression
+export const DATA_COL = 'Synchro_Donnees'; // colonnes envoyées, en un bloc JSON (vue d'export)
+export const SCHEMA_COL = 'Synchro_Colonnes'; // colonnes envoyées : [{ id, type, label }] en JSON
+export const GROUP_COL = 'group'; // colonne propre aux tables de résumé, envoyée par le webhook
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC1.';
 export const CHUNK = 500; // lignes par action : sous la file de 1000 événements des webhooks
@@ -82,10 +85,36 @@ export function latestByKey(journalRows) {
 // données présentes des deux côtés (sous le nom choisi dans `map`, sinon le même), hors colonnes
 // techniques de la synchro et formules de la destination. La destination ne garde que `id_sync`.
 export function copyColumns(journalCols, destCols, map = {}) {
-  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL]);
+  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL, DATA_COL, SCHEMA_COL, GROUP_COL]);
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
   return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_'))
     .map(id => [id, map[id] || id]).filter(([, to]) => writable.has(to) && to !== KEY_COL);
+}
+
+// Lignes du Journal avec leurs colonnes envoyées dépliées (bloc JSON de la vue d'export). Une
+// liste devient une ChoiceList au format de Grist. Un Journal d'avant la vue d'export n'a pas de
+// bloc : ses lignes restent telles quelles.
+export function expandRows(journalRows) {
+  return journalRows.map((row) => {
+    if (isBlank(row[DATA_COL])) return row;
+    let data;
+    try { data = JSON.parse(row[DATA_COL]); } catch (e) { return row; }
+    if (!data || typeof data !== 'object') return row;
+    const values = Object.fromEntries(Object.entries(data).filter(([k]) => COL_ID.test(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? ['L', ...v] : v]));
+    return { ...values, ...row };
+  });
+}
+
+// Colonnes envoyées d'après la dernière liste reçue (la SOURCE y met la description de sa vue
+// d'export), sinon `fallback` (celles de l'invitation).
+export function sentColumns(journalRows, fallback = []) {
+  const list = latestList(journalRows);
+  try {
+    const cols = JSON.parse((list && list[SCHEMA_COL]) || 'null');
+    if (validColumns(cols)) return cols;
+  } catch (e) { /* liste sans description */ }
+  return fallback;
 }
 
 // Dernière liste des clés reçue (ligne du Journal sans clé, colonne Synchro_Ids).
@@ -219,34 +248,60 @@ export const listFormula = tableId => `"${LIST_PREFIX}" + " ".join(${tableId}.al
 // ---------------------------------------------------------------------------------------------
 // SOURCE : contrôle de la table envoyée
 
-// Type de la colonne du Journal. Une Référence arrive comme un numéro de ligne de la SOURCE.
-function journalType(type) {
-  if (type.startsWith('Ref:')) return 'Int';
-  if (type.startsWith('RefList:')) return 'Any';
-  return type;
+// Vue d'export : table de résumé de la table SOURCE par `id_sync`, mise à jour par Grist seul.
+// Le webhook la surveille : elle n'a que la clé, la date, la case de suppression et les colonnes
+// choisies, en un bloc JSON. Changer les colonnes ne change donc jamais ce que reçoit le Journal.
+export const exportTableId = tableId => `${tableId}_summary_${KEY_COL}`;
+export const masterTableId = exportId => exportId.replace(new RegExp(`_summary_${KEY_COL}$`), '');
+
+// Colonnes qu'une table SOURCE peut envoyer : toutes ses colonnes de données et formules, hors
+// colonnes de la synchro et colonnes internes de Grist. Les pièces jointes ne peuvent pas partir
+// (`blocked`). Une Référence part comme le texte qu'elle affiche.
+export function exportableColumns(cols) {
+  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, DELETE_COL]);
+  return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map(c => ({
+    id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type,
+    visible: c.visible || '', blocked: c.type === 'Attachments',
+  }));
 }
 
-// `cols` : colonnes de _grist_Tables_column (id, colId, type, displayCol, rules). Renvoie les
-// colonnes envoyées par le webhook et les problèmes, sous forme de codes traduits par l'écran.
-export function checkSourceColumns(cols) {
-  const sent = [];
-  const problems = [];
-  for (const col of cols) {
-    if (col.colId === 'manualSort') continue;
-    if (col.colId.startsWith('gristHelper_')) {
-      const owner = cols.find(o => o.displayCol === col.id || (o.rules || []).includes(col.id));
-      const code = col.colId.startsWith('gristHelper_Display') ? 'helperDisplay' : 'helperRule';
-      problems.push({ code, blocking: true, colId: owner ? owner.colId : col.colId });
-    } else if (col.type === 'Attachments') {
-      problems.push({ code: 'attachments', blocking: true, colId: col.colId });
-    } else {
-      if (col.type.startsWith('Ref')) problems.push({ code: 'reference', blocking: false, colId: col.colId });
-      sent.push(col);
-    }
-  }
-  const missing = [KEY_COL, ORDER_COL, DELETE_COL].filter(id => !sent.some(c => c.colId === id));
-  return { sent, problems, missing };
+// Description des colonnes envoyées, telle que la CIBLE la reçoit.
+export const exportSchema = columns => columns.map(({ id, type, label }) => ({ id, type, label }));
+
+// Formule du bloc JSON. Chaque valeur est lue à part : une cellule en erreur part vide sans
+// bloquer les autres. Dates en secondes (format de Grist), Référence par son texte affiché.
+export function exportFormula(columns) {
+  const read = (c) => {
+    if (c.source.startsWith('RefList:')) return `", ".join(str(${c.visible ? `x.${c.visible}` : 'x.id'}) for x in r.${c.id})`;
+    if (c.source.startsWith('Ref:')) return c.visible ? `r.${c.id}.${c.visible}` : `r.${c.id}.id`;
+    return `r.${c.id}`;
+  };
+  return [
+    'import json, datetime',
+    'if not $group: return ""',
+    'r = $group[0]',
+    'def v(x):',
+    '  if isinstance(x, datetime.datetime): return x.timestamp()',
+    '  if isinstance(x, datetime.date): return (x - datetime.date(1970, 1, 1)).days * 86400',
+    '  if isinstance(x, (list, tuple)): return [v(y) for y in x]',
+    '  return x if x is None or isinstance(x, (str, int, float, bool)) else str(x)',
+    'def g(f):',
+    '  try: return v(f())',
+    '  except Exception: return None',
+    `return json.dumps({${columns.map(c => `"${c.id}": g(lambda: ${read(c)})`).join(', ')}}, ensure_ascii=False)`,
+  ].join('\n');
 }
+
+// Actions qui créent les colonnes de la vue d'export (créée juste avant par Grist, avec `count`).
+export const exportColumnsActions = exportId => [
+  ['RemoveColumn', exportId, 'count'],
+  ['AddColumn', exportId, ORDER_COL, { type: 'DateTime:UTC', isFormula: true, formula: `max($group.${ORDER_COL})` }],
+  ['AddColumn', exportId, DELETE_COL, { type: 'Bool', isFormula: true, formula: `any($group.${DELETE_COL})` }],
+  ['AddColumn', exportId, DATA_COL, { type: 'Text', isFormula: true, formula: '""' }],
+];
+
+// Colonnes de la synchro qui manquent à la table SOURCE.
+export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, DELETE_COL].filter(id => !cols.some(c => c.colId === id));
 
 // id_sync : UUID posé à la création. MajLe : NOW() à toute modification. Supprime : case à
 // cocher de suppression logique (Grist n'envoie pas les suppressions).
@@ -303,15 +358,16 @@ export function buildInvitation({ id, name, origin, secret = '', from = {}, tabl
   return encodeCode({
     kind: 'invitation', id, name, origin, secret, from,
     tables: tables.map(({ table, columns }) => ({
-      table, columns: columns.map(c => ({ id: c.colId, type: journalType(c.type), label: c.label || c.colId })),
+      table, columns: exportSchema(columns),
     })),
   });
 }
 
 const INVITATION_ID = /^[0-9a-f]{16}$/;
-const validColumns = cols => Array.isArray(cols) && cols.length > 0 &&
-  cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z:_0-9]+$/.test(c.type)) &&
-  [KEY_COL, ORDER_COL, DELETE_COL].every(id => cols.some(c => c.id === id));
+function validColumns(cols) {
+  return Array.isArray(cols) && cols.length > 0 && new Set(cols.map(c => c && c.id)).size === cols.length &&
+    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z:_0-9]+$/.test(c.type));
+}
 
 export function parseInvitation(text) {
   const inv = decodeCode(text, 'invitation');

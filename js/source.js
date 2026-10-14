@@ -2,15 +2,15 @@
 // sa réponse en créant les webhooks, suivre et piloter les envois. Rien n'est stocké hors des
 // webhooks eux-mêmes et de la note de la table liste (invitations en attente).
 import {
-  AUTHOR_COL, CHUNK, ORDER_COL, buildInvitation, checkSourceColumns, chunk, fillKeyActions, listTableId,
-  maskKey, parseReply, parseWebhookUrl, prepareSourceActions,
+  AUTHOR_COL, CHUNK, ORDER_COL, SCHEMA_COL, buildInvitation, chunk, exportTableId, exportableColumns, fillKeyActions, listTableId,
+  maskKey, masterTableId, missingSyncColumns, parseReply, parseWebhookUrl, prepareSourceActions,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
   setWebhookEnabled,
 } from './grist.js';
-import { createListTable, readNote, sentTables, writeNote } from './tables.js';
-import { checkList, confirmDialog, copyField, el, icon, message, openWizard, run } from './ui.js';
+import { createListTable, readExport, readNote, removeSyncTables, sentTables, setExport, writeNote } from './tables.js';
+import { checkList, confirmDialog, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
 import { t } from './i18n.js';
 
 const now = () => Date.now() / 1000;
@@ -23,16 +23,18 @@ async function sha256(text) {
 
 let container;
 
-// Destinataires branchés : un webhook sur la table (ajouts, modifications) et un sur sa table
-// liste (suppressions), vers la même adresse.
-// Les webhooks d'un même branchement (même nom, même destinataire) forment une carte.
+// Destinataires branchés : un webhook sur la vue d'export de la table (ajouts, modifications) et
+// un sur sa table liste (suppressions), vers la même adresse. Les webhooks d'un même branchement
+// (même nom, même destinataire) forment une carte.
 function recipients(tables, hooks) {
   const groups = new Map();
-  for (const main of hooks.filter(h => tables.includes(h.fields.tableId))) {
+  const isMain = h => tables.includes(masterTableId(h.fields.tableId)) && h.fields.tableId !== listTableId(masterTableId(h.fields.tableId));
+  for (const main of hooks.filter(isMain)) {
     const key = `${main.fields.name}\n${main.fields.memo}`;
     if (!groups.has(key)) groups.set(key, { name: main.fields.name.replace(/^Synchro /, ''), memo: main.fields.memo, feeds: [] });
-    const list = hooks.find(h => h.fields.tableId === listTableId(main.fields.tableId) && h.fields.url === main.fields.url);
-    groups.get(key).feeds.push({ table: main.fields.tableId, main, list, journal: (parseWebhookUrl(main.fields.url) || {}).table });
+    const table = masterTableId(main.fields.tableId);
+    const list = hooks.find(h => h.fields.tableId === listTableId(table) && h.fields.url === main.fields.url);
+    groups.get(key).feeds.push({ table, main, list, journal: (parseWebhookUrl(main.fields.url) || {}).table });
   }
   return [...groups.values()];
 }
@@ -105,12 +107,14 @@ function recipientCard(r, ownerOnly, out) {
   const enable = on => Promise.all(hooks.map(h => setWebhookEnabled(h.id, on)));
   const actions = [
     action(t('send.action.load'), 'send', async () => { for (const f of r.feeds) await sendAll(f.table, out); }),
+    action(t('send.action.columns'), 'columns', () => editColumns(r, out)),
     status[0] === 'paused' ? action(t('send.action.resume'), 'play', () => enable(true)) : action(t('send.action.pause'), 'pause', () => enable(false)),
     status[0] === 'error' ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
     action(t('send.action.revoke'), 'trash', () => revoke(r, hooks), 'btn-danger-text'),
   ].filter(Boolean);
   return card(r.name, status, t('send.to', { who: r.memo || '—' }),
     r.feeds.map(f => el('p', { class: 'muted small' }, `${f.table} → ${f.journal || '?'}`)),
+    lastSuccess(usage),
     waiting ? el('p', { class: 'small' }, t('send.waiting', { n: waiting })) : null,
     status[0] === 'error' && failure ? el('p', { class: 'small text-danger' }, `${failure.lastHttpStatus || ''} ${failure.lastErrorMessage}`) : null,
     el('div', { class: 'card-actions' }, actions));
@@ -124,12 +128,70 @@ async function cancelInvitation(inv) {
   }
 }
 
+// Dernier envoi accepté par le destinataire (Grist le date en millisecondes).
+function lastSuccess(usage) {
+  const at = Math.max(0, ...usage.map(u => u.lastSuccessTime || 0));
+  return at ? el('p', { class: 'muted small' }, t('send.lastOk', { at: new Date(at).toLocaleString() })) : null;
+}
+
+// Révoquer supprime les webhooks du destinataire. Si plus rien n'envoie une table (ni webhook ni
+// invitation), le widget propose aussi d'effacer ses tables techniques (liste, vue d'export) ;
+// les colonnes id_sync, MajLe et Supprime de la table restent (elles portent des données).
 async function revoke(r, hooks) {
-  const ok = await confirmDialog({
-    title: t('send.revoke.title', { name: r.name }), body: t('send.revoke.body'),
-    confirmLabel: t('send.action.revoke'), danger: true,
+  const others = (await listWebhooks()).filter(h => !hooks.some(mine => mine.id === h.id));
+  const pending = pendingInvitations(await readSchema()).flatMap(inv => inv.tables);
+  const orphans = r.feeds.map(f => f.table)
+    .filter(table => !others.some(h => masterTableId(h.fields.tableId) === table) && !pending.includes(table));
+  const cleanup = el('input', { type: 'checkbox', checked: true });
+  const ok = await new Promise((resolve) => {
+    let answered = false;
+    const modal = openModal({
+      title: t('send.revoke.title', { name: r.name }), width: 400,
+      body: [el('p', {}, t('send.revoke.body')),
+        orphans.length ? el('label', { class: 'check' }, cleanup, t('send.revoke.cleanup', { tables: orphans.map(listTableId).join(', ') })) : null],
+      onClose: () => { if (!answered) resolve(false); },
+      buttons: [
+        { label: t('common.cancel'), onClick: m => { answered = true; resolve(false); m.close(); } },
+        { label: t('send.action.revoke'), kind: 'btn-danger', onClick: m => { answered = true; resolve(true); m.close(); } },
+      ],
+    });
+    modal.footer.querySelector('button').focus();
   });
-  if (ok) for (const h of hooks) await deleteWebhook(h.id);
+  if (!ok) return;
+  for (const h of hooks) await deleteWebhook(h.id);
+  if (orphans.length && cleanup.checked) await removeSyncTables(orphans);
+}
+
+// Colonnes envoyées, par table : changer la vue d'export vaut pour tous les destinataires de la
+// table. Grist renvoie alors toutes les lignes ; au-delà de la file des webhooks, on les renvoie
+// par tranches.
+async function editColumns(r, out) {
+  const schema = await readSchema();
+  const fields = [];
+  for (const { table } of r.feeds) {
+    const usable = exportableColumns(schema.columns(table)).filter(c => !c.blocked);
+    const current = (await readExport(table)).map(c => c.id);
+    const field = { table, usable, values: usable.map(c => c.id).filter(id => current.includes(id)) };
+    field.list = checkList({ items: usable.map(c => ({ value: c.id, label: c.id })), checked: field.values, onChange: (v) => { field.values = v; } });
+    fields.push(field);
+  }
+  const report = el('div', { class: 'report' });
+  await new Promise((resolve) => {
+    openModal({
+      title: t('send.columns.title', { name: r.name }), onClose: resolve,
+      body: [message('warn', t('send.columns.shared')), ...fields.map(f => el('div', { class: 'form' }, el('h3', {}, f.table), f.list)), report],
+      buttons: [{ label: t('common.cancel') }, {
+        label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, async () => {
+          if (fields.some(f => !f.values.length)) throw new Error('noColumn');
+          for (const f of fields) {
+            await setExport(f.table, f.usable.filter(c => f.values.includes(c.id)));
+            if ((await fetchRows(f.table)).length > 1000 - CHUNK) await sendAll(f.table, out);
+          }
+          m.close();
+        }),
+      }],
+    });
+  });
 }
 
 async function unblockQueue() {
@@ -141,57 +203,69 @@ async function unblockQueue() {
 // Assistant d'envoi : Tables, Préparation, Options, Invitation, Réponse, Envoi. Une invitation
 // en attente rouvre l'assistant à l'étape Réponse (`pending`).
 
-const STEP = { tables: 0, prepare: 1, options: 2, invitation: 3, reply: 4, load: 5 };
+const STEP = { tables: 0, columns: 1, options: 2, invitation: 3, reply: 4, load: 5 };
 
 async function invitationWizard(pending = null) {
   const wizard = openWizard({
     title: pending ? pending.name : t('send.new'),
-    steps: ['send.step.tables', 'send.step.prepare', 'send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k)),
+    steps: ['send.step.tables', 'send.step.columns', 'send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k)),
     onClose: () => renderSource(),
   });
   const cancel = { label: t('common.cancel') };
   let chosen = [];
-  let checks = [];
+  const selected = new Map(); // table -> colonnes choisies (exportableColumns)
 
   if (pending) return showReply(pending);
   return showTables();
 
-  // 1. Tables : cocher, contrôler. Ce qui bloque l'envoi est expliqué table par table.
+  // 1. Tables à envoyer.
   async function showTables() {
     const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_'));
-    const report = el('div', { class: 'report' });
-    const next = { label: t('common.next'), kind: 'btn-primary', disabled: true, onClick: () => (toAdd().length ? showPrepare() : showOptions()) };
-    const toAdd = () => checks.flatMap(c => [...c.missing.map(col => `${c.table}.${col}`), ...(c.listMissing ? [t('send.check.table', { table: listTableId(c.table) })] : [])]);
-    async function refresh() {
-      const schema = await readSchema();
-      checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: !schema.has(listTableId(table)) }));
-      const problems = checks.flatMap(c => c.problems.map(p => message(p.blocking ? 'err' : 'warn', t(`send.problem.${p.code}`, { col: `${c.table}.${p.colId}` }))));
-      report.replaceChildren(...problems);
-      next.disabled = !chosen.length || checks.some(c => c.problems.some(p => p.blocking));
-      wizard.show(STEP.tables, body, [cancel, next]);
-    }
-    const body = [el('p', {}, t('send.tables.help')),
-      checkList({ items: tables.map(id => ({ value: id, label: id })), onChange: (values) => { chosen = values; refresh(); } }), report];
+    const next = { label: t('common.next'), kind: 'btn-primary', disabled: !chosen.length, onClick: () => run(null, null, showColumns) };
+    const body = [el('p', {}, t('send.tables.help')), checkList({
+      items: tables.map(id => ({ value: id, label: id })), checked: chosen,
+      onChange: (values) => { chosen = values; next.disabled = !chosen.length; wizard.show(STEP.tables, body, [cancel, next]); },
+    })];
     wizard.show(STEP.tables, body, [cancel, next]);
-
-    // 2. Préparation : ce que le widget ajoute, avant de l'ajouter.
-    function showPrepare() {
-      const report2 = el('div', { class: 'report' });
-      wizard.show(STEP.prepare, [message('warn', t('send.check.missing', { items: toAdd().join(', ') })), el('p', { class: 'small' }, t('send.prepare.help')), report2], [
-        { label: t('common.back'), onClick: () => wizard.show(STEP.tables, body, [cancel, next]) },
-        { label: t('send.prepare'), kind: 'btn-primary', onClick: () => run(null, report2, prepare) }]);
-    }
   }
 
-  async function prepare() {
-    for (const c of checks) {
-      await apply(prepareSourceActions(c.table, c.missing));
-      await apply(fillKeyActions(c.table, await fetchRows(c.table), () => crypto.randomUUID()));
-      await createListTable(c.table);
-    }
+  // 2. Colonnes : celles qui partent, par table (toutes par défaut, ou celles déjà envoyées), et
+  // ce que le widget ajoute pour la synchro, avant de l'ajouter.
+  async function showColumns() {
     const schema = await readSchema();
-    checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: false }));
-    showOptions();
+    const report = el('div', { class: 'report' });
+    const adds = [];
+    const blocks = [];
+    for (const table of chosen) {
+      const all = exportableColumns(schema.columns(table));
+      const usable = all.filter(c => !c.blocked);
+      const current = (await readExport(table)).map(c => c.id).filter(id => usable.some(c => c.id === id));
+      const start = selected.has(table) ? selected.get(table).map(c => c.id) : current.length ? current : usable.map(c => c.id);
+      selected.set(table, usable.filter(c => start.includes(c.id)));
+      const blocked = all.filter(c => c.blocked).map(c => c.id);
+      adds.push(...missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
+      if (!schema.has(listTableId(table))) adds.push(t('send.check.table', { table: listTableId(table) }));
+      if (!schema.has(exportTableId(table))) adds.push(t('send.check.export', { table }));
+      blocks.push(el('div', { class: 'form' }, el('h3', {}, table),
+        current.length ? message('warn', t('send.columns.shared')) : null,
+        checkList({ items: usable.map(c => ({ value: c.id, label: c.label === c.id ? c.id : `${c.label} (${c.id})` })), checked: start,
+          onChange: (values) => { selected.set(table, usable.filter(c => values.includes(c.id))); } }),
+        blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null));
+    }
+    const prepare = async () => {
+      if (chosen.some(table => !selected.get(table).length)) throw new Error('noColumn');
+      for (const table of chosen) {
+        await apply(prepareSourceActions(table, missingSyncColumns((await readSchema()).columns(table))));
+        await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
+        await createListTable(table);
+        await setExport(table, selected.get(table));
+      }
+      showOptions();
+    };
+    wizard.show(STEP.columns, [el('p', {}, t('send.columns.help')), ...blocks,
+      adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report], [
+      { label: t('common.back'), onClick: showTables },
+      { label: adds.length ? t('send.prepare') : t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, prepare) }]);
   }
 
   // 3. Options : nom de l'envoi, secret.
@@ -219,7 +293,7 @@ async function invitationWizard(pending = null) {
     const [{ origin, docId }, list] = await Promise.all([docIdentity(), fetchRows(listTableId(chosen[0]))]);
     const code = buildInvitation({
       id: entry.id, name: entry.name, origin, secret, from: { email: (list[0] || {})[AUTHOR_COL] || '', docId },
-      tables: checks.map(c => ({ table: c.table, columns: c.sent })),
+      tables: chosen.map(table => ({ table, columns: selected.get(table) })),
     });
     wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code)],
       [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
@@ -254,7 +328,7 @@ async function invitationWizard(pending = null) {
     const memo = [r.email, r.docId, r.team].filter(Boolean).join(' · ');
     const name = `Synchro ${inv.name}`;
     for (const link of reply.links) {
-      await createWebhook({ name, memo, url: link.url, tableId: link.table });
+      await createWebhook({ name, memo, url: link.url, tableId: exportTableId(link.table) });
       await createWebhook({ name, memo, url: link.url, tableId: listTableId(link.table) });
     }
     await cancelInvitation(inv);
@@ -291,7 +365,8 @@ async function sendAll(tableId, out) {
     if (done < ids.length) await waitForQueue();
   }
   const list = listTableId(tableId);
-  await apply([['BulkRemoveRecord', list, (await fetchRows(list)).map(r => r.id)], ['AddRecord', list, null, {}]]);
+  const rows = await fetchRows(list);
+  await apply([['BulkRemoveRecord', list, rows.map(r => r.id)], ['AddRecord', list, null, { [SCHEMA_COL]: (rows[0] || {})[SCHEMA_COL] || '' }]]);
 }
 
 async function waitForQueue() {

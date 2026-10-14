@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildInvitation, buildReply, buildWebhookUrl, checkSourceColumns, chunk, compareVersion, copyColumns,
+  buildInvitation, buildReply, buildWebhookUrl, chunk, exportFormula, exportableColumns, expandRows, sentColumns, compareVersion, copyColumns,
   decodeCode, fillKeyActions, latestByKey, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation,
   parseReply, parseWebhookUrl, planConsolidation, planPurge, recentChanges, prepareSourceActions, toRows, toTableId,
 } from '../../js/core.js';
@@ -105,26 +105,37 @@ test('historique : versions recopiées arrivées après la visite, plus récente
   assert.equal(recentChanges(rows, 'Nom', 0, 1).length, 1);
 });
 
-test('contrôle de la table SOURCE', () => {
+test('vue d\'export : colonnes envoyables, formule du bloc JSON', () => {
   const cols = [
-    { id: 1, colId: 'Nom', type: 'Text' },
-    { id: 2, colId: 'Ville', type: 'Ref:Villes', displayCol: 5 },
-    { id: 3, colId: 'Statut', type: 'Choice', rules: [6] },
-    { id: 4, colId: 'Photo', type: 'Attachments' },
-    { id: 5, colId: 'gristHelper_Display', type: 'Any' },
-    { id: 6, colId: 'gristHelper_ConditionalRule', type: 'Any' },
-    { id: 7, colId: 'manualSort', type: 'ManualSortPos' },
-    { id: 8, colId: 'id_sync', type: 'Text' },
+    { colId: 'Nom', type: 'Text', label: 'Nom' },
+    { colId: 'Ville', type: 'Ref:Villes', visible: 'Nom' },
+    { colId: 'Tags', type: 'RefList:Tags', visible: '' },
+    { colId: 'Photo', type: 'Attachments' },
+    { colId: 'gristHelper_Display', type: 'Any' },
+    { colId: 'manualSort', type: 'ManualSortPos' },
+    { colId: 'id_sync', type: 'Text' }, { colId: 'MajLe', type: 'DateTime:UTC' }, { colId: 'Supprime', type: 'Bool' },
   ];
-  const { sent, problems, missing } = checkSourceColumns(cols);
-  assert.deepEqual(sent.map(c => c.colId), ['Nom', 'Ville', 'Statut', 'id_sync']);
-  assert.deepEqual(problems, [
-    { code: 'reference', blocking: false, colId: 'Ville' },
-    { code: 'attachments', blocking: true, colId: 'Photo' },
-    { code: 'helperDisplay', blocking: true, colId: 'Ville' },
-    { code: 'helperRule', blocking: true, colId: 'Statut' },
+  const sendable = exportableColumns(cols);
+  assert.deepEqual(sendable.map(c => [c.id, c.type, c.blocked]), [['Nom', 'Text', false], ['Ville', 'Text', false], ['Tags', 'Text', false], ['Photo', 'Attachments', true]]);
+  const formula = exportFormula(sendable.filter(c => !c.blocked));
+  assert.match(formula, /r = \$group\[0\]/);
+  assert.match(formula, /"Nom": g\(lambda: r\.Nom\)/);
+  assert.match(formula, /"Ville": g\(lambda: r\.Ville\.Nom\)/);
+  assert.match(formula, /"Tags": g\(lambda: ", "\.join\(str\(x\.id\) for x in r\.Tags\)\)/);
+});
+
+test('CIBLE : bloc JSON déplié, colonnes envoyées lues dans la dernière liste', () => {
+  const rows = expandRows([
+    { id: 1, id_sync: 'a', Synchro_Donnees: '{"Nom": "Alice", "Tags": ["x", "y"], "id": 99}' },
+    { id: 2, id_sync: 'b', Nom: 'ancien format' },
+    { id: 3, id_sync: '', Synchro_Ids: 'ids:a', Synchro_Colonnes: '[{"id":"Nom","type":"Text","label":"Nom"}]' },
   ]);
-  assert.deepEqual(missing, ['MajLe', 'Supprime']);
+  assert.equal(rows[0].Nom, 'Alice');
+  assert.deepEqual(rows[0].Tags, ['L', 'x', 'y']);
+  assert.equal(rows[0].id, 1, 'le numéro de ligne du Journal reste le sien');
+  assert.equal(rows[1].Nom, 'ancien format');
+  assert.deepEqual(sentColumns(rows).map(c => c.id), ['Nom']);
+  assert.deepEqual(sentColumns(rows.slice(0, 2), [{ id: 'X', type: 'Text' }]).map(c => c.id), ['X']);
 });
 
 test('préparation de la SOURCE : colonnes manquantes et clés des lignes existantes', () => {
@@ -137,19 +148,17 @@ test('préparation de la SOURCE : colonnes manquantes et clés des lignes exista
 });
 
 test('invitation : aller-retour, plusieurs tables, refus des codes invalides', () => {
-  const columns = [{ colId: 'id_sync', type: 'Text' }, { colId: 'MajLe', type: 'DateTime:UTC' },
-    { colId: 'Supprime', type: 'Bool' }, { colId: 'Ville', type: 'Ref:Villes', label: 'Ville é' }];
+  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville é' }];
   const id = '0123456789abcdef';
   const code = buildInvitation({ id, name: 'Annuaire', secret: SECRET, origin: 'https://g.fr', tables: [{ table: 'Contacts', columns }, { table: 'Villes', columns }] });
   assert.ok(code.startsWith('GRISTSYNC1.'));
   const inv = parseInvitation(code);
   assert.deepEqual(inv.tables.map(tb => tb.table), ['Contacts', 'Villes']);
-  assert.equal(inv.tables[0].columns[3].type, 'Int');
-  assert.equal(inv.tables[0].columns[3].label, 'Ville é');
+  assert.deepEqual(inv.tables[0].columns[1], { id: 'Ville', type: 'Text', label: 'Ville é' });
   assert.equal(parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).secret, '');
   assert.throws(() => parseInvitation('bonjour'), /codeFormat/);
   assert.throws(() => decodeCode(code, 'reponse'), /notReply/);
-  const bad = buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns: [{ colId: 'a;b', type: 'Text' }] }] });
+  const bad = buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns: [{ id: 'a;b', type: 'Text' }] }] });
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
   const twice = buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }, { table: 'Contacts', columns }] });
   assert.throws(() => parseInvitation(twice), /codeInvalid/);
