@@ -1,0 +1,18 @@
+# Système
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Éditeurs
+.vscode/
+.idea/
+
+# Sorties locales
+*.log
+node_modules/
+dist/
