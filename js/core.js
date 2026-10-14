@@ -3,11 +3,12 @@
 // ici, testé par `tests/unit/core.test.mjs`. Les autres modules lisent Grist, appellent ces
 // fonctions et appliquent le résultat.
 
-export const CONFIG_TABLE = 'Synchro_Config';
-export const RECIPIENTS_TABLE = 'Synchro_Destinataires';
 export const KEY_COL = 'id_sync';
 export const ORDER_COL = 'MajLe';
 export const DELETE_COL = 'Supprime';
+export const LIST_COL = 'Synchro_Ids'; // liste des clés existantes, envoyée par la SOURCE
+export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
+const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC1.';
 export const CHUNK = 500; // lignes par action : sous la file de 1000 événements des webhooks
 
@@ -77,36 +78,62 @@ export function latestByKey(journalRows) {
 // Colonnes recopiées : colonnes de données présentes des deux côtés, hors colonnes techniques de
 // la synchro et formules de la destination. La destination ne garde que la clé `id_sync`.
 export function copyColumns(journalCols, destCols) {
-  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL]);
+  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL]);
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
   return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_') && writable.has(id));
 }
 
-// Actions qui amènent la destination à la dernière version de chaque clé reçue depuis le
-// dernier passage. `seen` est le plus grand numéro de ligne du Journal déjà traité (noté dans
-// Synchro_Config, que la clé du formulaire ne peut pas écrire) : une clé n'est réécrite que si
-// sa dernière version est arrivée après. Une retouche manuelle survit donc jusqu'à la prochaine
-// modification côté SOURCE, et rejouer le même plan ne change rien (idempotent).
-export function planConsolidation({ journalRows, destRows, copyCols, destTable, seen = 0 }) {
+// Dernière liste des clés reçue (ligne du Journal sans clé, colonne Synchro_Ids).
+function latestList(journalRows) {
+  let latest = null;
+  for (const row of journalRows) {
+    if (String(row[LIST_COL] || '').startsWith(LIST_PREFIX) && (!latest || row.id > latest.id)) latest = row;
+  }
+  return latest;
+}
+
+// Actions qui amènent la destination à l'état de la SOURCE, en un seul lot :
+//  - la dernière version de chaque clé, si elle n'a pas encore été recopiée ;
+//  - la suppression des lignes cochées `Supprime`, ou absentes de la dernière liste des clés
+//    (ligne effacée dans la SOURCE) quand aucune version plus récente n'est arrivée depuis ;
+//  - le marquage `Sync_Applique` des versions et de la liste traitées.
+// Une retouche manuelle survit donc jusqu'à la prochaine modification côté SOURCE, et rejouer le
+// plan après application ne change rien (idempotent).
+export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable }) {
   const destByKey = new Map();
   for (const row of destRows) {
     if (isBlank(row[KEY_COL])) continue;
     if (!destByKey.has(row[KEY_COL])) destByKey.set(row[KEY_COL], []);
     destByKey.get(row[KEY_COL]).push(row);
   }
+  const latest = latestByKey(journalRows);
+  const list = latestList(journalRows);
+  const marks = [];
+  const gone = new Set();
+  if (list && !isTrue(list[APPLIED_COL])) {
+    const present = new Set(String(list[LIST_COL]).slice(LIST_PREFIX.length).split(' ').filter(Boolean));
+    for (const key of destByKey.keys()) {
+      const version = latest.get(key);
+      if (!present.has(key) && (!version || version.id < list.id)) gone.add(key);
+    }
+    marks.push(list.id);
+  }
 
   const upserts = [];
-  const removeIds = [];
   const stats = { added: 0, updated: 0, removed: 0 };
-  for (const [key, version] of latestByKey(journalRows)) {
-    if (version.id <= seen) continue;
-    const existing = destByKey.get(key) || [];
-    if (isTrue(version.row[DELETE_COL])) {
-      if (existing.length) { removeIds.push(...existing.map(r => r.id)); stats.removed++; }
-      continue;
-    }
-    stats[existing.length ? 'updated' : 'added']++;
+  for (const [key, version] of latest) {
+    if (isTrue(version.row[APPLIED_COL])) continue;
+    marks.push(version.id);
+    if (isTrue(version.row[DELETE_COL])) gone.add(key);
+    if (gone.has(key)) continue;
+    stats[destByKey.has(key) ? 'updated' : 'added']++;
     upserts.push(version);
+  }
+  const removeIds = [];
+  for (const key of gone) {
+    if (!destByKey.has(key)) continue;
+    removeIds.push(...destByKey.get(key).map(r => r.id));
+    stats.removed++;
   }
 
   const actions = chunk(upserts).map(part => {
@@ -115,20 +142,26 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
     return ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(v => v.row[KEY_COL]) }, values, { on_many: 'all' }];
   });
   for (const part of chunk(removeIds)) actions.push(['BulkRemoveRecord', destTable, part]);
-  const lastId = journalRows.reduce((max, r) => Math.max(max, r.id), seen);
-  return { actions, stats, seen: lastId };
+  for (const part of chunk(marks)) actions.push(['BulkUpdateRecord', journalTable, part, { [APPLIED_COL]: part.map(() => true) }]);
+  return { actions, stats };
 }
 
-// Nettoyage du Journal, fait à chaque passage : les versions remplacées par une plus récente et
-// les lignes sans clé (test du lien) disparaissent. Restent la dernière version de chaque clé
-// (suppression comprise) et la ligne la plus récente du Journal, pour que Grist ne réutilise pas
-// son numéro (voir `seen`).
+// Nettoyage du Journal, dans le même lot : restent la dernière version de chaque clé et la
+// dernière liste (avec leur marque `Sync_Applique`), et la ligne la plus récente, pour que Grist ne
+// réutilise pas son numéro. Le reste (versions remplacées, test du lien) disparaît.
 export function planPurge(journalRows, journalTable) {
   const keep = new Set([...latestByKey(journalRows).values()].map(v => v.id));
+  const list = latestList(journalRows);
+  if (list) keep.add(list.id);
   keep.add(journalRows.reduce((max, r) => Math.max(max, r.id), 0));
   const ids = journalRows.filter(r => !keep.has(r.id)).map(r => r.id);
   return chunk(ids).map(part => ['BulkRemoveRecord', journalTable, part]);
 }
+
+// Table de la SOURCE qui envoie la liste des clés existantes : une ligne, une formule recalculée
+// à chaque ajout ou suppression dans `tableId` (pas à une simple modification).
+export const listTableId = tableId => `Synchro_${tableId}`;
+export const listFormula = tableId => `"${LIST_PREFIX}" + " ".join(${tableId}.all.${KEY_COL})`;
 
 // ---------------------------------------------------------------------------------------------
 // SOURCE : contrôle de la table envoyée
@@ -210,39 +243,51 @@ export function decodeCode(text, kind) {
 const COL_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SECRET = /^[0-9a-f]{32}$/;
 
-export function buildInvitation({ name, table, columns, secret, origin }) {
+// Une invitation porte une ou plusieurs tables. `id` la désigne dans la réponse ; `secret`,
+// facultatif et choisi à la création, prouve que la réponse vient de quelqu'un qui l'a reçue (la
+// SOURCE n'en garde que l'empreinte).
+export function buildInvitation({ id, name, origin, secret = '', tables }) {
   return encodeCode({
-    kind: 'invitation', name, table, origin, secret,
-    columns: columns.map(c => ({ id: c.colId, type: journalType(c.type), label: c.label || c.colId })),
+    kind: 'invitation', id, name, origin, secret,
+    tables: tables.map(({ table, columns }) => ({
+      table, columns: columns.map(c => ({ id: c.colId, type: journalType(c.type), label: c.label || c.colId })),
+    })),
   });
 }
 
+const INVITATION_ID = /^[0-9a-f]{16}$/;
+const validColumns = cols => Array.isArray(cols) && cols.length > 0 &&
+  cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z:_0-9]+$/.test(c.type)) &&
+  [KEY_COL, ORDER_COL, DELETE_COL].every(id => cols.some(c => c.id === id));
+
 export function parseInvitation(text) {
   const inv = decodeCode(text, 'invitation');
-  const ok = typeof inv.name === 'string' && COL_ID.test(inv.table) && SECRET.test(inv.secret) &&
-    Array.isArray(inv.columns) && inv.columns.length > 0 &&
-    inv.columns.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z:_0-9]+$/.test(c.type)) &&
-    [KEY_COL, ORDER_COL, DELETE_COL].every(id => inv.columns.some(c => c.id === id));
+  const ok = INVITATION_ID.test(inv.id) && typeof inv.name === 'string' && (!inv.secret || SECRET.test(inv.secret)) &&
+    Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && COL_ID.test(tb.table) && validColumns(tb.columns)) &&
+    new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
   if (!ok) throw new Error('codeInvalid');
   return inv;
 }
 
-export function buildReply({ url, secret, recipient }) {
-  return encodeCode({ kind: 'reponse', url, secret, recipient });
+// `links` : pour chaque table SOURCE, l'adresse d'écriture de son Journal dans la CIBLE.
+export function buildReply({ id, secret = '', recipient, links }) {
+  return encodeCode({ kind: 'reponse', id, secret, recipient, links });
 }
 
-// `sourceOrigin` : origine de l'instance du document SOURCE. Le webhook ne part que vers la même
-// instance, à une adresse d'écriture par clé de formulaire, rien d'autre.
+// `sourceOrigin` : origine de l'instance du document SOURCE. Les webhooks ne partent que vers la
+// même instance, à des adresses d'écriture par clé de formulaire, rien d'autre.
 export function parseReply(text, sourceOrigin) {
   const reply = decodeCode(text, 'reponse');
-  const target = parseWebhookUrl(reply.url);
-  if (!target || !target.flat || !SECRET.test(reply.secret) || !reply.recipient || typeof reply.recipient !== 'object') {
+  const links = Array.isArray(reply.links) ? reply.links : [];
+  const targets = links.map(l => l && COL_ID.test(l.table) && parseWebhookUrl(l.url));
+  if (!INVITATION_ID.test(reply.id) || (reply.secret && !SECRET.test(reply.secret)) || !links.length ||
+      targets.some(tg => !tg || !tg.flat) || !reply.recipient || typeof reply.recipient !== 'object') {
     throw new Error('codeInvalid');
   }
-  if (target.origin !== sourceOrigin) throw new Error('otherInstance');
+  if (targets.some(tg => tg.origin !== sourceOrigin)) throw new Error('otherInstance');
   const r = reply.recipient;
-  const recipient = Object.fromEntries(['email', 'docId', 'team', 'journal', 'at'].map(k => [k, String(r[k] ?? '').slice(0, 200)]));
-  return { url: reply.url, secret: reply.secret, recipient };
+  const recipient = Object.fromEntries(['email', 'docId', 'team', 'at'].map(k => [k, String(r[k] ?? '').slice(0, 200)]));
+  return { id: reply.id, secret: reply.secret || '', recipient, links: links.map(l => ({ table: l.table, url: l.url })) };
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -72,7 +72,14 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   clé d'API depuis un widget. L'accès au document courant passe par `grist.docApi`.
 
 - La clé du formulaire peut écrire **toutes** les colonnes de `Journal`, même absentes du
-  formulaire : aucun état de la consolidation ne doit y vivre (il est dans `Synchro_Config`).
+  formulaire : aucun état qui donnerait plus de pouvoir que l'injection de versions ne doit y vivre
+  (la marque `Sync_Applique` en est l'exemple acceptable).
+- Les vraies suppressions passent sans formulaire : une table SOURCE d'une ligne, formule
+  `"ids:" + " ".join(T.all.id_sync)`, surveillée par un second webhook : recalculée (et envoyée)
+  à chaque ajout ou suppression, pas à une modification. Vérifié le 14 octobre.
+- Un widget **replié** dans Grist continue de tourner (vérifié le 14 octobre).
+- Plusieurs formulaires publiés sur la même page partagent une seule clé : un seul lien suffit
+  pour tous les journaux d'un envoi (vérifié par le test d'intégration).
 - `_grist_Pages.options` `{"collapsed": true}` replie une page par défaut ; `indentation` en fait
   une sous-page.
 - Ajouter une section à la page du widget recrée l'iframe du widget : toute étape qui en ajoute
@@ -95,7 +102,9 @@ appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
 ## État : V0.1 (14 octobre 2026)
 
-Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
+Pas de table de réglages : une table technique par table synchronisée de chaque côté
+(`Synchro_<table>`, `Journal_<table>`) ; invitations en attente notées dans la description de
+leur colonne `Synchro_Ids`. Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
 analyse de sécurité dans `SECURITY.md`). Tests : `npm test` (logique pure), `npm run test:e2e`
 après `tests/e2e/start-grist.sh` (parcours complet dans un Grist Docker). Les instances autorisées
 sont à la fois dans `js/config.js` et dans la CSP de `index.html`.

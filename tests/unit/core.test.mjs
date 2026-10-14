@@ -37,41 +37,48 @@ test('copyColumns ignore les colonnes techniques et les formules de la destinati
   assert.deepEqual(copyColumns(journal, dest), ['Nom', 'Age']);
 });
 
-test('consolidation : ajout, mise à jour, suppression, versions déjà traitées ignorées', () => {
-  const journalRows = [j(1, 'a', 10), j(2, 'b', 10), j(3, 'c', 10), j(4, 'd', 10),
+const plan = (journalRows, destRows) => planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest', journalTable: 'J' });
+const list = (id, keys, extra = {}) => ({ id, id_sync: '', Synchro_Ids: `ids:${keys.join(' ')}`, ...extra });
+const done = { Sync_Applique: true };
+
+test('consolidation : ajout, mise à jour, suppression, versions déjà appliquées ignorées', () => {
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), j(3, 'c', 10, done), j(4, 'd', 10, done),
     j(5, 'b', 20, { Nom: 'b2' }), j(6, 'd', 20, { Supprime: true }), j(7, 'e', 10)];
-  const destRows = [
-    { id: 11, id_sync: 'b', Nom: 'old' },
-    { id: 12, id_sync: 'c', Nom: 'retouche manuelle' },
-    { id: 13, id_sync: 'd', Nom: 'n4' },
-  ];
-  const { actions, stats, seen } = planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest', seen: 4 });
+  const destRows = [{ id: 11, id_sync: 'b' }, { id: 12, id_sync: 'c', Nom: 'retouche manuelle' }, { id: 13, id_sync: 'd' }];
+  const { actions, stats } = plan(journalRows, destRows);
   assert.deepEqual(stats, { added: 1, updated: 1, removed: 1 });
-  assert.equal(seen, 7);
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b', 'e'] }, { Nom: ['b2', 'n7'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [13]],
+    ['BulkUpdateRecord', 'J', [5, 6, 7], { Sync_Applique: [true, true, true] }],
   ]);
 });
 
 test('consolidation : une version arrivée en retard ne remplace pas une plus récente', () => {
-  const journalRows = [j(1, 'a', 20), j(2, 'a', 10, { Nom: 'ancienne' })];
-  const { actions, seen } = planConsolidation({ journalRows, destRows: [{ id: 1, id_sync: 'a', Nom: 'n1' }], copyCols: ['Nom'], destTable: 'Dest', seen: 1 });
+  const { actions } = plan([j(1, 'a', 20, done), j(2, 'a', 10, { Nom: 'ancienne' })], [{ id: 1, id_sync: 'a' }]);
   assert.deepEqual(actions, []);
-  assert.equal(seen, 2);
+});
+
+test('consolidation : une clé absente de la liste est effacée, sauf version plus récente', () => {
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), list(3, ['a']), j(4, 'c', 10)];
+  const destRows = [{ id: 1, id_sync: 'a' }, { id: 2, id_sync: 'b' }, { id: 3, id_sync: '' }];
+  const { actions, stats } = plan(journalRows, destRows);
+  assert.deepEqual(stats, { added: 1, updated: 0, removed: 1 });
+  assert.deepEqual(actions, [
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['c'] }, { Nom: ['n4'] }, { on_many: 'all' }],
+    ['BulkRemoveRecord', 'Dest', [2]],
+    ['BulkUpdateRecord', 'J', [3, 4], { Sync_Applique: [true, true] }],
+  ]);
 });
 
 test('consolidation idempotente : rejouer après application ne fait rien', () => {
-  const journalRows = [j(1, 'a', 10), j(2, 'b', 20, { Supprime: true })];
-  const first = planConsolidation({ journalRows, destRows: [], copyCols: ['Nom'], destTable: 'Dest' });
-  assert.equal(first.actions.length, 1);
-  const again = planConsolidation({ journalRows, destRows: [{ id: 1, id_sync: 'a', Nom: 'n1' }], copyCols: ['Nom'], destTable: 'Dest', seen: first.seen });
-  assert.deepEqual(again.actions, []);
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 20, { Supprime: true, ...done }), list(3, ['a'], done)];
+  assert.deepEqual(plan(journalRows, [{ id: 1, id_sync: 'a', Nom: 'n1' }]).actions, []);
 });
 
-test('purge : garde la dernière version de chaque clé et la ligne la plus récente', () => {
-  const rows = [j(1, 'a', 10), j(2, 'a', 20), j(3, 'b', 10), j(4, '', 5), j(5, 'a', 15), j(6, '', 0)];
-  assert.deepEqual(planPurge(rows, 'Journal'), [['BulkRemoveRecord', 'Journal', [1, 4, 5]]]);
+test('purge : garde la dernière version de chaque clé, la dernière liste et la ligne la plus récente', () => {
+  const rows = [j(1, 'a', 10), j(2, 'a', 20), list(3, ['a']), j(4, '', 5), list(5, ['a', 'b']), j(6, 'a', 15), j(7, '', 0)];
+  assert.deepEqual(planPurge(rows, 'Journal'), [['BulkRemoveRecord', 'Journal', [1, 3, 4, 6]]]);
   assert.deepEqual(planPurge([j(1, 'a', 1)], 'Journal'), []);
 });
 
@@ -106,31 +113,41 @@ test('préparation de la SOURCE : colonnes manquantes et clés des lignes exista
   assert.deepEqual(actions, [['BulkUpdateRecord', 'T', [1, 3], { id_sync: ['u1', 'u2'] }]]);
 });
 
-test('invitation : aller-retour et refus des codes invalides', () => {
+test('invitation : aller-retour, plusieurs tables, refus des codes invalides', () => {
   const columns = [{ colId: 'id_sync', type: 'Text' }, { colId: 'MajLe', type: 'DateTime:UTC' },
     { colId: 'Supprime', type: 'Bool' }, { colId: 'Ville', type: 'Ref:Villes', label: 'Ville é' }];
-  const code = buildInvitation({ name: 'Contacts 2026', table: 'Contacts', columns, secret: SECRET, origin: 'https://g.fr' });
+  const id = '0123456789abcdef';
+  const code = buildInvitation({ id, name: 'Annuaire', secret: SECRET, origin: 'https://g.fr', tables: [{ table: 'Contacts', columns }, { table: 'Villes', columns }] });
   assert.ok(code.startsWith('GRISTSYNC1.'));
   const inv = parseInvitation(code);
-  assert.equal(inv.columns[3].type, 'Int');
-  assert.equal(inv.columns[3].label, 'Ville é');
+  assert.deepEqual(inv.tables.map(tb => tb.table), ['Contacts', 'Villes']);
+  assert.equal(inv.tables[0].columns[3].type, 'Int');
+  assert.equal(inv.tables[0].columns[3].label, 'Ville é');
+  assert.equal(parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).secret, '');
   assert.throws(() => parseInvitation('bonjour'), /codeFormat/);
   assert.throws(() => decodeCode(code, 'reponse'), /notReply/);
-  const bad = buildInvitation({ name: 'x', table: 'Contacts', columns: [{ colId: 'a;b', type: 'Text' }], secret: SECRET, origin: '' });
+  const bad = buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns: [{ colId: 'a;b', type: 'Text' }] }] });
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
+  const twice = buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }, { table: 'Contacts', columns }] });
+  assert.throws(() => parseInvitation(twice), /codeInvalid/);
 });
 
-test('réponse : même instance, adresse par clé de formulaire seulement', () => {
+test('réponse : même instance, adresses par clé de formulaire seulement', () => {
   const url = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Contacts/records?flat=1';
-  const recipient = { email: 'a@b.fr', docId: 'doc1', team: 'eq', journal: 'Journal_Contacts', at: '2026-10-14', extra: 'x' };
-  const reply = parseReply(buildReply({ url, secret: SECRET, recipient }), 'https://g.fr');
-  assert.equal(reply.url, url);
+  const id = '0123456789abcdef';
+  const recipient = { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14', extra: 'x' };
+  const links = [{ table: 'Contacts', url }];
+  const reply = parseReply(buildReply({ id, secret: SECRET, recipient, links }), 'https://g.fr');
+  assert.deepEqual(reply.links, links);
+  assert.equal(reply.secret, SECRET);
   assert.equal(reply.recipient.extra, undefined);
-  assert.throws(() => parseReply(buildReply({ url, secret: SECRET, recipient }), 'https://autre.fr'), /otherInstance/);
-  const noFlat = url.replace('?flat=1', '');
-  assert.throws(() => parseReply(buildReply({ url: noFlat, secret: SECRET, recipient }), 'https://g.fr'), /codeInvalid/);
-  const api = 'https://g.fr/api/docs/doc1/tables/T/records?flat=1';
-  assert.throws(() => parseReply(buildReply({ url: api, secret: SECRET, recipient }), 'https://g.fr'), /codeInvalid/);
+  assert.equal(parseReply(buildReply({ id, recipient, links }), 'https://g.fr').secret, '');
+  assert.throws(() => parseReply(buildReply({ id, secret: 'court', recipient, links }), 'https://g.fr'), /codeInvalid/);
+  assert.throws(() => parseReply(buildReply({ id, recipient, links }), 'https://autre.fr'), /otherInstance/);
+  const noFlat = [{ table: 'Contacts', url: url.replace('?flat=1', '') }];
+  assert.throws(() => parseReply(buildReply({ id, recipient, links: noFlat }), 'https://g.fr'), /codeInvalid/);
+  const api = [{ table: 'Contacts', url: 'https://g.fr/api/docs/doc1/tables/T/records?flat=1' }];
+  assert.throws(() => parseReply(buildReply({ id, recipient, links: api }), 'https://g.fr'), /codeInvalid/);
 });
 
 test('adresses : lien de formulaire, webhook, masque, baseUrl', () => {

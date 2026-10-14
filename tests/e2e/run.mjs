@@ -1,8 +1,8 @@
 // Test d'intégration : le parcours complet, dans un vrai Grist (tests/e2e/start-grist.sh) et un
 // vrai navigateur (Playwright). Deux documents, le widget installé dans chacun :
-//   SOURCE : préparer la table, inviter ;  CIBLE : accepter, coller le lien, répondre ;
-//   SOURCE : approuver, envoyer l'existant ;  CIBLE : consolider ; puis modification et
-//   suppression logique côté SOURCE, vérifiées dans la table de destination.
+//   SOURCE : préparer deux tables, inviter (avec secret) ;  CIBLE : accepter, coller le lien,
+//   répondre ;  SOURCE : approuver, envoyer l'existant ;  CIBLE : consolider ; puis ajout,
+//   modification, suppression logique et vraie suppression côté SOURCE, vérifiées dans la CIBLE.
 // Seul écart avec un humain : le lien du formulaire est lu dans la base du serveur de test au lieu
 // d'être copié depuis le bouton « Partager » de Grist (hors du widget).
 import { chromium } from 'playwright';
@@ -81,6 +81,8 @@ const step = text => console.log(`· ${text}`);
 const source = await newDocWithWidget('Source', [
   ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
+  ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
+  ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
 const target = await newDocWithWidget('Cible');
 step('documents SOURCE et CIBLE créés');
@@ -102,54 +104,55 @@ await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${
 
 const widget = () => page.frameLocator('iframe').first();
 const button = name => widget().getByRole('button', { name, exact: true });
-const consent = () => widget().getByRole('dialog', { name: 'Créer les tables du widget dans ce document ?' }).getByRole('button', { name: 'Créer les tables' }).click();
 async function openWidget(url) {
   await page.goto(url);
   await widget().locator('.topbar').waitFor({ timeout: 30000 });
 }
 
 try {
-  // --- SOURCE : préparer et inviter
+  // --- SOURCE : préparer deux tables et inviter
   await openWidget(source.url);
   await widget().locator('.tile', { hasText: 'Envoyer une table' }).click();
   await button('Nouveau destinataire').click();
-  await widget().locator('.search-input').click();
-  await widget().getByRole('option', { name: 'Contacts' }).click();
-  await widget().getByText('Il manque les colonnes de synchro').waitFor();
-  await button('Ajouter les colonnes de synchro').click();
-  await widget().getByText('La table peut être envoyée').waitFor();
+  await widget().getByRole('checkbox', { name: 'Contacts' }).check();
+  await widget().getByRole('checkbox', { name: 'Villes' }).check();
+  await widget().getByText('Le widget doit ajouter').waitFor();
+  await button('Préparer pour la synchro').click();
+  await widget().getByText('Prêt à envoyer : 2 tables').waitFor();
   const contacts = await records(source.doc, 'Contacts');
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
+  assert.ok((await records(source.doc, 'Synchro_Contacts'))[0].Synchro_Ids.startsWith('ids:'));
   await button('Créer l’invitation').click();
-  await consent();
   const invitation = await widget().locator('textarea.code').inputValue();
   assert.ok(invitation.startsWith('GRISTSYNC1.'));
-  step('SOURCE : table préparée, invitation créée');
+  step('SOURCE : deux tables préparées, invitation créée');
 
-  // --- CIBLE : accepter, publier le formulaire, répondre
+  // --- CIBLE : accepter, publier les formulaires, répondre
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
   await button('Accepter une invitation').click();
   await widget().locator('textarea.code').fill(invitation);
   await button('Continuer').click();
-  await widget().getByText('« Contacts » : table Contacts').waitFor();
+  await widget().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
+  await widget().getByRole('textbox', { name: 'Villes' }).fill('Communes');
   await widget().getByRole('dialog', { name: 'Invitation reçue' }).getByRole('button', { name: 'Créer les tables' }).click();
-  await consent();
   await widget().getByText('En attente du lien').waitFor();
-
+  // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
+  const formSections = await waitFor(async () => {
+    const sections = (await records(target.doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
+    return sections.length === 2 && sections;
+  }, 'deux formulaires publiés');
+  const widgetSection = (await records(target.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
+  assert.ok(formSections.every(sc => sc.parentId === widgetSection.parentId), 'formulaires sur la page du widget');
   const share = (await records(target.doc, '_grist_Shares'))[0];
-  const formSection = (await records(target.doc, '_grist_Views_section')).find(s => JSON.parse(s.shareOptions || '{}').form);
-  const pages = await records(target.doc, '_grist_Pages');
-  const widgetSection = (await records(target.doc, '_grist_Views_section')).find(s => s.parentKey === 'custom');
-  assert.equal(formSection.parentId, widgetSection.parentId, 'formulaire publié sur la page du widget');
-  assert.ok(pages.some(p => p.shareRef === share.id));
   const key = execFileSync('docker', ['exec', env.container, 'python3', '-c',
     `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
-  await widget().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSection.id}`);
+  await openWidget(target.url);
+  await widget().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
   await button('Tester le lien').click();
   await widget().getByText('Le lien fonctionne').waitFor();
   const reply = await widget().locator('textarea.code').inputValue();
-  step('CIBLE : tables créées, formulaire publié et testé, réponse produite');
+  step('CIBLE : tables créées, formulaires publiés, un lien testé pour les deux, réponse produite');
 
   // --- SOURCE : approuver, envoyer l'existant
   await openWidget(source.url);
@@ -159,49 +162,53 @@ try {
   await widget().getByText(env.email).waitFor();
   await button('Approuver et brancher').click();
   await button('Envoyer').click();
-  await widget().getByText('Actif').waitFor();
+  await widget().getByText('Actif').first().waitFor();
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
-  assert.equal(hooks.length, 1);
-  assert.deepEqual(hooks[0].fields.eventTypes, ['add', 'update']);
+  assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts', 'Synchro_Contacts', 'Synchro_Villes', 'Villes']);
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length >= 3, 'lignes reçues dans le journal');
-  step('SOURCE : webhook créé, lignes existantes envoyées');
+  step('SOURCE : quatre webhooks créés, lignes existantes envoyées');
 
   // --- CIBLE : consolidation à l'ouverture
   await openWidget(target.url);
   const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 3 && rows; }, 'consolidation');
   assert.deepEqual(dest.map(r => r.Nom).sort(), ['Alice', 'Bob', 'Chloé']);
-  step('CIBLE : 3 lignes consolidées');
+  await waitFor(async () => (await records(target.doc, 'Communes')).length === 2, 'seconde table consolidée');
+  step('CIBLE : Contacts et Communes consolidées');
 
-  // --- Destination propre, tables techniques rangées sous la page du widget
+  // --- Tables techniques rangées sous la page du widget, destination propre
   const tucked = async (doc) => {
     const list = (await api('POST', `/docs/${doc}/sql`, { sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
     const at = list.findIndex(p => p.indentation === 0 && JSON.parse(p.options || '{}').collapsed);
     assert.ok(at >= 0, 'page du widget repliée');
     return list.slice(at + 1).filter(p => p.indentation === 1).map(p => p.name).sort();
   };
-  assert.deepEqual(await tucked(source.doc), ['Synchro_Destinataires']);
-  assert.deepEqual(await tucked(target.doc), ['Journal_Contacts', 'Synchro_Config']);
+  assert.deepEqual(await tucked(source.doc), ['Synchro_Contacts', 'Synchro_Villes']);
+  assert.deepEqual(await tucked(target.doc), ['Journal_Communes', 'Journal_Contacts']);
+  const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
+  assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
   const destCols = (await api('GET', `/docs/${target.doc}/tables/Contacts/columns`)).columns.map(c => c.id);
   assert.deepEqual(destCols.sort(), ['Nom', 'Ville', 'id_sync']);
-  step('SOURCE et CIBLE : tables du widget rangées, destination sans colonne technique visible');
+  step('SOURCE et CIBLE : une table technique par table, rangée ; destination sans colonne technique');
 
-  // --- Ajout, modification, retouche manuelle préservée, suppression logique
+  // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');
   await applyActions(target.doc, [['UpdateRecord', 'Contacts', bob.id, { Ville: 'retouche' }]]);
   const alice = contacts.find(r => r.Nom === 'Alice');
   const chloe = contacts.find(r => r.Nom === 'Chloé');
   await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', chloe.id, { Supprime: true }], ['AddRecord', 'Contacts', null, { Nom: 'Denis' }]]);
+  await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
   const after = await waitFor(async () => {
     const rows = await records(target.doc, 'Contacts');
     return rows.some(r => r.Nom === 'Denis') && !rows.some(r => r.Nom === 'Chloé') && rows.some(r => r.Ville === 'Marseille') && rows;
   }, 'ajout, modification et suppression consolidés sans clic');
   assert.equal(after.length, 3);
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
-  step('CIBLE : ajout, modification et suppression appliqués seuls, retouche manuelle préservée');
+  await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Ville).join() === 'Lyon', 'vraie suppression consolidée');
+  step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');
 
-  // --- Journal nettoyé à chaque passage : une version par ligne
-  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length === 4, 'journal nettoyé');
-  step('CIBLE : journal nettoyé (une version par ligne)');
+  // --- Journal nettoyé à chaque passage : une version par ligne et la dernière liste
+  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).filter(r => r.id_sync).length === 4, 'journal nettoyé');
+  step('CIBLE : journal nettoyé');
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

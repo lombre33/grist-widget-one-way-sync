@@ -119,18 +119,15 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .copy-field { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: start; }
 .radios { display: flex; gap: 14px; }
 .radios label { font-weight: 400; display: flex; gap: 5px; align-items: center; }
+.dest-row { display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center; }
 .fiche { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 6px 0; }
 .fiche dt { color: var(--text-muted); }
 .fiche dd { margin: 0; overflow-wrap: anywhere; }
 
 /* Liste avec recherche */
-.search-select { position: relative; }
-.search-list { position: absolute; z-index: 30; left: 0; right: 0; max-height: 180px; overflow: auto; margin: 2px 0 0; padding: 4px; list-style: none;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-float); }
-.search-list li { padding: 5px 8px; border-radius: 5px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
-.search-list li.active { background: var(--accent-soft); color: var(--accent-ink); }
-.search-list li.empty { color: var(--text-muted); cursor: default; }
-.search-list .hint { color: var(--text-muted); font-size: 12px; }
+.check-list { display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow: auto; margin-top: 4px; padding: 4px 6px;
+  border: 1px solid var(--border); border-radius: var(--radius); }
+.check-list label, label.check { font-weight: 400; display: flex; gap: 6px; align-items: center; }
 
 /* Fenêtres : titre et boutons fixes, contenu qui défile ; tiennent dans un panneau de 700×400 */
 .scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 2000; padding: 12px; }

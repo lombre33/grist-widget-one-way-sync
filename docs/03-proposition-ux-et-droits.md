@@ -213,14 +213,20 @@ concrètes ici :
 
 ## 7. Ce que contient la V0.1 (14 octobre 2026)
 
-- Parcours complet invitation, réponse, approbation (section 2), formulaire publié par le widget
-  (section 2 bis), table d'export plate, fiche du destinataire et secret (section 5).
-- Côté SOURCE : contrôle de la table, ajout des colonnes de synchro, envoi des lignes existantes,
-  pause, reprise, déblocage de la file, renvoi complet, révocation.
-- Côté CIBLE : consolidation automatique page ouverte (10 s), retouches manuelles préservées,
-  suppression logique, journal nettoyé à chaque passage. La table de destination ne reçoit que ses
-  colonnes de données et `id_sync`, masquée ; les tables techniques sont rangées sous la page du
-  widget, repliée par défaut (retours d'Antoine du 14 octobre).
-- Reporté à la V0.2 : mode « lien public » sans aller-retour (la SOURCE partagée en lecture
-  « toute personne avec le lien », lue par le widget CIBLE sans connexion : vérifié en local),
-  vue filtrée par destinataire (option avancée), alertes de dérive du schéma.
+Retours d'Antoine du 14 octobre, qui remplacent une partie des sections ci-dessus :
+
+- **Pas de table de réglages** : ni `Synchro_Config` ni `Synchro_Destinataires`. Une seule table
+  technique par table synchronisée de chaque côté : `Synchro_<table>` (SOURCE, liste des clés)
+  et `Journal_<table>` (CIBLE). Les destinataires branchés sont les webhooks eux-mêmes ; les
+  invitations en attente sont notées dans la description de la colonne `Synchro_Ids`.
+- **Secret en option**, coché par défaut à la création de l'invitation.
+- **Vraies suppressions** transmises sans page ouverte ni formulaire côté SOURCE (liste des clés).
+- **Multitable** : une invitation porte plusieurs tables, la CIBLE nomme chaque destination, un
+  seul lien de formulaire sert à tous les journaux.
+- **Destination propre** : colonnes de données et `id_sync` masquée ; journal nettoyé à chaque
+  passage ; tables techniques rangées sous la page du widget, repliée par défaut ; recopie toutes
+  les 10 s page ouverte, widget replié compris.
+
+Reporté à la V0.2 : mode « lien public » sans aller-retour (la SOURCE partagée en lecture
+« toute personne avec le lien », lue par le widget CIBLE sans connexion : vérifié en local), vue
+filtrée par destinataire (option avancée), alertes de dérive du schéma.

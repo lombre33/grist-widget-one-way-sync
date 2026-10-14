@@ -1,17 +1,17 @@
 // Onglet « Recevoir » (document CIBLE) : accepter une invitation (Journal, table de destination,
-// formulaire de réception), produire le code de réponse, puis consolider le Journal dans la
+// formulaire de réception), produire le code de réponse, puis consolider chaque Journal dans sa
 // table de destination tant que la page est ouverte par un éditeur.
 import {
-  CONFIG_TABLE, DELETE_COL, KEY_COL, ORDER_COL, buildReply, buildWebhookUrl, copyColumns,
-  parseFormLink, parseInvitation, planConsolidation, planPurge, toTableId,
+  APPLIED_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, parseFormLink, parseInvitation,
+  planConsolidation, planPurge, toTableId,
 } from './core.js';
-import { apply, docIdentity, ensureForm, fetchRows, formPages, hideColumn, listColumns, tuckUnderWidgetPage } from './grist.js';
-import { ensureTable, hasTable } from './tables.js';
+import { apply, docIdentity, ensureForm, fetchRows, formPages, listColumns } from './grist.js';
+import { JOURNAL_PREFIX, createReceivingTables, hasTable, readNote, receivedTables } from './tables.js';
 import { copyField, el, icon, message, openModal, run } from './ui.js';
 import { t } from './i18n.js';
 
 const POLL_MS = 10000;
-const results = new Map(); // ligne de Synchro_Config -> { at, text, error }
+const results = new Map(); // Journal -> { at, text, error }
 let container;
 let busy = false;
 let readOnly = false;
@@ -23,19 +23,12 @@ export function startAutoConsolidation() {
 // ---------------------------------------------------------------------------------------------
 // Consolidation
 
-// Un seul lot d'écritures, donc tout ou rien : destination, nettoyage du Journal et numéro de la
-// dernière ligne traitée.
-async function consolidate(config) {
-  const [journalCols, destCols] = await Promise.all([listColumns(config.Journal), listColumns(config.Destination)]);
-  if (!journalCols || !destCols) throw new Error(`${config.Journal} / ${config.Destination} ?`);
-  const [journalRows, destRows] = await Promise.all([fetchRows(config.Journal), fetchRows(config.Destination)]);
-  const { actions, stats, seen } = planConsolidation({
-    journalRows, destRows, copyCols: copyColumns(journalCols, destCols), destTable: config.Destination, seen: config.Derniere_ligne || 0,
-  });
-  const changed = stats.added || stats.updated || stats.removed;
-  const bookkeeping = seen === config.Derniere_ligne ? [] : [['UpdateRecord', CONFIG_TABLE, config.id, {
-    Derniere_ligne: seen, ...(changed ? { Derniere_execution: Date.now() / 1000, Bilan: summary(stats) } : {}) }]];
-  await apply([...actions, ...planPurge(journalRows, config.Journal), ...bookkeeping]);
+// Un seul lot d'écritures, donc tout ou rien : destination, marques et nettoyage du Journal.
+async function consolidate({ journal, dest }) {
+  const [journalCols, destCols, journalRows, destRows] = await Promise.all([
+    listColumns(journal), listColumns(dest), fetchRows(journal), fetchRows(dest)]);
+  const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols: copyColumns(journalCols, destCols), destTable: dest, journalTable: journal });
+  await apply([...actions, ...planPurge(journalRows, journal)]);
   return stats;
 }
 
@@ -44,26 +37,24 @@ function summary(s) {
 }
 
 // Deux onglets du même navigateur ne consolident pas en même temps (verrou du navigateur) ;
-// entre deux navigateurs, les écritures par clé sont idempotentes.
+// entre deux navigateurs, les écritures sont idempotentes.
 async function withLock(fn) {
   return navigator.locks ? navigator.locks.request('gristsync-consolidation', fn) : fn();
 }
 
 export async function consolidateAll() {
-  if (busy || !(await hasTable(CONFIG_TABLE))) return;
+  if (busy) return;
   busy = true;
   try {
     await withLock(async () => {
-      await addMissingConfigColumns();
-      for (const config of await fetchRows(CONFIG_TABLE)) {
-        if (!config.Journal || !config.Destination) continue;
+      for (const pair of await receivedTables()) {
         const at = Date.now() / 1000;
         try {
-          results.set(config.id, { at, text: summary(await consolidate(config)) });
+          results.set(pair.journal, { at, text: summary(await consolidate(pair)) });
           readOnly = false;
         } catch (e) {
           readOnly = /access|denied|blocked|permission/i.test(e.message);
-          results.set(config.id, { at, text: e.message, error: true });
+          results.set(pair.journal, { at, text: e.message, error: true });
         }
       }
     });
@@ -76,51 +67,72 @@ export async function consolidateAll() {
 // ---------------------------------------------------------------------------------------------
 // Tableau de bord
 
+// Les tables reçues par une même invitation forment un envoi : une carte, un lien, une réponse.
+async function receivedGroups() {
+  const groups = new Map();
+  for (const pair of await receivedTables()) {
+    const note = (await readNote(pair.journal)) || {};
+    const key = note.id || pair.journal;
+    if (!groups.has(key)) groups.set(key, { id: note.id, name: note.name || pair.dest, secret: note.secret || '', pairs: [] });
+    groups.get(key).pairs.push({ ...pair, table: note.table || pair.dest });
+  }
+  return [...groups.values()];
+}
+
 export async function renderTarget(root = container) {
   container = root;
-  const configs = (await hasTable(CONFIG_TABLE)) ? await fetchRows(CONFIG_TABLE) : [];
+  const groups = await receivedGroups();
+  // Un envoi dont les journaux sont tous vides attend encore son lien : ses formulaires doivent
+  // être publiés (sur la page du widget, donc derrière une seule clé de partage).
+  for (const group of groups) {
+    group.waiting = true;
+    for (const pair of group.pairs) if ((await fetchRows(pair.journal)).length) group.waiting = false;
+  }
   try {
-    for (const config of configs.filter(c => c.Statut !== 'actif')) await ensureForm(config.Journal);
+    for (const group of groups.filter(g => g.waiting)) for (const pair of group.pairs) await ensureForm(pair.journal);
   } catch (e) {
     readOnly = true; // un lecteur ne peut pas publier le formulaire
   }
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: readOnly, onclick: () => acceptInvitation() }, icon('plus'), t('recv.new')),
-    el('button', { class: 'btn', type: 'button', disabled: readOnly || !configs.length, onclick: e => run(e.currentTarget, out, () => consolidateAll()) }, icon('refresh'), t('recv.action.sync')));
+    el('button', { class: 'btn', type: 'button', disabled: readOnly || !groups.length, onclick: e => run(e.currentTarget, out, () => consolidateAll()) }, icon('refresh'), t('recv.action.sync')));
   const pages = await formPages();
-  const cards = configs.map(config => syncCard(config, pages.get(config.Journal)));
+  const cards = groups.map(group => syncCard(group, pages.get(group.pairs[0].journal)));
   container.replaceChildren(...[toolbar,
     readOnly ? message('warn', t('common.readonly')) : null,
     out,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty'))].filter(Boolean));
 }
 
-function syncCard(config, formPage) {
-  const result = results.get(config.id);
-  const waiting = config.Statut !== 'actif';
-  const [status, tone] = waiting ? ['waiting', 'pending'] : result && result.error ? ['error', 'err'] : ['ok', 'ok'];
-  const when = result ? new Date(result.at * 1000).toLocaleTimeString() : '';
-  const linkStep = linkForm(config, formPage);
-  if (!waiting) linkStep.classList.add('hidden');
+function syncCard(group, formPage) {
+  const failed = group.pairs.some(p => (results.get(p.journal) || {}).error);
+  const [status, tone] = group.waiting ? ['waiting', 'pending'] : failed ? ['error', 'err'] : ['ok', 'ok'];
+  const linkStep = linkForm(group, formPage);
+  if (!group.waiting) linkStep.classList.add('hidden');
+  const line = (pair) => {
+    const result = results.get(pair.journal);
+    const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString()} · ${result.text}` : '';
+    return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${pair.table} → ${pair.dest}${when}`);
+  };
   return el('article', { class: 'card' },
-    el('div', { class: 'card-head' }, el('strong', {}, config.Nom || config.Destination), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
-    el('p', { class: 'muted small' }, `${config.Journal} → ${config.Destination}`),
-    result ? el('p', { class: `small ${result.error ? 'text-danger' : ''}` }, `${when} · ${result.text}`) : null,
-    waiting ? null : el('div', { class: 'card-actions' },
+    el('div', { class: 'card-head' }, el('strong', {}, group.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
+    group.pairs.map(line),
+    group.waiting ? null : el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small', type: 'button', disabled: readOnly, onclick: () => linkStep.classList.toggle('hidden') }, icon('paste'), t('recv.action.link'))),
     linkStep);
 }
 
 // ---------------------------------------------------------------------------------------------
-// Invitation : créer Journal, destination, réglage, formulaire publié
+// Invitation : un Journal et une destination par table ; les formulaires sont publiés à
+// l'affichage suivant
 
 async function acceptInvitation() {
   const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false' });
-  const destInput = el('input', { type: 'text', class: 'input' });
-  const details = el('div', { class: 'form hidden' }, el('label', {}, t('recv.dest')), destInput);
+  const details = el('div', { class: 'form hidden' });
   const report = el('div', { class: 'report' });
   let invitation = null;
+  let inputs = [];
 
   const modal = openModal({
     title: t('recv.invite.title'),
@@ -128,49 +140,33 @@ async function acceptInvitation() {
     buttons: [{ label: t('common.cancel') }, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, read) }],
   });
 
+  // Une destination par table reçue, nommée d'après la table SOURCE par défaut.
   function read() {
     invitation = parseInvitation(area.value);
-    destInput.value = toTableId(invitation.table);
+    inputs = invitation.tables.map(tb => el('input', { type: 'text', class: 'input', value: toTableId(tb.table), 'aria-label': tb.table }));
+    details.replaceChildren(el('label', {}, t('recv.dest')),
+      ...invitation.tables.map((tb, i) => el('div', { class: 'dest-row' }, el('span', {}, `${tb.table} →`), inputs[i])));
     details.classList.remove('hidden');
-    report.replaceChildren(message('ok', t('recv.invite.summary', { name: invitation.name, table: invitation.table, n: invitation.columns.length })));
+    report.replaceChildren(message('ok', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })));
     modal.setButtons([{ label: t('common.cancel') }, { label: t('recv.create'), kind: 'btn-primary', onClick: () => run(null, report, create) }]);
   }
 
   async function create() {
-    if (!(await ensureTable(CONFIG_TABLE))) return;
-    const destination = toTableId(destInput.value, invitation.table);
-    const journal = `Journal_${destination}`;
-    const columns = invitation.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false }));
-    await createOrComplete(journal, columns);
-    // La destination reste propre : ses colonnes de données, plus la clé `id_sync`, masquée.
-    const created = await createOrComplete(destination, columns.filter(c => c.id !== ORDER_COL && c.id !== DELETE_COL));
-    if (created) await hideColumn(destination, KEY_COL);
-    await apply([['AddRecord', CONFIG_TABLE, null, {
-      Nom: invitation.name, Table_source: invitation.table, Journal: journal, Destination: destination,
-      Statut: 'attente_lien', Secret: invitation.secret, Origine_source: invitation.origin,
-    }]]);
-    await tuckUnderWidgetPage([journal]);
+    const plans = invitation.tables.map((tb, i) => {
+      const dest = toTableId(inputs[i].value, tb.table);
+      return { tb, dest, journal: JOURNAL_PREFIX + dest };
+    });
+    if (new Set(plans.map(p => p.dest)).size !== plans.length) throw new Error('tableExists');
+    for (const p of plans) if (await hasTable(p.dest) || await hasTable(p.journal)) throw new Error('tableExists');
+    for (const p of plans) {
+      await createReceivingTables({
+        journal: p.journal, dest: p.dest,
+        columns: p.tb.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false })),
+        note: { id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret },
+      });
+    }
     modal.close();
     await renderTarget();
-  }
-}
-
-// Ajoute la table (true), ou les colonnes qui lui manquent si elle existe déjà (false).
-async function createOrComplete(tableId, columns) {
-  const existing = await listColumns(tableId);
-  if (!existing) {
-    await apply([['AddTable', tableId, columns]]);
-    return true;
-  }
-  const have = new Set(existing.map(c => c.colId));
-  await apply(columns.filter(c => !have.has(c.id)).map(({ id, ...info }) => ['AddColumn', tableId, id, info]));
-  return false;
-}
-
-// Synchro_Config créée par la V0.1.0 : il lui manque Derniere_ligne.
-async function addMissingConfigColumns() {
-  if (!(await listColumns(CONFIG_TABLE)).some(c => c.colId === 'Derniere_ligne')) {
-    await apply([['AddColumn', CONFIG_TABLE, 'Derniere_ligne', { type: 'Int', isFormula: false }]]);
   }
 }
 
@@ -179,7 +175,7 @@ async function addMissingConfigColumns() {
 
 // Étape du lien, dans la carte de la table reçue : elle reste affichée si Grist recharge le widget
 // (ajouter le formulaire à la page recrée son cadre).
-function linkForm(config, formPage) {
+function linkForm(group, formPage) {
   const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('recv.link.title') });
   const report = el('div', { class: 'report' });
   const help = formPage && !formPage.samePage ? t('recv.link.help.other', { page: formPage.name }) : t('recv.link.help');
@@ -188,21 +184,19 @@ function linkForm(config, formPage) {
 
   async function check() {
     if (!parseFormLink(input.value)) throw new Error('formLink');
-    const url = buildWebhookUrl(input.value, config.Journal);
-    await testUrl(url);
+    const links = group.pairs.map(pair => ({ table: pair.table, url: buildWebhookUrl(input.value, pair.journal) }));
+    for (const link of links) await testUrl(link.url);
     const identity = await docIdentity();
-    const fresh = (await fetchRows(CONFIG_TABLE)).find(c => c.id === config.id);
-    await apply([['UpdateRecord', CONFIG_TABLE, config.id, { Statut: 'actif' }]]);
     const code = buildReply({
-      url, secret: fresh.Secret,
-      recipient: { email: fresh.Accepte_par, docId: identity.docId, team: identity.team, journal: config.Journal, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
+      id: group.id, secret: group.secret, links,
+      recipient: { email: await myEmail(group.pairs[0].journal), docId: identity.docId, team: identity.team, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
     });
     openModal({ title: t('recv.reply.title'), body: el('div', { class: 'form' }, el('p', {}, t('recv.reply.help')), copyField(code)), onClose: () => renderTarget() });
   }
 }
 
-// Envoie une ligne vide par la clé, comme le fera le webhook (le prochain passage l'efface du
-// Journal) : valide d'un coup la clé, la publication, le nom de la table et `?flat=1`.
+// Envoie une ligne vide par la clé, comme le fera le webhook (le nettoyage du Journal l'efface) :
+// valide d'un coup la clé, la publication, le nom de la table et `?flat=1`.
 async function testUrl(url) {
   let response;
   try {
@@ -214,3 +208,9 @@ async function testUrl(url) {
   if (!response.ok) throw new Error(t('error.linkTest', { detail: `HTTP ${response.status} ${text.slice(0, 120)}` }));
 }
 
+// E-mail de la personne connectée, calculé par le serveur Grist : une ligne vide ajoutée au
+// Journal avec ses droits remplit la colonne Sync_Par (formule user.Email). Le nettoyage l'efface.
+async function myEmail(journal) {
+  const id = (await apply([['AddRecord', journal, null, { [APPLIED_COL]: true, [LIST_COL]: '' }]])).retValues[0];
+  return ((await fetchRows(journal)).find(r => r.id === id) || {}).Sync_Par || '';
+}

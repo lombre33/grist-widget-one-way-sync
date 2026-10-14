@@ -104,46 +104,25 @@ export function copyField(value) {
   return el('div', { class: 'copy-field' }, area, button);
 }
 
-// Liste avec recherche (combobox). `items` : [{value, label, hint}]. Renvoie l'élément ; la
-// valeur choisie est dans `.value` et un événement `change` est émis.
-export function searchSelect({ items, placeholder = t('common.choose'), onChange }) {
-  const input = el('input', { class: 'search-input', type: 'text', role: 'combobox', 'aria-expanded': 'false', placeholder, autocomplete: 'off' });
-  const list = el('ul', { class: 'search-list hidden', role: 'listbox' });
-  const root = el('div', { class: 'search-select' }, input, list);
-  root.value = '';
-  let active = 0;
-  const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-
-  const matches = () => {
-    const words = fold(input.value).split(' ').filter(Boolean);
-    return items.filter(it => words.every(w => fold(`${it.label} ${it.value}`).includes(w)));
-  };
+// Liste à cocher, filtrable au clavier (choix de plusieurs tables). `onChange` reçoit les valeurs
+// cochées, dans l'ordre de la liste.
+export function checkList({ items, placeholder = t('common.filter'), onChange }) {
+  const filter = el('input', { class: 'search-input', type: 'search', placeholder, 'aria-label': placeholder, autocomplete: 'off' });
+  const list = el('div', { class: 'check-list', role: 'group' });
+  const chosen = new Set();
+  const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const render = () => {
-    const found = matches();
-    active = Math.min(active, Math.max(found.length - 1, 0));
-    list.replaceChildren(...(found.length ? found.map((it, i) => el('li', {
-      role: 'option', class: i === active ? 'active' : '', 'aria-selected': String(it.value === root.value),
-      onmousedown: (e) => { e.preventDefault(); choose(it); },
-    }, el('span', {}, it.label), it.hint ? el('span', { class: 'hint' }, it.hint) : null)) : [el('li', { class: 'empty' }, t('common.none'))]));
+    const words = fold(filter.value).split(/\s+/).filter(Boolean);
+    const found = items.filter(it => words.every(w => fold(it.label).includes(w)));
+    list.replaceChildren(...(found.length ? found.map(it => el('label', {},
+      el('input', {
+        type: 'checkbox', checked: chosen.has(it.value),
+        onchange: (e) => { if (e.target.checked) chosen.add(it.value); else chosen.delete(it.value); onChange(items.map(i => i.value).filter(v => chosen.has(v))); },
+      }), it.label)) : [el('p', { class: 'muted small' }, t('common.none'))]));
   };
-  const open = (on) => { list.classList.toggle('hidden', !on); input.setAttribute('aria-expanded', String(on)); if (on) render(); };
-  const choose = (it) => {
-    root.value = it.value;
-    input.value = it.label;
-    open(false);
-    if (onChange) onChange(it.value);
-  };
-  input.addEventListener('focus', () => { input.select(); open(true); });
-  input.addEventListener('blur', () => { open(false); const it = items.find(i => i.value === root.value); input.value = it ? it.label : ''; });
-  input.addEventListener('input', () => { active = 0; open(true); });
-  input.addEventListener('keydown', (e) => {
-    const found = matches();
-    if (e.key === 'ArrowDown') { active = Math.min(active + 1, found.length - 1); render(); e.preventDefault(); }
-    else if (e.key === 'ArrowUp') { active = Math.max(active - 1, 0); render(); e.preventDefault(); }
-    else if (e.key === 'Enter' && found[active]) { choose(found[active]); e.preventDefault(); }
-    else if (e.key === 'Escape' && !list.classList.contains('hidden')) { open(false); e.stopPropagation(); e.preventDefault(); }
-  });
-  return root;
+  filter.addEventListener('input', render);
+  render();
+  return el('div', { class: 'check-select' }, filter, list);
 }
 
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée

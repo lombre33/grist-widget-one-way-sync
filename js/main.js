@@ -1,10 +1,9 @@
 // Démarrage : thème et langue, chargement de l'API des widgets depuis l'instance Grist, choix de
 // l'onglet, Réglages.
 import { GRIST_ORIGINS, VERSION } from './config.js';
-import { CONFIG_TABLE, RECIPIENTS_TABLE } from './core.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
-import { hasTable } from './tables.js';
+import { receivedTables, sentTables } from './tables.js';
 import { copyField, el, message, openModal } from './ui.js';
 import { renderSource } from './source.js';
 import { consolidateAll, renderTarget, startAutoConsolidation } from './target.js';
@@ -87,9 +86,8 @@ async function start() {
     return showStartProblem(t('start.access'), false);
   }
 
-  const receiving = await hasTable(CONFIG_TABLE);
   startAutoConsolidation();
-  if (receiving) { await select('receive'); consolidateAll(); } else if (await hasTable(RECIPIENTS_TABLE)) await select('send'); else showHome();
+  if ((await receivedTables()).length) { await select('receive'); consolidateAll(); } else if ((await sentTables()).length) await select('send'); else showHome();
 }
 
 start();
