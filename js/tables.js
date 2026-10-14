@@ -28,16 +28,23 @@ export async function createListTable(tableId) {
   await tuckUnderWidgetPage([id]);
 }
 
+// Colonnes que la destination reçoit : les colonnes de données et la clé `id_sync`.
+export const destColumns = columns => columns.filter(c => c.id !== ORDER_COL && c.id !== DELETE_COL);
+
 // CIBLE : le journal reçoit les colonnes envoyées, la liste des clés, la marque des versions
-// recopiées et l'auteur de chaque ligne ; la destination, les seules colonnes de données et la
-// clé `id_sync`, masquée de sa page.
+// recopiées et l'auteur de chaque ligne. La destination est créée, ou, si elle existe déjà,
+// complétée des seules colonnes qui lui manquent ; sa clé `id_sync` est masquée de sa page.
 export async function createReceivingTables({ journal, dest, columns, note }) {
+  const existing = (await readSchema()).columns(dest);
+  const have = new Set((existing || []).map(c => c.colId));
   await apply([
     ['AddTable', journal, [...columns,
       { id: LIST_COL, type: 'Text', isFormula: false },
       { id: APPLIED_COL, type: 'Bool', isFormula: false },
       { id: 'Sync_Par', type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 }]],
-    ['AddTable', dest, columns.filter(c => c.id !== ORDER_COL && c.id !== DELETE_COL)],
+    ...(existing
+      ? destColumns(columns).filter(c => !have.has(c.id)).map(({ id, ...info }) => ['AddColumn', dest, id, info])
+      : [['AddTable', dest, destColumns(columns)]]),
   ]);
   await writeNote(await readSchema(), journal, note);
   await hideColumn(dest, KEY_COL);

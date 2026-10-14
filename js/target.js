@@ -6,7 +6,7 @@ import {
   planConsolidation, planPurge, toTableId,
 } from './core.js';
 import { apply, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
-import { JOURNAL_PREFIX, createReceivingTables, readNote, receivedTables } from './tables.js';
+import { JOURNAL_PREFIX, createReceivingTables, destColumns, readNote, receivedTables } from './tables.js';
 import { copyField, el, icon, message, openModal, run } from './ui.js';
 import { t } from './i18n.js';
 
@@ -142,6 +142,7 @@ async function acceptInvitation() {
   const report = el('div', { class: 'report' });
   let invitation = null;
   let inputs = [];
+  let confirmed = false; // tables existantes acceptées comme destinations
 
   const modal = openModal({
     title: t('recv.invite.title'),
@@ -149,11 +150,17 @@ async function acceptInvitation() {
     buttons: [{ label: t('common.cancel') }, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, read) }],
   });
 
-  // Une destination par table reçue, nommée d'après la table SOURCE par défaut.
-  function read() {
+  // Une destination par table reçue, nommée d'après la table SOURCE par défaut ; une table
+  // existante du document peut être choisie (liste proposée à la saisie).
+  async function read() {
     invitation = parseInvitation(area.value);
-    inputs = invitation.tables.map(tb => el('input', { type: 'text', class: 'input', value: toTableId(tb.table), 'aria-label': tb.table }));
-    details.replaceChildren(el('label', {}, t('recv.dest')),
+    const known = el('datalist', { id: 'gristsync-tables' },
+      (await readSchema()).tableIds.filter(id => !id.startsWith(JOURNAL_PREFIX) && !id.startsWith('Synchro_')).map(id => el('option', { value: id })));
+    inputs = invitation.tables.map(tb => el('input', {
+      type: 'text', class: 'input', value: toTableId(tb.table), list: 'gristsync-tables', 'aria-label': tb.table,
+      oninput: () => { confirmed = false; },
+    }));
+    details.replaceChildren(known, el('label', {}, t('recv.dest')),
       ...invitation.tables.map((tb, i) => el('div', { class: 'dest-row' }, el('span', {}, `${tb.table} →`), inputs[i])));
     details.classList.remove('hidden');
     report.replaceChildren(message('ok', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })));
@@ -166,7 +173,19 @@ async function acceptInvitation() {
       return { tb, dest, journal: JOURNAL_PREFIX + dest };
     });
     const schema = await readSchema();
-    if (new Set(plans.map(p => p.dest)).size !== plans.length || plans.some(p => schema.has(p.dest) || schema.has(p.journal))) throw new Error('tableExists');
+    if (new Set(plans.map(p => p.dest)).size !== plans.length || plans.some(p => schema.has(p.journal))) throw new Error('destTaken');
+    // Une table existante n'est utilisée qu'après avoir montré ce qui lui sera ajouté.
+    const existing = plans.filter(p => schema.has(p.dest));
+    if (existing.length && !confirmed) {
+      report.replaceChildren(...existing.map((p) => {
+        const have = new Set(schema.columns(p.dest).map(c => c.colId));
+        const added = destColumns(p.tb.columns).map(c => c.id).filter(id => !have.has(id));
+        return message('warn', t('recv.existing', { table: p.dest, cols: added.join(', ') || '—' }));
+      }));
+      confirmed = true;
+      modal.setButtons([{ label: t('common.cancel') }, { label: t('recv.useExisting'), kind: 'btn-primary', onClick: () => run(null, report, create) }]);
+      return;
+    }
     for (const p of plans) {
       await createReceivingTables({
         journal: p.journal, dest: p.dest,

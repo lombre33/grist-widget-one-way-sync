@@ -84,7 +84,8 @@ const source = await newDocWithWidget('Source', [
   ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
-const target = await newDocWithWidget('Cible');
+// La CIBLE a déjà une table « Communes » (référentiel vide), choisie comme destination.
+const target = await newDocWithWidget('Cible', [['AddTable', 'Communes', [{ id: 'Ville', type: 'Text' }, { id: 'Note', type: 'Text' }]]]);
 step('documents SOURCE et CIBLE créés');
 
 const browser = await chromium.launch();
@@ -134,8 +135,10 @@ try {
   await widget().locator('textarea.code').fill(invitation);
   await button('Continuer').click();
   await widget().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
-  await widget().getByRole('textbox', { name: 'Villes' }).fill('Communes');
+  await widget().getByRole('combobox', { name: 'Villes' }).fill('Communes');
   await widget().getByRole('dialog', { name: 'Invitation reçue' }).getByRole('button', { name: 'Créer les tables' }).click();
+  await widget().getByText('« Communes » existe déjà').waitFor();
+  await button('Utiliser cette table').click();
   await widget().getByText('En attente du lien').waitFor();
   // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
   const formSections = await waitFor(async () => {
@@ -186,8 +189,9 @@ try {
   assert.deepEqual(await tucked(target.doc), ['Journal_Communes', 'Journal_Contacts']);
   const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
   assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
-  const destCols = (await api('GET', `/docs/${target.doc}/tables/Contacts/columns`)).columns.map(c => c.id);
-  assert.deepEqual(destCols.sort(), ['Nom', 'Ville', 'id_sync']);
+  const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
+  assert.deepEqual(await columnsOf('Contacts'), ['Nom', 'Ville', 'id_sync']);
+  assert.deepEqual(await columnsOf('Communes'), ['Note', 'Ville', 'id_sync'], 'table existante complétée de la seule clé');
   step('SOURCE et CIBLE : une table technique par table, rangée ; destination sans colonne technique');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression

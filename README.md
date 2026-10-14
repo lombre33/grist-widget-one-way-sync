@@ -28,8 +28,9 @@ Synchro_Contacts (liste des clés) ─────────▶   (versions)  
   destination.
 - Une **retouche** faite à la main dans la CIBLE reste en place jusqu'à la prochaine modification
   de la même ligne dans la SOURCE.
-- Un envoi peut porter **plusieurs tables** ; la CIBLE choisit le nom de chaque table de
-  destination.
+- Un envoi peut porter **plusieurs tables** ; la CIBLE choisit chaque table de destination,
+  nouvelle ou existante (un référentiel déjà là, complété de la clé `id_sync` masquée et des
+  colonnes manquantes ; ses lignes actuelles ne sont jamais touchées).
 
 ## Installer
 
