@@ -23,10 +23,31 @@ deux codes à copier-coller, dans le sens naturel d'une invitation.
 | 1. Préparer | Propriétaire SOURCE | Widget SOURCE | Choisit la table, contrôle qu'elle passe (colonnes cachées `gristHelper_*`, pièces jointes, Références), ajoute `id_sync`, `MajLe`, `Supprime` et remplit `id_sync` des lignes existantes. |
 | 2. Inviter | Propriétaire SOURCE | Widget SOURCE | Choisit les colonnes et les lignes envoyées à ce destinataire (section 4), puis produit un **code d'invitation** (schéma des colonnes + nom de la synchro). |
 | 3. Accepter | Éditeur CIBLE | Widget CIBLE | Colle le code : le widget crée le `Journal` (colonnes exactement alignées, toutes en données) et la table de destination éditable. |
-| 4. Ouvrir la porte | Éditeur CIBLE | Grist (4 clics) | Publie un formulaire sur le `Journal` et copie son lien. Seule étape manuelle : la clé de partage est générée par le serveur et illisible par un widget. |
+| 4. Ouvrir la porte | Éditeur CIBLE | Widget CIBLE puis Grist (2 clics) | Le widget crée **et publie** lui-même le formulaire sur le `Journal`, sur sa propre page. Reste à cliquer « Partager » puis « Copier le lien » et à coller le lien dans le widget (section 2 bis). |
 | 5. Répondre | Éditeur CIBLE | Widget CIBLE | Colle le lien : le widget construit l'adresse `…/api/s/<clé>/tables/<Journal>/records?flat=1`, la **teste** (envoi d'une ligne vide puis effacement) et produit un **code de réponse** (adresse + fiche du destinataire, section 5). |
 | 6. Approuver | Propriétaire SOURCE | Widget SOURCE | Colle la réponse, lit la fiche du destinataire, approuve : le widget crée le webhook (`add` + `update`) et propose le chargement initial. |
 | 7. Vivre | Éditeur CIBLE | Page du widget CIBLE | À chaque ouverture, puis toutes les 30 s et à chaque arrivée dans le `Journal`, recopie les dernières versions dans la table éditable. |
+
+## 2 bis. La clé du formulaire : ce qu'un widget peut faire ou non (vérifié le 14 octobre)
+
+- **Publier, oui.** Publier un formulaire revient à trois actions sur le document, celles
+  qu'envoie le bouton « Publier » de Grist (lues dans son code client) : `AddRecord
+  _grist_Shares {linkId, options: {"publish": true}}`, `UpdateRecord _grist_Pages {shareRef}`, et
+  `shareOptions: {"form": true, "publish": true}` sur la section. Le serveur crée alors la clé
+  (`Sharing.ts` synchronise dès que `_grist_Shares` change). Fait par `applyUserActions` sur un
+  Grist local : le formulaire est publié et sa clé accepte l'écriture anonyme.
+- **Lire la clé, non.** La clé est tirée au hasard par le serveur (`makeId()` dans
+  `HomeDBManager.syncShares`), rangée hors du document (base `home`), et distincte du `linkId`
+  du document : l'adresse construite avec le `linkId` répond `Share not known` (vérifié). Le seul
+  accès est la méthode `getShare` de la connexion de l'interface Grist, réservée aux
+  propriétaires et absente de l'API des widgets et de l'API REST.
+- **Contourner par un document public, écarté.** Ouvrir la CIBLE en « accès public éditeur »
+  avec des règles d'accès limitant les anonymes à l'ajout dans le `Journal` supprimerait la clé
+  (l'adresse ne contient plus que l'identifiant du document, lisible par le widget). Mais une
+  erreur de règle exposerait tout le document, et il faut de toute façon un réglage manuel du
+  partage. Le formulaire reste le mécanisme sûr prévu par Grist.
+
+Bilan : côté CIBLE, il reste deux clics (« Partager », « Copier le lien ») et un collage.
 
 ## 3. Fonctionnalités proposées
 
@@ -155,6 +176,12 @@ niveaux possibles, cumulables :
 Le widget SOURCE tient un **registre des destinataires** (table visible `Synchro_Destinataires`) :
 nom, fiche, colonnes et filtre envoyés, webhook, date d'approbation, statut. C'est la réponse
 pratique à « qui reçoit quoi » pour tous les propriétaires de la SOURCE.
+
+### Décision d'Antoine (14 octobre 2026) : fiche + secret
+
+Le code de réponse contient la fiche du destinataire (dont l'e-mail calculé par `user.Email`) et
+le secret de l'invitation ; le tout est noté au registre des destinataires. La vérification en
+lecteur du document CIBLE n'est pas exigée.
 
 ## 6. Cadre d'interface : la charte Grist Factory
 
