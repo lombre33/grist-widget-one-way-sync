@@ -9,22 +9,26 @@ export const fetchRows = async tableId => toRows(await grist.docApi.fetchTable(t
 
 export const apply = actions => (actions.length ? grist.docApi.applyUserActions(actions) : null);
 
-export async function listTables() {
-  const tables = await fetchRows('_grist_Tables');
-  return tables.filter(t => !t.summarySourceTable && !t.tableId.startsWith('GristHidden')).map(t => ({ ref: t.id, tableId: t.tableId }));
-}
-
-// Colonnes d'une table, dans l'ordre de leur création.
-export async function listColumns(tableId) {
-  const table = (await listTables()).find(t => t.tableId === tableId);
-  if (!table) return null;
-  return (await fetchRows('_grist_Tables_column'))
-    .filter(c => c.parentId === table.ref)
-    .sort((a, b) => a.parentPos - b.parentPos)
-    .map(c => ({
-      id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, label: c.label,
-      displayCol: c.displayCol, rules: Array.isArray(c.rules) ? c.rules.slice(1) : [],
-    }));
+// Instantané des métadonnées du document (tables et colonnes), lu en deux requêtes : chaque
+// écran ou passage de synchro le lit une fois, puis le relit après une écriture qui change le
+// schéma. Les tables de résumé et les tables cachées de Grist sont ignorées.
+export async function readSchema() {
+  const [tables, columns] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Tables_column')]);
+  const byId = new Map(tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => [tb.tableId, tb]));
+  return {
+    tableIds: [...byId.keys()].sort(),
+    has: tableId => byId.has(tableId),
+    table: tableId => byId.get(tableId),
+    // Colonnes d'une table, dans l'ordre de leur création ; null si la table n'existe pas.
+    columns(tableId) {
+      const table = byId.get(tableId);
+      if (!table) return null;
+      return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
+        id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, label: c.label, description: c.description,
+        displayCol: c.displayCol, rules: Array.isArray(c.rules) ? c.rules.slice(1) : [],
+      }));
+    },
+  };
 }
 
 // Identité du document, déduite de l'adresse REST du jeton : instance, équipe, identifiant.
@@ -74,10 +78,10 @@ export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
 // recréer son cadre par Grist, ce qui interrompt le script. Le widget rappelle donc cette
 // fonction à chaque affichage tant que la table reçue attend son lien.
 export async function ensureForm(tableId) {
-  const table = (await listTables()).find(tb => tb.tableId === tableId);
-  let section = (await fetchRows('_grist_Views_section')).find(s => s.parentKey === 'form' && s.tableRef === table.ref);
+  const table = (await readSchema()).table(tableId);
+  let section = (await fetchRows('_grist_Views_section')).find(s => s.parentKey === 'form' && s.tableRef === table.id);
   if (!section) {
-    const created = (await apply([['CreateViewSection', table.ref, await widgetViewRef(), 'form', null, null]])).retValues[0];
+    const created = (await apply([['CreateViewSection', table.id, await widgetViewRef(), 'form', null, null]])).retValues[0];
     section = { id: created.sectionRef, parentId: created.viewRef, shareOptions: '' };
   }
   const page = (await fetchRows('_grist_Pages')).find(p => p.viewRef === section.parentId);
@@ -94,11 +98,11 @@ export async function ensureForm(tableId) {
 // Page de chaque formulaire publié, par table : { samePage, name }, pour dire où cliquer.
 export async function formPages() {
   const [sections, tables, views, mine] = await Promise.all([
-    fetchRows('_grist_Views_section'), listTables(), fetchRows('_grist_Views'), widgetViewRef()]);
+    fetchRows('_grist_Views_section'), fetchRows('_grist_Tables'), fetchRows('_grist_Views'), widgetViewRef()]);
   const pages = new Map();
   for (const section of sections) {
     if (section.parentKey !== 'form' || !JSON.parse(section.shareOptions || '{}').publish) continue;
-    const table = tables.find(tb => tb.ref === section.tableRef);
+    const table = tables.find(tb => tb.id === section.tableRef);
     const view = views.find(v => v.id === section.parentId);
     if (table) pages.set(table.tableId, { samePage: section.parentId === mine, name: view ? view.name : '' });
   }

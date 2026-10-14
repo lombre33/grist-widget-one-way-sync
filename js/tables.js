@@ -6,30 +6,21 @@
 // description de la colonne Synchro_Ids de ces tables : des métadonnées, que le webhook n'envoie
 // pas et que la clé du formulaire ne peut pas écrire.
 import { APPLIED_COL, DELETE_COL, KEY_COL, LIST_COL, ORDER_COL, listFormula, listTableId } from './core.js';
-import { apply, fetchRows, hideColumn, listTables, tuckUnderWidgetPage } from './grist.js';
+import { apply, hideColumn, readSchema, tuckUnderWidgetPage } from './grist.js';
 
 export const JOURNAL_PREFIX = 'Journal_';
 
-export async function hasTable(tableId) {
-  return (await listTables()).some(tb => tb.tableId === tableId);
-}
-
 // SOURCE : tables prêtes à l'envoi (elles ont leur table liste).
-export async function sentTables() {
-  const ids = new Set((await listTables()).map(tb => tb.tableId));
-  return [...ids].filter(id => ids.has(listTableId(id))).sort();
-}
+export const sentTables = schema => schema.tableIds.filter(id => schema.has(listTableId(id)));
 
 // CIBLE : couples (Journal_<D>, D) existants.
-export async function receivedTables() {
-  const ids = new Set((await listTables()).map(tb => tb.tableId));
-  return [...ids].filter(id => id.startsWith(JOURNAL_PREFIX) && ids.has(id.slice(JOURNAL_PREFIX.length)))
-    .sort().map(journal => ({ journal, dest: journal.slice(JOURNAL_PREFIX.length) }));
-}
+export const receivedTables = schema => schema.tableIds
+  .filter(id => id.startsWith(JOURNAL_PREFIX) && schema.has(id.slice(JOURNAL_PREFIX.length)))
+  .map(journal => ({ journal, dest: journal.slice(JOURNAL_PREFIX.length) }));
 
 export async function createListTable(tableId) {
   const id = listTableId(tableId);
-  if (await hasTable(id)) return;
+  if ((await readSchema()).has(id)) return;
   await apply([
     ['AddTable', id, [{ id: LIST_COL, type: 'Text', isFormula: true, formula: listFormula(tableId) }]],
     ['AddRecord', id, null, {}],
@@ -48,23 +39,19 @@ export async function createReceivingTables({ journal, dest, columns, note }) {
       { id: 'Sync_Par', type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 }]],
     ['AddTable', dest, columns.filter(c => c.id !== ORDER_COL && c.id !== DELETE_COL)],
   ]);
-  await writeNote(journal, note);
+  await writeNote(await readSchema(), journal, note);
   await hideColumn(dest, KEY_COL);
   await tuckUnderWidgetPage([journal]);
 }
 
 // Note JSON dans la description de la colonne Synchro_Ids d'une table technique.
-async function listColumn(tableId) {
-  const table = (await fetchRows('_grist_Tables')).find(tb => tb.tableId === tableId);
-  return table && (await fetchRows('_grist_Tables_column')).find(c => c.parentId === table.id && c.colId === LIST_COL);
-}
+const listColumn = (schema, tableId) => (schema.columns(tableId) || []).find(c => c.colId === LIST_COL);
 
-export async function readNote(tableId) {
-  const column = await listColumn(tableId);
+export function readNote(schema, tableId) {
+  const column = listColumn(schema, tableId);
   try { return JSON.parse((column && column.description) || 'null'); } catch (e) { return null; }
 }
 
-export async function writeNote(tableId, value) {
-  const column = await listColumn(tableId);
-  await apply([['UpdateRecord', '_grist_Tables_column', column.id, { description: value == null ? '' : JSON.stringify(value) }]]);
+export async function writeNote(schema, tableId, value) {
+  await apply([['UpdateRecord', '_grist_Tables_column', listColumn(schema, tableId).id, { description: value == null ? '' : JSON.stringify(value) }]]);
 }

@@ -5,13 +5,13 @@ import {
   APPLIED_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, parseFormLink, parseInvitation,
   planConsolidation, planPurge, toTableId,
 } from './core.js';
-import { apply, docIdentity, ensureForm, fetchRows, formPages, listColumns } from './grist.js';
-import { JOURNAL_PREFIX, createReceivingTables, hasTable, readNote, receivedTables } from './tables.js';
+import { apply, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
+import { JOURNAL_PREFIX, createReceivingTables, readNote, receivedTables } from './tables.js';
 import { copyField, el, icon, message, openModal, run } from './ui.js';
 import { t } from './i18n.js';
 
 const POLL_MS = 10000;
-const results = new Map(); // Journal -> { at, text, error }
+const results = new Map(); // Journal -> { at, text, error, rows } du dernier passage
 let container;
 let busy = false;
 let readOnly = false;
@@ -24,12 +24,13 @@ export function startAutoConsolidation() {
 // Consolidation
 
 // Un seul lot d'écritures, donc tout ou rien : destination, marques et nettoyage du Journal.
-async function consolidate({ journal, dest }) {
-  const [journalCols, destCols, journalRows, destRows] = await Promise.all([
-    listColumns(journal), listColumns(dest), fetchRows(journal), fetchRows(dest)]);
-  const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols: copyColumns(journalCols, destCols), destTable: dest, journalTable: journal });
+async function consolidate(schema, { journal, dest }) {
+  const [journalRows, destRows] = await Promise.all([fetchRows(journal), fetchRows(dest)]);
+  const { actions, stats } = planConsolidation({
+    journalRows, destRows, copyCols: copyColumns(schema.columns(journal), schema.columns(dest)), destTable: dest, journalTable: journal,
+  });
   await apply([...actions, ...planPurge(journalRows, journal)]);
-  return stats;
+  return { ...stats, rows: journalRows.length };
 }
 
 function summary(s) {
@@ -42,52 +43,60 @@ async function withLock(fn) {
   return navigator.locks ? navigator.locks.request('gristsync-consolidation', fn) : fn();
 }
 
+// L'écran n'est redessiné que si un passage a changé quelque chose, et jamais quand un lien de
+// formulaire est en cours de saisie.
 export async function consolidateAll() {
   if (busy) return;
   busy = true;
+  let changed = false;
   try {
     await withLock(async () => {
-      for (const pair of await receivedTables()) {
+      const schema = await readSchema();
+      for (const pair of receivedTables(schema)) {
+        const before = results.get(pair.journal);
         const at = Date.now() / 1000;
         try {
-          results.set(pair.journal, { at, text: summary(await consolidate(pair)) });
+          const stats = await consolidate(schema, pair);
+          results.set(pair.journal, { at, text: summary(stats), rows: stats.rows });
+          changed ||= stats.added + stats.updated + stats.removed > 0 || Boolean(before && (before.error || !before.rows !== !stats.rows));
           readOnly = false;
         } catch (e) {
           readOnly = /access|denied|blocked|permission/i.test(e.message);
-          results.set(pair.journal, { at, text: e.message, error: true });
+          results.set(pair.journal, { at, text: e.message, error: true, rows: before ? before.rows : 0 });
+          changed ||= !(before && before.error);
         }
       }
     });
   } finally {
     busy = false;
   }
-  if (container && container.isConnected) await renderTarget();
+  const typing = container && [...container.querySelectorAll('.link-step input')].some(input => input.value);
+  if (changed && container && container.isConnected && !typing) await renderTarget();
 }
 
 // ---------------------------------------------------------------------------------------------
 // Tableau de bord
 
 // Les tables reçues par une même invitation forment un envoi : une carte, un lien, une réponse.
-async function receivedGroups() {
+// Un envoi dont les journaux sont tous vides attend encore son lien.
+async function receivedGroups(schema) {
   const groups = new Map();
-  for (const pair of await receivedTables()) {
-    const note = (await readNote(pair.journal)) || {};
+  for (const pair of receivedTables(schema)) {
+    const note = readNote(schema, pair.journal) || {};
     const key = note.id || pair.journal;
-    if (!groups.has(key)) groups.set(key, { id: note.id, name: note.name || pair.dest, secret: note.secret || '', pairs: [] });
-    groups.get(key).pairs.push({ ...pair, table: note.table || pair.dest });
+    if (!groups.has(key)) groups.set(key, { id: note.id, name: note.name || pair.dest, secret: note.secret || '', pairs: [], waiting: true });
+    const group = groups.get(key);
+    group.pairs.push({ ...pair, table: note.table || pair.dest });
+    const known = results.get(pair.journal);
+    if (known ? known.rows : (await fetchRows(pair.journal)).length) group.waiting = false;
   }
   return [...groups.values()];
 }
 
 export async function renderTarget(root = container) {
   container = root;
-  const groups = await receivedGroups();
-  // Un envoi dont les journaux sont tous vides attend encore son lien : ses formulaires doivent
-  // être publiés (sur la page du widget, donc derrière une seule clé de partage).
-  for (const group of groups) {
-    group.waiting = true;
-    for (const pair of group.pairs) if ((await fetchRows(pair.journal)).length) group.waiting = false;
-  }
+  const groups = await receivedGroups(await readSchema());
+  // Formulaires des envois en attente, publiés sur la page du widget (une seule clé de partage).
   try {
     for (const group of groups.filter(g => g.waiting)) for (const pair of group.pairs) await ensureForm(pair.journal);
   } catch (e) {
@@ -156,8 +165,8 @@ async function acceptInvitation() {
       const dest = toTableId(inputs[i].value, tb.table);
       return { tb, dest, journal: JOURNAL_PREFIX + dest };
     });
-    if (new Set(plans.map(p => p.dest)).size !== plans.length) throw new Error('tableExists');
-    for (const p of plans) if (await hasTable(p.dest) || await hasTable(p.journal)) throw new Error('tableExists');
+    const schema = await readSchema();
+    if (new Set(plans.map(p => p.dest)).size !== plans.length || plans.some(p => schema.has(p.dest) || schema.has(p.journal))) throw new Error('tableExists');
     for (const p of plans) {
       await createReceivingTables({
         journal: p.journal, dest: p.dest,

@@ -6,8 +6,8 @@ import {
   maskKey, parseReply, prepareSourceActions,
 } from './core.js';
 import {
-  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listColumns, listTables,
-  listWebhooks, setWebhookEnabled,
+  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
+  setWebhookEnabled,
 } from './grist.js';
 import { createListTable, readNote, sentTables, writeNote } from './tables.js';
 import { checkList, confirmDialog, copyField, el, icon, message, openModal, run } from './ui.js';
@@ -34,9 +34,9 @@ function recipients(tables, hooks) {
 }
 
 // Invitations en attente, notées dans la table liste de chacune de leurs tables.
-async function pendingInvitations(tables) {
+function pendingInvitations(schema) {
   const byId = new Map();
-  for (const table of tables) for (const inv of (await readNote(listTableId(table))) || []) byId.set(inv.id, inv);
+  for (const table of sentTables(schema)) for (const inv of readNote(schema, listTableId(table)) || []) byId.set(inv.id, inv);
   return [...byId.values()];
 }
 
@@ -48,13 +48,14 @@ export async function renderSource(root = container) {
   let hooks = [];
   let ownerOnly = false;
   try { hooks = await listWebhooks(); } catch (e) { ownerOnly = e.message === 'ownerOnly'; }
-  const tables = await sentTables();
-  const pending = await pendingInvitations(tables);
+  const schema = await readSchema();
+  const tables = sentTables(schema);
+  const pending = pendingInvitations(schema);
 
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: ownerOnly, onclick: () => newRecipient() }, icon('plus'), t('send.new')),
-    el('button', { class: 'btn', type: 'button', disabled: ownerOnly || !pending.length, onclick: () => pasteReply(tables) }, icon('paste'), t('send.reply')));
+    el('button', { class: 'btn', type: 'button', disabled: ownerOnly || !pending.length, onclick: () => pasteReply() }, icon('paste'), t('send.reply')));
   const cards = [
     ...pending.map(inv => pendingCard(inv, ownerOnly, out)),
     ...recipients(tables, hooks).map(r => recipientCard(r, ownerOnly, out)),
@@ -111,9 +112,10 @@ function recipientCard(r, ownerOnly, out) {
 }
 
 async function cancelInvitation(inv) {
+  const schema = await readSchema();
   for (const table of inv.tables) {
-    const id = listTableId(table);
-    if (await readNote(id)) await writeNote(id, (await readNote(id)).filter(i => i.id !== inv.id));
+    const note = readNote(schema, listTableId(table));
+    if (note) await writeNote(schema, listTableId(table), note.filter(i => i.id !== inv.id));
   }
 }
 
@@ -134,7 +136,7 @@ async function unblockQueue() {
 // Invitation
 
 async function newRecipient() {
-  const tables = (await listTables()).filter(tb => !tb.tableId.startsWith('Synchro_'));
+  const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_'));
   const nameInput = el('input', { type: 'text', class: 'input' });
   const secretBox = el('input', { type: 'checkbox', checked: true });
   const report = el('div', { class: 'report' });
@@ -145,7 +147,7 @@ async function newRecipient() {
     title: t('send.new'),
     body: el('div', { class: 'form' },
       el('label', {}, t('send.step1')),
-      checkList({ items: tables.map(tb => ({ value: tb.tableId, label: tb.tableId })), onChange: (values) => { chosen = values; if (!nameInput.dataset.edited) nameInput.value = values.join(' + '); refresh(); } }),
+      checkList({ items: tables.map(id => ({ value: id, label: id })), onChange: (values) => { chosen = values; if (!nameInput.dataset.edited) nameInput.value = values.join(' + '); refresh(); } }),
       el('label', {}, t('send.name')), nameInput,
       el('label', { class: 'check' }, secretBox, t('send.secret')),
       report),
@@ -155,8 +157,8 @@ async function newRecipient() {
 
   // Contrôle de chaque table choisie : ce qui bloque, ce qu'il faut ajouter.
   async function refresh() {
-    const existing = new Set((await listTables()).map(tb => tb.tableId));
-    checks = await Promise.all(chosen.map(async table => ({ table, ...checkSourceColumns(await listColumns(table)), listMissing: !existing.has(listTableId(table)) })));
+    const schema = await readSchema();
+    checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: !schema.has(listTableId(table)) }));
     const blocking = checks.some(c => c.problems.some(p => p.blocking));
     const toAdd = checks.flatMap(c => [...c.missing.map(col => `${c.table}.${col}`), ...(c.listMissing ? [t('send.check.table', { table: listTableId(c.table) })] : [])]);
     report.replaceChildren(...[
@@ -182,9 +184,10 @@ async function newRecipient() {
   async function invite() {
     const secret = secretBox.checked ? randomHex(16) : '';
     const entry = { id: randomHex(8), name: nameInput.value.trim() || chosen.join(' + '), hash: secret ? await sha256(secret) : '', at: now(), tables: chosen };
+    const schema = await readSchema();
     for (const table of chosen) {
       const id = listTableId(table);
-      await writeNote(id, [...((await readNote(id)) || []), entry]);
+      await writeNote(schema, id, [...(readNote(schema, id) || []), entry]);
     }
     const { origin } = await docIdentity();
     const code = buildInvitation({ id: entry.id, name: entry.name, origin, secret, tables: checks.map(c => ({ table: c.table, columns: c.sent })) });
@@ -200,7 +203,7 @@ async function newRecipient() {
 // ---------------------------------------------------------------------------------------------
 // Réponse : vérifier, montrer la fiche, approuver
 
-async function pasteReply(tables) {
+async function pasteReply() {
   const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false' });
   const report = el('div', { class: 'report' });
   const modal = openModal({
@@ -214,7 +217,7 @@ async function pasteReply(tables) {
   async function check() {
     const { origin } = await docIdentity();
     const reply = parseReply(area.value, origin);
-    const inv = (await pendingInvitations(tables)).find(i => i.id === reply.id);
+    const inv = pendingInvitations(await readSchema()).find(i => i.id === reply.id);
     if (!inv || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
     if (!reply.links.every(l => inv.tables.includes(l.table))) throw new Error('codeInvalid');
     const r = reply.recipient;

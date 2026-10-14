@@ -3,6 +3,7 @@
 import { GRIST_ORIGINS, VERSION } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
+import { readSchema } from './grist.js';
 import { receivedTables, sentTables } from './tables.js';
 import { copyField, el, message, openModal } from './ui.js';
 import { renderSource } from './source.js';
@@ -87,7 +88,8 @@ async function start() {
   }
 
   startAutoConsolidation();
-  if ((await receivedTables()).length) { await select('receive'); consolidateAll(); } else if ((await sentTables()).length) await select('send'); else showHome();
+  const schema = await readSchema();
+  if (receivedTables(schema).length) { await select('receive'); consolidateAll(); } else if (sentTables(schema).length) await select('send'); else showHome();
 }
 
 start();
