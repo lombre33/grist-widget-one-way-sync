@@ -23,7 +23,7 @@ deux codes à copier-coller, dans le sens naturel d'une invitation.
 | 1. Préparer | Propriétaire SOURCE | Widget SOURCE | Choisit la table, contrôle qu'elle passe (colonnes cachées `gristHelper_*`, pièces jointes, Références), ajoute `id_sync`, `MajLe`, `Supprime` et remplit `id_sync` des lignes existantes. |
 | 2. Inviter | Propriétaire SOURCE | Widget SOURCE | Choisit les colonnes et les lignes envoyées à ce destinataire (section 4), puis produit un **code d'invitation** (schéma des colonnes + nom de la synchro). |
 | 3. Accepter | Éditeur CIBLE | Widget CIBLE | Colle le code : le widget crée le `Journal` (colonnes exactement alignées, toutes en données) et la table de destination éditable. |
-| 4. Ouvrir la porte | Éditeur CIBLE | Grist (4 clics) | Publie un formulaire sur le `Journal` et copie son lien. Seule étape manuelle : la clé de partage est générée par le serveur et illisible par un widget (constat FormPlus). |
+| 4. Ouvrir la porte | Éditeur CIBLE | Grist (4 clics) | Publie un formulaire sur le `Journal` et copie son lien. Seule étape manuelle : la clé de partage est générée par le serveur et illisible par un widget. |
 | 5. Répondre | Éditeur CIBLE | Widget CIBLE | Colle le lien : le widget construit l'adresse `…/api/s/<clé>/tables/<Journal>/records?flat=1`, la **teste** (envoi d'une ligne vide puis effacement) et produit un **code de réponse** (adresse + fiche du destinataire, section 5). |
 | 6. Approuver | Propriétaire SOURCE | Widget SOURCE | Colle la réponse, lit la fiche du destinataire, approuve : le widget crée le webhook (`add` + `update`) et propose le chargement initial. |
 | 7. Vivre | Éditeur CIBLE | Page du widget CIBLE | À chaque ouverture, puis toutes les 30 s et à chaque arrivée dans le `Journal`, recopie les dernières versions dans la table éditable. |
@@ -150,7 +150,35 @@ Le widget SOURCE tient un **registre des destinataires** (table visible `Synchro
 nom, fiche, colonnes et filtre envoyés, webhook, date d'approbation, statut. C'est la réponse
 pratique à « qui reçoit quoi » pour tous les propriétaires de la SOURCE.
 
-## 6. Ce qui est déjà prototypé
+## 6. Cadre d'interface : la charte Grist Factory
+
+Le widget est indépendant (aucun lien avec FormPlus) et suit la charte commune des widgets Grist
+Factory (`identite-ui-ux-grist-factory.md` du dépôt publipostageGrist, §1). Conséquences
+concrètes ici :
+
+- **Marque** : éditeur « Grist Factory », licence GPL v3, panneau Crédits dans les Réglages,
+  logo discret en haut à droite (fichier à obtenir auprès d'Antoine).
+- **Apparence** : gris neutres et un seul bleu d'accent (jetons de Publipostage+), rouge pour
+  les erreurs et la révocation, ambre pour « en attente » et `retrying` ; contrastes de 4,5:1 en
+  clair et en sombre ; police du système ; thème système / clair / sombre ; icônes SVG en trait.
+- **Panneau de 700×400** : le parcours en étapes (section 2) doit tenir dans ce format, une étape
+  visible à la fois, les codes à copier dans un champ à bouton « Copier ».
+- **Fenêtres du widget** pour toutes les confirmations (approuver un destinataire, révoquer,
+  purger, effacer la file), jamais `confirm()` ; une confirmation destructrice met le focus sur
+  « Annuler ».
+- **Listes avec recherche** pour choisir la table, les colonnes envoyées et la colonne du filtre,
+  colonne affichée avec son type.
+- **Consentement avant de créer des tables** : `Synchro_Config` (CIBLE),
+  `Synchro_Destinataires` (SOURCE), le `Journal` et la vue d'export ne sont créés qu'après la
+  fenêtre « Créer les tables du widget dans ce document ? ».
+- **Grisé, jamais masqué** : un lecteur voit le tableau de bord avec les actions grisées et la
+  raison ; le bouton « Créer le webhook » est grisé pour un non-propriétaire.
+- **Bilingue fr/en** dès le premier lot, y compris le texte que le widget écrit dans le document
+  (colonne `Bilan`), pluriels sans parenthèses.
+- **Démarrage raté** : fenêtre qui dit quoi faire (hors de Grist, accès complet non accordé,
+  réseau bloqué).
+
+## 7. Ce qui est déjà prototypé
 
 Un premier jet du moteur CIBLE existe en local (non publié) : logique pure de consolidation et de
 purge, création du `Journal` et de la destination depuis un schéma, test de l'adresse. Il sera
