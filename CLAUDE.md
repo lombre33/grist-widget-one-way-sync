@@ -4,9 +4,10 @@
 
 Synchroniser **à sens unique** une table d'un document Grist SOURCE vers un document Grist CIBLE
 de la même instance (cible principale : `grist.numerique.gouv.fr`, instance DINUM), sans serveur
-à héberger. Le projet est né dans FormPlus (widget de formulaire Grist d'Antoine,
-https://github.com/lombre33/FormPlus) et en est volontairement séparé : on peut lire FormPlus pour
-s'en inspirer, jamais le modifier depuis ici.
+à héberger. L'idée est née dans FormPlus (https://github.com/lombre33/FormPlus), mais le widget est
+**totalement indépendant** : aucun code partagé, aucune mention de FormPlus dans l'interface.
+FormPlus ne sert que de référence sur la gestion des clés de formulaire ; ne jamais le modifier
+depuis ici.
 
 Lire d'abord : `docs/01-etude-faisabilite.md` (étude complète, preuves dans le code de
 grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel réussi sur DINUM le
@@ -17,10 +18,14 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 - Répondre en français.
 - Toute question à choix (2 à 4 options) passe par une carte de décision dédiée quand l'outil
   existe dans la session, jamais par des options écrites dans le corps du texte.
-- Jamais la charte graphique DSFR (réservée aux services de l'État) : palette libre.
-- Git : dans FormPlus, Antoine fait travailler directement sur `main` et pousser sans pull request
-  une fois le travail vérifié (tests verts). Suivre les instructions du projet Claude pour
-  savoir si la même règle s'applique ici.
+- Jamais la charte graphique DSFR (réservée aux services de l'État).
+- **Charte d'interface** : les règles communes des widgets Grist Factory s'appliquent
+  (`planning/identite-ui-ux-grist-factory.md` du dépôt https://github.com/lombre33/publipostageGrist,
+  §1). Résumé de ce qu'elles imposent ici : `docs/03-proposition-ux-et-droits.md`, section 6.
+- Git : travail directement sur `main`, commit et push sans pull request ni confirmation, une
+  fois le travail vérifié (tests verts).
+- Avant de coder lourdement, se mettre d'accord avec Antoine sur le parcours et les
+  fonctionnalités (proposition en cours : `docs/03-proposition-ux-et-droits.md`).
 
 ## Ce qui est établi (ne pas redécouvrir)
 
