@@ -34,10 +34,12 @@ test('la version la plus récente gagne, MajLe puis numéro de ligne', () => {
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
   const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'Age', 'manualSort', 'gristHelper_X'].map(colId => ({ colId }));
   const dest = [{ colId: 'id_sync' }, { colId: 'Nom' }, { colId: 'Ville', isFormula: true }, { colId: 'Age' }];
-  assert.deepEqual(copyColumns(journal, dest), ['Nom', 'Age']);
+  assert.deepEqual(copyColumns(journal, dest), [['Nom', 'Nom'], ['Age', 'Age']]);
+  assert.deepEqual(copyColumns(journal, [...dest, { colId: 'Commune' }], { Ville: 'Commune' }), [['Nom', 'Nom'], ['Ville', 'Commune'], ['Age', 'Age']]);
 });
 
-const plan = (journalRows, destRows) => planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest', journalTable: 'J' });
+const plan = (journalRows, destRows, matchCol) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', matchCol });
+const marked = (ids, states) => ['BulkUpdateRecord', 'J', ids, { Sync_Applique: ids.map(() => true), Sync_Etat: states }];
 const list = (id, keys, extra = {}) => ({ id, id_sync: '', Synchro_Ids: `ids:${keys.join(' ')}`, ...extra });
 const done = { Sync_Applique: true };
 
@@ -50,7 +52,7 @@ test('consolidation : ajout, mise à jour, suppression, versions déjà appliqu�
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b', 'e'] }, { Nom: ['b2', 'n7'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [13]],
-    ['BulkUpdateRecord', 'J', [5, 6, 7], { Sync_Applique: [true, true, true] }],
+    marked([5, 6, 7], ['modif', 'suppression', 'ajout']),
   ]);
 });
 
@@ -60,14 +62,27 @@ test('consolidation : une version arrivée en retard ne remplace pas une plus r�
 });
 
 test('consolidation : une clé absente de la liste est effacée, sauf version plus récente', () => {
-  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), list(3, ['a']), j(4, 'c', 10)];
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), list(3, ['a'], { Sync_Recu: 50 }), j(4, 'c', 10)];
   const destRows = [{ id: 1, id_sync: 'a' }, { id: 2, id_sync: 'b' }, { id: 3, id_sync: '' }];
   const { actions, stats } = plan(journalRows, destRows);
   assert.deepEqual(stats, { added: 1, updated: 0, removed: 1 });
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['c'] }, { Nom: ['n4'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [2]],
-    ['BulkUpdateRecord', 'J', [3, 4], { Sync_Applique: [true, true] }],
+    marked([3, 4], ['', 'ajout']),
+    ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [50] }],
+  ]);
+});
+
+test('consolidation : une ligne déjà là est rattachée par la colonne commune au lieu d\'être doublée', () => {
+  const journalRows = [j(1, 'a', 10, { Nom: 'Lyon' }), j(2, 'b', 10, { Nom: 'Paris' })];
+  const destRows = [{ id: 7, id_sync: '', Nom: 'Lyon' }, { id: 8, id_sync: '', Nom: 'Nice' }];
+  const { actions, stats } = plan(journalRows, destRows, 'Nom');
+  assert.deepEqual(stats, { added: 1, updated: 1, removed: 0 });
+  assert.deepEqual(actions, [
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b'] }, { Nom: ['Paris'] }, { on_many: 'all' }],
+    ['BulkUpdateRecord', 'Dest', [7], { id_sync: ['a'], Nom: ['Lyon'] }],
+    marked([1, 2], ['modif', 'ajout']),
   ]);
 });
 
@@ -82,10 +97,11 @@ test('purge : garde la dernière version de chaque clé, la dernière liste et l
   assert.deepEqual(planPurge([j(1, 'a', 1)], 'Journal'), []);
 });
 
-test('historique : dernières versions après la visite, plus récentes d\'abord, plafonnées', () => {
-  const rows = [j(1, 'a', 10), j(2, 'a', 30), j(3, 'b', 20, { Supprime: true }), j(4, 'c', 5), list(5, ['a'])];
-  assert.deepEqual(recentChanges(rows, 'Nom', 8, 20), [
-    { at: 30, label: 'n2', deleted: false }, { at: 20, label: 'n3', deleted: true }]);
+test('historique : versions recopiées arrivées après la visite, plus récentes d\'abord, plafonnées', () => {
+  const rows = [j(1, 'a', 10, { Sync_Etat: 'ajout' }), j(2, 'a', 30, { Sync_Etat: 'modif', Sync_Recu: 31 }),
+    j(3, 'b', 20, { Sync_Etat: 'suppression', Sync_Recu: 40 }), j(4, 'c', 15, { Sync_Etat: 'ajout' }), j(5, 'd', 50), list(6, ['a'])];
+  assert.deepEqual(recentChanges(rows, 'Nom', 12, 20), [
+    { at: 40, label: 'n3', state: 'suppression' }, { at: 31, label: 'n2', state: 'modif' }, { at: 15, label: 'n4', state: 'ajout' }]);
   assert.equal(recentChanges(rows, 'Nom', 0, 1).length, 1);
 });
 

@@ -6,8 +6,8 @@ import {
   planConsolidation, planPurge, recentChanges, toTableId,
 } from './core.js';
 import { apply, collapseForms, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
-import { JOURNAL_PREFIX, createReceivingTables, destColumns, readNote, receivedTables } from './tables.js';
-import { copyField, el, icon, message, openWizard, run } from './ui.js';
+import { JOURNAL_PREFIX, createReceivingTables, destColumns, readNote, receivedTables, upgradeJournal, writeNote } from './tables.js';
+import { copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
 
@@ -37,12 +37,20 @@ async function readLastVisit() {
 // Consolidation
 
 // Un seul lot d'écritures, donc tout ou rien : destination, marques et nettoyage du Journal.
+// La note du journal donne les noms de colonnes choisis (`map`), la colonne de rattachement
+// (`match`) et la colonne qui nomme les lignes dans l'historique (`label`).
 async function consolidate(schema, { journal, dest }) {
+  const note = readNote(schema, journal) || {};
   const [journalRows, destRows] = await Promise.all([fetchRows(journal), fetchRows(dest)]);
-  const copyCols = copyColumns(schema.columns(journal), schema.columns(dest));
-  const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols, destTable: dest, journalTable: journal });
-  await apply([...actions, ...planPurge(journalRows, journal)]);
-  return { ...stats, rows: journalRows.length, recent: recentChanges(journalRows, copyCols[0], lastVisit, HISTORY_MAX) };
+  const copyCols = copyColumns(schema.columns(journal), schema.columns(dest), note.map);
+  const { actions, stats } = planConsolidation({
+    journalRows, destRows, copyCols, destTable: dest, journalTable: journal, matchCol: note.match || '',
+  });
+  const writes = [...actions, ...planPurge(journalRows, journal)];
+  await apply(writes);
+  const after = writes.length ? await fetchRows(journal) : journalRows;
+  const labelCol = copyCols.some(([from]) => from === note.label) ? note.label : (copyCols[0] || [])[0];
+  return { ...stats, rows: after.length, labelCol, recent: recentChanges(after, labelCol, lastVisit, HISTORY_MAX) };
 }
 
 function summary(s) {
@@ -63,14 +71,17 @@ export async function consolidateAll() {
   try {
     await readLastVisit();
     await withLock(async () => {
-      const schema = await readSchema();
+      let schema = await readSchema();
+      let upgraded = false;
+      for (const pair of receivedTables(schema)) upgraded = (await upgradeJournal(schema, pair.journal)) || upgraded;
+      if (upgraded) schema = await readSchema();
       for (const pair of receivedTables(schema)) {
         const before = results.get(pair.journal);
         const at = Date.now() / 1000;
         try {
           const stats = await consolidate(schema, pair);
-          results.set(pair.journal, { at, text: summary(stats), rows: stats.rows, recent: stats.recent });
-          changed ||= stats.added + stats.updated + stats.removed > 0 || Boolean(before && (before.error || !before.rows !== !stats.rows));
+          results.set(pair.journal, { at, text: summary(stats), rows: stats.rows, recent: stats.recent, labelCol: stats.labelCol });
+          changed ||= stats.added + stats.updated + stats.removed > 0 || !before || Boolean(before.error || !before.rows !== !stats.rows);
           readOnly = false;
         } catch (e) {
           readOnly = /access|denied|blocked|permission/i.test(e.message);
@@ -153,15 +164,42 @@ function syncCard(group) {
         icon('paste'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link'))));
 }
 
-// Dernières lignes reçues depuis la visite précédente (toutes les tables de l'envoi), au plus 20.
+// Dernières lignes reçues depuis la visite précédente (toutes les tables de l'envoi), au plus 20,
+// nommées par la colonne choisie pour chaque table.
 function history(group) {
   const items = group.pairs.flatMap(p => ((results.get(p.journal) || {}).recent || []).map(c => ({ ...c, dest: p.dest })))
     .sort((a, b) => b.at - a.at).slice(0, HISTORY_MAX);
-  const title = t(lastVisit ? 'recv.history.since' : 'recv.history.last', { n: items.length });
+  const choose = el('button', { class: 'btn btn-small', type: 'button', disabled: readOnly, onclick: () => labelDialog(group) }, t('recv.label.change'));
   if (!items.length) return el('p', { class: 'muted small' }, t('recv.history.none'));
+  const title = t(lastVisit ? 'recv.history.since' : 'recv.history.last', { n: items.length });
   return el('details', { class: 'history' }, el('summary', { class: 'small' }, title),
     el('ul', { class: 'small' }, items.map(c => el('li', {},
-      `${new Date(c.at * 1000).toLocaleString()} · ${c.dest} · ${c.label || '—'} · ${t(c.deleted ? 'recv.history.deleted' : 'recv.history.changed')}`))));
+      `${new Date(c.at * 1000).toLocaleString()} · ${c.dest} · ${c.label || '—'} · ${t(`recv.history.${c.state}`)}`))),
+    choose);
+}
+
+// Colonne qui nomme les lignes dans l'historique, par table reçue (notée dans le journal).
+async function labelDialog(group) {
+  const schema = await readSchema();
+  const pickers = group.pairs.map((pair) => {
+    const note = readNote(schema, pair.journal) || {};
+    const cols = copyColumns(schema.columns(pair.journal), schema.columns(pair.dest), note.map).map(([from]) => from);
+    const current = (results.get(pair.journal) || {}).labelCol || cols[0];
+    return { pair, note, field: pickField({ items: cols.map(c => ({ value: c, label: c })), value: current, label: pair.dest }) };
+  });
+  openModal({
+    title: t('recv.label.title'), width: 400,
+    body: [el('p', { class: 'small' }, t('recv.label.help')),
+      ...pickers.map(p => el('div', { class: 'dest-row' }, el('span', {}, p.pair.dest), p.field))],
+    buttons: [{ label: t('common.cancel') }, {
+      label: t('common.save'), kind: 'btn-primary', onClick: async (m) => {
+        for (const p of pickers) await writeNote(await readSchema(), p.pair.journal, { ...p.note, label: p.field.value() });
+        m.close();
+        results.clear();
+        await consolidateAll();
+      },
+    }],
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -188,56 +226,92 @@ function receiveWizard(group = null) {
       [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, () => showDest(parseInvitation(area.value))) }]);
   }
 
-  // 2. Destinations : une par table reçue, nouvelle ou existante (proposées à la saisie). Une
-  // table existante n'est utilisée qu'après avoir montré ce qui lui sera ajouté.
+  // 2. Destinations : une par table reçue, nouvelle ou existante (liste filtrable). Une table
+  // existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
   async function showDest(invitation) {
     const schema = await readSchema();
-    const known = el('datalist', { id: 'gristsync-tables' },
-      schema.tableIds.filter(id => !id.startsWith(JOURNAL_PREFIX) && !id.startsWith('Synchro_')).map(id => el('option', { value: id })));
-    let confirmed = false;
-    const inputs = invitation.tables.map(tb => el('input', {
-      type: 'text', class: 'input', value: toTableId(tb.table), list: 'gristsync-tables', 'aria-label': tb.table,
-      oninput: () => { confirmed = false; },
-    }));
+    const tables = schema.tableIds.filter(id => !id.startsWith(JOURNAL_PREFIX) && !id.startsWith('Synchro_'));
+    const rows = invitation.tables.map((tb) => {
+      const name = el('input', { type: 'text', class: 'input', value: toTableId(tb.table), 'aria-label': t('recv.dest.name', { table: tb.table }) });
+      const field = pickField({
+        label: tb.table, value: '',
+        items: [{ value: '', label: t('recv.dest.new') }, ...tables.map(id => ({ value: id, label: id }))],
+        onChange: (v) => { name.classList.toggle('hidden', v !== ''); },
+      });
+      return { tb, field, name };
+    });
     const report = el('div', { class: 'report' });
     const from = invitation.from.email;
-    const create = async () => {
-      const plans = invitation.tables.map((tb, i) => {
-        const dest = toTableId(inputs[i].value, tb.table);
-        return { tb, dest, journal: JOURNAL_PREFIX + dest };
-      });
+    const next = async () => {
       const now = await readSchema();
+      const plans = rows.map(({ tb, field, name }) => {
+        const dest = field.value() || toTableId(name.value, tb.table);
+        return { tb, dest, journal: JOURNAL_PREFIX + dest, existing: now.has(dest) };
+      });
       if (new Set(plans.map(p => p.dest)).size !== plans.length || plans.some(p => now.has(p.journal))) throw new Error('destTaken');
-      const existing = plans.filter(p => now.has(p.dest));
-      if (existing.length && !confirmed) {
-        confirmed = true;
-        report.replaceChildren(...existing.map((p) => {
-          const have = new Set(now.columns(p.dest).map(c => c.colId));
-          const added = destColumns(p.tb.columns).map(c => c.id).filter(id => !have.has(id))
-            .map(id => (id === KEY_COL ? t('recv.hidden', { col: id }) : id));
-          return message('warn', t('recv.existing', { table: p.dest, cols: added.join(', ') }));
-        }));
-        wizard.show(STEP.dest, body, [cancel, { label: t('recv.useExisting'), kind: 'btn-primary', onClick: () => run(null, report, create) }]);
-        return;
-      }
-      for (const p of plans) {
-        await createReceivingTables({
-          journal: p.journal, dest: p.dest,
-          columns: p.tb.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false })),
-          note: { id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret, from: invitation.from },
-        });
-      }
-      wizard.show(STEP.link, message('info', t('recv.publishing')), []);
-      await renderTarget(); // publie les formulaires ; le cadre est en général recréé ici
+      if (plans.some(p => p.existing)) return showColumns(invitation, plans, now);
+      return create(invitation, plans);
     };
-    const body = [
+    wizard.show(STEP.dest, [
       message('ok', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
       from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
-      known, el('label', {}, t('recv.dest')),
-      ...invitation.tables.map((tb, i) => el('div', { class: 'dest-row' }, el('span', {}, `${tb.table} →`), inputs[i])),
+      el('label', {}, t('recv.dest')),
+      ...rows.map(r => el('div', { class: 'dest-row' }, el('span', {}, `${r.tb.table} →`), el('div', {}, r.field, r.name))),
       report,
-    ];
-    wizard.show(STEP.dest, body, [cancel, { label: t('recv.create'), kind: 'btn-primary', onClick: () => run(null, report, create) }]);
+    ], [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
+  }
+
+  // 2 bis. Table existante : colonne qui reçoit chaque colonne envoyée (la même, une autre, ou une
+  // nouvelle), et colonne commune qui rattache les lignes déjà là au lieu de les doubler.
+  function showColumns(invitation, plans, schema) {
+    const report = el('div', { class: 'report' });
+    const blocks = plans.filter(p => p.existing).map((p) => {
+      const destCols = schema.columns(p.dest).filter(c => !c.isFormula && c.colId !== KEY_COL).map(c => c.colId);
+      const sent = destColumns(p.tb.columns).filter(c => c.id !== KEY_COL);
+      const maps = sent.map(c => ({
+        id: c.id,
+        field: pickField({
+          label: c.id, value: destCols.includes(c.id) ? c.id : '',
+          items: [...(destCols.includes(c.id) ? [] : [{ value: '', label: t('recv.col.new', { col: c.id }) }]), ...destCols.map(d => ({ value: d, label: d }))],
+        }),
+      }));
+      const match = pickField({
+        label: t('recv.match'), value: '',
+        items: [{ value: '', label: t('recv.match.none') }, ...destCols.map(d => ({ value: d, label: d }))],
+      });
+      p.read = () => {
+        const map = Object.fromEntries(maps.map(m => [m.id, m.field.value() || m.id]));
+        const targets = Object.values(map);
+        if (new Set(targets).size !== targets.length) throw new Error('mapTwice');
+        if (match.value() && !targets.includes(match.value())) throw new Error('matchUnmapped');
+        p.map = map;
+        p.match = match.value();
+      };
+      return el('div', { class: 'form' },
+        el('h3', {}, `${p.tb.table} → ${p.dest}`),
+        ...maps.map(m => el('div', { class: 'dest-row' }, el('span', {}, `${m.id} →`), m.field)),
+        el('label', {}, t('recv.match')), match,
+        el('p', { class: 'muted small' }, t('recv.match.help')));
+    });
+    wizard.show(STEP.dest, [el('p', {}, t('recv.existing')), ...blocks, report], [
+      { label: t('common.back'), onClick: () => showDest(invitation) },
+      { label: t('recv.create'), kind: 'btn-primary', onClick: () => run(null, report, () => { plans.forEach(p => p.read && p.read()); return create(invitation, plans); }) },
+    ]);
+  }
+
+  async function create(invitation, plans) {
+    for (const p of plans) {
+      await createReceivingTables({
+        journal: p.journal, dest: p.dest, map: p.map,
+        columns: p.tb.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false })),
+        note: {
+          id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret, from: invitation.from,
+          ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}),
+        },
+      });
+    }
+    wizard.show(STEP.link, message('info', t('recv.publishing')), []);
+    await renderTarget(); // publie les formulaires ; le cadre est en général recréé ici
   }
 
   // 3. Lien du formulaire : un seul lien sert pour toutes les tables de l'envoi.
@@ -246,7 +320,9 @@ function receiveWizard(group = null) {
     const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('recv.link.title') });
     const report = el('div', { class: 'report' });
     const help = page && !page.samePage ? t('recv.link.help.other', { page: page.name }) : t('recv.link.help');
-    wizard.show(STEP.link, [el('p', {}, help), input, report],
+    const figure = (text, src) => el('figure', { class: 'help-figure' }, el('figcaption', {}, text), el('img', { src, alt: '' }));
+    wizard.show(STEP.link, [el('p', {}, help),
+      figure(t('recv.link.step1'), 'img/aide-partager.png'), figure(t('recv.link.step2'), 'img/aide-copier.png'), input, report],
       [{ label: t('common.later') }, { label: t('recv.link.check'), kind: 'btn-primary', onClick: () => run(null, report, () => check(g, input.value)) }]);
   }
 

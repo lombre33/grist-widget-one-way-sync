@@ -148,6 +148,41 @@ export function checkList({ items, placeholder = t('common.filter'), onChange })
   return el('div', { class: 'check-select' }, filter, list);
 }
 
+// Choix d'une valeur dans une liste filtrable (tables, colonnes) : un bouton qui affiche le choix
+// et ouvre la liste sous lui. `items` : [{ value, label }]. Échap referme la liste seule.
+export function pickField({ items, value, label, onChange = () => {} }) {
+  let current = value;
+  const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const button = el('button', { class: 'btn pick-button', type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-label': label });
+  const filter = el('input', { class: 'search-input', type: 'search', placeholder: t('common.filter'), 'aria-label': t('common.filter'), autocomplete: 'off' });
+  const list = el('div', { class: 'check-list', role: 'listbox', 'aria-label': label });
+  const panel = el('div', { class: 'pick-panel hidden' }, filter, list);
+  const field = el('div', { class: 'pick-field' }, button, panel);
+  const shown = () => (items.find(it => it.value === current) || items[0]).label;
+  const toggle = (open) => {
+    panel.classList.toggle('hidden', !open);
+    button.setAttribute('aria-expanded', String(open));
+    if (open) { filter.value = ''; render(); filter.focus(); } else button.focus();
+  };
+  const choose = (v) => { current = v; button.textContent = shown(); toggle(false); onChange(v); };
+  function render() {
+    const words = fold(filter.value).split(/\s+/).filter(Boolean);
+    const found = items.filter(it => words.every(w => fold(it.label).includes(w)));
+    list.replaceChildren(...(found.length ? found.map(it => el('button', {
+      class: 'pick-option', type: 'button', role: 'option', 'aria-selected': String(it.value === current), onclick: () => choose(it.value),
+    }, it.label)) : [el('p', { class: 'muted small' }, t('common.none'))]));
+  }
+  button.textContent = shown();
+  button.addEventListener('click', () => toggle(panel.classList.contains('hidden')));
+  filter.addEventListener('input', render);
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.classList.contains('hidden')) { e.stopPropagation(); toggle(false); }
+    if (e.key === 'Enter' && e.target === filter) { e.preventDefault(); const first = list.querySelector('.pick-option'); if (first) first.click(); }
+  });
+  field.value = () => current;
+  return field;
+}
+
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
 export async function run(button, out, fn) {

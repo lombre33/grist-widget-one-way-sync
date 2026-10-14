@@ -76,6 +76,25 @@ async function waitFor(check, what, timeout = 30000) {
 }
 
 const step = text => console.log(`· ${text}`);
+// Images d'aide montrées par l'assistant à l'étape Lien (img/) : la carte du formulaire publié
+// avec son bouton « Partager », puis la fenêtre de partage avec « Copier le lien ».
+async function helpShots() {
+  const pad = async (locator, path, margin = 12) => {
+    const box = await locator.boundingBox();
+    await page.screenshot({ path: join(ROOT, 'img', path), clip: {
+      x: Math.max(0, box.x - margin), y: Math.max(0, box.y - margin), width: box.width + 2 * margin, height: box.height + 2 * margin } });
+  };
+  const share = page.getByRole('button', { name: 'Partager', exact: true }).first();
+  const banner = share.locator('xpath=ancestor::div[.//button[normalize-space()="Dépublier"]][1]');
+  await pad(banner, 'aide-partager.png');
+  await share.click();
+  const copy = page.getByText('Copier le lien', { exact: true }).first();
+  await copy.waitFor();
+  await pad(copy.locator('xpath=ancestor::div[5]'), 'aide-copier.png', 4);
+  await page.keyboard.press('Escape');
+  await page.mouse.click(1090, 690);
+  await copy.waitFor({ state: 'hidden' });
+}
 // CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
 const shot = async name => { if (process.env.CAPTURES) await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) }); };
 
@@ -86,8 +105,12 @@ const source = await newDocWithWidget('Source', [
   ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
-// La CIBLE a déjà une table « Communes » (référentiel vide), choisie comme destination.
-const target = await newDocWithWidget('Cible', [['AddTable', 'Communes', [{ id: 'Ville', type: 'Text' }, { id: 'Note', type: 'Text' }]]]);
+// La CIBLE a déjà un référentiel « Communes » (colonne Commune, une ligne Lyon annotée), choisi
+// comme destination de Villes : Ville va dans Commune, et Lyon est rattachée au lieu d'être doublée.
+const target = await newDocWithWidget('Cible', [
+  ['AddTable', 'Communes', [{ id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }]],
+  ['AddRecord', 'Communes', null, { Commune: 'Lyon', Note: 'déjà là' }],
+]);
 step('documents SOURCE et CIBLE créés');
 
 const browser = await chromium.launch();
@@ -151,11 +174,17 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
-  await dialog().getByRole('combobox', { name: 'Villes' }).fill('Communes');
-  await dialogButton('Créer les tables').click();
-  await dialog().getByText('« Communes » existe déjà').waitFor();
+  const pick = async (field, option) => {
+    await dialog().getByRole('button', { name: field, exact: true }).click();
+    await dialog().getByRole('option', { name: option, exact: true }).click();
+  };
+  await pick('Villes', 'Communes');
   await shot('08-cible-destinations');
-  await dialogButton('Utiliser cette table').click();
+  await dialogButton('Continuer').click();
+  await pick('Ville', 'Commune');
+  await pick('Rattacher les lignes déjà là par la colonne', 'Commune');
+  await shot('08b-cible-colonnes');
+  await dialogButton('Créer les tables').click();
   // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
   const formSections = await waitFor(async () => {
     const sections = (await records(target.doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
@@ -169,6 +198,7 @@ try {
   await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
   await dialog().getByLabel('Lien du formulaire').waitFor();
   await shot('09-cible-lien');
+  if (process.env.CAPTURES) await helpShots();
   await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
   await dialogButton('Tester le lien').click();
   await dialog().getByText('Le lien fonctionne').waitFor();
@@ -201,7 +231,8 @@ try {
   await openWidget(target.url);
   const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 3 && rows; }, 'consolidation');
   assert.deepEqual(dest.map(r => r.Nom).sort(), ['Alice', 'Bob', 'Chloé']);
-  await waitFor(async () => (await records(target.doc, 'Communes')).length === 2, 'seconde table consolidée');
+  const communes = await waitFor(async () => { const rows = await records(target.doc, 'Communes'); return rows.length === 2 && rows.every(r => r.id_sync) && rows; }, 'seconde table consolidée');
+  assert.deepEqual(communes.map(r => `${r.Commune}:${r.Note}`).sort(), ['Lyon:déjà là', 'Paris:'], 'Lyon rattachée, pas doublée');
   await widget().getByText(`Données de ${env.email}`).waitFor();
   step('CIBLE : Contacts et Communes consolidées, propriétaire affiché');
 
@@ -218,7 +249,7 @@ try {
   assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
   const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
   assert.deepEqual(await columnsOf('Contacts'), ['Nom', 'Ville', 'id_sync']);
-  assert.deepEqual(await columnsOf('Communes'), ['Note', 'Ville', 'id_sync'], 'table existante complétée de la seule clé');
+  assert.deepEqual(await columnsOf('Communes'), ['Commune', 'Note', 'id_sync'], 'table existante complétée de la seule clé');
   const layout = await waitFor(async () => {
     const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
     const spec = JSON.parse(views[0].fields.layoutSpec || '{}');
@@ -239,8 +270,12 @@ try {
   }, 'ajout, modification et suppression consolidés sans clic');
   assert.equal(after.length, 3);
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
-  await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Ville).join() === 'Lyon', 'vraie suppression consolidée');
-  await waitFor(async () => (await widget().locator('.history li').allTextContents()).some(text => text.includes('Denis')), 'historique');
+  await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression consolidée');
+  const historyHas = text => waitFor(async () => (await widget().locator('.history li').allTextContents()).some(li => li.includes(text)), `historique : ${text}`);
+  await historyHas('Denis · ajoutée');
+  await historyHas('Alice · modifiée');
+  await historyHas('Chloé · supprimée');
+  await historyHas('Paris · supprimée');
   await widget().locator('.history summary').first().click();
   await shot('14-cible-historique');
   step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');

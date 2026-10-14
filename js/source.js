@@ -269,8 +269,12 @@ async function invitationWizard(pending = null) {
       for (const table of tables) await sendAll(table, report);
       wizard.show(STEP.load + 1, message('ok', t('send.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
     };
+    if (!count) {
+      wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], [{ label: t('common.close'), kind: 'btn-primary' }]);
+      return;
+    }
     wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: count })), report],
-      [{ label: t('common.later') }, { label: t('send.load.ok'), kind: 'btn-primary', disabled: !count, onClick: () => run(null, report, send) }]);
+      [{ label: t('common.later') }, { label: t('send.load.ok'), kind: 'btn-primary', onClick: () => run(null, report, send) }]);
   }
 }
 

@@ -9,6 +9,8 @@ export const DELETE_COL = 'Supprime';
 export const LIST_COL = 'Synchro_Ids'; // liste des clés existantes, envoyée par la SOURCE
 export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
 export const AUTHOR_COL = 'Sync_Par'; // e-mail de la personne qui a ajouté la ligne (user.Email)
+export const RECEIVED_COL = 'Sync_Recu'; // date d'arrivée de la ligne dans le Journal (NOW())
+export const STATE_COL = 'Sync_Etat'; // effet de la version recopiée : ajout, modif, suppression
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC1.';
 export const CHUNK = 500; // lignes par action : sous la file de 1000 événements des webhooks
@@ -76,12 +78,14 @@ export function latestByKey(journalRows) {
 // ---------------------------------------------------------------------------------------------
 // Consolidation Journal -> table de destination
 
-// Colonnes recopiées : colonnes de données présentes des deux côtés, hors colonnes techniques de
-// la synchro et formules de la destination. La destination ne garde que la clé `id_sync`.
-export function copyColumns(journalCols, destCols) {
-  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL]);
+// Colonnes recopiées, en couples [colonne du Journal, colonne de la destination] : colonnes de
+// données présentes des deux côtés (sous le nom choisi dans `map`, sinon le même), hors colonnes
+// techniques de la synchro et formules de la destination. La destination ne garde que `id_sync`.
+export function copyColumns(journalCols, destCols, map = {}) {
+  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL]);
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
-  return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_') && writable.has(id));
+  return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_'))
+    .map(id => [id, map[id] || id]).filter(([, to]) => writable.has(to) && to !== KEY_COL);
 }
 
 // Dernière liste des clés reçue (ligne du Journal sans clé, colonne Synchro_Ids).
@@ -94,39 +98,64 @@ function latestList(journalRows) {
 }
 
 // Actions qui amènent la destination à l'état de la SOURCE, en un seul lot :
-//  - la dernière version de chaque clé, si elle n'a pas encore été recopiée ;
+//  - la dernière version de chaque clé, si elle n'a pas encore été recopiée ; une clé inconnue
+//    de la destination peut y reprendre une ligne existante sans clé de même valeur dans la
+//    colonne `matchCol` (rattachement d'un référentiel déjà rempli) ;
 //  - la suppression des lignes cochées `Supprime`, ou absentes de la dernière liste des clés
 //    (ligne effacée dans la SOURCE) quand aucune version plus récente n'est arrivée depuis ;
-//  - le marquage `Sync_Applique` des versions et de la liste traitées.
+//  - le marquage des versions et de la liste traitées (`Sync_Applique`) et de leur effet
+//    (`Sync_Etat`), pour l'historique ; une suppression venue de la liste est notée sur la
+//    dernière version de la clé, à la date d'arrivée de la liste.
 // Une retouche manuelle survit donc jusqu'à la prochaine modification côté SOURCE, et rejouer le
 // plan après application ne change rien (idempotent).
-export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable }) {
+export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '' }) {
   const destByKey = new Map();
+  const unkeyed = new Map(); // valeur de matchCol -> lignes de la destination sans clé
   for (const row of destRows) {
-    if (isBlank(row[KEY_COL])) continue;
+    if (isBlank(row[KEY_COL])) {
+      if (!matchCol || isBlank(row[matchCol])) continue;
+      if (!unkeyed.has(row[matchCol])) unkeyed.set(row[matchCol], []);
+      unkeyed.get(row[matchCol]).push(row);
+      continue;
+    }
     if (!destByKey.has(row[KEY_COL])) destByKey.set(row[KEY_COL], []);
     destByKey.get(row[KEY_COL]).push(row);
   }
+  const matchFrom = (copyCols.find(([, to]) => to === matchCol) || [])[0];
   const latest = latestByKey(journalRows);
   const list = latestList(journalRows);
-  const marks = [];
+  const marks = new Map(); // ligne du Journal -> effet ('' pour la liste ou une version sans effet)
+  const listGone = [];
   const gone = new Set();
   if (list && !isTrue(list[APPLIED_COL])) {
     const present = new Set(String(list[LIST_COL]).slice(LIST_PREFIX.length).split(' ').filter(Boolean));
     for (const key of destByKey.keys()) {
       const version = latest.get(key);
-      if (!present.has(key) && (!version || version.id < list.id)) gone.add(key);
+      if (present.has(key) || (version && version.id > list.id)) continue;
+      gone.add(key);
+      if (version) listGone.push(version.id);
     }
-    marks.push(list.id);
+    marks.set(list.id, '');
   }
 
   const upserts = [];
+  const attached = []; // [ligne de la destination, version]
   const stats = { added: 0, updated: 0, removed: 0 };
   for (const [key, version] of latest) {
     if (isTrue(version.row[APPLIED_COL])) continue;
-    marks.push(version.id);
     if (isTrue(version.row[DELETE_COL])) gone.add(key);
-    if (gone.has(key)) continue;
+    if (gone.has(key)) {
+      marks.set(version.id, destByKey.has(key) ? 'suppression' : '');
+      continue;
+    }
+    const candidates = !destByKey.has(key) && matchFrom ? unkeyed.get(version.row[matchFrom]) : null;
+    if (candidates && candidates.length) {
+      attached.push([candidates.shift(), version]);
+      marks.set(version.id, 'modif');
+      stats.updated++;
+      continue;
+    }
+    marks.set(version.id, destByKey.has(key) ? 'modif' : 'ajout');
     stats[destByKey.has(key) ? 'updated' : 'added']++;
     upserts.push(version);
   }
@@ -137,13 +166,26 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
     stats.removed++;
   }
 
-  const actions = chunk(upserts).map(part => {
-    const values = {};
-    for (const col of copyCols) values[col] = part.map(v => v.row[col] ?? null);
-    return ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(v => v.row[KEY_COL]) }, values, { on_many: 'all' }];
-  });
+  const values = (versions) => {
+    const out = {};
+    for (const [from, to] of copyCols) out[to] = versions.map(v => v.row[from] ?? null);
+    return out;
+  };
+  const actions = chunk(upserts).map(part =>
+    ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(v => v.row[KEY_COL]) }, values(part), { on_many: 'all' }]);
+  for (const part of chunk(attached)) {
+    actions.push(['BulkUpdateRecord', destTable, part.map(([row]) => row.id),
+      { [KEY_COL]: part.map(([, v]) => v.row[KEY_COL]), ...values(part.map(([, v]) => v)) }]);
+  }
   for (const part of chunk(removeIds)) actions.push(['BulkRemoveRecord', destTable, part]);
-  for (const part of chunk(marks)) actions.push(['BulkUpdateRecord', journalTable, part, { [APPLIED_COL]: part.map(() => true) }]);
+  for (const part of chunk([...marks])) {
+    actions.push(['BulkUpdateRecord', journalTable, part.map(([id]) => id),
+      { [APPLIED_COL]: part.map(() => true), [STATE_COL]: part.map(([, state]) => state) }]);
+  }
+  for (const part of chunk(listGone)) {
+    actions.push(['BulkUpdateRecord', journalTable, part,
+      { [STATE_COL]: part.map(() => 'suppression'), [RECEIVED_COL]: part.map(() => list[RECEIVED_COL] ?? null) }]);
+  }
   return { actions, stats };
 }
 
@@ -159,13 +201,14 @@ export function planPurge(journalRows, journalTable) {
   return chunk(ids).map(part => ['BulkRemoveRecord', journalTable, part]);
 }
 
-// Historique : dernière version de chaque clé modifiée dans la SOURCE après `since` (secondes),
-// la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne (première colonne recopiée).
+// Historique : dernière version de chaque clé recopiée avec un effet, arrivée après `since`
+// (secondes), la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne.
 export function recentChanges(journalRows, labelCol, since, max) {
   return [...latestByKey(journalRows).values()]
-    .filter(v => typeof v.order === 'number' && v.order > since)
-    .sort((a, b) => b.order - a.order).slice(0, max)
-    .map(v => ({ at: v.order, label: labelCol ? String(v.row[labelCol] ?? '') : '', deleted: isTrue(v.row[DELETE_COL]) }));
+    .map(v => ({ at: v.row[RECEIVED_COL] ?? v.order, state: v.row[STATE_COL], row: v.row }))
+    .filter(c => c.state && typeof c.at === 'number' && c.at > since)
+    .sort((a, b) => b.at - a.at).slice(0, max)
+    .map(c => ({ at: c.at, label: labelCol ? String(c.row[labelCol] ?? '') : '', state: c.state }));
 }
 
 // Table de la SOURCE qui envoie la liste des clés existantes : une ligne, une formule recalculée

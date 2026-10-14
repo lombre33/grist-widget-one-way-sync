@@ -127,6 +127,12 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 /* Liste avec recherche */
 .check-list { display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow: auto; margin-top: 4px; padding: 4px 6px;
   border: 1px solid var(--border); border-radius: var(--radius); }
+.pick-field { position: relative; min-width: 0; }
+.pick-button { width: 100%; justify-content: space-between; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-button::after { content: "▾"; margin-left: 6px; color: var(--text-muted); }
+.pick-panel { margin-top: 4px; }
+.pick-option { text-align: left; padding: 3px 6px; border: 0; border-radius: var(--radius); background: none; color: var(--text); cursor: pointer; }
+.pick-option:hover, .pick-option[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-ink); }
 .check-list label, label.check { font-weight: 400; display: flex; gap: 6px; align-items: center; }
 
 /* Fenêtres : titre et boutons fixes, contenu qui défile ; tiennent dans un panneau de 700×400 */
@@ -162,3 +168,7 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .link-step { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .history summary { cursor: pointer; color: var(--text-muted); }
 .history ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* Aide en images dans l'assistant */
+.help-figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.help-figure img { max-width: 100%; max-height: 120px; object-fit: contain; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--radius); }
