@@ -149,7 +149,6 @@ try {
   await button('Tester le lien').click();
   await widget().getByText('Le lien fonctionne').waitFor();
   const reply = await widget().locator('textarea.code').inputValue();
-  assert.equal((await records(target.doc, 'Journal_Contacts')).length, 0, 'la ligne de test est effacée');
   step('CIBLE : tables créées, formulaire publié et testé, réponse produite');
 
   // --- SOURCE : approuver, envoyer l'existant
@@ -173,24 +172,36 @@ try {
   assert.deepEqual(dest.map(r => r.Nom).sort(), ['Alice', 'Bob', 'Chloé']);
   step('CIBLE : 3 lignes consolidées');
 
-  // --- Modification, retouche manuelle préservée, suppression logique
+  // --- Destination propre, tables techniques rangées sous la page du widget
+  const tucked = async (doc) => {
+    const list = (await api('POST', `/docs/${doc}/sql`, { sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
+    const at = list.findIndex(p => p.indentation === 0 && JSON.parse(p.options || '{}').collapsed);
+    assert.ok(at >= 0, 'page du widget repliée');
+    return list.slice(at + 1).filter(p => p.indentation === 1).map(p => p.name).sort();
+  };
+  assert.deepEqual(await tucked(source.doc), ['Synchro_Destinataires']);
+  assert.deepEqual(await tucked(target.doc), ['Journal_Contacts', 'Synchro_Config']);
+  const destCols = (await api('GET', `/docs/${target.doc}/tables/Contacts/columns`)).columns.map(c => c.id);
+  assert.deepEqual(destCols.sort(), ['Nom', 'Ville', 'id_sync']);
+  step('SOURCE et CIBLE : tables du widget rangées, destination sans colonne technique visible');
+
+  // --- Ajout, modification, retouche manuelle préservée, suppression logique
   const bob = dest.find(r => r.Nom === 'Bob');
   await applyActions(target.doc, [['UpdateRecord', 'Contacts', bob.id, { Ville: 'retouche' }]]);
   const alice = contacts.find(r => r.Nom === 'Alice');
   const chloe = contacts.find(r => r.Nom === 'Chloé');
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', chloe.id, { Supprime: true }]]);
-  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length >= 5, 'nouvelles versions reçues');
-  await button('Synchroniser').click();
-  const after = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 2 && rows; }, 'suppression consolidée');
-  assert.equal(after.find(r => r.Nom === 'Alice').Ville, 'Marseille');
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', chloe.id, { Supprime: true }], ['AddRecord', 'Contacts', null, { Nom: 'Denis' }]]);
+  const after = await waitFor(async () => {
+    const rows = await records(target.doc, 'Contacts');
+    return rows.some(r => r.Nom === 'Denis') && !rows.some(r => r.Nom === 'Chloé') && rows.some(r => r.Ville === 'Marseille') && rows;
+  }, 'ajout, modification et suppression consolidés sans clic');
+  assert.equal(after.length, 3);
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
-  step('CIBLE : modification appliquée, suppression logique appliquée, retouche manuelle préservée');
+  step('CIBLE : ajout, modification et suppression appliqués seuls, retouche manuelle préservée');
 
-  // --- Purge du journal
-  await button('Purger le journal').click();
-  await widget().getByRole('dialog').getByRole('button', { name: 'Purger le journal' }).click();
-  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length === 3, 'purge');
-  step('CIBLE : journal purgé (une version par ligne)');
+  // --- Journal nettoyé à chaque passage : une version par ligne
+  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length === 4, 'journal nettoyé');
+  step('CIBLE : journal nettoyé (une version par ligne)');
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

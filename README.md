@@ -22,7 +22,8 @@ table Contacts ──webhook natif de Grist──▶ Journal_Contacts (une ligne
   serveur, même quand personne n'a la page ouverte.
 - La **consolidation** est faite par le widget, dans la CIBLE, avec les droits de l'éditeur qui
   ouvre la page : il recopie la dernière version de chaque ligne (clé `id_sync`, ordre `MajLe`)
-  dans la table de destination, toutes les 30 secondes tant que la page est ouverte.
+  dans la table de destination, toutes les 10 secondes tant que la page est ouverte, puis
+  efface du journal les versions remplacées.
 - Les **suppressions** sont logiques : cocher `Supprime` dans la SOURCE retire la ligne de la
   CIBLE (Grist n'envoie pas les suppressions).
 - Une **retouche** faite à la main dans la CIBLE reste en place jusqu'à la prochaine modification
@@ -44,16 +45,17 @@ formulaire n'existe pas dans un espace personnel).
 | SOURCE, onglet **Envoyer** | un propriétaire | **Coller la réponse** : le widget montre qui a accepté (e-mail, document, équipe), puis **Approuver et brancher** crée le webhook et propose d'envoyer les lignes existantes. |
 
 Ensuite, côté SOURCE : pause, reprise, déblocage de la file d'envoi, renvoi complet, révocation.
-Côté CIBLE : synchronisation et purge du journal.
+Côté CIBLE : synchronisation immédiate à la demande.
 
 ## Ce que le widget écrit dans les documents
 
 | Document | Tables et colonnes |
 |---|---|
 | SOURCE | Colonnes `id_sync` (UUID à la création), `MajLe` (date de modification), `Supprime` (case à cocher) dans la table envoyée ; table `Synchro_Destinataires` (registre des invitations et des webhooks) ; le webhook. |
-| CIBLE | `Journal_<table>` ; la table de destination, avec `Sync_JournalId` et `Sync_Ordre` (dernière version appliquée) ; table `Synchro_Config` ; une section Formulaire publiée sur le journal. |
+| CIBLE | La table de destination, avec ses seules colonnes de données plus `id_sync`, masquée de sa page ; `Journal_<table>` ; table `Synchro_Config` ; une section Formulaire publiée sur le journal, sur la page du widget. |
 
-Les tables `Synchro_…` ne sont créées qu'après accord, à la première action qui en a besoin.
+Les tables `Synchro_…` ne sont créées qu'après accord, à la première action qui en a besoin. Les
+pages des tables techniques sont rangées sous la page du widget, repliée par défaut.
 
 ## Limites connues
 
@@ -92,6 +94,6 @@ npm run test:e2e              # parcours complet SOURCE -> CIBLE dans un vrai na
 ```
 
 Le test d'intégration déroule tout le parcours ci-dessus sur deux documents, puis vérifie
-l'envoi des lignes existantes, la consolidation, une modification, une suppression logique, la
-conservation d'une retouche manuelle et la purge. Les deux suites tournent à chaque push
+l'envoi des lignes existantes, la consolidation, un ajout, une modification, une suppression
+logique, la conservation d'une retouche manuelle, le nettoyage du journal et le rangement des pages. Les deux suites tournent à chaque push
 (`.github/workflows/tests.yml`).

@@ -105,6 +105,40 @@ export async function formPages() {
   return pages;
 }
 
+// Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
+// celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
+export async function tuckUnderWidgetPage(tableIds) {
+  const viewRef = await widgetViewRef();
+  if (!viewRef) return;
+  const [tables, allPages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Pages')]);
+  const views = new Set(tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.primaryViewId));
+  const moving = allPages.filter(p => views.has(p.viewRef));
+  const pages = allPages.filter(p => !views.has(p.viewRef)).sort((a, b) => a.pagePos - b.pagePos);
+  const at = pages.findIndex(p => p.viewRef === viewRef);
+  if (at < 0 || !moving.length) return;
+  const parent = pages[at];
+  let last = at;
+  while (last + 1 < pages.length && pages[last + 1].indentation > parent.indentation) last++;
+  const low = pages[last].pagePos;
+  const high = last + 1 < pages.length ? pages[last + 1].pagePos : low + 1;
+  const step = (high - low) / (moving.length + 1);
+  const options = { ...JSON.parse(parent.options || '{}'), collapsed: true };
+  await apply([
+    ['BulkUpdateRecord', '_grist_Pages', moving.map(p => p.id), {
+      pagePos: moving.map((_, i) => low + step * (i + 1)), indentation: moving.map(() => parent.indentation + 1) }],
+    ['UpdateRecord', '_grist_Pages', parent.id, { options: JSON.stringify(options) }],
+  ]);
+}
+
+// Retire une colonne de la page principale de sa table (elle reste dans les données brutes).
+export async function hideColumn(tableId, colId) {
+  const table = (await fetchRows('_grist_Tables')).find(tb => tb.tableId === tableId);
+  const column = (await fetchRows('_grist_Tables_column')).find(c => c.parentId === table.id && c.colId === colId);
+  const sections = new Set((await fetchRows('_grist_Views_section')).filter(s => s.parentId === table.primaryViewId).map(s => s.id));
+  const fields = (await fetchRows('_grist_Views_section_field')).filter(f => f.colRef === column.id && sections.has(f.parentId));
+  await apply(fields.length ? [['BulkRemoveRecord', '_grist_Views_section_field', fields.map(f => f.id)]] : []);
+}
+
 // Page qui porte ce widget : la seule section « personnalisée » dont l'adresse est celle de cette
 // page. Sinon (aucune ou plusieurs), 0 : le formulaire va sur une nouvelle page.
 async function widgetViewRef() {

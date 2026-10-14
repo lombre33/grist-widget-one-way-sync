@@ -71,6 +71,10 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   `Authorization` à Grist (403 « Credentials not supported for cross-origin requests ») : pas de
   clé d'API depuis un widget. L'accès au document courant passe par `grist.docApi`.
 
+- La clé du formulaire peut écrire **toutes** les colonnes de `Journal`, même absentes du
+  formulaire : aucun état de la consolidation ne doit y vivre (il est dans `Synchro_Config`).
+- `_grist_Pages.options` `{"collapsed": true}` replie une page par défaut ; `indentation` en fait
+  une sous-page.
 - Ajouter une section à la page du widget recrée l'iframe du widget : toute étape qui en ajoute
   une (publication du formulaire) doit pouvoir reprendre où elle s'est arrêtée.
 

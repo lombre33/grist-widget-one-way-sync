@@ -2,15 +2,15 @@
 // formulaire de réception), produire le code de réponse, puis consolider le Journal dans la
 // table de destination tant que la page est ouverte par un éditeur.
 import {
-  CONFIG_TABLE, KEY_COL, META_JOURNAL_ID, META_ORDER, ORDER_COL, buildReply, buildWebhookUrl, copyColumns,
+  CONFIG_TABLE, DELETE_COL, KEY_COL, ORDER_COL, buildReply, buildWebhookUrl, copyColumns,
   parseFormLink, parseInvitation, planConsolidation, planPurge, toTableId,
 } from './core.js';
-import { apply, docIdentity, ensureForm, fetchRows, formPages, listColumns } from './grist.js';
+import { apply, docIdentity, ensureForm, fetchRows, formPages, hideColumn, listColumns, tuckUnderWidgetPage } from './grist.js';
 import { ensureTable, hasTable } from './tables.js';
-import { confirmDialog, copyField, el, icon, message, openModal, run } from './ui.js';
+import { copyField, el, icon, message, openModal, run } from './ui.js';
 import { t } from './i18n.js';
 
-const POLL_MS = 30000;
+const POLL_MS = 10000;
 const results = new Map(); // ligne de Synchro_Config -> { at, text, error }
 let container;
 let busy = false;
@@ -23,28 +23,24 @@ export function startAutoConsolidation() {
 // ---------------------------------------------------------------------------------------------
 // Consolidation
 
-async function consolidate(config, purge) {
-  const journalCols = await listColumns(config.Journal);
-  let destCols = await listColumns(config.Destination);
+// Un seul lot d'écritures, donc tout ou rien : destination, nettoyage du Journal et numéro de la
+// dernière ligne traitée.
+async function consolidate(config) {
+  const [journalCols, destCols] = await Promise.all([listColumns(config.Journal), listColumns(config.Destination)]);
   if (!journalCols || !destCols) throw new Error(`${config.Journal} / ${config.Destination} ?`);
-  const orderType = (journalCols.find(c => c.colId === ORDER_COL) || {}).type || 'Any';
-  const missingMeta = [[META_JOURNAL_ID, 'Int'], [META_ORDER, orderType]].filter(([id]) => !destCols.some(c => c.colId === id));
-  if (missingMeta.length) {
-    await apply(missingMeta.map(([id, type]) => ['AddColumn', config.Destination, id, { type, isFormula: false }]));
-    destCols = await listColumns(config.Destination);
-  }
   const [journalRows, destRows] = await Promise.all([fetchRows(config.Journal), fetchRows(config.Destination)]);
-  const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols: copyColumns(journalCols, destCols), destTable: config.Destination });
-  await apply(actions);
-  const purgeActions = purge ? planPurge(journalRows, config.Journal) : [];
-  await apply(purgeActions);
-  return { ...stats, purged: purgeActions.reduce((n, a) => n + a[2].length, 0) };
+  const { actions, stats, seen } = planConsolidation({
+    journalRows, destRows, copyCols: copyColumns(journalCols, destCols), destTable: config.Destination, seen: config.Derniere_ligne || 0,
+  });
+  const changed = stats.added || stats.updated || stats.removed;
+  const bookkeeping = seen === config.Derniere_ligne ? [] : [['UpdateRecord', CONFIG_TABLE, config.id, {
+    Derniere_ligne: seen, ...(changed ? { Derniere_execution: Date.now() / 1000, Bilan: summary(stats) } : {}) }]];
+  await apply([...actions, ...planPurge(journalRows, config.Journal), ...bookkeeping]);
+  return stats;
 }
 
 function summary(s) {
-  const parts = [s.added || s.updated || s.removed ? t('recv.result', s) : t('recv.result.none')];
-  if (s.purged) parts.push(t('recv.purged', { n: s.purged }));
-  return parts.join(' · ');
+  return s.added || s.updated || s.removed ? t('recv.result', s) : t('recv.result.none');
 }
 
 // Deux onglets du même navigateur ne consolident pas en même temps (verrou du navigateur) ;
@@ -53,20 +49,17 @@ async function withLock(fn) {
   return navigator.locks ? navigator.locks.request('gristsync-consolidation', fn) : fn();
 }
 
-export async function consolidateAll({ purge = false } = {}) {
+export async function consolidateAll() {
   if (busy || !(await hasTable(CONFIG_TABLE))) return;
   busy = true;
   try {
     await withLock(async () => {
+      await addMissingConfigColumns();
       for (const config of await fetchRows(CONFIG_TABLE)) {
         if (!config.Journal || !config.Destination) continue;
         const at = Date.now() / 1000;
         try {
-          const stats = await consolidate(config, purge);
-          results.set(config.id, { at, text: summary(stats) });
-          if (stats.added || stats.updated || stats.removed || stats.purged) {
-            await apply([['UpdateRecord', CONFIG_TABLE, config.id, { Derniere_execution: at, Bilan: summary(stats) }]]);
-          }
+          results.set(config.id, { at, text: summary(await consolidate(config)) });
           readOnly = false;
         } catch (e) {
           readOnly = /access|denied|blocked|permission/i.test(e.message);
@@ -94,8 +87,7 @@ export async function renderTarget(root = container) {
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: readOnly, onclick: () => acceptInvitation() }, icon('plus'), t('recv.new')),
-    el('button', { class: 'btn', type: 'button', disabled: readOnly || !configs.length, onclick: e => run(e.currentTarget, out, () => consolidateAll()) }, icon('refresh'), t('recv.action.sync')),
-    el('button', { class: 'btn', type: 'button', disabled: readOnly || !configs.length, onclick: e => run(e.currentTarget, out, purge) }, icon('trash'), t('recv.action.purge')));
+    el('button', { class: 'btn', type: 'button', disabled: readOnly || !configs.length, onclick: e => run(e.currentTarget, out, () => consolidateAll()) }, icon('refresh'), t('recv.action.sync')));
   const pages = await formPages();
   const cards = configs.map(config => syncCard(config, pages.get(config.Journal)));
   container.replaceChildren(...[toolbar,
@@ -118,12 +110,6 @@ function syncCard(config, formPage) {
     waiting ? null : el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small', type: 'button', disabled: readOnly, onclick: () => linkStep.classList.toggle('hidden') }, icon('paste'), t('recv.action.link'))),
     linkStep);
-}
-
-async function purge() {
-  if (await confirmDialog({ title: t('recv.purge.title'), body: t('recv.purge.body'), confirmLabel: t('recv.action.purge'), danger: true })) {
-    await consolidateAll({ purge: true });
-  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -156,24 +142,36 @@ async function acceptInvitation() {
     const journal = `Journal_${destination}`;
     const columns = invitation.columns.map(c => ({ id: c.id, type: c.type, label: c.label, isFormula: false }));
     await createOrComplete(journal, columns);
-    await createOrComplete(destination, [...columns,
-      { id: META_JOURNAL_ID, type: 'Int', isFormula: false },
-      { id: META_ORDER, type: (columns.find(c => c.id === ORDER_COL) || {}).type || 'Any', isFormula: false }]);
+    // La destination reste propre : ses colonnes de données, plus la clé `id_sync`, masquée.
+    const created = await createOrComplete(destination, columns.filter(c => c.id !== ORDER_COL && c.id !== DELETE_COL));
+    if (created) await hideColumn(destination, KEY_COL);
     await apply([['AddRecord', CONFIG_TABLE, null, {
       Nom: invitation.name, Table_source: invitation.table, Journal: journal, Destination: destination,
       Statut: 'attente_lien', Secret: invitation.secret, Origine_source: invitation.origin,
     }]]);
+    await tuckUnderWidgetPage([journal]);
     modal.close();
     await renderTarget();
   }
 }
 
-// Ajoute la table, ou les colonnes qui lui manquent si elle existe déjà.
+// Ajoute la table (true), ou les colonnes qui lui manquent si elle existe déjà (false).
 async function createOrComplete(tableId, columns) {
   const existing = await listColumns(tableId);
-  if (!existing) return apply([['AddTable', tableId, columns]]);
+  if (!existing) {
+    await apply([['AddTable', tableId, columns]]);
+    return true;
+  }
   const have = new Set(existing.map(c => c.colId));
-  return apply(columns.filter(c => !have.has(c.id)).map(({ id, ...info }) => ['AddColumn', tableId, id, info]));
+  await apply(columns.filter(c => !have.has(c.id)).map(({ id, ...info }) => ['AddColumn', tableId, id, info]));
+  return false;
+}
+
+// Synchro_Config créée par la V0.1.0 : il lui manque Derniere_ligne.
+async function addMissingConfigColumns() {
+  if (!(await listColumns(CONFIG_TABLE)).some(c => c.colId === 'Derniere_ligne')) {
+    await apply([['AddColumn', CONFIG_TABLE, 'Derniere_ligne', { type: 'Int', isFormula: false }]]);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -191,7 +189,7 @@ function linkForm(config, formPage) {
   async function check() {
     if (!parseFormLink(input.value)) throw new Error('formLink');
     const url = buildWebhookUrl(input.value, config.Journal);
-    await testUrl(url, config.Journal);
+    await testUrl(url);
     const identity = await docIdentity();
     const fresh = (await fetchRows(CONFIG_TABLE)).find(c => c.id === config.id);
     await apply([['UpdateRecord', CONFIG_TABLE, config.id, { Statut: 'actif' }]]);
@@ -203,9 +201,9 @@ function linkForm(config, formPage) {
   }
 }
 
-// Envoie une ligne vide par la clé, comme le fera le webhook, puis l'efface du Journal : valide
-// d'un coup la clé, la publication, le nom de la table et `?flat=1`.
-async function testUrl(url, journal) {
+// Envoie une ligne vide par la clé, comme le fera le webhook (le prochain passage l'efface du
+// Journal) : valide d'un coup la clé, la publication, le nom de la table et `?flat=1`.
+async function testUrl(url) {
   let response;
   try {
     response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([{ [KEY_COL]: '' }]) });
@@ -214,7 +212,5 @@ async function testUrl(url, journal) {
   }
   const text = await response.text();
   if (!response.ok) throw new Error(t('error.linkTest', { detail: `HTTP ${response.status} ${text.slice(0, 120)}` }));
-  const id = JSON.parse(text).records[0].id;
-  await apply([['RemoveRecord', journal, id]]);
 }
 

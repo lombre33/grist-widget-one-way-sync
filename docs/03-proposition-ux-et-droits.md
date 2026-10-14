@@ -26,7 +26,7 @@ deux codes à copier-coller, dans le sens naturel d'une invitation.
 | 4. Ouvrir la porte | Éditeur CIBLE | Widget CIBLE puis Grist (2 clics) | Le widget crée **et publie** lui-même le formulaire sur le `Journal`, sur sa propre page. Reste à cliquer « Partager » puis « Copier le lien » et à coller le lien dans le widget (section 2 bis). |
 | 5. Répondre | Éditeur CIBLE | Widget CIBLE | Colle le lien : le widget construit l'adresse `…/api/s/<clé>/tables/<Journal>/records?flat=1`, la **teste** (envoi d'une ligne vide puis effacement) et produit un **code de réponse** (adresse + fiche du destinataire, section 5). |
 | 6. Approuver | Propriétaire SOURCE | Widget SOURCE | Colle la réponse, lit la fiche du destinataire, approuve : le widget crée le webhook (`add` + `update`) et propose le chargement initial. |
-| 7. Vivre | Éditeur CIBLE | Page du widget CIBLE | À chaque ouverture, puis toutes les 30 s et à chaque arrivée dans le `Journal`, recopie les dernières versions dans la table éditable. |
+| 7. Vivre | Éditeur CIBLE | Page du widget CIBLE | À chaque ouverture, puis toutes les 10 s et à chaque arrivée dans le `Journal`, recopie les dernières versions dans la table éditable. |
 
 ## 2 bis. La clé du formulaire : ce qu'un widget peut faire ou non (vérifié le 14 octobre)
 
@@ -217,6 +217,10 @@ concrètes ici :
   (section 2 bis), table d'export plate, fiche du destinataire et secret (section 5).
 - Côté SOURCE : contrôle de la table, ajout des colonnes de synchro, envoi des lignes existantes,
   pause, reprise, déblocage de la file, renvoi complet, révocation.
-- Côté CIBLE : consolidation automatique page ouverte, retouches manuelles préservées, suppression
-  logique, purge du journal.
-- Reporté à la V0.2 : vue filtrée par destinataire (option avancée), alertes de dérive du schéma.
+- Côté CIBLE : consolidation automatique page ouverte (10 s), retouches manuelles préservées,
+  suppression logique, journal nettoyé à chaque passage. La table de destination ne reçoit que ses
+  colonnes de données et `id_sync`, masquée ; les tables techniques sont rangées sous la page du
+  widget, repliée par défaut (retours d'Antoine du 14 octobre).
+- Reporté à la V0.2 : mode « lien public » sans aller-retour (la SOURCE partagée en lecture
+  « toute personne avec le lien », lue par le widget CIBLE sans connexion : vérifié en local),
+  vue filtrée par destinataire (option avancée), alertes de dérive du schéma.

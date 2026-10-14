@@ -31,38 +31,47 @@ test('la version la plus récente gagne, MajLe puis numéro de ligne', () => {
   assert.equal(latest.get('a').id, 2); // la version de 20 arrivée en retard est ignorée
 });
 
-test('copyColumns ignore clé, colonnes techniques et formules de la destination', () => {
-  const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'manualSort', 'gristHelper_X'].map(colId => ({ colId }));
-  const dest = [{ colId: 'id_sync' }, { colId: 'MajLe' }, { colId: 'Nom' }, { colId: 'Ville', isFormula: true }, { colId: 'Sync_JournalId' }];
-  assert.deepEqual(copyColumns(journal, dest), ['MajLe', 'Nom']);
+test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
+  const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'Age', 'manualSort', 'gristHelper_X'].map(colId => ({ colId }));
+  const dest = [{ colId: 'id_sync' }, { colId: 'Nom' }, { colId: 'Ville', isFormula: true }, { colId: 'Age' }];
+  assert.deepEqual(copyColumns(journal, dest), ['Nom', 'Age']);
 });
 
-test('consolidation : ajout, mise à jour, rien à faire, suppression', () => {
-  const journalRows = [j(1, 'a', 10), j(2, 'b', 10), j(3, 'b', 20, { Nom: 'b2' }), j(4, 'c', 10), j(5, 'd', 10), j(6, 'd', 20, { Supprime: true })];
+test('consolidation : ajout, mise à jour, suppression, versions déjà traitées ignorées', () => {
+  const journalRows = [j(1, 'a', 10), j(2, 'b', 10), j(3, 'c', 10), j(4, 'd', 10),
+    j(5, 'b', 20, { Nom: 'b2' }), j(6, 'd', 20, { Supprime: true }), j(7, 'e', 10)];
   const destRows = [
-    { id: 11, id_sync: 'b', Nom: 'old', Sync_JournalId: 2, Sync_Ordre: 10 },
-    { id: 12, id_sync: 'c', Nom: 'retouche manuelle', Sync_JournalId: 4, Sync_Ordre: 10 },
-    { id: 13, id_sync: 'd', Nom: 'n5', Sync_JournalId: 5, Sync_Ordre: 10 },
+    { id: 11, id_sync: 'b', Nom: 'old' },
+    { id: 12, id_sync: 'c', Nom: 'retouche manuelle' },
+    { id: 13, id_sync: 'd', Nom: 'n4' },
   ];
-  const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest' });
+  const { actions, stats, seen } = planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest', seen: 4 });
   assert.deepEqual(stats, { added: 1, updated: 1, removed: 1 });
+  assert.equal(seen, 7);
   assert.deepEqual(actions, [
-    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a', 'b'] },
-      { Sync_JournalId: [1, 3], Sync_Ordre: [10, 20], Nom: ['n1', 'b2'] }, { on_many: 'all' }],
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b', 'e'] }, { Nom: ['b2', 'n7'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [13]],
   ]);
 });
 
-test('consolidation idempotente : rejouer après application ne fait rien', () => {
-  const journalRows = [j(1, 'a', 10), j(2, 'b', 20, { Supprime: true })];
-  const destRows = [{ id: 1, id_sync: 'a', Nom: 'n1', Sync_JournalId: 1, Sync_Ordre: 10 }];
-  const { actions } = planConsolidation({ journalRows, destRows, copyCols: ['Nom'], destTable: 'Dest' });
+test('consolidation : une version arrivée en retard ne remplace pas une plus récente', () => {
+  const journalRows = [j(1, 'a', 20), j(2, 'a', 10, { Nom: 'ancienne' })];
+  const { actions, seen } = planConsolidation({ journalRows, destRows: [{ id: 1, id_sync: 'a', Nom: 'n1' }], copyCols: ['Nom'], destTable: 'Dest', seen: 1 });
   assert.deepEqual(actions, []);
+  assert.equal(seen, 2);
 });
 
-test('purge : garde la dernière version de chaque clé et les lignes sans clé', () => {
-  const rows = [j(1, 'a', 10), j(2, 'a', 20), j(3, 'b', 10), j(4, '', 5), j(5, 'a', 15)];
-  assert.deepEqual(planPurge(rows, 'Journal'), [['BulkRemoveRecord', 'Journal', [1, 5]]]);
+test('consolidation idempotente : rejouer après application ne fait rien', () => {
+  const journalRows = [j(1, 'a', 10), j(2, 'b', 20, { Supprime: true })];
+  const first = planConsolidation({ journalRows, destRows: [], copyCols: ['Nom'], destTable: 'Dest' });
+  assert.equal(first.actions.length, 1);
+  const again = planConsolidation({ journalRows, destRows: [{ id: 1, id_sync: 'a', Nom: 'n1' }], copyCols: ['Nom'], destTable: 'Dest', seen: first.seen });
+  assert.deepEqual(again.actions, []);
+});
+
+test('purge : garde la dernière version de chaque clé et la ligne la plus récente', () => {
+  const rows = [j(1, 'a', 10), j(2, 'a', 20), j(3, 'b', 10), j(4, '', 5), j(5, 'a', 15), j(6, '', 0)];
+  assert.deepEqual(planPurge(rows, 'Journal'), [['BulkRemoveRecord', 'Journal', [1, 4, 5]]]);
   assert.deepEqual(planPurge([j(1, 'a', 1)], 'Journal'), []);
 });
 

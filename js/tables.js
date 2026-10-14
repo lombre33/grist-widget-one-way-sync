@@ -1,7 +1,7 @@
 // Tables du widget. Elles sont visibles dans le document et ne sont créées qu'avec l'accord de
 // la personne ; un refus n'est pas retenu, la question revient à l'action suivante.
 import { CONFIG_TABLE, RECIPIENTS_TABLE } from './core.js';
-import { apply, listTables } from './grist.js';
+import { apply, listTables, tuckUnderWidgetPage } from './grist.js';
 import { confirmDialog } from './ui.js';
 import { t } from './i18n.js';
 
@@ -21,6 +21,8 @@ const TABLE_SPECS = {
     { id: 'Accepte_par', type: 'Text', formula: 'user.Email', recalcWhen: 0 },
     { id: 'Derniere_execution', type: 'DateTime:UTC' },
     { id: 'Bilan', type: 'Text' },
+    // Plus grand numéro de ligne du Journal déjà traité.
+    { id: 'Derniere_ligne', type: 'Int' },
   ],
   // SOURCE : registre des destinataires. Le secret de l'invitation n'y est gardé qu'en empreinte.
   [RECIPIENTS_TABLE]: [
@@ -47,5 +49,6 @@ export async function ensureTable(tableId) {
   });
   if (!ok) return false;
   await apply([['AddTable', tableId, TABLE_SPECS[tableId].map(c => ({ isFormula: false, ...c }))]]);
+  await tuckUnderWidgetPage([tableId]);
   return true;
 }

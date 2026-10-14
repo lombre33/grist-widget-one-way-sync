@@ -28,7 +28,7 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
 |---|---|---|
 | `GET <instance>/grist-plugin-api.js` | au démarrage | aucune |
 | `GET/POST/PATCH/DELETE <document>/webhooks…` | onglet Envoyer : lister, créer, suspendre, supprimer un webhook, vider la file | jeton d'accès court du document (`getAccessToken`), en paramètre `auth=` ; Grist réserve ces appels aux propriétaires |
-| `POST <instance>/api/s/<clé>/tables/<Journal>/records?flat=1` | onglet Recevoir, bouton « Tester le lien » : une ligne vide, aussitôt effacée | aucune (clé du formulaire) |
+| `POST <instance>/api/s/<clé>/tables/<Journal>/records?flat=1` | onglet Recevoir, bouton « Tester le lien » : une ligne vide, effacée au passage suivant | aucune (clé du formulaire) |
 
 Tout le reste passe par l'API des widgets (`grist.docApi`, messages entre le cadre et Grist), avec
 les droits de la personne connectée.
@@ -60,7 +60,8 @@ les droits de la personne connectée.
 - Elle est lisible en clair par les propriétaires de la SOURCE (réglages du webhook). Le widget ne
   l'écrit dans aucune table et la masque à l'écran (`…/api/s/Ab12…/…`).
 - Quiconque la connaît peut injecter de fausses versions dans le journal : la consolidation les
-  appliquerait. Pour la changer : dépublier puis republier le formulaire, et refaire l'échange de
+  appliquerait. L'état de la consolidation (dernière ligne traitée) est rangé dans
+  `Synchro_Config`, que la clé ne peut pas écrire. Pour la changer : dépublier puis republier le formulaire, et refaire l'échange de
   codes.
 - Révoquer côté SOURCE supprime le webhook : les envois s'arrêtent, les données déjà reçues
   restent dans la CIBLE.

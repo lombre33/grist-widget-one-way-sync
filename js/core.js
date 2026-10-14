@@ -5,11 +5,9 @@
 
 export const CONFIG_TABLE = 'Synchro_Config';
 export const RECIPIENTS_TABLE = 'Synchro_Destinataires';
-export const META_JOURNAL_ID = 'Sync_JournalId';
-export const META_ORDER = 'Sync_Ordre';
 export const KEY_COL = 'id_sync';
 export const ORDER_COL = 'MajLe';
-const DELETE_COL = 'Supprime';
+export const DELETE_COL = 'Supprime';
 const CODE_PREFIX = 'GRISTSYNC1.';
 export const CHUNK = 500; // lignes par action : sous la file de 1000 événements des webhooks
 
@@ -76,19 +74,20 @@ export function latestByKey(journalRows) {
 // ---------------------------------------------------------------------------------------------
 // Consolidation Journal -> table de destination
 
-// Colonnes recopiées : colonnes de données présentes des deux côtés, hors clé, colonnes
-// techniques et formules de la destination.
+// Colonnes recopiées : colonnes de données présentes des deux côtés, hors colonnes techniques de
+// la synchro et formules de la destination. La destination ne garde que la clé `id_sync`.
 export function copyColumns(journalCols, destCols) {
-  const skip = new Set(['id', 'manualSort', KEY_COL, META_JOURNAL_ID, META_ORDER]);
+  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL]);
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
   return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_') && writable.has(id));
 }
 
-// Actions qui amènent la destination à la dernière version de chaque clé. Une ligne n'est
-// réécrite que si le Journal a une version strictement plus récente que celle notée dans
-// Sync_JournalId / Sync_Ordre : une retouche manuelle survit jusqu'à la prochaine modification
-// côté SOURCE. Rejouer le même plan ne change rien (idempotent).
-export function planConsolidation({ journalRows, destRows, copyCols, destTable }) {
+// Actions qui amènent la destination à la dernière version de chaque clé reçue depuis le
+// dernier passage. `seen` est le plus grand numéro de ligne du Journal déjà traité (noté dans
+// Synchro_Config, que la clé du formulaire ne peut pas écrire) : une clé n'est réécrite que si
+// sa dernière version est arrivée après. Une retouche manuelle survit donc jusqu'à la prochaine
+// modification côté SOURCE, et rejouer le même plan ne change rien (idempotent).
+export function planConsolidation({ journalRows, destRows, copyCols, destTable, seen = 0 }) {
   const destByKey = new Map();
   for (const row of destRows) {
     if (isBlank(row[KEY_COL])) continue;
@@ -100,32 +99,34 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable }
   const removeIds = [];
   const stats = { added: 0, updated: 0, removed: 0 };
   for (const [key, version] of latestByKey(journalRows)) {
+    if (version.id <= seen) continue;
     const existing = destByKey.get(key) || [];
     if (isTrue(version.row[DELETE_COL])) {
       if (existing.length) { removeIds.push(...existing.map(r => r.id)); stats.removed++; }
       continue;
     }
-    const upToDate = existing.length > 0 && existing.every(r => !isBlank(r[META_JOURNAL_ID]) &&
-      compareVersion({ order: r[META_ORDER], id: r[META_JOURNAL_ID] }, version) >= 0);
-    if (upToDate) continue;
     stats[existing.length ? 'updated' : 'added']++;
     upserts.push(version);
   }
 
   const actions = chunk(upserts).map(part => {
-    const values = { [META_JOURNAL_ID]: part.map(v => v.id), [META_ORDER]: part.map(v => v.order ?? null) };
+    const values = {};
     for (const col of copyCols) values[col] = part.map(v => v.row[col] ?? null);
     return ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(v => v.row[KEY_COL]) }, values, { on_many: 'all' }];
   });
   for (const part of chunk(removeIds)) actions.push(['BulkRemoveRecord', destTable, part]);
-  return { actions, stats };
+  const lastId = journalRows.reduce((max, r) => Math.max(max, r.id), seen);
+  return { actions, stats, seen: lastId };
 }
 
-// Versions du Journal remplacées par une plus récente. La dernière de chaque clé est gardée,
-// suppression comprise. À n'appliquer qu'après une consolidation réussie du même instantané.
+// Nettoyage du Journal, fait à chaque passage : les versions remplacées par une plus récente et
+// les lignes sans clé (test du lien) disparaissent. Restent la dernière version de chaque clé
+// (suppression comprise) et la ligne la plus récente du Journal, pour que Grist ne réutilise pas
+// son numéro (voir `seen`).
 export function planPurge(journalRows, journalTable) {
   const keep = new Set([...latestByKey(journalRows).values()].map(v => v.id));
-  const ids = journalRows.filter(r => !isBlank(r[KEY_COL]) && !keep.has(r.id)).map(r => r.id);
+  keep.add(journalRows.reduce((max, r) => Math.max(max, r.id), 0));
+  const ids = journalRows.filter(r => !keep.has(r.id)).map(r => r.id);
   return chunk(ids).map(part => ['BulkRemoveRecord', journalTable, part]);
 }
 
