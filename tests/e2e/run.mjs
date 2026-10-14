@@ -311,6 +311,47 @@ try {
   assert.equal((await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 0);
   step('CIBLE puis SOURCE : réception arrêtée, révocation et tables techniques effacées');
 
+  // --- Lien public : un seul code, la CIBLE lit la vue d'export sans identifiant
+  await button('Nouveau destinataire').click();
+  await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
+  await dialogButton('Continuer').click();
+  await dialogButton('Préparer pour la synchro').click();
+  await dialog().getByRole('radio', { name: /Lien public/ }).check();
+  await shot('15-source-public');
+  await dialogButton('Créer l’invitation').click();
+  const publicCode = await dialog().locator('textarea.code').inputValue();
+  await dialogButton('Fermer').click();
+  await widget().getByText('Lien public à activer').waitFor();
+  await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
+  const anon = async table => (await fetch(`${TEAM}/api/docs/${source.doc}/tables/${table}/records`)).status;
+  assert.equal(await anon('Contacts'), 403, 'table source cachée au lien public');
+  assert.equal(await anon('Villes'), 403, 'autres tables cachées');
+  assert.equal(await anon('Contacts_summary_id_sync'), 200, 'vue d\'export lisible');
+  await openWidget(source.url);
+  await widget().getByText('Public', { exact: true }).waitFor();
+
+  await openWidget(target.url);
+  await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
+  await button('Accepter une invitation').click();
+  await dialog().locator('textarea.code').fill(publicCode);
+  await dialogButton('Continuer').click();
+  await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill('Annuaire');
+  await dialogButton('Continuer').click();
+  await dialog().getByText('Branché').waitFor();
+  await dialogButton('Fermer').click();
+  await waitFor(async () => (await records(target.doc, 'Annuaire')).length === 3, 'lien public : lignes lues');
+  await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Émile', Interne: 'i5' }]]);
+  await waitFor(async () => (await records(target.doc, 'Annuaire')).some(r => r.Nom === 'Émile' && r.Interne === 'i5'), 'lien public : ajout lu');
+  step('Lien public : seule la vue d\'export est lisible, la CIBLE la recopie sans échange de réponse');
+
+  await openWidget(source.url);
+  await button('Révoquer').click();
+  await dialogButton('Révoquer').click();
+  await widget().getByText('Aucun destinataire').waitFor();
+  assert.equal(await anon('Contacts_summary_id_sync'), 403, 'vue d\'export fermée après révocation');
+  assert.equal(await anon('Contacts'), 403, 'reste du document toujours caché tant qu\'il est public');
+  step('Lien public révoqué : plus rien de lisible');
+
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');
 } catch (e) {

@@ -1,37 +1,25 @@
 # Pistes pour la suite
 
-Tri par rapport coût / utilité, en gardant l'outil simple. Rien de ceci n'est commencé.
+## Faites le 14 octobre 2026
 
-## Déjà décidé pour la V0.2
+- Vue d'export en un bloc : colonnes choisies et modifiables à tout moment, sans bloquer la file ;
+  la table SOURCE n'a plus besoin d'être « plate ».
+- Mode lien public : un seul code, règles d'accès posées par le widget.
+- Destination existante : correspondance des colonnes, rattachement des lignes déjà là par une
+  colonne commune.
+- Historique : ajoutées, modifiées, supprimées (vraies suppressions comprises), colonne affichée
+  au choix.
+- Carte SOURCE : dernier envoi reçu. Révoquer efface les tables techniques devenues inutiles ;
+  la CIBLE peut arrêter la réception.
 
-- **Lien public, un seul code.** La SOURCE partage son document en lecture « toute personne ayant
-  le lien », la CIBLE lit par l'API REST anonyme (vérifié en local : réponse 200 et en-tête
-  `Access-Control-Allow-Origin: *`). Pas de webhook, pas de réponse à renvoyer. À vérifier : que
-  l'instance DINUM autorise ce partage.
+## Encore possibles, sans alourdir l'outil
 
-## Petites, utiles, sans nouvel écran
-
-1. **Alerte de schéma.** Quand la table SOURCE gagne une colonne, la file se bloque
-   (`400 Invalid column`). La carte SOURCE pourrait le dire en clair (« la colonne Téléphone
-   n'existe pas chez le destinataire ») au lieu du message brut de Grist.
-2. **Vraies suppressions dans l'historique.** L'historique CIBLE montre les ajouts, modifications
-   et suppressions logiques ; les lignes effacées par la liste des clés n'y figurent pas encore.
-3. **« Ajoutée » ou « modifiée ».** L'historique dit « modifiée » pour une ligne nouvelle ; la
-   distinction est possible en regardant si la clé existait avant.
-4. **Libellé de ligne choisi.** L'historique nomme la ligne par sa première colonne ; un choix de
-   colonne (dans les Réglages) aiderait quand c'est un code.
-5. **Dernier envoi réussi** sur la carte SOURCE (Grist le fournit dans l'état du webhook).
-
-## Moyennes, à discuter
-
-6. **Rattacher les lignes existantes.** Quand la destination est un référentiel déjà rempli, les
-   lignes déjà présentes sont aujourd'hui doublées. Choisir une colonne commune (un SIRET, un
-   code INSEE) permettrait de remplir `id_sync` sur les lignes existantes au premier passage.
-7. **Correspondance de colonnes.** Recevoir `Ville` dans une colonne `Commune` existante, sans
-   renommer.
-8. **Vue filtrée par destinataire** (piste vérifiée en local avec Grist 1.7) : une table
-   résumé par `id_sync` avec une condition, pour n'envoyer qu'une partie des lignes à un
-   destinataire.
+1. **Filtre de lignes par table** : n'envoyer que les lignes qui passent une condition simple
+   (colonne = valeur). La vue d'export le permet : une ligne qui sort du filtre part une dernière
+   fois marquée supprimée.
+2. **Colonnes différentes par destinataire** : aujourd'hui une table n'a qu'une vue d'export,
+   commune à tous ses destinataires. Il faudrait une vue par destinataire.
+3. **Ajouter une table à un envoi existant** : aujourd'hui, une nouvelle invitation.
 
 ## À éviter, pour rester simple
 

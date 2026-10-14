@@ -3,7 +3,7 @@
 // webhooks eux-mêmes et de la note de la table liste (invitations en attente).
 import {
   AUTHOR_COL, CHUNK, ORDER_COL, SCHEMA_COL, buildInvitation, chunk, exportTableId, exportableColumns, fillKeyActions, listTableId,
-  maskKey, masterTableId, missingSyncColumns, parseReply, parseWebhookUrl, prepareSourceActions,
+  PUBLIC_MEMO, maskKey, masterTableId, missingSyncColumns, parseReply, parseWebhookUrl, prepareSourceActions, publicAclActions,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
@@ -39,11 +39,32 @@ function recipients(tables, hooks) {
   return [...groups.values()];
 }
 
-// Invitations en attente, notées dans la table liste de chacune de leurs tables.
-function pendingInvitations(schema) {
+// Invitations en attente et partages par lien public, notés dans la table liste de chacune de
+// leurs tables (`mode: 'public'` pour les seconds).
+function notedInvitations(schema) {
   const byId = new Map();
   for (const table of sentTables(schema)) for (const inv of readNote(schema, listTableId(table)) || []) byId.set(inv.id, inv);
   return [...byId.values()];
+}
+const pendingInvitations = schema => notedInvitations(schema).filter(inv => inv.mode !== 'public');
+const publicShares = schema => notedInvitations(schema).filter(inv => inv.mode === 'public');
+
+// Lien public : le document est-il lisible sans identifiant ? (requête anonyme)
+async function isPublic(base) {
+  try { return (await fetch(base, { credentials: 'omit' })).ok; } catch (e) { return false; }
+}
+
+// Règles d'accès du lien public, accordées aux partages notés : réécrites seulement si elles
+// diffèrent (changer une règle fait recharger le document, et donc le widget). Le refus général
+// reste tant que le document est public.
+async function syncPublicRules(shares, open) {
+  const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
+  const tables = [...new Set(shares.flatMap(sh => sh.tables))];
+  const name = id => (resources.find(r => r.id === id) || {}).tableId;
+  const want = new Set([...tables.flatMap(tb => [exportTableId(tb), listTableId(tb)]), ...(tables.length || open ? ['*'] : [])]);
+  const have = new Set(rules.filter(r => r.memo === PUBLIC_MEMO).map(r => name(r.resource)));
+  if (want.size === have.size && [...want].every(tb => have.has(tb))) return;
+  await apply(publicAclActions(resources, rules, tables, { keepDeny: open }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -57,12 +78,18 @@ export async function renderSource(root = container) {
   const schema = await readSchema();
   const tables = sentTables(schema);
   const pending = pendingInvitations(schema);
+  const shares = publicShares(schema);
+  // Document lisible par lien public ? Vérifié à chaque affichage : tant qu'il l'est, le refus
+  // général posé par le widget reste en place, même sans partage.
+  const open = await isPublic((await grist.docApi.getAccessToken({ readOnly: true })).baseUrl);
+  if (!ownerOnly) await syncPublicRules(shares, open);
 
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: ownerOnly, onclick: () => invitationWizard() }, icon('plus'), t('send.new')));
   const cards = [
     ...pending.map(inv => pendingCard(inv, ownerOnly, out)),
+    ...shares.map(share => publicCard(share, open, ownerOnly, out)),
     ...recipients(tables, hooks).map(r => recipientCard(r, ownerOnly, out)),
   ];
   container.replaceChildren(...[toolbar,
@@ -89,6 +116,42 @@ function pendingCard(inv, ownerOnly, out) {
     el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => invitationWizard(inv) }, icon('paste'), t('send.reply')),
       actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
+}
+
+// Partage par lien public : pas de webhook, la CIBLE lit les vues d'export elle-même.
+function publicCard(share, open, ownerOnly, out) {
+  const r = { name: share.name, feeds: share.tables.map(table => ({ table })) };
+  return card(share.name, open ? ['public', 'ok'] : ['publicOff', 'pending'], `${share.tables.join(', ')} · ${t('send.public.label')}`,
+    open ? null : el('p', { class: 'small' }, t('send.public.turnOn')),
+    el('div', { class: 'card-actions' },
+      actionButton(t('send.public.code'), 'copy', () => showPublicCode(share), ownerOnly, out),
+      actionButton(t('send.action.columns'), 'columns', () => editColumns(r, out), ownerOnly, out),
+      actionButton(t('send.action.revoke'), 'trash', () => revokePublic(share), ownerOnly, out, 'btn-danger-text')));
+}
+
+async function publicCode(share) {
+  const [{ origin, docId }, { baseUrl }, list] = await Promise.all([
+    docIdentity(), grist.docApi.getAccessToken({ readOnly: true }), fetchRows(listTableId(share.tables[0]))]);
+  const tables = await Promise.all(share.tables.map(async table => ({ table, columns: await readExport(table) })));
+  return buildInvitation({
+    id: share.id, name: share.name, origin, base: baseUrl, from: { email: (list[0] || {})[AUTHOR_COL] || '', docId }, tables,
+  });
+}
+
+async function showPublicCode(share) {
+  const code = await publicCode(share);
+  await new Promise(resolve => openModal({ title: share.name, onClose: resolve,
+    body: [el('p', {}, t('send.public.help')), copyField(code)], buttons: [{ label: t('common.close'), kind: 'btn-primary' }] }));
+}
+
+// Révoquer un lien public retire l'accès des lecteurs à ses vues d'export. Tant que le document
+// reste public, le refus général reste en place : rien d'autre ne devient lisible.
+async function revokePublic(share) {
+  const ok = await confirmDialog({
+    title: t('send.revoke.title', { name: share.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.action.revoke'), danger: true,
+  });
+  if (!ok) return;
+  await cancelInvitation(share); // le tableau de bord redessiné ajuste les règles d'accès
 }
 
 function recipientStatus(hooks) {
@@ -139,7 +202,7 @@ function lastSuccess(usage) {
 // les colonnes id_sync, MajLe et Supprime de la table restent (elles portent des données).
 async function revoke(r, hooks) {
   const others = (await listWebhooks()).filter(h => !hooks.some(mine => mine.id === h.id));
-  const pending = pendingInvitations(await readSchema()).flatMap(inv => inv.tables);
+  const pending = notedInvitations(await readSchema()).flatMap(inv => inv.tables);
   const orphans = r.feeds.map(f => f.table)
     .filter(table => !others.some(h => masterTableId(h.fields.tableId) === table) && !pending.includes(table));
   const cleanup = el('input', { type: 'checkbox', checked: true });
@@ -268,27 +331,40 @@ async function invitationWizard(pending = null) {
       { label: adds.length ? t('send.prepare') : t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, prepare) }]);
   }
 
-  // 3. Options : nom de l'envoi, secret.
+  // 3. Options : nom de l'envoi, mode (réponse ou lien public), secret.
   function showOptions() {
     const nameInput = el('input', { type: 'text', class: 'input', value: chosen.join(' + ') });
     const secretBox = el('input', { type: 'checkbox', checked: true });
+    const radio = (value, label, checked) => el('label', { class: 'check' },
+      el('input', { type: 'radio', name: 'gristsync-mode', value, checked, onchange: () => { secretPart.classList.toggle('hidden', value === 'public'); publicPart.classList.toggle('hidden', value !== 'public'); } }), label);
+    const secretPart = el('div', { class: 'form' }, el('label', { class: 'check' }, secretBox, t('send.secret')), el('p', { class: 'muted small' }, t('send.secret.help')));
+    const publicPart = el('div', { class: 'hidden' }, message('warn', t('send.public.warn')));
     const report = el('div', { class: 'report' });
+    const mode = () => (document.querySelector('input[name="gristsync-mode"]:checked') || {}).value;
     wizard.show(STEP.options, [
       message('ok', t('send.check.ok', { n: chosen.length })),
       el('label', {}, t('send.name')), nameInput,
-      el('label', { class: 'check' }, secretBox, t('send.secret')),
-      el('p', { class: 'muted small' }, t('send.secret.help')), report,
-    ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(nameInput.value.trim(), secretBox.checked)) }]);
+      el('label', {}, t('send.mode')),
+      radio('reponse', t('send.mode.reply'), true), radio('public', t('send.mode.public'), false),
+      secretPart, publicPart, report,
+    ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(nameInput.value.trim(), mode() !== 'public' && secretBox.checked, mode() === 'public')) }]);
   }
 
   // 4. Invitation : le code à transmettre ; l'invitation attend sa réponse dans une carte.
-  async function invite(name, withSecret) {
+  async function invite(name, withSecret, isPublicMode) {
     const secret = withSecret ? randomHex(16) : '';
-    const entry = { id: randomHex(8), name: name || chosen.join(' + '), hash: secret ? await sha256(secret) : '', at: now(), tables: chosen };
+    const entry = { id: randomHex(8), name: name || chosen.join(' + '), hash: secret ? await sha256(secret) : '', at: now(), tables: chosen,
+      ...(isPublicMode ? { mode: 'public' } : {}) };
     const schema = await readSchema();
     for (const table of chosen) {
       const id = listTableId(table);
       await writeNote(schema, id, [...(readNote(schema, id) || []), entry]);
+    }
+    // Les règles d'accès sont posées à la fermeture (le document se recharge alors).
+    if (isPublicMode) {
+      wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(await publicCode(entry)), message('warn', t('send.public.turnOn'))],
+        [{ label: t('common.close'), kind: 'btn-primary' }]);
+      return;
     }
     const [{ origin, docId }, list] = await Promise.all([docIdentity(), fetchRows(listTableId(chosen[0]))]);
     const code = buildInvitation({

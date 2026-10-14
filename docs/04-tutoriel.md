@@ -2,22 +2,28 @@
 
 Deux documents Grist de la même instance, dans un espace d'équipe :
 
-- la **SOURCE**, qui a la table à partager (ici `Contacts` et `Villes`) ;
-- la **CIBLE**, qui recevra une copie tenue à jour (ici `Contacts`, et `Communes`, une table qui
-  existait déjà).
+- la **SOURCE**, qui a les tables à partager (ici `Contacts` et `Villes`) ;
+- la **CIBLE**, qui en reçoit une copie tenue à jour (ici `Contacts`, et `Communes`, un
+  référentiel qui existait déjà).
 
-Il faut un **propriétaire** de la SOURCE et un **éditeur** de la CIBLE. Ils échangent deux codes,
-par le canal de leur choix (courriel, messagerie). Aucune donnée ne passe par ce canal : seulement
-le nom des tables et une adresse d'écriture.
+Il faut un **propriétaire** de la SOURCE et un **éditeur** de la CIBLE. Deux modes :
+
+- **avec réponse** (recommandé) : ils échangent deux codes ; Grist pousse chaque modification vers
+  la CIBLE, même quand personne n'a la page ouverte ;
+- **lien public** : un seul code ; la SOURCE devient lisible par lien public, mais uniquement ses
+  vues d'export (voir [plus bas](#mode-lien-public)).
+
+Aucune donnée ne passe par les codes : seulement des noms de tables et de colonnes, et une
+adresse d'écriture.
 
 Les captures viennent du test d'intégration (`CAPTURES=1 npm run test:e2e`) : elles montrent
-l'écran tel qu'il est dans la version du dépôt.
+l'écran de la version du dépôt.
 
 ## 0. Installer le widget (dans chaque document)
 
 **Ajouter**, **Ajouter un widget**, **Personnalisé**, **URL personnalisée**, coller l'adresse du
 widget, puis **Accès complet** dans l'onglet Widget du panneau de droite. Renommer la page, par
-exemple « Synchro » : les tables techniques se rangeront dessous.
+exemple « Synchro » : les tables techniques se rangeront dessous, repliées.
 
 ![Le widget à l'ouverture](images/01-accueil.png)
 
@@ -28,42 +34,44 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 
 ### 1. Choisir les tables
 
-**Envoyer**, **Nouveau destinataire**. Cocher les tables à partager (le filtre aide quand il y en
-a beaucoup).
+**Envoyer**, **Nouveau destinataire**, cocher les tables à partager.
 
 ![Choix des tables](images/02-source-tables.png)
 
-Le widget contrôle chaque table. Une table qui affiche une Référence par une autre colonne, qui a
-une mise en forme conditionnelle ou des pièces jointes ne peut pas partir telle quelle : faire une
-table « d'export » plate, qui ne contient que ce que la CIBLE a le droit de voir (les webhooks de
-Grist ignorent les règles d'accès).
+### 2. Choisir les colonnes
 
-### 2. Préparer
+Cocher les colonnes qui partent (toutes par défaut). Le reste ne sort jamais du document : le
+widget crée une **vue d'export** par table, tenue à jour par Grist, qui ne contient que ces
+colonnes. Une Référence part comme le texte qu'elle affiche ; les pièces jointes ne partent pas.
 
-Le widget dit exactement ce qu'il va ajouter et attend votre accord.
+![Colonnes](images/03-source-preparation.png)
 
-![Préparation](images/03-source-preparation.png)
+Le widget dit exactement ce qu'il ajoute, et ne le fait qu'au clic sur **Préparer pour la
+synchro** :
 
 - `id_sync` : identifiant stable de chaque ligne (les `id` de Grist sont réutilisés) ;
 - `MajLe` : date de dernière modification, pour remettre les versions dans l'ordre ;
 - `Supprime` : case à cocher pour retirer une ligne de la CIBLE sans l'effacer de la SOURCE ;
-- `Synchro_<table>` : une table d'une ligne qui liste les `id_sync` existants, pour que les vraies
-  suppressions partent aussi. Elle se range sous la page du widget, repliée.
+- `Synchro_<table>` : une ligne qui liste les `id_sync` existants, pour que les vraies
+  suppressions partent aussi ;
+- la vue d'export de la table.
+
+Une table déjà envoyée garde les mêmes colonnes pour tous ses destinataires.
 
 ### 3. Options
 
 ![Options](images/04-source-options.png)
 
-Donner un nom à l'envoi : le destinataire le verra. Le **secret** (coché par défaut) garantit que la réponse vient de quelqu'un qui a reçu
-l'invitation. Sans secret, l'approbation repose sur la seule fiche du destinataire, que vous
-vérifiez à l'étape 5.
+Donner un nom à l'envoi : le destinataire le verra. Choisir le mode. Le **secret** (coché par
+défaut) garantit que la réponse vient de quelqu'un qui a reçu l'invitation ; sans secret,
+l'approbation repose sur la seule fiche du destinataire, que vous vérifiez à l'étape 9.
 
 ### 4. Copier l'invitation
 
 ![Invitation](images/05-source-invitation.png)
 
-Envoyer ce code à la personne de la CIBLE. Il ne contient aucune donnée. **Plus tard** ferme
-l'assistant : l'invitation reste en attente sur sa carte.
+Envoyer ce code à la personne de la CIBLE. **Plus tard** ferme l'assistant : l'invitation reste
+en attente sur sa carte.
 
 ![Invitation en attente](images/06-source-attente.png)
 
@@ -77,22 +85,27 @@ l'assistant : l'invitation reste en attente sur sa carte.
 
 ### 6. Choisir les destinations
 
-Pour chaque table reçue, le nom de la table qui recevra les lignes. La liste propose les tables
-du document : choisir une table existante (un référentiel déjà là) la complète des colonnes
-manquantes et d'une colonne `id_sync` masquée, sans toucher à ses lignes actuelles. Le widget
-demande confirmation.
+Pour chaque table reçue, ouvrir la liste et choisir **Nouvelle table** (nom modifiable) ou une
+table du document.
 
 ![Destinations](images/08-cible-destinations.png)
 
-Le widget crée alors un `Journal_<table>` par table (rangé sous sa page, replié) et publie sur sa
-page un formulaire de réception par journal. Grist recharge le widget : l'assistant se rouvre de
-lui-même à l'étape suivante.
+Pour une table existante, le widget demande où va chaque colonne envoyée (la même, une autre, ou
+une nouvelle) et par quelle colonne **rattacher les lignes déjà là** : une ligne déjà présente
+dont cette colonne a la même valeur qu'une ligne reçue est mise à jour au lieu d'être doublée.
+Ici, `Ville` va dans `Commune`, et Lyon, déjà là avec une note, est rattachée.
+
+![Colonnes de la table existante](images/08b-cible-colonnes.png)
+
+Le widget crée un `Journal_<table>` par table (rangé sous sa page) et publie sur sa page un
+formulaire de réception par journal. Grist recharge alors le widget : l'assistant se rouvre seul
+à l'étape suivante.
 
 ### 7. Copier le lien du formulaire
 
-Dans la carte d'**un** des formulaires apparus à côté du widget : **Partager**, **Copier le
-lien**, coller ce lien dans le widget, **Tester le lien**. Un seul lien suffit pour toutes les
-tables (les formulaires d'une même page partagent la même clé).
+L'assistant montre où cliquer : dans la carte d'**un** des formulaires apparus à côté du widget,
+**Partager**, puis **Copier le lien** ; coller ce lien dans le widget, **Tester le lien**. Un seul
+lien suffit pour toutes les tables.
 
 ![Lien](images/09-cible-lien.png)
 
@@ -116,13 +129,20 @@ tables : vérifier que c'est la bonne personne, puis **Approuver et brancher**.
 
 ### 10. Envoyer les lignes existantes
 
-Les webhooks n'envoient que les changements à venir. **Tout envoyer** pousse les lignes déjà là.
+Le branchement n'envoie que les changements à venir. **Envoyer** pousse les lignes déjà là.
 
 ![Envoi](images/12-source-envoi.png)
 
-La carte du destinataire montre ensuite l'état des envois et les actions : **Tout renvoyer**,
-**Mettre en pause**, **Débloquer la file** (quand un envoi échoue, Grist bloque toute la file du
-document environ 15 minutes), **Révoquer**.
+La carte du destinataire montre le dernier envoi reçu et les actions :
+
+- **Tout renvoyer** ;
+- **Colonnes** : ajouter ou retirer des colonnes à tout moment ; la CIBLE crée seule les
+  nouvelles colonnes ;
+- **Mettre en pause** ;
+- **Débloquer la file**, quand un envoi échoue (Grist bloque alors toute la file du document
+  environ 15 minutes) ;
+- **Révoquer** : supprime les webhooks et, si plus rien n'envoie la table, propose d'effacer ses
+  tables techniques.
 
 ![Destinataire actif](images/13-source-actif.png)
 
@@ -131,20 +151,39 @@ document environ 15 minutes), **Révoquer**.
 Chaque ajout, modification ou suppression dans la SOURCE arrive dans le journal en une seconde
 environ, même si personne n'a le widget ouvert. La **recopie** dans la table de destination se fait
 quand un éditeur ouvre la page du widget (même replié), puis toutes les 10 secondes tant qu'elle
-reste ouverte. Une fois les données arrivées, les formulaires se replient dans la barre en haut de
-la page.
+reste ouverte. Une fois les données arrivées, les formulaires se replient en haut de la page.
 
 ![Synchro à jour et historique](images/14-cible-historique.png)
 
-La carte montre le propriétaire des données, le dernier passage par table, et les lignes modifiées
-depuis votre dernière visite (20 au plus). Une retouche faite à la main dans la CIBLE reste en
-place jusqu'à la prochaine modification de la même ligne dans la SOURCE.
+La carte montre le propriétaire des données, le dernier passage par table, et les lignes
+ajoutées, modifiées ou supprimées depuis votre dernière visite (20 au plus), nommées par la
+colonne de votre choix. Une retouche faite à la main dans la CIBLE reste en place jusqu'à la
+prochaine modification de la même ligne dans la SOURCE. **Arrêter la réception** efface les
+journaux et garde les tables de destination.
+
+## Mode lien public
+
+À l'étape 3, choisir **Lien public**. Le widget pose des règles d'accès : toute personne qui n'est
+que **lectrice** du document, dont le lien public, ne voit plus que les vues d'export partagées.
+Ensuite, dans le menu **Partager** du document, régler « Lien public » sur **Lecture**. La carte
+passe de « Lien public à activer » à « Public ».
+
+![Mode lien public](images/15-source-public.png)
+
+Côté CIBLE : coller le code, choisir les destinations, c'est tout. Le widget lit la SOURCE toutes
+les 10 secondes tant que sa page est ouverte. À éviter pour des données qui ne doivent pas être
+publiques ; les lecteurs déjà invités sur la SOURCE ne voient plus, eux aussi, que les vues
+d'export.
+
+**Révoquer** retire l'accès aux vues d'export. Tant que le lien public reste actif, le widget
+garde la règle qui cache le reste du document : désactivez-le dans **Partager**.
 
 ## Si quelque chose coince
 
 | Symptôme | Cause probable | Que faire |
 |---|---|---|
-| La carte SOURCE est rouge, « 400 Invalid column » | Une colonne a été ajoutée à la table SOURCE après le branchement | Ajouter la même colonne au journal de la CIBLE (et à la table de destination pour la recevoir), puis **Débloquer la file** et **Tout renvoyer** |
 | Rien n'arrive dans la table de destination | Personne n'a ouvert la page du widget dans la CIBLE | Ouvrir la page ; les versions attendaient dans le journal |
+| La carte SOURCE est rouge | La CIBLE a arrêté la réception ou dépublié son formulaire | Révoquer, puis refaire une invitation |
 | Tous les webhooks du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
+| Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou révoqué | Voir avec la SOURCE |

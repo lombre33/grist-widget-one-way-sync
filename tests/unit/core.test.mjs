@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, exportFormula, exportableColumns, expandRows, sentColumns, compareVersion, copyColumns,
   decodeCode, fillKeyActions, latestByKey, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation,
-  parseReply, parseWebhookUrl, planConsolidation, planPurge, recentChanges, prepareSourceActions, toRows, toTableId,
+  parseReply, parseWebhookUrl, planConsolidation, planPull, planPurge, publicAclActions, recentChanges, prepareSourceActions, toRows, toTableId,
 } from '../../js/core.js';
 
 const SECRET = '0123456789abcdef0123456789abcdef';
@@ -193,4 +193,47 @@ test('adresses : lien de formulaire, webhook, masque, baseUrl', () => {
   assert.equal(maskKey('https://x.fr/api/s/Ab12Cd34Ef56/tables/J/records?flat=1'), 'https://x.fr/api/s/Ab12…/tables/J/records?flat=1');
   assert.deepEqual(parseDocBaseUrl('https://x.fr/o/eq/api/docs/d1'), { origin: 'https://x.fr', team: 'eq', docId: 'd1' });
   assert.deepEqual(parseDocBaseUrl('http://localhost:8484/api/docs/d2'), { origin: 'http://localhost:8484', team: '', docId: 'd2' });
+});
+
+test('lien public : règles d\'accès du widget, avant les règles existantes, retirables', () => {
+  const resources = [{ id: 1, tableId: '*', colIds: '*' }];
+  const rules = [{ id: 5, resource: 1, rulePos: 1, memo: '' }, { id: 6, resource: 1, rulePos: -1, memo: 'Synchro : lecture limitée aux vues d’export' }];
+  const actions = publicAclActions(resources, rules, ['Contacts']);
+  assert.deepEqual(actions[0], ['BulkRemoveRecord', '_grist_ACLRules', [6]]);
+  const added = actions.filter(a => a[1] === '_grist_ACLRules' && a[0] === 'AddRecord').map(a => [a[3].resource, a[3].permissionsText, a[3].aclFormula]);
+  assert.deepEqual(added, [[-1, '+R', 'user.Access == VIEWER'], [-2, '+R', 'user.Access == VIEWER'], [1, '-R', 'user.Access == VIEWER']]);
+  assert.deepEqual(actions.filter(a => a[1] === '_grist_ACLResources').map(a => a[3].tableId), ['Contacts_summary_id_sync', 'Synchro_Contacts']);
+  assert.ok(actions.filter(a => a[0] === 'AddRecord' && a[1] === '_grist_ACLRules').every(a => a[3].rulePos < -1));
+  assert.deepEqual(publicAclActions(resources, rules, []), [['BulkRemoveRecord', '_grist_ACLRules', [6]]]);
+  assert.equal(publicAclActions(resources, rules, [], { keepDeny: true }).filter(a => a[0] === 'AddRecord').length, 1);
+});
+
+test('lien public : seules les versions nouvelles et une liste changée entrent au Journal', () => {
+  const records = [
+    { id: 1, fields: { id_sync: 'a', MajLe: 10, Supprime: false, Synchro_Donnees: '{"Nom":"A"}' } },
+    { id: 2, fields: { id_sync: 'b', MajLe: 20, Supprime: false, Synchro_Donnees: '{"Nom":"B2"}' } },
+  ];
+  const schema = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
+  const journalRows = [
+    { id: 1, id_sync: 'a', MajLe: 10, Supprime: false, Synchro_Donnees: '{"Nom":"A"}' },
+    { id: 2, id_sync: 'b', MajLe: 20, Supprime: false, Synchro_Donnees: '{"Nom":"B"}' },
+    { id: 3, id_sync: '', Synchro_Ids: 'ids:b a', Synchro_Colonnes: JSON.stringify(schema) },
+  ];
+  assert.deepEqual(planPull({ records, schema, journalRows, journalTable: 'J' }), [
+    ['BulkAddRecord', 'J', [null], { id_sync: ['b'], MajLe: [20], Supprime: [false], Synchro_Donnees: ['{"Nom":"B2"}'] }],
+  ]);
+  const gone = planPull({ records: records.slice(0, 1), schema, journalRows, journalTable: 'J' });
+  assert.deepEqual(gone.at(-1), ['AddRecord', 'J', null, { Synchro_Ids: 'ids:a', Synchro_Colonnes: JSON.stringify(schema) }]);
+});
+
+test('invitation par lien public : adresse du document réécrite, sinon refusée', () => {
+  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
+  const id = '0123456789abcdef';
+  const code = buildInvitation({ id, name: 'x', origin: 'https://g.fr', base: 'https://g.fr/o/eq/api/docs/abcDEF12', tables: [{ table: 'Contacts', columns }] });
+  const inv = parseInvitation(code);
+  assert.equal(inv.mode, 'public');
+  assert.equal(inv.base, 'https://g.fr/o/eq/api/docs/abcDEF12');
+  const bad = buildInvitation({ id, name: 'x', origin: '', base: 'https://g.fr/api/docs/abc?x=1', tables: [{ table: 'Contacts', columns }] });
+  assert.throws(() => parseInvitation(bad), /codeInvalid/);
+  assert.equal(parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).mode, 'reponse');
 });

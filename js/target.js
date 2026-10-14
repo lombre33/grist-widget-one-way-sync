@@ -3,7 +3,7 @@
 // table de destination tant que la page est ouverte par un éditeur.
 import {
   APPLIED_COL, AUTHOR_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, expandRows, parseFormLink, parseInvitation,
-  planConsolidation, planPurge, recentChanges, sentColumns, toTableId,
+  exportTableId, listTableId, planConsolidation, planPull, planPurge, recentChanges, sentColumns, toTableId,
 } from './core.js';
 import { apply, collapseForms, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
 import {
@@ -42,9 +42,29 @@ async function readLastVisit() {
 // Un seul lot d'écritures, donc tout ou rien : destination, marques et nettoyage du Journal.
 // La note du journal donne les noms de colonnes choisis (`map`), la colonne de rattachement
 // (`match`) et la colonne qui nomme les lignes dans l'historique (`label`).
+// Lien public : lit la vue d'export et la liste de la SOURCE sans identifiant, et ajoute au
+// Journal ce qui a changé, comme l'aurait fait un webhook.
+async function pull(note, journal) {
+  const read = async (tableId) => {
+    let response;
+    try {
+      response = await fetch(`${note.base}/tables/${encodeURIComponent(tableId)}/records`, { credentials: 'omit' });
+    } catch (e) {
+      throw new Error('publicClosed');
+    }
+    if (!response.ok) throw new Error('publicClosed');
+    return (await response.json()).records || [];
+  };
+  const [records, list] = await Promise.all([read(exportTableId(note.table)), read(listTableId(note.table))]);
+  let schema = [];
+  try { schema = JSON.parse(((list[0] || {}).fields || {}).Synchro_Colonnes || '[]') || []; } catch (e) { /* liste sans colonnes */ }
+  await apply(planPull({ records, schema, journalRows: await fetchRows(journal), journalTable: journal }));
+}
+
 // Une colonne nouvelle dans la vue d'export de la SOURCE est d'abord ajoutée à la destination.
 async function consolidate(schema, { journal, dest }) {
   const note = readNote(schema, journal) || {};
+  if (note.mode === 'public') await pull(note, journal);
   const journalRows = expandRows(await fetchRows(journal));
   const sent = sentColumns(journalRows, note.columns || []);
   const added = addDestColumnsActions(schema, dest, sent, note.map);
@@ -98,7 +118,8 @@ export async function consolidateAll() {
           readOnly = false;
         } catch (e) {
           readOnly = /access|denied|blocked|permission/i.test(e.message);
-          results.set(pair.journal, { ...before, at, text: e.message, error: true });
+          const key = `error.${e.message}`;
+          results.set(pair.journal, { ...before, at, text: t(key) === key ? e.message : t(key), error: true });
           changed ||= !(before && before.error);
         }
       }
@@ -120,7 +141,10 @@ async function receivedGroups(schema) {
     const note = readNote(schema, pair.journal) || {};
     const key = note.id || pair.journal;
     if (!groups.has(key)) {
-      groups.set(key, { id: note.id, name: note.name || pair.dest, secret: note.secret || '', from: note.from || {}, pairs: [], waiting: true });
+      groups.set(key, {
+        id: note.id, name: note.name || pair.dest, secret: note.secret || '', from: note.from || {}, pairs: [],
+        public: note.mode === 'public', waiting: note.mode !== 'public',
+      });
     }
     const group = groups.get(key);
     group.pairs.push({ ...pair, table: note.table || pair.dest });
@@ -170,10 +194,11 @@ function syncCard(group) {
   return el('article', { class: 'card' },
     el('div', { class: 'card-head' }, el('strong', {}, group.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
     from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
+    group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
     group.pairs.map(line),
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
-      el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
+      group.public ? null : el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
         icon('paste'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
       el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => stopReceiving(group) },
         icon('trash'), t('recv.action.stop'))));
@@ -251,7 +276,11 @@ function receiveWizard(group = null) {
     const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false', 'aria-label': t('recv.invite.title') });
     const report = el('div', { class: 'report' });
     wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report],
-      [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, () => showDest(parseInvitation(area.value))) }]);
+      [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
+        const invitation = parseInvitation(area.value);
+        if (invitation.mode === 'public' && new URL(invitation.base).origin !== (await docIdentity()).origin) throw new Error('otherInstance');
+        return showDest(invitation);
+      }) }]);
   }
 
   // 2. Destinations : une par table reçue, nouvelle ou existante (liste filtrable). Une table
@@ -335,8 +364,14 @@ function receiveWizard(group = null) {
         note: {
           id: invitation.id, name: invitation.name, table: p.tb.table, secret: invitation.secret, from: invitation.from, columns: p.tb.columns,
           ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}),
+          ...(invitation.mode === 'public' ? { mode: 'public', base: invitation.base } : {}),
         },
       });
+    }
+    if (invitation.mode === 'public') {
+      wizard.show(STEP.reply, message('ok', t('recv.public.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
+      consolidateAll();
+      return;
     }
     wizard.show(STEP.link, message('info', t('recv.publishing')), []);
     await renderTarget(); // publie les formulaires ; le cadre est en général recréé ici

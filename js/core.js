@@ -300,6 +300,65 @@ export const exportColumnsActions = exportId => [
   ['AddColumn', exportId, DATA_COL, { type: 'Text', isFormula: true, formula: '""' }],
 ];
 
+// Lien public : règles d'accès qui ne laissent aux lecteurs (dont le lien public) que les vues
+// d'export et les tables liste de `tables`. Les règles du widget portent ce mémo ; elles passent
+// avant les règles existantes. `resources`, `rules` : lignes de _grist_ACLResources et
+// _grist_ACLRules. Sans table, `keepDeny` garde le refus général : à utiliser tant que le
+// document reste partagé publiquement.
+export const PUBLIC_MEMO = 'Synchro : lecture limitée aux vues d’export';
+const VIEWER_ONLY = 'user.Access == VIEWER';
+
+export function publicAclActions(resources, rules, tables, { keepDeny = false } = {}) {
+  const mine = rules.filter(r => r.memo === PUBLIC_MEMO);
+  const actions = [['BulkRemoveRecord', '_grist_ACLRules', mine.map(r => r.id)]].filter(a => a[2].length);
+  if (!tables.length && !keepDeny) return actions;
+  let pos = Math.min(0, ...rules.map(r => r.rulePos || 0));
+  let temp = 0;
+  const resourceFor = (tableId) => {
+    const found = resources.find(r => r.tableId === tableId && r.colIds === '*');
+    if (found) return found.id;
+    actions.push(['AddRecord', '_grist_ACLResources', --temp, { tableId, colIds: '*' }]);
+    return temp;
+  };
+  const rule = (tableId, permissionsText) => {
+    actions.push(['AddRecord', '_grist_ACLRules', null, {
+      resource: resourceFor(tableId), aclFormula: VIEWER_ONLY, permissionsText, rulePos: --pos, memo: PUBLIC_MEMO }]);
+  };
+  for (const table of tables) {
+    rule(exportTableId(table), '+R');
+    rule(listTableId(table), '+R');
+  }
+  rule('*', '-R');
+  return actions;
+}
+
+// Lien public, côté CIBLE : lignes à ajouter au Journal pour qu'il reflète la vue d'export lue
+// (`records` : lignes de l'API REST), comme l'aurait fait un webhook. Une version n'est ajoutée
+// que si elle diffère de la dernière reçue ; une liste des clés, que si l'ensemble des clés ou
+// les colonnes ont changé.
+export function planPull({ records, schema, journalRows, journalTable }) {
+  const latest = latestByKey(journalRows);
+  const list = latestList(journalRows);
+  const versions = [];
+  for (const { fields } of records) {
+    const key = fields[KEY_COL];
+    if (isBlank(key)) continue;
+    const known = latest.get(key);
+    if (known && known.order === fields[ORDER_COL] && known.row[DATA_COL] === fields[DATA_COL] &&
+        isTrue(known.row[DELETE_COL]) === isTrue(fields[DELETE_COL])) continue;
+    versions.push({ [KEY_COL]: key, [ORDER_COL]: fields[ORDER_COL] ?? null, [DELETE_COL]: isTrue(fields[DELETE_COL]), [DATA_COL]: fields[DATA_COL] ?? '' });
+  }
+  const ids = `${LIST_PREFIX}${records.map(r => r.fields[KEY_COL]).filter(k => !isBlank(k)).sort().join(' ')}`;
+  const schemaText = JSON.stringify(schema);
+  const sorted = list && `${LIST_PREFIX}${String(list[LIST_COL]).slice(LIST_PREFIX.length).split(' ').filter(Boolean).sort().join(' ')}`;
+  const actions = chunk(versions).map(part => ['BulkAddRecord', journalTable, part.map(() => null),
+    Object.fromEntries([KEY_COL, ORDER_COL, DELETE_COL, DATA_COL].map(col => [col, part.map(v => v[col])]))]);
+  if (sorted !== ids || (list && (list[SCHEMA_COL] || '') !== schemaText)) {
+    actions.push(['AddRecord', journalTable, null, { [LIST_COL]: ids, [SCHEMA_COL]: schemaText }]);
+  }
+  return actions;
+}
+
 // Colonnes de la synchro qui manquent à la table SOURCE.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, DELETE_COL].filter(id => !cols.some(c => c.colId === id));
 
@@ -354,9 +413,11 @@ const SECRET = /^[0-9a-f]{32}$/;
 // Une invitation porte une ou plusieurs tables. `id` la désigne dans la réponse ; `secret`,
 // facultatif et choisi à la création, prouve que la réponse vient de quelqu'un qui l'a reçue (la
 // SOURCE n'en garde que l'empreinte).
-export function buildInvitation({ id, name, origin, secret = '', from = {}, tables }) {
+// Mode « lien public » (`base` : adresse REST du document SOURCE) : pas de réponse, la CIBLE lit
+// les vues d'export elle-même, sans identifiant.
+export function buildInvitation({ id, name, origin, secret = '', from = {}, tables, base = '' }) {
   return encodeCode({
-    kind: 'invitation', id, name, origin, secret, from,
+    kind: 'invitation', id, name, origin, secret, from, ...(base ? { mode: 'public', base } : {}),
     tables: tables.map(({ table, columns }) => ({
       table, columns: exportSchema(columns),
     })),
@@ -374,9 +435,13 @@ export function parseInvitation(text) {
   const ok = INVITATION_ID.test(inv.id) && typeof inv.name === 'string' && (!inv.secret || SECRET.test(inv.secret)) &&
     Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && COL_ID.test(tb.table) && validColumns(tb.columns)) &&
     new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
-  if (!ok) throw new Error('codeInvalid');
+  const publicBase = inv.mode === 'public' ? safeDocBaseUrl(inv.base) : '';
+  if (!ok || (inv.mode === 'public' && !publicBase)) throw new Error('codeInvalid');
   const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
-  return { ...inv, from: { email: String(from.email || '').slice(0, 200), docId: String(from.docId || '').slice(0, 200) } };
+  return {
+    ...inv, mode: publicBase ? 'public' : 'reponse', base: publicBase,
+    from: { email: String(from.email || '').slice(0, 200), docId: String(from.docId || '').slice(0, 200) },
+  };
 }
 
 // `links` : pour chaque table SOURCE, l'adresse d'écriture de son Journal dans la CIBLE.
@@ -430,6 +495,18 @@ export function maskKey(url) {
 }
 
 // `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>
+// Adresse REST d'un document, réécrite à partir de ses seuls éléments reconnus ; '' sinon.
+function safeDocBaseUrl(text) {
+  try {
+    const url = new URL(String(text));
+    const { team, docId } = parseDocBaseUrl(url.href);
+    if (!/^https?:$/.test(url.protocol) || url.search || url.username || !/^[A-Za-z0-9_-]+$/.test(docId)) return '';
+    return `${url.origin}${team ? `/o/${encodeURIComponent(team)}` : ''}/api/docs/${docId}`;
+  } catch (e) {
+    return '';
+  }
+}
+
 export function parseDocBaseUrl(baseUrl) {
   const url = new URL(baseUrl);
   const m = url.pathname.match(/^(?:\/o\/([^/]+))?\/api\/docs\/([^/]+)\/?$/);

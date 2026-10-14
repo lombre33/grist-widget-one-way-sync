@@ -56,6 +56,11 @@ code. Pour un usage en production :
 | `GET <instance>/grist-plugin-api.js` | au démarrage | aucune |
 | `GET/POST/PATCH/DELETE <document>/webhooks…` | onglet Envoyer : lister, créer, suspendre, supprimer un webhook, vider la file | jeton d'accès court du document (`getAccessToken`), en paramètre `auth=` ; Grist réserve ces appels aux propriétaires |
 | `POST <instance>/api/s/<clé>/tables/<Journal>/records?flat=1` | onglet Recevoir, bouton « Tester le lien » : une ligne vide par journal, effacée au passage suivant | aucune (clé du formulaire) |
+| `GET <document SOURCE>` | onglet Envoyer, à chaque affichage : le document est-il lisible par lien public ? | aucune (requête anonyme) |
+| `GET <document SOURCE>/tables/<vue d'export ou Synchro_<table>>/records` | onglet Recevoir, mode lien public seulement, toutes les 10 s page ouverte | aucune (requête anonyme) |
+
+Les écritures REST portent l'en-tête `X-Requested-With`, exigé par Grist contre les requêtes
+forgées.
 
 Tout le reste passe par l'API des widgets (`grist.docApi`, messages entre le cadre et Grist), avec
 les droits de la personne connectée.
@@ -63,17 +68,30 @@ les droits de la personne connectée.
 ## Flux de données
 
 - **SOURCE vers CIBLE** : par les webhooks natifs de Grist, côté serveur, jamais par le
-  navigateur. Ils envoient **toutes les colonnes** de la table surveillée, **sans appliquer les
-  règles d'accès** de la SOURCE (comportement de Grist). Il faut donc envoyer une table qui ne
-  contient que ce que la CIBLE a le droit de voir. Le second webhook de chaque table envoie la
-  table `Synchro_<table>` : la liste des `id_sync` existants, rien d'autre.
+  navigateur. Un webhook envoie toutes les colonnes de la table qu'il surveille, sans appliquer
+  les règles d'accès (comportement de Grist) : c'est pourquoi il surveille la **vue d'export**
+  (table de résumé par `id_sync`), qui ne contient que `id_sync`, `MajLe`, `Supprime`, `group`
+  (numéros des lignes d'origine, imposé par Grist) et `Synchro_Donnees`, les **colonnes cochées**
+  en un bloc JSON calculé par une formule. Les autres colonnes ne sortent pas. Le second webhook
+  de chaque table envoie `Synchro_<table>` : la liste des `id_sync` existants, l'e-mail de la
+  personne qui a préparé la table et la description des colonnes envoyées.
+- **Mode lien public** : le document SOURCE est partagé en lecture « toute personne ayant le
+  lien », par son propriétaire, dans Grist. Le widget pose d'abord des règles d'accès, marquées
+  du mémo « Synchro : lecture limitée aux vues d'export » et placées avant les autres : pour
+  `user.Access == VIEWER`, lecture refusée sur tout le document, sauf les vues d'export et les
+  tables `Synchro_<table>` partagées. Conséquences : tout lecteur (pas seulement le lien public)
+  ne voit plus que ces tables ; les données exportées sont publiques. Révoquer retire les
+  autorisations ; le refus général reste tant que le document est public (le widget le vérifie
+  par une requête anonyme). Vérifié par le test d'intégration : sans identifiant, la table
+  d'origine et les autres tables répondent 403, la vue d'export 200.
 - **Contrôles faits avant de créer un webhook** (`parseReply`, `js/core.js`) : l'adresse doit être
   sur la **même instance** que la SOURCE, de la forme exacte
   `/api/s/<clé>/tables/<table>/records?flat=1` (écriture par clé de formulaire, rien d'autre),
   sans identifiant dans l'adresse ; le code de réponse doit porter le secret d'une invitation en
   attente de ce document.
 - **Invitation et réponse** : l'invitation contient un identifiant, le nom des tables et de leurs
-  colonnes, et, si la case est cochée, un secret aléatoire de 128 bits. La SOURCE ne garde que
+  colonnes envoyées (en mode lien public, l'adresse REST du document SOURCE, réécrite et contrôlée
+  à la lecture : même instance que la CIBLE), et, si la case est cochée, un secret aléatoire de 128 bits. La SOURCE ne garde que
   l'empreinte SHA-256 du secret, dans la description de la colonne `Synchro_Ids` de chaque table
   envoyée (métadonnée lisible par les personnes qui voient le document) ; la CIBLE garde le secret
   dans la description de la même colonne de son journal jusqu'à la réponse. La réponse contient
@@ -98,11 +116,13 @@ les droits de la personne connectée.
   `Synchro_Ids`), ce qui ne lui donne pas plus de pouvoir : la consolidation n'écrit jamais que
   dans la table de destination, par clé `id_sync`. Pour la changer : dépublier puis republier le formulaire, et refaire l'échange de
   codes.
-- Révoquer côté SOURCE supprime le webhook : les envois s'arrêtent, les données déjà reçues
-  restent dans la CIBLE.
+- Révoquer côté SOURCE supprime les webhooks : les envois s'arrêtent, les données déjà reçues
+  restent dans la CIBLE. Arrêter la réception côté CIBLE efface les journaux, donc les
+  formulaires : la clé n'écrit plus nulle part.
 
 ## Ce que le widget ne fait pas
 
 - Aucune requête vers un service tiers, aucune télémétrie, aucune donnée hors de Grist.
 - Aucune clé d'API personnelle : seuls le jeton court du document et la clé du formulaire servent.
-- Aucune lecture du document CIBLE depuis la SOURCE, ni l'inverse.
+- Aucune lecture du document CIBLE depuis la SOURCE. La CIBLE ne lit la SOURCE qu'en mode lien
+  public, sans identifiant, et seulement ce que les règles d'accès laissent voir.

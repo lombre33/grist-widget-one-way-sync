@@ -100,11 +100,20 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.1 (14 octobre 2026)
+## État : V0.2 (14 octobre 2026)
 
-Pas de table de réglages : une table technique par table synchronisée de chaque côté
-(`Synchro_<table>`, `Journal_<table>`) ; invitations en attente notées dans la description de
-leur colonne `Synchro_Ids`. Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
-analyse de sécurité dans `SECURITY.md`). Tests : `npm test` (logique pure), `npm run test:e2e`
-après `tests/e2e/start-grist.sh` (parcours complet dans un Grist Docker). Les instances autorisées
-sont à la fois dans `js/config.js` et dans la CSP de `index.html`.
+Pas de table de réglages. SOURCE : `id_sync`, `MajLe`, `Supprime` dans la table, une vue d'export
+`<table>_summary_id_sync` (colonnes cochées en un bloc JSON `Synchro_Donnees`) surveillée par le
+webhook, et `Synchro_<table>` (liste des clés, colonnes envoyées). CIBLE : `Journal_<table>` à
+colonnes fixes. Invitations en attente et partages par lien public notés dans la description de
+leur colonne `Synchro_Ids`. Mode lien public : règles d'accès marquées par un mémo, lecture
+anonyme des vues d'export par la CIBLE. Code à la racine, sans build : `index.html`, `css/`, `js/`
+(carte des modules dans `README.md`, analyse de sécurité dans `SECURITY.md`, tutoriel
+`docs/04-tutoriel.md`). Tests : `npm test` (logique pure), `npm run test:e2e` après
+`tests/e2e/start-grist.sh` (parcours complet dans un Grist Docker ; `CAPTURES=1` refait les
+captures de `docs/images` et les images d'aide de `img/`). Les instances autorisées sont à la fois
+dans `js/config.js` et dans la CSP de `index.html`.
+
+Pièges vus en V0.2 : toute écriture REST depuis le widget doit porter `X-Requested-With` (sinon
+401, vu comme une erreur CORS) ; changer une règle d'accès recharge le document, donc le widget ;
+une table de résumé n'est lisible par une règle que si une ressource la nomme explicitement.
