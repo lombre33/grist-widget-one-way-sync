@@ -71,6 +71,9 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   `Authorization` à Grist (403 « Credentials not supported for cross-origin requests ») : pas de
   clé d'API depuis un widget. L'accès au document courant passe par `grist.docApi`.
 
+- Ajouter une section à la page du widget recrée l'iframe du widget : toute étape qui en ajoute
+  une (publication du formulaire) doit pouvoir reprendre où elle s'est arrêtée.
+
 ## Le design préféré d'Antoine (design C)
 
 Le webhook dépose les versions dans `Journal` (table A). Un widget en accès complet, ouvert dans
@@ -85,3 +88,10 @@ possible des lignes de `Journal` déjà appliquées.
 Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifié : un widget en accès
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
+
+## État : V0.1 (14 octobre 2026)
+
+Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
+analyse de sécurité dans `SECURITY.md`). Tests : `npm test` (logique pure), `npm run test:e2e`
+après `tests/e2e/start-grist.sh` (parcours complet dans un Grist Docker). Les instances autorisées
+sont à la fois dans `js/config.js` et dans la CSP de `index.html`.

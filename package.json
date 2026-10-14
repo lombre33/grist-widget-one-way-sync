@@ -1,0 +1,14 @@
+{
+  "name": "grist-widget-one-way-sync",
+  "private": true,
+  "type": "module",
+  "description": "Outillage de test uniquement. Le widget lui-même n'a aucune dépendance et aucune étape de build.",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "node tests/e2e/run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

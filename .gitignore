@@ -16,3 +16,5 @@ __pycache__/
 *.log
 node_modules/
 dist/
+tests/e2e/.env.json
+tests/e2e/echec.png

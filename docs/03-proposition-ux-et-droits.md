@@ -1,7 +1,7 @@
 # Proposition : parcours, fonctionnalités et droits d'accès du widget
 
-Document de travail du 14 octobre 2026, à valider avec Antoine avant d'écrire la version
-définitive du widget. Il part du design C (`01-etude-faisabilite.md`, section 5) et du test réel
+Document de travail du 14 octobre 2026. Décisions prises le même jour ; la V0.1 en applique le
+parcours de base (section 7). Il part du design C (`01-etude-faisabilite.md`, section 5) et du test réel
 DINUM (`02-procedure-test-dinum.md`). « Vérifié » signale un essai réel sur Grist 1.7.21 en local
 (Docker) le 14 octobre ; « à vérifier » ce qui reste déduit.
 
@@ -211,8 +211,12 @@ concrètes ici :
 - **Démarrage raté** : fenêtre qui dit quoi faire (hors de Grist, accès complet non accordé,
   réseau bloqué).
 
-## 7. Ce qui est déjà prototypé
+## 7. Ce que contient la V0.1 (14 octobre 2026)
 
-Un premier jet du moteur CIBLE existe en local (non publié) : logique pure de consolidation et de
-purge, création du `Journal` et de la destination depuis un schéma, test de l'adresse. Il sera
-adapté une fois les choix ci-dessus arrêtés.
+- Parcours complet invitation, réponse, approbation (section 2), formulaire publié par le widget
+  (section 2 bis), table d'export plate, fiche du destinataire et secret (section 5).
+- Côté SOURCE : contrôle de la table, ajout des colonnes de synchro, envoi des lignes existantes,
+  pause, reprise, déblocage de la file, renvoi complet, révocation.
+- Côté CIBLE : consolidation automatique page ouverte, retouches manuelles préservées, suppression
+  logique, purge du journal.
+- Reporté à la V0.2 : vue filtrée par destinataire (option avancée), alertes de dérive du schéma.
