@@ -3,7 +3,7 @@
 // webhooks eux-mêmes et de la note de la table liste (invitations en attente).
 import {
   AUTHOR_COL, CHUNK, ORDER_COL, buildInvitation, checkSourceColumns, chunk, fillKeyActions, listTableId,
-  maskKey, parseReply, prepareSourceActions,
+  maskKey, parseReply, parseWebhookUrl, prepareSourceActions,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
@@ -25,12 +25,16 @@ let container;
 
 // Destinataires branchés : un webhook sur la table (ajouts, modifications) et un sur sa table
 // liste (suppressions), vers la même adresse.
+// Les webhooks d'un même branchement (même nom, même destinataire) forment une carte.
 function recipients(tables, hooks) {
-  return hooks.filter(h => tables.includes(h.fields.tableId)).map(main => ({
-    table: main.fields.tableId,
-    main,
-    list: hooks.find(h => h.fields.tableId === listTableId(main.fields.tableId) && h.fields.url === main.fields.url),
-  }));
+  const groups = new Map();
+  for (const main of hooks.filter(h => tables.includes(h.fields.tableId))) {
+    const key = `${main.fields.name}\n${main.fields.memo}`;
+    if (!groups.has(key)) groups.set(key, { name: main.fields.name.replace(/^Synchro /, ''), memo: main.fields.memo, feeds: [] });
+    const list = hooks.find(h => h.fields.tableId === listTableId(main.fields.tableId) && h.fields.url === main.fields.url);
+    groups.get(key).feeds.push({ table: main.fields.tableId, main, list, journal: (parseWebhookUrl(main.fields.url) || {}).table });
+  }
+  return [...groups.values()];
 }
 
 // Invitations en attente, notées dans la table liste de chacune de leurs tables.
@@ -85,28 +89,28 @@ function pendingCard(inv, ownerOnly, out) {
       actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
 }
 
-function recipientStatus({ main, list }) {
-  if (!main.fields.enabled) return ['paused', 'off'];
-  const failing = [main, list].filter(Boolean).find(h => ['retrying', 'error'].includes((h.usage || {}).status) || (h.usage || {}).lastHttpStatus >= 400);
+function recipientStatus(hooks) {
+  if (!hooks.some(h => h.fields.enabled)) return ['paused', 'off'];
+  const failing = hooks.some(h => ['retrying', 'error'].includes((h.usage || {}).status) || (h.usage || {}).lastHttpStatus >= 400);
   return failing ? ['error', 'err'] : ['active', 'ok'];
 }
 
 function recipientCard(r, ownerOnly, out) {
-  const status = recipientStatus(r);
-  const hooks = [r.main, r.list].filter(Boolean);
+  const hooks = r.feeds.flatMap(f => [f.main, f.list]).filter(Boolean);
+  const status = recipientStatus(hooks);
   const usage = hooks.map(h => h.usage || {});
   const waiting = usage.reduce((n, u) => n + (u.numWaiting || 0), 0);
   const failure = usage.find(u => u.lastErrorMessage);
   const action = (label, iconName, fn, kind) => actionButton(label, iconName, fn, ownerOnly, out, kind);
   const enable = on => Promise.all(hooks.map(h => setWebhookEnabled(h.id, on)));
   const actions = [
-    action(t('send.action.load'), 'send', () => sendAll(r.table, out)),
-    r.main.fields.enabled ? action(t('send.action.pause'), 'pause', () => enable(false)) : action(t('send.action.resume'), 'play', () => enable(true)),
+    action(t('send.action.load'), 'send', async () => { for (const f of r.feeds) await sendAll(f.table, out); }),
+    status[0] === 'paused' ? action(t('send.action.resume'), 'play', () => enable(true)) : action(t('send.action.pause'), 'pause', () => enable(false)),
     status[0] === 'error' ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
-    action(t('send.action.revoke'), 'trash', () => revoke(r), 'btn-danger-text'),
+    action(t('send.action.revoke'), 'trash', () => revoke(r, hooks), 'btn-danger-text'),
   ].filter(Boolean);
-  return card(r.main.fields.name.replace(/^Synchro /, ''), status,
-    [r.table, r.main.fields.memo, maskKey(r.main.fields.url)].filter(Boolean).join(' → '),
+  return card(r.name, status, t('send.to', { who: r.memo || '—' }),
+    r.feeds.map(f => el('p', { class: 'muted small' }, `${f.table} → ${f.journal || '?'}`)),
     waiting ? el('p', { class: 'small' }, t('send.waiting', { n: waiting })) : null,
     status[0] === 'error' && failure ? el('p', { class: 'small text-danger' }, `${failure.lastHttpStatus || ''} ${failure.lastErrorMessage}`) : null,
     el('div', { class: 'card-actions' }, actions));
@@ -120,12 +124,12 @@ async function cancelInvitation(inv) {
   }
 }
 
-async function revoke(r) {
+async function revoke(r, hooks) {
   const ok = await confirmDialog({
-    title: t('send.revoke.title', { name: r.main.fields.name.replace(/^Synchro /, '') }), body: t('send.revoke.body'),
+    title: t('send.revoke.title', { name: r.name }), body: t('send.revoke.body'),
     confirmLabel: t('send.action.revoke'), danger: true,
   });
-  if (ok) for (const h of [r.main, r.list].filter(Boolean)) await deleteWebhook(h.id);
+  if (ok) for (const h of hooks) await deleteWebhook(h.id);
 }
 
 async function unblockQueue() {

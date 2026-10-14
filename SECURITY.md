@@ -18,9 +18,36 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   bloquée par cette règle, sans effet sur le widget (il a sa propre charte).
 - Aucun texte venu du document ou d'un code collé n'est inséré comme HTML : l'interface est
   construite avec `textContent` (`js/ui.js`, fonction `el`).
-- Stockage local du navigateur : la langue et le thème choisis dans les Réglages, rien d'autre.
+- Stockage local du navigateur : la langue et le thème choisis dans les Réglages, et la date de
+  la dernière visite par document (pour l'historique « depuis votre dernière visite »), rien
+  d'autre.
 - Accès demandé à Grist : **complet**, nécessaire pour créer les tables, lire les métadonnées
   (colonnes) et écrire dans la table de destination.
+
+## Où passent les données
+
+Quand SOURCE et CIBLE sont sur la même instance (par exemple `grist.numerique.gouv.fr`), **aucune
+donnée ne quitte l'instance** :
+
+- le webhook va du serveur Grist au même serveur Grist (adresse du formulaire de la CIBLE) ;
+- le widget lit et écrit par `grist.docApi`, dans le navigateur de l'éditeur, avec ses droits ;
+- GitHub Pages (ou l'hébergeur choisi) ne sert que le **code** du widget : il ne reçoit aucune
+  donnée, aucun code d'invitation, aucune clé.
+
+Le seul passage hors de Grist est le navigateur des personnes qui ont déjà accès aux documents, et
+les deux codes qu'elles s'échangent (noms de tables et de colonnes, adresse d'écriture, fiche).
+
+## Chaîne d'approvisionnement
+
+Le widget a un **accès complet** au document : qui peut modifier son code peut lire et écrire le
+document de quiconque l'ouvre. Le risque n'est donc pas le transit des données mais l'origine du
+code. Pour un usage en production :
+
+- héberger une **copie figée** du dépôt (version relue, étiquette Git) sur un serveur de
+  l'organisation, plutôt que la branche `main` sur GitHub Pages ;
+- ajouter cette adresse à la liste des widgets de l'instance, et à `connect-src` / `script-src`
+  seulement les instances Grist utilisées (`js/config.js`, `index.html`) ;
+- relire le code à chaque mise à jour : il tient en une dizaine de fichiers sans dépendance.
 
 ## Requêtes réseau (toutes vers l'instance Grist qui affiche le widget)
 

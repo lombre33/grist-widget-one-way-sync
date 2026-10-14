@@ -41,14 +41,19 @@ formulaire n'existe pas dans un espace personnel).
 
 ## Brancher une synchro (deux codes à copier-coller)
 
+Pas à pas, avec captures d'écran : [`docs/04-tutoriel.md`](docs/04-tutoriel.md).
+
 | Où | Qui | Quoi |
 |---|---|---|
-| SOURCE, onglet **Envoyer** | un propriétaire | **Nouveau destinataire** : cocher les tables. Le widget signale ce qui empêche l'envoi ; **Préparer pour la synchro** ajoute les colonnes `id_sync`, `MajLe`, `Supprime` et la table `Synchro_<table>`. **Créer l'invitation** (secret en option, coché par défaut) donne un code à transmettre. |
-| CIBLE, onglet **Recevoir** | un éditeur | **Accepter une invitation** : coller le code, nommer les tables de destination. Le widget crée les tables et publie les formulaires de réception sur sa page. Dans la carte d'un formulaire : **Partager**, **Copier le lien**, coller ce seul lien dans le widget, **Tester le lien**. Le widget donne un code de réponse. |
-| SOURCE, onglet **Envoyer** | un propriétaire | **Coller la réponse** : le widget montre les tables et qui a accepté (e-mail, document, équipe), puis **Approuver et brancher** crée les webhooks et propose d'envoyer les lignes existantes. |
+| SOURCE, onglet **Envoyer** | un propriétaire | **Nouveau destinataire** ouvre un assistant : cocher les tables, accepter la préparation (`id_sync`, `MajLe`, `Supprime`, table `Synchro_<table>`), nommer l'envoi, secret en option. Il donne un code d'invitation. |
+| CIBLE, onglet **Recevoir** | un éditeur | **Accepter une invitation** : coller le code, choisir chaque table de destination (nouvelle ou existante). Le widget publie les formulaires de réception sur sa page ; dans la carte d'un formulaire, **Partager**, **Copier le lien**, coller ce seul lien. Il donne un code de réponse. |
+| SOURCE, onglet **Envoyer** | un propriétaire | **Coller la réponse** : vérifier qui a accepté (e-mail, document, équipe), **Approuver et brancher**, puis **Tout envoyer** pour les lignes déjà là. |
 
-Ensuite, côté SOURCE : pause, reprise, déblocage de la file d'envoi, renvoi complet, révocation,
-annulation d'une invitation. Côté CIBLE : synchronisation immédiate à la demande.
+Ensuite, côté SOURCE, une carte par destinataire : pause, reprise, déblocage de la file d'envoi,
+renvoi complet, révocation. Côté CIBLE, une carte par envoi : e-mail du propriétaire des données,
+dernier passage par table, lignes modifiées depuis la dernière visite (20 au plus),
+synchronisation immédiate. Les formulaires se replient en haut de la page dès que les données
+arrivent.
 
 ## Ce que le widget écrit dans les documents
 
@@ -74,7 +79,7 @@ Une seule table technique par table synchronisée, de chaque côté, rangée sou
 - Le paramètre `?flat=1` n'est pas documenté par Grist ; il est couvert par ses tests depuis 2023.
 
 Détails et preuves : `docs/01-etude-faisabilite.md`, `docs/02-procedure-test-dinum.md`,
-`docs/03-proposition-ux-et-droits.md`. Sécurité : [`SECURITY.md`](SECURITY.md).
+`docs/03-proposition-ux-et-droits.md`. Pistes : [`docs/05-pistes.md`](docs/05-pistes.md). Sécurité : [`SECURITY.md`](SECURITY.md).
 
 ## Code
 
@@ -100,6 +105,6 @@ npm run test:e2e              # parcours complet SOURCE -> CIBLE dans un vrai na
 
 Le test d'intégration déroule tout le parcours ci-dessus avec deux tables, puis vérifie l'envoi
 des lignes existantes, la consolidation, un ajout, une modification, une suppression logique, une
-vraie suppression, la conservation d'une retouche manuelle, le nettoyage du journal et le
-rangement des pages. Les deux suites tournent à chaque push
+vraie suppression, la conservation d'une retouche manuelle, l'historique, le nettoyage du journal
+et le rangement des pages. Avec `CAPTURES=1`, il refait les captures de `docs/images`. Les deux suites tournent à chaque push
 (`.github/workflows/tests.yml`).

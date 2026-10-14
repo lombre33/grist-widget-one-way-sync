@@ -109,6 +109,30 @@ export async function formPages() {
   return pages;
 }
 
+// Replie dans la barre de la page du widget les formulaires de ces tables, une fois leur lien
+// donné : la page ne montre plus que le widget. Ils restent publiés, un clic les rouvre.
+export async function collapseForms(tableIds) {
+  const viewRef = await widgetViewRef();
+  if (!viewRef) return;
+  const [tables, sections, views] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Views')]);
+  const refs = new Set(tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.id));
+  const forms = new Set(sections.filter(s => s.parentId === viewRef && s.parentKey === 'form' && refs.has(s.tableRef)).map(s => s.id));
+  const view = views.find(v => v.id === viewRef);
+  // Sans disposition enregistrée, Grist empile les sections de la page : on part de là.
+  const layout = JSON.parse(view.layoutSpec || '{}');
+  if (!layout.children) layout.children = sections.filter(s => s.parentId === viewRef).map(s => ({ leaf: s.id }));
+  const collapsed = layout.collapsed || [];
+  if ([...forms].every(id => collapsed.some(c => c.leaf === id))) return;
+  const keep = box => {
+    if (box.leaf !== undefined) return forms.has(box.leaf) ? null : box;
+    const children = (box.children || []).map(keep).filter(Boolean);
+    return children.length ? { ...box, children } : null;
+  };
+  const root = keep(layout) || { children: [] };
+  root.collapsed = [...collapsed, ...[...forms].filter(id => !collapsed.some(c => c.leaf === id)).map(leaf => ({ leaf }))];
+  await apply([['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(root) }]]);
+}
+
 // Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
 // celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
 export async function tuckUnderWidgetPage(tableIds) {

@@ -5,7 +5,7 @@ import {
   APPLIED_COL, AUTHOR_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, parseFormLink, parseInvitation,
   planConsolidation, planPurge, recentChanges, toTableId,
 } from './core.js';
-import { apply, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
+import { apply, collapseForms, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
 import { JOURNAL_PREFIX, createReceivingTables, destColumns, readNote, receivedTables } from './tables.js';
 import { copyField, el, icon, message, openWizard, run } from './ui.js';
 import { t } from './i18n.js';
@@ -125,6 +125,8 @@ export async function renderTarget(root = container) {
     readOnly ? message('warn', t('common.readonly')) : null,
     out,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty'))].filter(Boolean));
+  // Les journaux qui reçoivent déjà n'ont plus besoin de leur formulaire à l'écran.
+  if (!readOnly) collapseForms(groups.filter(g => !g.waiting).flatMap(g => g.pairs.map(p => p.journal))).catch(() => {});
   const waiting = groups.find(g => g.waiting);
   if (waiting && !readOnly && !wizardOpened) {
     wizardOpened = true;
@@ -140,7 +142,7 @@ function syncCard(group) {
     const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString()} · ${result.text}` : '';
     return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${pair.table} → ${pair.dest}${when}`);
   };
-  const from = [group.from.email, group.from.docId].filter(Boolean).join(' · ');
+  const from = group.from.email;
   return el('article', { class: 'card' },
     el('div', { class: 'card-head' }, el('strong', {}, group.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
     from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
@@ -198,7 +200,7 @@ function receiveWizard(group = null) {
       oninput: () => { confirmed = false; },
     }));
     const report = el('div', { class: 'report' });
-    const from = [invitation.from.email, invitation.from.docId].filter(Boolean).join(' · ');
+    const from = invitation.from.email;
     const create = async () => {
       const plans = invitation.tables.map((tb, i) => {
         const dest = toTableId(inputs[i].value, tb.table);
@@ -211,8 +213,9 @@ function receiveWizard(group = null) {
         confirmed = true;
         report.replaceChildren(...existing.map((p) => {
           const have = new Set(now.columns(p.dest).map(c => c.colId));
-          const added = destColumns(p.tb.columns).map(c => c.id).filter(id => !have.has(id));
-          return message('warn', t('recv.existing', { table: p.dest, cols: added.join(', ') || '—' }));
+          const added = destColumns(p.tb.columns).map(c => c.id).filter(id => !have.has(id))
+            .map(id => (id === KEY_COL ? t('recv.hidden', { col: id }) : id));
+          return message('warn', t('recv.existing', { table: p.dest, cols: added.join(', ') }));
         }));
         wizard.show(STEP.dest, body, [cancel, { label: t('recv.useExisting'), kind: 'btn-primary', onClick: () => run(null, report, create) }]);
         return;

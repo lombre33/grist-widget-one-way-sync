@@ -76,6 +76,8 @@ async function waitFor(check, what, timeout = 30000) {
 }
 
 const step = text => console.log(`· ${text}`);
+// CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
+const shot = async name => { if (process.env.CAPTURES) await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) }); };
 
 // --- Documents
 const source = await newDocWithWidget('Source', [
@@ -116,22 +118,28 @@ try {
 
   // --- SOURCE : assistant d'envoi, étapes Tables, Préparation, Options, Invitation
   await openWidget(source.url);
+  await shot('01-accueil');
   await widget().locator('.tile', { hasText: 'Envoyer une table' }).click();
   await button('Nouveau destinataire').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
   await dialog().getByRole('checkbox', { name: 'Villes' }).check();
+  await shot('02-source-tables');
   await dialogButton('Continuer').click();
   await dialog().getByText('Le widget doit ajouter').waitFor();
+  await shot('03-source-preparation');
   await dialogButton('Préparer pour la synchro').click();
   await dialog().getByText('Prêt à envoyer : 2 tables').waitFor();
+  await shot('04-source-options');
   const contacts = await records(source.doc, 'Contacts');
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
   assert.ok((await records(source.doc, 'Synchro_Contacts'))[0].Synchro_Ids.startsWith('ids:'));
   await dialogButton('Créer l’invitation').click();
   const invitation = await dialog().locator('textarea.code').inputValue();
   assert.ok(invitation.startsWith('GRISTSYNC1.'));
+  await shot('05-source-invitation');
   await dialogButton('Plus tard').click();
   await widget().getByText('En attente de réponse').waitFor();
+  await shot('06-source-attente');
   step('SOURCE : deux tables préparées, invitation créée');
 
   // --- CIBLE : assistant de réception, étapes Code, Destinations, Lien, Réponse
@@ -139,12 +147,14 @@ try {
   await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
   await button('Accepter une invitation').click();
   await dialog().locator('textarea.code').fill(invitation);
+  await shot('07-cible-code');
   await dialogButton('Continuer').click();
   await dialog().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
   await dialog().getByRole('combobox', { name: 'Villes' }).fill('Communes');
   await dialogButton('Créer les tables').click();
   await dialog().getByText('« Communes » existe déjà').waitFor();
+  await shot('08-cible-destinations');
   await dialogButton('Utiliser cette table').click();
   // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
   const formSections = await waitFor(async () => {
@@ -157,10 +167,13 @@ try {
   const key = execFileSync('docker', ['exec', env.container, 'python3', '-c',
     `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
   await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
+  await dialog().getByLabel('Lien du formulaire').waitFor();
+  await shot('09-cible-lien');
   await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
   await dialogButton('Tester le lien').click();
   await dialog().getByText('Le lien fonctionne').waitFor();
   const reply = await dialog().locator('textarea.code').inputValue();
+  await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
   step('CIBLE : tables créées (dont une existante), formulaires publiés, un lien pour les deux, réponse produite');
 
@@ -170,11 +183,15 @@ try {
   await dialog().locator('textarea.code').fill(reply);
   await dialogButton('Vérifier').click();
   await dialog().getByText(env.email).waitFor();
+  await shot('11-source-fiche');
   await dialogButton('Approuver et brancher').click();
+  await dialog().getByText('Branché').waitFor();
+  await shot('12-source-envoi');
   await dialogButton('Envoyer').click();
   await dialog().getByText('Lignes existantes envoyées').waitFor();
   await dialogButton('Fermer').click();
   await widget().getByText('Actif').first().waitFor();
+  await shot('13-source-actif');
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
   assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts', 'Synchro_Contacts', 'Synchro_Villes', 'Villes']);
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length >= 3, 'lignes reçues dans le journal');
@@ -202,7 +219,12 @@ try {
   const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
   assert.deepEqual(await columnsOf('Contacts'), ['Nom', 'Ville', 'id_sync']);
   assert.deepEqual(await columnsOf('Communes'), ['Note', 'Ville', 'id_sync'], 'table existante complétée de la seule clé');
-  step('SOURCE et CIBLE : une table technique par table, rangée ; destination sans colonne technique');
+  const layout = await waitFor(async () => {
+    const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
+    const spec = JSON.parse(views[0].fields.layoutSpec || '{}');
+    return (spec.collapsed || []).length === 2 && spec;
+  }, 'formulaires repliés');
+  step('SOURCE et CIBLE : une table technique par table, rangée ; destination sans colonne technique ; formulaires repliés');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');
@@ -219,6 +241,8 @@ try {
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Ville).join() === 'Lyon', 'vraie suppression consolidée');
   await waitFor(async () => (await widget().locator('.history li').allTextContents()).some(text => text.includes('Denis')), 'historique');
+  await widget().locator('.history summary').first().click();
+  await shot('14-cible-historique');
   step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');
 
   // --- Journal nettoyé à chaque passage : une version par ligne et la dernière liste
