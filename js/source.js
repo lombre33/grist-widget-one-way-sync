@@ -2,7 +2,7 @@
 // sa réponse en créant les webhooks, suivre et piloter les envois. Rien n'est stocké hors des
 // webhooks eux-mêmes et de la note de la table liste (invitations en attente).
 import {
-  CHUNK, ORDER_COL, buildInvitation, checkSourceColumns, chunk, fillKeyActions, listTableId,
+  AUTHOR_COL, CHUNK, ORDER_COL, buildInvitation, checkSourceColumns, chunk, fillKeyActions, listTableId,
   maskKey, parseReply, prepareSourceActions,
 } from './core.js';
 import {
@@ -10,7 +10,7 @@ import {
   setWebhookEnabled,
 } from './grist.js';
 import { createListTable, readNote, sentTables, writeNote } from './tables.js';
-import { checkList, confirmDialog, copyField, el, icon, message, openModal, run } from './ui.js';
+import { checkList, confirmDialog, copyField, el, icon, message, openWizard, run } from './ui.js';
 import { t } from './i18n.js';
 
 const now = () => Date.now() / 1000;
@@ -54,8 +54,7 @@ export async function renderSource(root = container) {
 
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },
-    el('button', { class: 'btn btn-primary', type: 'button', disabled: ownerOnly, onclick: () => newRecipient() }, icon('plus'), t('send.new')),
-    el('button', { class: 'btn', type: 'button', disabled: ownerOnly || !pending.length, onclick: () => pasteReply() }, icon('paste'), t('send.reply')));
+    el('button', { class: 'btn btn-primary', type: 'button', disabled: ownerOnly, onclick: () => invitationWizard() }, icon('plus'), t('send.new')));
   const cards = [
     ...pending.map(inv => pendingCard(inv, ownerOnly, out)),
     ...recipients(tables, hooks).map(r => recipientCard(r, ownerOnly, out)),
@@ -81,7 +80,9 @@ function card(title, [status, tone], detail, ...rest) {
 
 function pendingCard(inv, ownerOnly, out) {
   return card(inv.name, ['invited', 'pending'], `${inv.tables.join(', ')} · ${inv.hash ? t('send.secret.on') : t('send.secret.off')}`,
-    el('div', { class: 'card-actions' }, actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
+    el('div', { class: 'card-actions' },
+      el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => invitationWizard(inv) }, icon('paste'), t('send.reply')),
+      actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
 }
 
 function recipientStatus({ main, list }) {
@@ -133,43 +134,49 @@ async function unblockQueue() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Invitation
+// Assistant d'envoi : Tables, Préparation, Options, Invitation, Réponse, Envoi. Une invitation
+// en attente rouvre l'assistant à l'étape Réponse (`pending`).
 
-async function newRecipient() {
-  const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_'));
-  const nameInput = el('input', { type: 'text', class: 'input' });
-  const secretBox = el('input', { type: 'checkbox', checked: true });
-  const report = el('div', { class: 'report' });
+const STEP = { tables: 0, prepare: 1, options: 2, invitation: 3, reply: 4, load: 5 };
+
+async function invitationWizard(pending = null) {
+  const wizard = openWizard({
+    title: pending ? pending.name : t('send.new'),
+    steps: ['send.step.tables', 'send.step.prepare', 'send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k)),
+    onClose: () => renderSource(),
+  });
+  const cancel = { label: t('common.cancel') };
   let chosen = [];
   let checks = [];
 
-  const modal = openModal({
-    title: t('send.new'),
-    body: el('div', { class: 'form' },
-      el('label', {}, t('send.step1')),
-      checkList({ items: tables.map(id => ({ value: id, label: id })), onChange: (values) => { chosen = values; if (!nameInput.dataset.edited) nameInput.value = values.join(' + '); refresh(); } }),
-      el('label', {}, t('send.name')), nameInput,
-      el('label', { class: 'check' }, secretBox, t('send.secret')),
-      report),
-    buttons: [{ label: t('common.cancel') }],
-  });
-  nameInput.addEventListener('input', () => { nameInput.dataset.edited = '1'; });
+  if (pending) return showReply(pending);
+  return showTables();
 
-  // Contrôle de chaque table choisie : ce qui bloque, ce qu'il faut ajouter.
-  async function refresh() {
-    const schema = await readSchema();
-    checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: !schema.has(listTableId(table)) }));
-    const blocking = checks.some(c => c.problems.some(p => p.blocking));
-    const toAdd = checks.flatMap(c => [...c.missing.map(col => `${c.table}.${col}`), ...(c.listMissing ? [t('send.check.table', { table: listTableId(c.table) })] : [])]);
-    report.replaceChildren(...[
-      ...checks.flatMap(c => c.problems.map(p => message(p.blocking ? 'err' : 'warn', t(`send.problem.${p.code}`, { col: `${c.table}.${p.colId}` })))),
-      !chosen.length || blocking ? null : toAdd.length
-        ? message('warn', t('send.check.missing', { items: toAdd.join(', ') }))
-        : message('ok', t('send.check.ok', { n: chosen.length }))].filter(Boolean));
-    const buttons = [{ label: t('common.cancel') }];
-    if (chosen.length && !blocking && toAdd.length) buttons.push({ label: t('send.prepare'), kind: 'btn-primary', onClick: () => run(null, report, prepare) });
-    if (chosen.length && !blocking && !toAdd.length) buttons.push({ label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, invite) });
-    modal.setButtons(buttons);
+  // 1. Tables : cocher, contrôler. Ce qui bloque l'envoi est expliqué table par table.
+  async function showTables() {
+    const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_'));
+    const report = el('div', { class: 'report' });
+    const next = { label: t('common.next'), kind: 'btn-primary', disabled: true, onClick: () => (toAdd().length ? showPrepare() : showOptions()) };
+    const toAdd = () => checks.flatMap(c => [...c.missing.map(col => `${c.table}.${col}`), ...(c.listMissing ? [t('send.check.table', { table: listTableId(c.table) })] : [])]);
+    async function refresh() {
+      const schema = await readSchema();
+      checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: !schema.has(listTableId(table)) }));
+      const problems = checks.flatMap(c => c.problems.map(p => message(p.blocking ? 'err' : 'warn', t(`send.problem.${p.code}`, { col: `${c.table}.${p.colId}` }))));
+      report.replaceChildren(...problems);
+      next.disabled = !chosen.length || checks.some(c => c.problems.some(p => p.blocking));
+      wizard.show(STEP.tables, body, [cancel, next]);
+    }
+    const body = [el('p', {}, t('send.tables.help')),
+      checkList({ items: tables.map(id => ({ value: id, label: id })), onChange: (values) => { chosen = values; refresh(); } }), report];
+    wizard.show(STEP.tables, body, [cancel, next]);
+
+    // 2. Préparation : ce que le widget ajoute, avant de l'ajouter.
+    function showPrepare() {
+      const report2 = el('div', { class: 'report' });
+      wizard.show(STEP.prepare, [message('warn', t('send.check.missing', { items: toAdd().join(', ') })), el('p', { class: 'small' }, t('send.prepare.help')), report2], [
+        { label: t('common.back'), onClick: () => wizard.show(STEP.tables, body, [cancel, next]) },
+        { label: t('send.prepare'), kind: 'btn-primary', onClick: () => run(null, report2, prepare) }]);
+    }
   }
 
   async function prepare() {
@@ -178,55 +185,63 @@ async function newRecipient() {
       await apply(fillKeyActions(c.table, await fetchRows(c.table), () => crypto.randomUUID()));
       await createListTable(c.table);
     }
-    await refresh();
+    const schema = await readSchema();
+    checks = chosen.map(table => ({ table, ...checkSourceColumns(schema.columns(table)), listMissing: false }));
+    showOptions();
   }
 
-  async function invite() {
-    const secret = secretBox.checked ? randomHex(16) : '';
-    const entry = { id: randomHex(8), name: nameInput.value.trim() || chosen.join(' + '), hash: secret ? await sha256(secret) : '', at: now(), tables: chosen };
+  // 3. Options : nom de l'envoi, secret.
+  function showOptions() {
+    const nameInput = el('input', { type: 'text', class: 'input', value: chosen.join(' + ') });
+    const secretBox = el('input', { type: 'checkbox', checked: true });
+    const report = el('div', { class: 'report' });
+    wizard.show(STEP.options, [
+      message('ok', t('send.check.ok', { n: chosen.length })),
+      el('label', {}, t('send.name')), nameInput,
+      el('label', { class: 'check' }, secretBox, t('send.secret')),
+      el('p', { class: 'muted small' }, t('send.secret.help')), report,
+    ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(nameInput.value.trim(), secretBox.checked)) }]);
+  }
+
+  // 4. Invitation : le code à transmettre ; l'invitation attend sa réponse dans une carte.
+  async function invite(name, withSecret) {
+    const secret = withSecret ? randomHex(16) : '';
+    const entry = { id: randomHex(8), name: name || chosen.join(' + '), hash: secret ? await sha256(secret) : '', at: now(), tables: chosen };
     const schema = await readSchema();
     for (const table of chosen) {
       const id = listTableId(table);
       await writeNote(schema, id, [...(readNote(schema, id) || []), entry]);
     }
-    const { origin } = await docIdentity();
-    const code = buildInvitation({ id: entry.id, name: entry.name, origin, secret, tables: checks.map(c => ({ table: c.table, columns: c.sent })) });
-    modal.close();
-    openModal({
-      title: t('send.invite.title'),
-      body: el('div', { class: 'form' }, el('p', {}, t('send.invite.help')), copyField(code)),
-      onClose: () => renderSource(),
+    const [{ origin, docId }, list] = await Promise.all([docIdentity(), fetchRows(listTableId(chosen[0]))]);
+    const code = buildInvitation({
+      id: entry.id, name: entry.name, origin, secret, from: { email: (list[0] || {})[AUTHOR_COL] || '', docId },
+      tables: checks.map(c => ({ table: c.table, columns: c.sent })),
     });
+    wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code)],
+      [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
   }
-}
 
-// ---------------------------------------------------------------------------------------------
-// Réponse : vérifier, montrer la fiche, approuver
-
-async function pasteReply() {
-  const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false' });
-  const report = el('div', { class: 'report' });
-  const modal = openModal({
-    title: t('send.reply.title'),
-    body: el('div', { class: 'form' }, el('p', {}, t('send.reply.help')), area, report),
-    buttons: [{ label: t('common.cancel') }, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }],
-  });
-
-  // La réponse doit désigner une invitation en attente, porter le même secret (comparé par
-  // empreinte) et ne viser que des tables de cette invitation.
-  async function check() {
-    const { origin } = await docIdentity();
-    const reply = parseReply(area.value, origin);
-    const inv = pendingInvitations(await readSchema()).find(i => i.id === reply.id);
-    if (!inv || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
-    if (!reply.links.every(l => inv.tables.includes(l.table))) throw new Error('codeInvalid');
-    const r = reply.recipient;
-    const fiche = [[t('send.reply.tables'), reply.links.map(l => l.table).join(', ')], [t('send.reply.email'), r.email],
-      [t('send.reply.doc'), r.docId], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
-    report.replaceChildren(...[el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
-      reply.secret ? null : message('warn', t('send.reply.nosecret')),
-      el('p', { class: 'muted small' }, maskKey(reply.links[0].url))].filter(Boolean));
-    modal.setButtons([{ label: t('common.cancel') }, { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, () => approve(inv, reply)) }]);
+  // 5. Réponse : vérifier, montrer la fiche, approuver. La réponse doit désigner cette invitation,
+  // porter le même secret (comparé par empreinte) et ne viser que ses tables.
+  function showReply(inv) {
+    const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false', 'aria-label': t('send.reply.title') });
+    const report = el('div', { class: 'report' });
+    const check = async () => {
+      const { origin } = await docIdentity();
+      const reply = parseReply(area.value, origin);
+      if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
+      if (!reply.links.every(l => inv.tables.includes(l.table))) throw new Error('codeInvalid');
+      const r = reply.recipient;
+      const fiche = [[t('send.reply.tables'), reply.links.map(l => l.table).join(', ')], [t('send.reply.email'), r.email],
+        [t('send.reply.doc'), r.docId], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
+      report.replaceChildren(...[el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
+        reply.secret ? null : message('warn', t('send.reply.nosecret')),
+        el('p', { class: 'muted small' }, maskKey(reply.links[0].url))].filter(Boolean));
+      wizard.show(STEP.reply, body, [{ label: t('common.later') },
+        { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, () => approve(inv, reply)) }]);
+    };
+    const body = [el('p', {}, t('send.reply.help')), area, report];
+    wizard.show(STEP.reply, body, [{ label: t('common.later') }, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
   }
 
   // Deux webhooks par table : la table (ajouts, modifications) et sa table liste (suppressions).
@@ -239,12 +254,19 @@ async function pasteReply() {
       await createWebhook({ name, memo, url: link.url, tableId: listTableId(link.table) });
     }
     await cancelInvitation(inv);
-    modal.close();
-    const count = (await Promise.all(reply.links.map(l => fetchRows(l.table)))).reduce((n, rows) => n + rows.length, 0);
-    if (count && await confirmDialog({ title: t('send.load.title'), body: t('send.load.body', { n: count }), confirmLabel: t('send.load.ok') })) {
-      for (const link of reply.links) await sendAll(link.table, null);
-    }
-    await renderSource();
+    showLoad(reply.links.map(l => l.table));
+  }
+
+  // 6. Envoi : le branchement n'envoie que les modifications à venir ; proposer l'existant.
+  async function showLoad(tables) {
+    const count = (await Promise.all(tables.map(table => fetchRows(table)))).reduce((n, rows) => n + rows.length, 0);
+    const report = el('div', { class: 'report' });
+    const send = async () => {
+      for (const table of tables) await sendAll(table, report);
+      wizard.show(STEP.load + 1, message('ok', t('send.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
+    };
+    wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: count })), report],
+      [{ label: t('common.later') }, { label: t('send.load.ok'), kind: 'btn-primary', disabled: !count, onClick: () => run(null, report, send) }]);
   }
 }
 

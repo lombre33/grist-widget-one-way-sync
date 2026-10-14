@@ -137,6 +137,13 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .modal-480 { max-width: 480px; }
 .modal-title { font-size: 15px; padding: 12px 14px 8px; }
 .modal-body { padding: 0 14px 8px; overflow: auto; }
+.steps { display: flex; gap: 4px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 12px; flex-wrap: wrap; }
+.steps li { display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
+.steps li + li::before { content: ""; width: 10px; height: 1px; background: var(--border-strong); margin-right: 2px; }
+.steps .step-num { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 11px; }
+.steps .current { color: var(--text); font-weight: 600; }
+.steps .current .step-num { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
+.steps .done .step-num { border-color: var(--good); color: var(--good); }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
 
 /* Icônes : tracés SVG en masque, couleur du texte du bouton */
@@ -153,3 +160,5 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .icon-play { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M7 4l13 8-13 8z'/%3E%3C/svg%3E"); }
 .icon-unblock { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 9.9-1'/%3E%3C/svg%3E"); }
 .link-step { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.history summary { cursor: pointer; color: var(--text-muted); }
+.history ul { margin: 4px 0 0; padding-left: 18px; }

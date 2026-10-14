@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, checkSourceColumns, chunk, compareVersion, copyColumns,
   decodeCode, fillKeyActions, latestByKey, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation,
-  parseReply, parseWebhookUrl, planConsolidation, planPurge, prepareSourceActions, toRows, toTableId,
+  parseReply, parseWebhookUrl, planConsolidation, planPurge, recentChanges, prepareSourceActions, toRows, toTableId,
 } from '../../js/core.js';
 
 const SECRET = '0123456789abcdef0123456789abcdef';
@@ -80,6 +80,13 @@ test('purge : garde la dernière version de chaque clé, la dernière liste et l
   const rows = [j(1, 'a', 10), j(2, 'a', 20), list(3, ['a']), j(4, '', 5), list(5, ['a', 'b']), j(6, 'a', 15), j(7, '', 0)];
   assert.deepEqual(planPurge(rows, 'Journal'), [['BulkRemoveRecord', 'Journal', [1, 3, 4, 6]]]);
   assert.deepEqual(planPurge([j(1, 'a', 1)], 'Journal'), []);
+});
+
+test('historique : dernières versions après la visite, plus récentes d\'abord, plafonnées', () => {
+  const rows = [j(1, 'a', 10), j(2, 'a', 30), j(3, 'b', 20, { Supprime: true }), j(4, 'c', 5), list(5, ['a'])];
+  assert.deepEqual(recentChanges(rows, 'Nom', 8, 20), [
+    { at: 30, label: 'n2', deleted: false }, { at: 20, label: 'n3', deleted: true }]);
+  assert.equal(recentChanges(rows, 'Nom', 0, 1).length, 1);
 });
 
 test('contrôle de la table SOURCE', () => {

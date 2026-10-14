@@ -8,6 +8,7 @@ export const ORDER_COL = 'MajLe';
 export const DELETE_COL = 'Supprime';
 export const LIST_COL = 'Synchro_Ids'; // liste des clés existantes, envoyée par la SOURCE
 export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
+export const AUTHOR_COL = 'Sync_Par'; // e-mail de la personne qui a ajouté la ligne (user.Email)
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC1.';
 export const CHUNK = 500; // lignes par action : sous la file de 1000 événements des webhooks
@@ -78,7 +79,7 @@ export function latestByKey(journalRows) {
 // Colonnes recopiées : colonnes de données présentes des deux côtés, hors colonnes techniques de
 // la synchro et formules de la destination. La destination ne garde que la clé `id_sync`.
 export function copyColumns(journalCols, destCols) {
-  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL]);
+  const skip = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL]);
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
   return journalCols.map(c => c.colId).filter(id => !skip.has(id) && !id.startsWith('gristHelper_') && writable.has(id));
 }
@@ -156,6 +157,15 @@ export function planPurge(journalRows, journalTable) {
   keep.add(journalRows.reduce((max, r) => Math.max(max, r.id), 0));
   const ids = journalRows.filter(r => !keep.has(r.id)).map(r => r.id);
   return chunk(ids).map(part => ['BulkRemoveRecord', journalTable, part]);
+}
+
+// Historique : dernière version de chaque clé modifiée dans la SOURCE après `since` (secondes),
+// la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne (première colonne recopiée).
+export function recentChanges(journalRows, labelCol, since, max) {
+  return [...latestByKey(journalRows).values()]
+    .filter(v => typeof v.order === 'number' && v.order > since)
+    .sort((a, b) => b.order - a.order).slice(0, max)
+    .map(v => ({ at: v.order, label: labelCol ? String(v.row[labelCol] ?? '') : '', deleted: isTrue(v.row[DELETE_COL]) }));
 }
 
 // Table de la SOURCE qui envoie la liste des clés existantes : une ligne, une formule recalculée
@@ -246,9 +256,9 @@ const SECRET = /^[0-9a-f]{32}$/;
 // Une invitation porte une ou plusieurs tables. `id` la désigne dans la réponse ; `secret`,
 // facultatif et choisi à la création, prouve que la réponse vient de quelqu'un qui l'a reçue (la
 // SOURCE n'en garde que l'empreinte).
-export function buildInvitation({ id, name, origin, secret = '', tables }) {
+export function buildInvitation({ id, name, origin, secret = '', from = {}, tables }) {
   return encodeCode({
-    kind: 'invitation', id, name, origin, secret,
+    kind: 'invitation', id, name, origin, secret, from,
     tables: tables.map(({ table, columns }) => ({
       table, columns: columns.map(c => ({ id: c.colId, type: journalType(c.type), label: c.label || c.colId })),
     })),
@@ -266,7 +276,8 @@ export function parseInvitation(text) {
     Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && COL_ID.test(tb.table) && validColumns(tb.columns)) &&
     new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
   if (!ok) throw new Error('codeInvalid');
-  return inv;
+  const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
+  return { ...inv, from: { email: String(from.email || '').slice(0, 200), docId: String(from.docId || '').slice(0, 200) } };
 }
 
 // `links` : pour chaque table SOURCE, l'adresse d'écriture de son Journal dans la CIBLE.

@@ -5,7 +5,7 @@
 // Les invitations en attente (et l'empreinte de leur secret éventuel) sont notées dans la
 // description de la colonne Synchro_Ids de ces tables : des métadonnées, que le webhook n'envoie
 // pas et que la clé du formulaire ne peut pas écrire.
-import { APPLIED_COL, DELETE_COL, KEY_COL, LIST_COL, ORDER_COL, listFormula, listTableId } from './core.js';
+import { APPLIED_COL, AUTHOR_COL, DELETE_COL, KEY_COL, LIST_COL, ORDER_COL, listFormula, listTableId } from './core.js';
 import { apply, hideColumn, readSchema, tuckUnderWidgetPage } from './grist.js';
 
 export const JOURNAL_PREFIX = 'Journal_';
@@ -22,7 +22,10 @@ export async function createListTable(tableId) {
   const id = listTableId(tableId);
   if ((await readSchema()).has(id)) return;
   await apply([
-    ['AddTable', id, [{ id: LIST_COL, type: 'Text', isFormula: true, formula: listFormula(tableId) }]],
+    ['AddTable', id, [
+      { id: LIST_COL, type: 'Text', isFormula: true, formula: listFormula(tableId) },
+      // E-mail de la personne qui prépare la table : présenté à la CIBLE comme propriétaire.
+      { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 }]],
     ['AddRecord', id, null, {}],
   ]);
   await tuckUnderWidgetPage([id]);
@@ -41,7 +44,7 @@ export async function createReceivingTables({ journal, dest, columns, note }) {
     ['AddTable', journal, [...columns,
       { id: LIST_COL, type: 'Text', isFormula: false },
       { id: APPLIED_COL, type: 'Bool', isFormula: false },
-      { id: 'Sync_Par', type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 }]],
+      { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 }]],
     ...(existing
       ? destColumns(columns).filter(c => !have.has(c.id)).map(({ id, ...info }) => ['AddColumn', dest, id, info])
       : [['AddTable', dest, destColumns(columns)]]),

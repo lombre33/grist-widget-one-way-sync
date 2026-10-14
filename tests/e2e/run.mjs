@@ -111,35 +111,41 @@ async function openWidget(url) {
 }
 
 try {
-  // --- SOURCE : préparer deux tables et inviter
+  const dialog = () => widget().getByRole('dialog');
+  const dialogButton = name => dialog().getByRole('button', { name, exact: true });
+
+  // --- SOURCE : assistant d'envoi, étapes Tables, Préparation, Options, Invitation
   await openWidget(source.url);
   await widget().locator('.tile', { hasText: 'Envoyer une table' }).click();
   await button('Nouveau destinataire').click();
-  await widget().getByRole('checkbox', { name: 'Contacts' }).check();
-  await widget().getByRole('checkbox', { name: 'Villes' }).check();
-  await widget().getByText('Le widget doit ajouter').waitFor();
-  await button('Préparer pour la synchro').click();
-  await widget().getByText('Prêt à envoyer : 2 tables').waitFor();
+  await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
+  await dialog().getByRole('checkbox', { name: 'Villes' }).check();
+  await dialogButton('Continuer').click();
+  await dialog().getByText('Le widget doit ajouter').waitFor();
+  await dialogButton('Préparer pour la synchro').click();
+  await dialog().getByText('Prêt à envoyer : 2 tables').waitFor();
   const contacts = await records(source.doc, 'Contacts');
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
   assert.ok((await records(source.doc, 'Synchro_Contacts'))[0].Synchro_Ids.startsWith('ids:'));
-  await button('Créer l’invitation').click();
-  const invitation = await widget().locator('textarea.code').inputValue();
+  await dialogButton('Créer l’invitation').click();
+  const invitation = await dialog().locator('textarea.code').inputValue();
   assert.ok(invitation.startsWith('GRISTSYNC1.'));
+  await dialogButton('Plus tard').click();
+  await widget().getByText('En attente de réponse').waitFor();
   step('SOURCE : deux tables préparées, invitation créée');
 
-  // --- CIBLE : accepter, publier les formulaires, répondre
+  // --- CIBLE : assistant de réception, étapes Code, Destinations, Lien, Réponse
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
   await button('Accepter une invitation').click();
-  await widget().locator('textarea.code').fill(invitation);
-  await button('Continuer').click();
-  await widget().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
-  await widget().getByRole('combobox', { name: 'Villes' }).fill('Communes');
-  await widget().getByRole('dialog', { name: 'Invitation reçue' }).getByRole('button', { name: 'Créer les tables' }).click();
-  await widget().getByText('« Communes » existe déjà').waitFor();
-  await button('Utiliser cette table').click();
-  await widget().getByText('En attente du lien').waitFor();
+  await dialog().locator('textarea.code').fill(invitation);
+  await dialogButton('Continuer').click();
+  await dialog().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
+  await dialog().getByText(`Données de ${env.email}`).waitFor();
+  await dialog().getByRole('combobox', { name: 'Villes' }).fill('Communes');
+  await dialogButton('Créer les tables').click();
+  await dialog().getByText('« Communes » existe déjà').waitFor();
+  await dialogButton('Utiliser cette table').click();
   // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
   const formSections = await waitFor(async () => {
     const sections = (await records(target.doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
@@ -150,21 +156,24 @@ try {
   const share = (await records(target.doc, '_grist_Shares'))[0];
   const key = execFileSync('docker', ['exec', env.container, 'python3', '-c',
     `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
-  await openWidget(target.url);
-  await widget().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
-  await button('Tester le lien').click();
-  await widget().getByText('Le lien fonctionne').waitFor();
-  const reply = await widget().locator('textarea.code').inputValue();
-  step('CIBLE : tables créées, formulaires publiés, un lien testé pour les deux, réponse produite');
+  await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
+  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
+  await dialogButton('Tester le lien').click();
+  await dialog().getByText('Le lien fonctionne').waitFor();
+  const reply = await dialog().locator('textarea.code').inputValue();
+  await dialogButton('Fermer').click();
+  step('CIBLE : tables créées (dont une existante), formulaires publiés, un lien pour les deux, réponse produite');
 
-  // --- SOURCE : approuver, envoyer l'existant
+  // --- SOURCE : la carte de l'invitation rouvre l'assistant à l'étape Réponse, puis Envoi
   await openWidget(source.url);
   await button('Coller la réponse').click();
-  await widget().locator('textarea.code').fill(reply);
-  await button('Vérifier').click();
-  await widget().getByText(env.email).waitFor();
-  await button('Approuver et brancher').click();
-  await button('Envoyer').click();
+  await dialog().locator('textarea.code').fill(reply);
+  await dialogButton('Vérifier').click();
+  await dialog().getByText(env.email).waitFor();
+  await dialogButton('Approuver et brancher').click();
+  await dialogButton('Envoyer').click();
+  await dialog().getByText('Lignes existantes envoyées').waitFor();
+  await dialogButton('Fermer').click();
   await widget().getByText('Actif').first().waitFor();
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
   assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts', 'Synchro_Contacts', 'Synchro_Villes', 'Villes']);
@@ -176,7 +185,8 @@ try {
   const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 3 && rows; }, 'consolidation');
   assert.deepEqual(dest.map(r => r.Nom).sort(), ['Alice', 'Bob', 'Chloé']);
   await waitFor(async () => (await records(target.doc, 'Communes')).length === 2, 'seconde table consolidée');
-  step('CIBLE : Contacts et Communes consolidées');
+  await widget().getByText(`Données de ${env.email}`).waitFor();
+  step('CIBLE : Contacts et Communes consolidées, propriétaire affiché');
 
   // --- Tables techniques rangées sous la page du widget, destination propre
   const tucked = async (doc) => {
@@ -208,6 +218,7 @@ try {
   assert.equal(after.length, 3);
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Ville).join() === 'Lyon', 'vraie suppression consolidée');
+  await waitFor(async () => (await widget().locator('.history li').allTextContents()).some(text => text.includes('Denis')), 'historique');
   step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');
 
   // --- Journal nettoyé à chaque passage : une version par ligne et la dernière liste

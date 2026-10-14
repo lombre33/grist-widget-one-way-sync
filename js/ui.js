@@ -75,6 +75,29 @@ document.addEventListener('keydown', (event) => {
   else if (!event.shiftKey && (document.activeElement === last || !inside)) { event.preventDefault(); first.focus(); }
 });
 
+// Assistant : une seule fenêtre, des étapes numérotées qui se débloquent l'une après l'autre.
+// `show(index, body, buttons)` affiche une étape ; les précédentes sont marquées faites.
+export function openWizard({ title, steps, onClose }) {
+  const bar = el('ol', { class: 'steps' });
+  const content = el('div', { class: 'form' });
+  const modal = openModal({ title, body: [bar, content], onClose });
+  let shown = -1;
+  return {
+    close: () => modal.close(),
+    show(index, body, buttons) {
+      bar.replaceChildren(...steps.map((label, i) => el('li', {
+        class: i < index ? 'done' : i === index ? 'current' : 'locked', 'aria-current': i === index ? 'step' : null,
+      }, el('span', { class: 'step-num', 'aria-hidden': 'true' }, i < index ? '✓' : String(i + 1)), label)));
+      content.replaceChildren(...[body].flat().filter(Boolean));
+      modal.setButtons(buttons);
+      if (index === shown) return; // même étape redessinée : le focus reste où il est
+      shown = index;
+      const first = content.querySelector('textarea:not([readonly]), input') || modal.footer.querySelector('.btn-primary');
+      if (first) first.focus();
+    },
+  };
+}
+
 // Confirmation : promesse d'un booléen. Une action destructrice met le focus sur Annuler.
 export function confirmDialog({ title, body, confirmLabel, cancelLabel = t('common.cancel'), danger = false }) {
   return new Promise((resolve) => {
