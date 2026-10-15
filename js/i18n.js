@@ -43,6 +43,10 @@ export function format(lang, key, vars = {}) {
 
 export const t = (key, vars) => format(LANG, key, vars);
 
+// Dates et heures à la façon de la langue (millisecondes, ou secondes pour timeText).
+export const dateText = ms => new Date(ms).toLocaleString(LANG);
+export const timeText = sec => new Date(sec * 1000).toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
+
 // Type d'une colonne Grist, en clair : « Référence (Villes) », « Date et heure ».
 export function typeName(type) {
   const [base, target] = String(type || '').split(':');

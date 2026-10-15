@@ -79,7 +79,8 @@ async function waitFor(check, what, timeout = 30000) {
 const step = text => console.log(`· ${text}`);
 // Images d'aide montrées par l'assistant à l'étape Lien (img/) : la carte du formulaire publié
 // avec son bouton « Partager », puis la fenêtre de partage avec « Copier le lien ».
-async function helpShots() {
+async function helpShots(formUrl, back) {
+  await page.goto(formUrl);
   await clean();
   const pad = async (locator, path, margin = 12) => {
     const box = await locator.boundingBox();
@@ -96,6 +97,8 @@ async function helpShots() {
   await page.keyboard.press('Escape');
   await page.mouse.click(1090, 690);
   await copy.waitFor({ state: 'hidden' });
+  await page.goto(back);
+  await widget().locator('.topbar').waitFor({ timeout: 30000 });
 }
 // Captures de l'installation du widget (docs/images/00-*), dans un document neuf, comme un humain :
 // Ajouter, Ajouter une page, Personnalisée, URL personnalisée, avertissement, accès complet.
@@ -197,12 +200,65 @@ try {
     await dialog().getByRole('button', { name: `${field} : ` }).click();
     await dialog().getByRole('option', { name: option, exact: true }).click();
   };
-  const formKey = async (doc) => {
-    const share = (await records(doc, '_grist_Shares'))[0];
-    return execFileSync('docker', ['exec', env.container, 'python3', '-c',
-      `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
+  const pageOf = async (doc, viewRef) => (await records(doc, '_grist_Pages')).find(p => p.viewRef === viewRef);
+  // Clé de la page d'un formulaire (une par page partagée), lue dans la base du serveur de test ;
+  // Grist l'enregistre juste après le partage.
+  const formKey = async (doc, form) => {
+    const { shareRef } = await pageOf(doc, form.parentId);
+    const share = (await records(doc, '_grist_Shares')).find(sh => sh.id === shareRef);
+    return waitFor(() => {
+      try {
+        return execFileSync('docker', ['exec', env.container, 'python3', '-c',
+          `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
+      } catch (e) {
+        return null;
+      }
+    }, 'clé du formulaire enregistrée', 10000);
   };
+  const formLink = async (doc, form) => `${TEAM}/forms/${await formKey(doc, form)}/${form.id}`;
   const publishedForms = async doc => (await records(doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
+  // Formulaire publié sur sa page, dans `doc`, pour une table créée pour l'occasion.
+  async function strayForm(doc, tableId, columns) {
+    await applyActions(doc, [['AddTable', tableId, columns]]);
+    const { sectionRef, viewRef } = (await applyActions(doc, [['CreateViewSection', await tableRef(doc, tableId), 0, 'form', null, null]])).retValues[0];
+    const shareRef = (await applyActions(doc, [['AddRecord', '_grist_Shares', null, { linkId: `e2e${Date.now()}`, options: '{"publish": true}' }]])).retValues[0];
+    await applyActions(doc, [['UpdateRecord', '_grist_Pages', (await pageOf(doc, viewRef)).id, { shareRef }],
+      ['UpdateRecord', '_grist_Views_section', sectionRef, { shareOptions: '{"form": true, "publish": true}' }]]);
+    // Effacer la table efface aussi sa page devenue vide ; le partage reste.
+    return { form: { id: sectionRef, parentId: viewRef }, remove: () => applyActions(doc, [['RemoveTable', tableId], ['RemoveRecord', '_grist_Shares', shareRef]]) };
+  }
+  const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
+    sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
+  // La page du widget est repliée une fois le lien donné : la page du formulaire ne se voit plus.
+  const widgetPageCollapsed = async doc => JSON.parse((await pagesOf(doc)).find(p => p.name === 'Synchro').options || '{}').collapsed === true;
+
+  // SOURCE : un export d'une table, toutes ses colonnes.
+  async function newExport(table, name) {
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: table }).check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill(name);
+    await dialogButton('Créer l’export').click();
+  }
+  // SOURCE : révoquer la personne de `where` (par défaut la seule affichée).
+  async function revoke(where = widget()) {
+    await where.getByRole('button', { name: 'Révoquer', exact: true }).click();
+    await dialogButton('Révoquer').click();
+  }
+  // Coller un lien de formulaire dans le champ `label`, le tester ; rend le code affiché si le
+  // test donne le texte `ok`.
+  async function testLink(label, link, ok) {
+    await dialog().getByLabel(label).fill(link);
+    await dialogButton('Tester le lien').click();
+    await dialog().getByText(ok).waitFor();
+    return dialog().locator('textarea.code').first().inputValue();
+  }
+  // `count` lignes de Contacts (`prefix` numéro, remplissage de 80 caractères) ; rend leurs id.
+  async function addContacts(prefix, count, fill) {
+    const names = Array.from({ length: count }, (_, i) => `${prefix} ${i} ${fill.repeat(80)}`);
+    return (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', names.map(() => null), { Nom: names }]])).retValues[0];
+  }
 
   // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
   // publié, rendre la réponse.
@@ -216,10 +272,8 @@ try {
     await dialogButton('Continuer').click();
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
-    await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(doc)}/${forms[0].id}`);
-    await dialogButton('Tester le lien').click();
-    await dialog().getByText('Le lien fonctionne').waitFor();
-    const code2 = await dialog().locator('textarea.code').first().inputValue();
+    const code2 = await testLink('Lien du formulaire', await formLink(doc, forms[0]), 'Le lien fonctionne');
+    await waitFor(() => widgetPageCollapsed(doc), 'page du widget repliée');
     await dialogButton('Fermer').click();
     return code2;
   }
@@ -253,22 +307,15 @@ try {
     const b = await newDocWithWidget('Échange B');
     await openWidget(a.url);
     await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
-    await button('Nouvel export').click();
-    await dialog().getByRole('checkbox', { name: 'Fiches' }).check();
-    await dialogButton('Continuer').click();
-    await dialogButton('Continuer').click();
-    await dialog().getByLabel('Nom de l’export').fill('Partage');
-    await dialogButton('Créer l’export').click();
+    await newExport('Fiches', 'Partage');
     await dialogButton('Ajouter un destinataire').click();
     await dialog().getByRole('radio', { name: /Échange/ }).check();
     await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
+    await shot('20-echange-mode');
     await dialogButton('Créer l’invitation').click();
     const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
     await openWidget(a.url); // l'assistant reprend à l'étape du lien de retour
-    await dialog().getByLabel('Lien du formulaire de retour').fill(`${TEAM}/forms/${await formKey(a.doc)}/${back[0].id}`);
-    await dialogButton('Tester le lien').click();
-    await dialog().getByText('Transmettez ce code').waitFor();
-    const code = await dialog().locator('textarea.code').first().inputValue();
+    const code = await testLink('Lien du formulaire de retour', await formLink(a.doc, back[0]), 'Transmettez ce code');
     await dialogButton('Plus tard').click();
     assert.ok(!JSON.stringify(await api('POST', `/docs/${a.doc}/sql`, { sql: 'select description from _grist_Tables_column' })).includes('/api/s/'),
       'adresse de retour notée nulle part chez A');
@@ -284,6 +331,7 @@ try {
     assert.deepEqual(Object.values(bRows).map(r => `${r.Nom}:${r.Ville}:${r.id_sync === aRows[r.Nom].id_sync}`).sort(), ['Anna:Lyon:true', 'Basile:Paris:true', 'Céline:Nantes:true']);
     assert.ok(['MajLe', 'RecalculLe', 'Supprime'].every(c => c in bRows.Anna), 'B : colonnes de l\'envoi de retour');
     await widget().getByText('Échange : vos modifications de ces tables repartent vers ce document.').waitFor();
+    await shot('21-echange-cible');
     // Lignes de A recopiées chez B : rien ne repart vers A.
     const sentLines = async (doc, table) => (await rawRows(doc, table)).flatMap(r => (r.Synchro_Type === 'lot' ? JSON.parse(r.Synchro_Lot || '{}').lignes || [] : []));
     const aJournal = (await records(a.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_')).tableId;
@@ -402,20 +450,34 @@ try {
   await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
   await shot('08-cible-destinations');
+  const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
+  await widgetFrame.evaluate(() => { window.sameFrame = true; });
   await dialogButton('Continuer').click();
-  const formSections = await waitFor(async () => { const f = await publishedForms(target.doc); return f.length === 1 && f; }, 'formulaire publié');
-  const widgetSection = (await records(target.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
-  assert.equal(formSections[0].parentId, widgetSection.parentId, 'formulaire sur la page du widget');
-  await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
   await dialog().getByLabel('Lien du formulaire').waitFor();
+  assert.ok(await widgetFrame.evaluate(() => window.sameFrame), 'formulaire publié sans recharger le widget');
+  const formSections = await publishedForms(target.doc);
+  assert.equal(formSections.length, 1, 'un formulaire publié');
+  const widgetSection = (await records(target.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
+  const widgetPage = await pageOf(target.doc, widgetSection.parentId);
+  const formPage = await pageOf(target.doc, formSections[0].parentId);
+  assert.notEqual(formPage.id, widgetPage.id, 'formulaire sur sa propre page');
+  assert.equal(formPage.indentation, widgetPage.indentation + 1, 'page du formulaire sous celle du widget');
+  assert.ok(!JSON.parse(widgetPage.options || '{}').collapsed, 'page du widget dépliée pour montrer le formulaire');
+  await dialog().getByText(/sur la page\s+«\s+Journal_Annuaire\s+»/).waitFor();
   await dialog().getByText(/il sert pour toutes les tables de l’export/).waitFor();
   await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; }));
   await shot('09-cible-lien');
-  if (process.env.CAPTURES) await helpShots();
-  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(target.doc)}/${formSections[0].id}`);
+  if (process.env.CAPTURES) await helpShots(`${TEAM}/doc/${target.doc}/p/${formPage.viewRef}`, target.url);
+  // Lien d'un formulaire d'un autre document, sur une table du même nom : refusé, la réponse
+  // enverrait les données ailleurs.
+  const stray = await strayForm(source.doc, 'Journal_Annuaire', [{ id: 'id_sync', type: 'Text' }, { id: 'Sync_Par', type: 'Text' }]);
+  await dialog().getByLabel('Lien du formulaire').fill(await formLink(source.doc, stray.form));
   await dialogButton('Tester le lien').click();
-  await dialog().getByText('Le lien fonctionne').waitFor();
-  const reply = await dialog().locator('textarea.code').first().inputValue();
+  await dialog().getByText('Ce lien n’écrit pas dans le journal de cette réception').waitFor();
+  assert.equal((await records(source.doc, 'Journal_Annuaire')).length, 1, 'la ligne de test est arrivée dans l\'autre document');
+  await stray.remove();
+  const reply = await testLink('Lien du formulaire', await formLink(target.doc, formSections[0]), 'Le lien fonctionne');
+  await waitFor(() => widgetPageCollapsed(target.doc), 'page du widget repliée');
   await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
   step('CIBLE : un journal pour l\'export, un formulaire, réponse produite');
@@ -468,21 +530,18 @@ try {
   step('CIBLE : un lecteur voit les boutons grisés d\'emblée');
 
   // --- Pages et tables : aucune page technique, une seule table technique côté SOURCE
-  const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
-    sql: 'select p.indentation, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
   assert.deepEqual((await pagesOf(source.doc)).map(p => p.name), ['Table1', 'Contacts', 'Villes', 'Synchro'], 'SOURCE : aucune page technique');
-  assert.deepEqual((await pagesOf(target.doc)).map(p => p.name).sort(), ['Communes', 'Contacts', 'Synchro', 'Table1'], 'CIBLE : aucune page technique');
+  const targetPages = (await pagesOf(target.doc)).map(p => `${p.indentation}:${p.name}`);
+  assert.equal(targetPages[targetPages.indexOf('0:Synchro') + 1], '1:Journal_Annuaire', 'CIBLE : la page du formulaire juste sous celle du widget');
+  assert.deepEqual(targetPages.map(p => p.slice(2)).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Synchro', 'Table1'], 'CIBLE : aucune autre page technique');
   assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Synchro', 'Table1', 'Villes']);
   assert.deepEqual((await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Table1']);
   const columnsOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
   assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Lieu', 'Nom', 'Ville', 'id_sync']);
   const hiddenOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns?hidden=true`)).columns.map(c => c.id);
   assert.ok(!(await hiddenOf(source.doc, 'Synchro')).includes('manualSort'), 'Synchro sans manualSort (le webhook l\'enverrait)');
-  await waitFor(async () => {
-    const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
-    return (JSON.parse(views[0].fields.layoutSpec || '{}').collapsed || []).length === 1;
-  }, 'formulaire replié');
-  step('SOURCE et CIBLE : tables techniques sans page, destination sans colonne technique, formulaire replié');
+  assert.ok(await widgetPageCollapsed(target.doc), 'page du widget repliée');
+  step('SOURCE et CIBLE : tables techniques sans page, destination sans colonne technique, formulaire sur sa page, repliée');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');
@@ -530,8 +589,7 @@ try {
 
   // --- Révoquer le second seulement : le premier continue
   await openWidget(source.url);
-  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByRole('button', { name: 'Révoquer' }).click();
-  await dialogButton('Révoquer').click();
+  await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
   await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Nancy' }]]);
   await openWidget(target.url);
@@ -673,8 +731,7 @@ try {
   // --- Gros import (4 000 lignes d'un coup) : le lot ne part qu'en partie, la CIBLE le signale ;
   // le widget SOURCE, une fois sa page ouverte, envoie le reste seul
   const before = (await records(target.doc, 'Contacts')).length;
-  const big = Array.from({ length: 4000 }, (_, i) => `Import ${i} ${'x'.repeat(80)}`);
-  const imported = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', big.map(() => null), { Nom: big }]])).retValues[0];
+  const imported = await addContacts('Import', 4000, 'x');
   const lotRow = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Table === 'Contacts' && r.Synchro_Type === 'lot');
   assert.ok((await lotRow()).Sync_Etat > 0, 'envoi coupé noté dans Synchro');
   await widget().getByText(/Contacts\s:\s[\d\s]+\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
@@ -684,7 +741,7 @@ try {
   await widget().getByText('Un envoi n’est pas terminé').waitFor({ state: 'detached', timeout: 240000 });
   assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
   await openWidget(target.url);
-  await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + big.length, 'gros import reçu en entier', 120000);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + imported.length, 'gros import reçu en entier', 120000);
   await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'avis de la CIBLE retiré', 30000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', imported]]);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
@@ -693,8 +750,7 @@ try {
   // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
   // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le
   // widget SOURCE vide la file et renvoie tout, seul.
-  const bloc = Array.from({ length: 1500 }, (_, i) => `Bloc ${i} ${'y'.repeat(80)}`);
-  const blocIds = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', bloc.map(() => null), { Nom: bloc }]])).retValues[0];
+  const blocIds = await addContacts('Bloc', 1500, 'y');
   await openWidget(source.url);
   const usages = async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.map(h => h.usage || {});
   await waitFor(async () => (await lotRow()).Sync_Etat === 0 && (await usages()).every(u => !u.numWaiting), 'bloc envoyé', 120000);
@@ -711,7 +767,7 @@ try {
   await openWidget(target.url);
   await waitFor(async () => {
     const rows = await records(target.doc, 'Contacts');
-    return rows.filter(r => r.Interne === 'r5').length === bloc.length && rows.find(r => r.Nom === 'Bob').Ville === 'Brest';
+    return rows.filter(r => r.Interne === 'r5').length === blocIds.length && rows.find(r => r.Nom === 'Bob').Ville === 'Brest';
   }, 'tout reçu après le déblocage', 240000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', blocIds]]);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
@@ -794,8 +850,12 @@ try {
   step('CIBLE : une table reçue peut être relayée (avis affiché), journaux exclus');
 
   // --- Lignes forgées avec le lien du formulaire : rejetées et signalées ; lien coupé, puis la
-  // même réception reprend avec une nouvelle invitation
+  // même réception reprend avec une nouvelle invitation. Le formulaire partage d'abord sa page avec
+  // un autre (montage d'avant la 0.5) : le lien commun est signalé, et la coupure le sépare.
   const hookUrl = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks[0].fields.url;
+  const journalForm = (await publishedForms(target.doc))[0];
+  const neighbour = (await applyActions(target.doc, [['CreateViewSection', await tableRef(target.doc, 'Communes'), journalForm.parentId, 'form', null, null]])).retValues[0];
+  await applyActions(target.doc, [['UpdateRecord', '_grist_Views_section', neighbour.sectionRef, { shareOptions: '{"form": true, "publish": true}' }]]);
   const exportId = (await records(source.doc, 'Synchro'))[0].Synchro_Export;
   const forge = rows => fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
   const pirate = JSON.stringify({ lignes: [['pirate', 9e9, false, { Nom: 'Pirate' }]], total: 1 });
@@ -809,17 +869,19 @@ try {
   await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await widget().getByText('Arrivées suspectes').waitFor();
   await widget().getByText(/3\s+lignes rejetées/).waitFor();
+  await widget().getByText('Lien commun à d’autres formulaires').waitFor();
   assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Pirate'), 'rien de recopié');
   assert.equal((await rawRows(target.doc, 'Journal_Annuaire')).length, 0, 'lignes rejetées effacées');
   await shot('17-cible-suspect');
-  await button('Couper le lien').click();
+  await button('Couper le lien').first().click();
   await dialogButton('Couper le lien').click();
   await widget().getByText('Lien coupé').waitFor();
-  // Grist remplace la clé juste après l'enregistrement du nouveau partage.
-  await waitFor(async () => !(await forge([{ id_sync: '' }])).ok, 'l\'ancien lien n\'écrit plus', 10000);
+  await waitFor(async () => !(await forge([{ id_sync: '' }])).ok, 'l\'ancien lien n\'écrit plus dans le journal', 10000);
+  assert.ok(!(await publishedForms(target.doc)).some(f => f.id === journalForm.id), 'formulaire du journal retiré de la page commune');
+  const commonPage = await pageOf(target.doc, journalForm.parentId);
+  assert.ok((await records(target.doc, '_grist_Shares')).some(sh => sh.id === commonPage.shareRef), 'la page commune garde son partage pour l\'autre formulaire');
   await openWidget(source.url);
-  await button('Révoquer').click();
-  await dialogButton('Révoquer').click();
+  await revoke();
   await waitFor(async () => !(await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 'ancien destinataire révoqué');
   await button('Ajouter un destinataire').click();
   await dialogButton('Créer l’invitation').click();
@@ -831,15 +893,21 @@ try {
   await button('Accepter une invitation').click();
   await dialog().locator('textarea.code').first().fill(invitation3);
   await dialogButton('Continuer').click();
+  await dialog().getByText('Cette invitation reprend la même réception').waitFor();
+  await dialog().getByText(`Données de ${env.email}`).waitFor();
+  await dialogButton('Reprendre la réception').click();
   await dialog().getByText('la même réception reprend').waitFor();
-  const forms3 = await publishedForms(target.doc);
-  assert.equal(forms3.length, 1, 'toujours un seul formulaire');
-  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(target.doc)}/${forms3[0].id}`);
-  await dialogButton('Tester le lien').click();
-  await dialog().getByText('Le lien fonctionne').waitFor();
-  const reply3 = await dialog().locator('textarea.code').first().inputValue();
+  const journalRef = await tableRef(target.doc, 'Journal_Annuaire');
+  const forms3 = (await publishedForms(target.doc)).filter(f => f.tableRef === journalRef);
+  assert.equal(forms3.length, 1, 'un seul formulaire pour le journal');
+  assert.notEqual(forms3[0].parentId, journalForm.parentId, 'sur une nouvelle page, à lui seul');
+  assert.equal((await records(target.doc, '_grist_Views_section')).filter(sc => sc.parentId === forms3[0].parentId).length, 1);
+  const reply3 = await testLink('Lien du formulaire', await formLink(target.doc, forms3[0]), 'Le lien fonctionne');
   await dialogButton('Fermer').click();
   await approve(reply3);
+  // Fin du montage d'avant la 0.5 simulé : la page commune et son partage disparaissent.
+  const oldPage = await pageOf(target.doc, journalForm.parentId);
+  await applyActions(target.doc, [['RemoveView', journalForm.parentId], ['RemoveRecord', '_grist_Shares', oldPage.shareRef]]);
   assert.equal((await records(target.doc, '_grist_Tables')).filter(tb => tb.tableId.startsWith('Journal_')).length, 1, 'même journal');
   await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Brest' }]]);
   await openWidget(target.url);
@@ -856,11 +924,11 @@ try {
   assert.ok(!targetSections.some(sc => sc.parentKey === 'form'), 'formulaire effacé');
   const synchroPage = (await records(target.doc, '_grist_Views')).find(v => v.name === 'Synchro');
   const leaves = JSON.stringify(JSON.parse(synchroPage.layoutSpec || '{}')).match(/"leaf":\d+/g) || [];
-  assert.ok(leaves.every(l => targetSections.some(sc => sc.id === Number(l.slice(7)) && sc.parentId === synchroPage.id)), 'disposition de la page nettoyée');
+  assert.ok(leaves.every(l => targetSections.some(sc => sc.id === Number(l.slice(7)) && sc.parentId === synchroPage.id)), 'disposition de la page du widget intacte');
+  assert.ok(!(await pagesOf(target.doc)).some(p => p.name.startsWith('Journal_')), 'page du formulaire effacée');
   assert.equal((await records(target.doc, 'Contacts')).length, 4, 'destination gardée');
   await openWidget(source.url);
-  await button('Révoquer').click();
-  await dialogButton('Révoquer').click();
+  await revoke();
   await widget().getByText('Personne ne reçoit encore cet export.').waitFor();
   await button('Supprimer').click();
   await dialogButton('Supprimer').click();
@@ -870,12 +938,7 @@ try {
   step('CIBLE puis SOURCE : réception arrêtée, révocation, export supprimé avec sa table technique');
 
   // --- Lien public : un seul code, la CIBLE lit les instantanés de l'export sans identifiant
-  await button('Nouvel export').click();
-  await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
-  await dialogButton('Continuer').click();
-  await dialogButton('Continuer').click();
-  await dialog().getByLabel('Nom de l’export').fill('Annuaire');
-  await dialogButton('Créer l’export').click();
+  await newExport('Contacts', 'Annuaire');
   await dialogButton('Ajouter un destinataire').click();
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
   await shot('15-source-public');
@@ -891,6 +954,8 @@ try {
   const visible = (await (await anon('Synchro')).json()).records;
   assert.deepEqual(visible.map(r => r.fields.Synchro_Type).sort(), ['complet', 'empreinte'], 'seuls l\'instantané de l\'export public et son empreinte sont lisibles');
   assert.match(visible.find(r => r.fields.Synchro_Type === 'empreinte').fields.Synchro_Ids, /^\d+:[0-9a-f]{8}$/);
+  const anonColumns = await (await fetch(`${TEAM}/api/docs/${source.doc}/tables/Synchro/columns`)).text();
+  assert.ok(anonColumns.includes('Synchro_Lot') && !anonColumns.includes('Synchro_Export') && !anonColumns.includes('invitations'), 'note de la SOURCE cachée au lien public');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
 
@@ -907,7 +972,7 @@ try {
   await waitFor(async () => (await records(target.doc, 'Annuaire')).length === live, 'lien public : lignes lues');
   await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Émile', Interne: 'i5' }]]);
   await waitFor(async () => (await records(target.doc, 'Annuaire')).some(r => r.Nom === 'Émile'), 'lien public : ajout lu');
-  step('Lien public : seul l\'instantané de l\'export est lisible, la CIBLE le recopie sans échange de réponse');
+  step('Lien public : seul l\'instantané de l\'export est lisible (sans la note de la SOURCE), la CIBLE le recopie sans échange de réponse');
 
   await openWidget(source.url);
   await button('Couper le lien public').click();

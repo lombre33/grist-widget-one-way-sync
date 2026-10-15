@@ -7,7 +7,11 @@ import { el, openModal } from './ui.js';
 const IMG = name => (name.startsWith('img/') ? name : `docs/images/${name}.png`);
 
 // role : 'source', 'target' ou 'both'. text : paragraphes, fr puis en.
+// Les sections suivent le parcours réel, dans l'ordre où les deux personnes le vivent : chacune
+// est aussi reprise seule comme aide d'une étape d'assistant (`stepHelp`), son `id` ne change donc
+// pas. Les images sont celles du test d'intégration : une capture qui manque fait échouer `npm test`.
 const SECTIONS = [
+  // Avant tout : installer le widget, des deux côtés.
   { id: 'install', role: 'both',
     title: ['Installer le widget (dans chaque document)', 'Install the widget (in each document)'],
     text: [[
@@ -24,6 +28,7 @@ const SECTIONS = [
       '4. In the right panel, accept full access to the document. Rename the page, for example “Sync”. Technical tables have no page: they are in “Raw data”.',
     ]],
     images: ['00a-installer-ajouter', '00b-installer-page', '00c-installer-url', '00d-installer-acces', '01-accueil'] },
+  // SOURCE : créer un export (tables, colonnes, options), puis inviter.
   { id: 's-tables', role: 'source',
     title: ['Créer un export : les tables', 'Create an export: the tables'],
     text: [[
@@ -45,9 +50,9 @@ const SECTIONS = [
   { id: 's-options', role: 'source',
     title: ['Ajouter un destinataire', 'Add a recipient'],
     text: [[
-      'Sur la carte de l’export, Ajouter un destinataire. Mode « avec réponse » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation.',
+      'Sur la carte de l’export, Ajouter un destinataire. Mode « avec réponse » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas.',
     ], [
-      'On the export card, Add a recipient. “With reply” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation.',
+      'On the export card, Add a recipient. “With reply” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below.',
     ]],
     images: ['04-source-options'] },
   { id: 's-invite', role: 'source',
@@ -58,6 +63,7 @@ const SECTIONS = [
       'Copy the code, or “Copy with instructions” for a message ready to email to the TARGET person. “Later” closes the wizard: the invitation waits on the export card.',
     ]],
     images: ['05-source-invitation', '06-source-attente'] },
+  // CIBLE : accepter l'invitation, ranger les tables, donner le lien du formulaire.
   { id: 't-code', role: 'target',
     title: ['Coller le code d’invitation', 'Paste the invitation code'],
     text: [['Recevoir, Accepter une invitation, coller le code reçu de la SOURCE.'], ['Receive, Accept an invitation, paste the code received from the SOURCE.']],
@@ -67,21 +73,21 @@ const SECTIONS = [
     text: [[
       'Pour chaque table de l’export : Nouvelle table (nom modifiable) ou une table du document.',
       'Pour une table existante, dire où va chaque colonne et par quelle colonne rattacher les lignes déjà là : une ligne dont cette colonne a la même valeur est mise à jour au lieu d’être doublée.',
-      'Le widget crée un journal pour l’export et publie un formulaire de réception à côté de lui. Grist recharge le widget : l’assistant se rouvre seul à l’étape suivante.',
+      'Le widget crée un journal pour l’export et publie son formulaire de réception sur sa propre page, rangée sous celle du widget.',
     ], [
       'For each table of the export: New table (name editable) or a table of the document.',
       'For an existing table, say where each column goes and which column attaches rows already there: a row with the same value is updated instead of duplicated.',
-      'The widget creates a journal for the export and publishes a receiving form next to it. Grist reloads the widget: the wizard reopens at the next step.',
+      'The widget creates a journal for the export and publishes its receiving form on its own page, under the widget’s page.',
     ]],
     images: ['08-cible-destinations', '08b-cible-colonnes'] },
   { id: 't-link', role: 'target',
     title: ['Copier le lien du formulaire', 'Copy the form link'],
     text: [[
-      'Dans la carte du formulaire apparu : Partager, puis Copier le lien. Coller ce lien dans le widget, Tester le lien. Il sert pour toutes les tables de l’export, et pour celles qui s’y ajouteront.',
-      'Ce lien est un droit d’écriture dans votre journal : ne le diffusez pas ailleurs.',
+      'Ouvrir la page du formulaire, sous celle du widget, puis dans sa carte : Partager, Copier le lien. Coller ce lien dans le widget, Tester le lien : le widget vérifie qu’il écrit bien dans le journal de cette réception. Il sert pour toutes les tables de l’export, et pour celles qui s’y ajouteront. Ensuite, la page du widget se replie.',
+      'Ce lien est un droit d’écriture dans votre journal : ne le diffusez pas ailleurs. Chaque réception a le sien.',
     ], [
-      'In the card of the new form: Share, then Copy link. Paste it in the widget, Test the link. It works for every table of the export, and those added later.',
-      'This link is a write right into your journal: do not share it elsewhere.',
+      'Open the form’s page, under the widget’s page, then in its card: Share, Copy link. Paste it in the widget, Test the link: the widget checks that it writes into this reception’s journal. It works for every table of the export, and those added later. Then the widget’s page folds up.',
+      'This link is a write right into your journal: do not share it elsewhere. Each reception has its own.',
     ]],
     images: ['img/aide-partager.png', 'img/aide-copier.png', '09-cible-lien'] },
   { id: 't-reply', role: 'target',
@@ -92,6 +98,7 @@ const SECTIONS = [
       'Copy the reply code, or “Copy with instructions”, and send it to the SOURCE. It holds the write address and your card (email, document, team), no data.',
     ]],
     images: ['10-cible-reponse'] },
+  // SOURCE : approuver la réponse, envoyer l'existant, gérer les destinataires.
   { id: 's-reply', role: 'source',
     title: ['Approuver la réponse', 'Approve the reply'],
     text: [[
@@ -116,6 +123,7 @@ const SECTIONS = [
       'A resend goes to all recipients of the export; for those who already had these rows, it has no effect.',
     ]],
     images: ['13-source-actif', '18-source-modifier', '13b-source-reprendre'] },
+  // CIBLE au quotidien : la recopie, les tables ajoutées plus tard.
   { id: 't-daily', role: 'target',
     title: ['Au quotidien, côté CIBLE', 'Day to day, TARGET side'],
     text: [[
@@ -136,18 +144,31 @@ const SECTIONS = [
       'When the SOURCE adds a table to the export, a dialog asks where it goes: Receive (new table, or existing table with column mapping), Refuse (its rows are deleted on arrival), or Later (it stays offered on the card).',
     ]],
     images: ['17-cible-nouvelle-table', '08b-cible-colonnes'] },
+  // Cas particuliers (grosses tables, Échange, lien public, relais), puis les pannes connues.
   { id: 'big', role: 'both',
     title: ['Gros changements, valeurs venues d’une autre table', 'Big changes, values from another table'],
     text: [[
       'Un changement de plus de 2 000 lignes environ, fait d’un coup (import, remplacement), ne part qu’en partie. Grist le note dans la table Synchro, et le widget SOURCE envoie le reste par tranches, seul, dès qu’un propriétaire ouvre sa page (même repliée). En attendant, la CIBLE affiche combien de lignes manquent.',
       'Une valeur qui change à cause d’une autre table (le nom d’une ville renommée, affiché par une Référence, ou une formule) repart seule, sans toucher la ligne.',
-      'Une table de plus de 20 000 lignes ne peut pas être envoyée : le widget la refuse. Si des envois en attente dépassent ensemble la taille permise par Grist, le widget SOURCE vide la file et renvoie tout, seul.',
+      'Une grande table part comme une petite : la liste de ses clés tient en 256 empreintes, et le widget envoie la liste complète par morceaux quand il le faut. Si des envois en attente dépassent ensemble la taille permise par Grist, le widget SOURCE vide la file et renvoie tout, seul.',
     ], [
       'A change of more than about 2,000 rows made at once (import, replace) is only partly sent. Grist notes it in the Synchro table, and the SOURCE widget sends the rest in batches, on its own, as soon as an owner opens its page (even collapsed). Meanwhile, the TARGET shows how many rows are missing.',
       'A value that changes because of another table (the name of a renamed city, shown by a Reference, or a formula) leaves on its own, without touching the row.',
-      'A table of more than 20,000 rows cannot be sent: the widget refuses it. If waiting deliveries together exceed the size Grist allows, the SOURCE widget clears the queue and resends everything, on its own.',
+      'A large table leaves like a small one: its key list fits in 256 fingerprints, and the widget sends the full list in parts when needed. If waiting deliveries together exceed the size Grist allows, the SOURCE widget clears the queue and resends everything, on its own.',
     ]],
     images: ['19-cible-envoi-coupe'] },
+  { id: 'exchange', role: 'both',
+    title: ['Variante : Échange, dans les deux sens', 'Variant: Exchange, both ways'],
+    text: [[
+      'Deux documents se tiennent à jour l’un l’autre : une modification faite d’un côté passe de l’autre, sans revenir ; quand la même ligne change des deux côtés, la plus récente l’emporte. Il faut un propriétaire de chaque côté.',
+      'SOURCE : en ajoutant un destinataire (le premier de l’export), choisir Échange. Le widget publie un formulaire de retour sur sa propre page : copier son lien, il part dans l’invitation. CIBLE : accepter comme d’habitude ; la réponse branche les deux sens à la fois. SOURCE : approuver.',
+      'Une case Supprime est ajoutée aux tables : cochée d’un côté, la ligne disparaît des deux. Arrêter, d’un côté ou de l’autre, arrête les deux sens ; les tables gardent leurs lignes.',
+    ], [
+      'Two documents keep each other up to date: a change made on one side reaches the other, without coming back; when the same row changes on both sides, the most recent wins. Each side needs an owner.',
+      'SOURCE: when adding a recipient (the first of the export), pick Exchange. The widget publishes a return form on its own page: copy its link, it goes into the invitation. TARGET: accept as usual; the reply connects both ways at once. SOURCE: approve.',
+      'A Supprime box is added to the tables: ticked on one side, the row disappears on both. Stopping, on either side, stops both ways; the tables keep their rows.',
+    ]],
+    images: ['20-echange-mode', '21-echange-cible'] },
   { id: 'public', role: 'both',
     title: ['Variante : lien public', 'Variant: public link'],
     text: [[
@@ -174,13 +195,13 @@ const SECTIONS = [
     title: ['Si quelque chose coince', 'If something gets stuck'],
     text: [[
       'Rien n’arrive dans la table de la CIBLE : ouvrir la page du widget dans la CIBLE, les versions attendaient dans le journal.',
-      'Ligne d’un destinataire en rouge : la CIBLE a arrêté la réception ou dépublié son formulaire. Révoquer cette personne, puis l’inviter de nouveau.',
+      'Ligne d’un destinataire en rouge : la CIBLE a arrêté la réception, coupé ou dépublié son formulaire. Révoquer cette personne, puis l’inviter de nouveau ; dans la CIBLE, la même réception reprend.',
       'Tous les envois du document SOURCE sont en retard : un envoi en échec bloque la file. Débloquer la file.',
       'Des lignes ne sont pas arrivées : ouvrir la page du widget dans la SOURCE (un gros changement y finit de partir seul), sinon Tout renvoyer.',
       'Au branchement, « Grist 1.7.11 ou plus récent » : l’instance ne sait pas filtrer un webhook par export.',
     ], [
       'Nothing reaches the TARGET table: open the widget page in the TARGET, versions were waiting in the journal.',
-      'Red recipient line: the TARGET stopped receiving or unpublished its form. Revoke this person, then invite them again.',
+      'Red recipient line: the TARGET stopped receiving, cut or unpublished its form. Revoke this person, then invite them again; in the TARGET, the same reception resumes.',
       'All deliveries of the SOURCE document are late: a failed delivery blocks the queue. Unblock the queue.',
       'Rows did not arrive: open the widget page in the SOURCE (a big change finishes leaving there on its own), otherwise Resend all.',
       'On connecting, “Grist 1.7.11 or later”: the instance cannot filter a webhook by export.',
@@ -211,7 +232,7 @@ export function tutorialView(address) {
   const sections = SECTIONS.map((s, i) => section(s, i + 1));
   const filter = role => {
     for (const node of sections) node.classList.toggle('hidden', role !== 'all' && !['both', role].includes(node.dataset.role));
-    for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.role === role));
+    for (const button of buttons) button.setAttribute('aria-pressed', String(button.dataset.role === role));
   };
   const buttons = [['all', t('tuto.all')], ['source', t('tuto.source')], ['target', t('tuto.target')]].map(([role, label]) =>
     el('button', { class: 'btn btn-small', type: 'button', 'data-role': role, 'aria-pressed': String(role === 'all'), onclick: () => filter(role) }, label));

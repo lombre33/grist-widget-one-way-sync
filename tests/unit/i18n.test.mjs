@@ -1,14 +1,16 @@
 // Textes de l'interface : les deux langues ont les mêmes clés et les mêmes valeurs à insérer, toute
-// clé employée par le code existe, et la mise en forme suit la typographie de chaque langue.
+// clé employée par le code existe, la mise en forme suit la typographie de chaque langue, et les
+// images du tutoriel existent.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { format } from '../../js/i18n.js';
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const fr = JSON.parse(read('i18n/fr.json'));
 const en = JSON.parse(read('i18n/en.json'));
-const code = [...readdirSync(new URL('../../js', import.meta.url)).map(f => read(`js/${f}`)), read('index.html')].join('\n');
+const jsFiles = readdirSync(new URL('../../js', import.meta.url), { recursive: true }).filter(f => f.endsWith('.js'));
+const code = [...jsFiles.map(f => read(`js/${f}`)), read('index.html')].join('\n');
 // Familles de clés que le code compose (`t(`send.status.${key}`)`, `error.${e.message}`).
 const DYNAMIC = ['type.', 'guide.role.', 'guide.handoff.', 'send.status.', 'recv.status.', 'recv.history.', 'error.'];
 const placeholders = text => [...new Set([...text.matchAll(/\{(\w+)(?:\|[^}]*)?\}/g)].map(m => m[1]))].sort();
@@ -59,4 +61,11 @@ test('mise en forme : espaces insécables et nombres en français, pluriels des 
     'une valeur insérée garde ses espaces');
   assert.equal(format('fr', 'cle.inconnue'), 'cle.inconnue');
   assert.equal(format('fr', 'error.generic'), fr['error.generic'].replace(' :', ' :'), 'valeur absente : laissée entre accolades');
+});
+
+test('toute image du tutoriel existe', () => {
+  const names = [...read('js/tutorial.js').matchAll(/images: \[([^\]]*)\]/g)].flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(n => n[1]));
+  assert.ok(names.length > 20);
+  const missing = names.map(name => (name.startsWith('img/') ? name : `docs/images/${name}.png`)).filter(path => !existsSync(new URL(`../../${path}`, import.meta.url)));
+  assert.deepEqual(missing, []);
 });

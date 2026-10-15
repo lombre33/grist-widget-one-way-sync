@@ -7,7 +7,8 @@ import { t } from './i18n.js';
 const fold = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const matches = (label, query) => fold(query).split(/\s+/).filter(Boolean).every(w => fold(label).includes(w));
 
-// el('button', {class: 'btn', onclick: fn}, 'Texte') ; les enfants texte passent par textContent.
+// el('button', {class: 'btn', onclick: fn}, 'Texte') ; les enfants texte passent par textContent,
+// les listes d'enfants (imbriquées ou non) sont mises à plat.
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attrs)) {
@@ -16,7 +17,7 @@ export function el(tag, attrs = {}, ...children) {
     else if (name === 'class') node.className = value;
     else node.setAttribute(name, value === true ? '' : value);
   }
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined || child === false) continue;
     node.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
@@ -63,12 +64,12 @@ export function openModal({ title, body, buttons = [], width = 480, onClose }) {
   };
   async function busy(clicked, fn) {
     const all = [...footer.children];
-    const before = all.map(b => b.disabled);
-    for (const b of all) b.disabled = true;
+    const before = all.map(button => button.disabled);
+    for (const button of all) button.disabled = true;
     try {
       await fn();
     } finally {
-      all.forEach((b, i) => { b.disabled = before[i]; });
+      all.forEach((button, i) => { button.disabled = before[i]; });
       if (clicked.isConnected && !frame.contains(document.activeElement)) clicked.focus();
     }
   }
@@ -97,16 +98,16 @@ document.addEventListener('keydown', (event) => {
 // `show(index, body, buttons)` affiche une étape ; les précédentes sont marquées faites.
 // `buttons(list)` change les boutons seuls ; `setSteps(labels)` raccourcit le parcours (lien public).
 export function openWizard({ title, steps, onClose }) {
-  const bar = el('ol', { class: 'steps' });
+  const stepList = el('ol', { class: 'steps' });
   const content = el('div', { class: 'form' });
-  const modal = openModal({ title, body: [bar, content], onClose });
+  const modal = openModal({ title, body: [stepList, content], onClose });
   let shown = -1;
   return {
     close: () => modal.close(),
     buttons: list => modal.setButtons(list),
     setSteps(labels) { steps = labels; },
     show(index, body, buttons) {
-      bar.replaceChildren(...steps.map((label, i) => el('li', {
+      stepList.replaceChildren(...steps.map((label, i) => el('li', {
         class: i < index ? 'done' : i === index ? 'current' : 'locked', 'aria-current': i === index ? 'step' : null,
       }, el('span', { class: 'step-num', 'aria-hidden': 'true' }, i < index ? icon('check') : String(i + 1)), label)));
       content.replaceChildren(...[body].flat().filter(Boolean));
@@ -211,10 +212,8 @@ export function pickField({ items, value, label, onChange = () => {} }) {
 
 // Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`), sinon une phrase
 // générique avec le détail technique.
-export function errorText(e) {
-  const key = `error.${e.message}`;
-  return t(key) === key ? t('error.generic', { detail: e.message || String(e) }) : t(key);
-}
+const known = e => t(`error.${e.message}`) !== `error.${e.message}`;
+export const errorText = e => (known(e) ? t(`error.${e.message}`) : t('error.generic', { detail: e.message || String(e) }));
 
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
@@ -224,7 +223,7 @@ export async function run(button, out, fn) {
   try {
     return await fn();
   } catch (e) {
-    console.error(e);
+    if (!known(e)) console.error(e); // une erreur prévue (code mal copié, lien refusé) n'est qu'un message
     if (out) out.replaceChildren(message('err', errorText(e)));
     return undefined;
   } finally {

@@ -4,7 +4,17 @@
 //  - l'API REST de la même instance pour les webhooks, que l'API des widgets n'expose pas, et
 //    pour des lectures légères en SQL, avec un jeton d'accès court (`getAccessToken`) passé en
 //    paramètre `auth=`.
-import { parseDocBaseUrl, randomHex, toRows } from './core.js';
+// Toute requête réseau du widget passe par gristFetch.
+import { GRIST_ORIGINS } from './config.js';
+import { maskKey, parseDocBaseUrl } from './logic/codes.js';
+import { toRows } from './logic/common.js';
+
+// Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
+// la personne (le jeton, quand il en faut un, est dans l'adresse).
+export async function gristFetch(url, options = {}) {
+  if (!GRIST_ORIGINS.includes(new URL(url).origin)) throw new Error('otherInstance');
+  return fetch(url, { ...options, credentials: 'omit' });
+}
 
 export const fetchRows = async tableId => toRows(await grist.docApi.fetchTable(tableId));
 
@@ -60,7 +70,7 @@ export async function selectRows(tableId, colIds) {
   try {
     const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
     const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"`;
-    const response = await fetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
+    const response = await gristFetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
   } catch (e) {
     return null;
@@ -75,7 +85,7 @@ export const withLock = (name, fn) => (navigator.locks ? navigator.locks.request
 
 async function rest(method, path, body) {
   const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
-  const response = await fetch(`${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`, {
+  const response = await gristFetch(`${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`, {
     method,
     // Grist exige l'un de ces en-têtes pour toute écriture sans cookie (protection CSRF).
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -83,7 +93,8 @@ async function rest(method, path, body) {
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(response.status === 403 ? 'ownerOnly' : `HTTP ${response.status} ${text.slice(0, 200)}`);
+    // Une erreur de Grist peut citer l'adresse d'un webhook : sa clé n'est jamais montrée en entier.
+    const error = new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${text.slice(0, 200)}`));
     error.status = response.status;
     throw error;
   }
@@ -132,152 +143,3 @@ export const setWebhookEnabled = (id, enabled) => rest('PATCH', `/webhooks/${enc
 export const renameWebhook = (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name });
 export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
 export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
-
-// ---------------------------------------------------------------------------------------------
-// Formulaire de réception (CIBLE) : mêmes trois actions que le bouton « Publier » de Grist. Le
-// serveur crée alors la clé de partage, que le widget ne peut pas lire : la personne copie le
-// lien depuis la carte du formulaire.
-
-// Idempotent, et repris là où il s'est arrêté : ajouter une section à la page du widget fait
-// recréer son cadre par Grist, ce qui interrompt le script. Le widget rappelle donc cette
-// fonction à chaque affichage tant que le journal de l'export attend son lien.
-export async function ensureForm(tableId) {
-  const table = (await readSchema()).table(tableId);
-  const sections = await fetchRows('_grist_Views_section');
-  let section = sections.find(s => s.parentKey === 'form' && s.tableRef === table.id);
-  if (!section) {
-    const created = (await apply([['CreateViewSection', table.id, widgetViewRef(sections), 'form', null, null]])).retValues[0];
-    section = { id: created.sectionRef, parentId: created.viewRef, shareOptions: '' };
-  }
-  const page = (await fetchRows('_grist_Pages')).find(p => p.viewRef === section.parentId);
-  if (!page.shareRef) {
-    const shareRef = (await apply([['AddRecord', '_grist_Shares', null, { linkId: randomHex(12), options: JSON.stringify({ publish: true }) }]])).retValues[0];
-    await apply([['UpdateRecord', '_grist_Pages', page.id, { shareRef }]]);
-  }
-  if (!JSON.parse(section.shareOptions || '{}').publish) {
-    await apply([['UpdateRecord', '_grist_Views_section', section.id, { shareOptions: JSON.stringify({ form: true, publish: true }) }]]);
-  }
-}
-
-// Couper le lien du formulaire de cette table : le partage de sa page change d'identifiant, et
-// Grist remplace alors sa clé (il efface celle d'un identifiant disparu, vérifié dans
-// HomeDBManager.syncShares). La clé est celle de la page : tous ses formulaires en changent.
-export async function renewFormLink(tableId) {
-  await ensureForm(tableId);
-  const table = (await readSchema()).table(tableId);
-  const section = (await fetchRows('_grist_Views_section')).find(s => s.parentKey === 'form' && s.tableRef === table.id);
-  const page = (await fetchRows('_grist_Pages')).find(p => p.viewRef === section.parentId);
-  await apply([['UpdateRecord', '_grist_Shares', page.shareRef, { linkId: randomHex(12) }]]);
-}
-
-// Page de chaque formulaire publié, par table : { samePage, name }, pour dire où cliquer.
-export async function formPages() {
-  const [sections, tables, views] = await Promise.all([fetchRows('_grist_Views_section'), fetchRows('_grist_Tables'), fetchRows('_grist_Views')]);
-  const mine = widgetViewRef(sections);
-  const pages = new Map();
-  for (const section of sections) {
-    if (section.parentKey !== 'form' || !JSON.parse(section.shareOptions || '{}').publish) continue;
-    const table = tables.find(tb => tb.id === section.tableRef);
-    const view = views.find(v => v.id === section.parentId);
-    if (table) pages.set(table.tableId, { samePage: section.parentId === mine, name: view ? view.name : '' });
-  }
-  return pages;
-}
-
-// Replie dans la barre de la page du widget les formulaires de ces tables, une fois leur lien
-// donné : la page ne montre plus que le widget. Ils restent publiés, un clic les rouvre.
-export async function collapseForms(tableIds) {
-  const [tables, sections, views] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Views')]);
-  const viewRef = widgetViewRef(sections);
-  if (!viewRef) return;
-  const refs = new Set(tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.id));
-  const forms = new Set(sections.filter(s => s.parentId === viewRef && s.parentKey === 'form' && refs.has(s.tableRef)).map(s => s.id));
-  const view = views.find(v => v.id === viewRef);
-  // Sans disposition enregistrée, Grist empile les sections de la page : on part de là.
-  const layout = JSON.parse(view.layoutSpec || '{}');
-  if (!layout.children) layout.children = sections.filter(s => s.parentId === viewRef).map(s => ({ leaf: s.id }));
-  const collapsed = layout.collapsed || [];
-  if ([...forms].every(id => collapsed.some(c => c.leaf === id))) return;
-  const keep = box => {
-    if (box.leaf !== undefined) return forms.has(box.leaf) ? null : box;
-    const children = (box.children || []).map(keep).filter(Boolean);
-    return children.length ? { ...box, children } : null;
-  };
-  const root = keep(layout) || { children: [] };
-  root.collapsed = [...collapsed, ...[...forms].filter(id => !collapsed.some(c => c.leaf === id)).map(leaf => ({ leaf }))];
-  await apply([['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(root) }]]);
-}
-
-// Après l'effacement de tables : leurs sections (dont les formulaires) disparaissent, mais pas
-// leurs cases dans la disposition de la page, ni dans la barre des repliés (vérifié : les numéros
-// de sections sont ensuite réutilisés). On les retire, et une page qui n'a plus de formulaire
-// publié perd son partage : la clé d'écriture disparaît avec lui.
-export async function tidyPages(viewRefs) {
-  const [sections, views, pages] = await Promise.all([fetchRows('_grist_Views_section'), fetchRows('_grist_Views'), fetchRows('_grist_Pages')]);
-  const actions = [];
-  for (const viewRef of viewRefs) {
-    const view = views.find(v => v.id === viewRef);
-    if (!view) continue;
-    const here = sections.filter(s => s.parentId === viewRef);
-    const ids = new Set(here.map(s => s.id));
-    if (view.layoutSpec) {
-      const layout = JSON.parse(view.layoutSpec);
-      const keep = box => {
-        if (box.leaf !== undefined) return ids.has(box.leaf) ? box : null;
-        return { ...box, children: (box.children || []).map(keep).filter(Boolean) };
-      };
-      const { collapsed = [], ...tree } = layout;
-      const tidy = { ...keep(tree), collapsed: collapsed.filter(c => ids.has(c.leaf)) };
-      if (!tidy.collapsed.length) delete tidy.collapsed;
-      if (JSON.stringify(tidy) !== view.layoutSpec) actions.push(['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(tidy) }]);
-    }
-    const page = pages.find(p => p.viewRef === viewRef);
-    const published = here.some(s => JSON.parse(s.shareOptions || '{}').publish);
-    if (page && page.shareRef && !published && !pages.some(p => p.id !== page.id && p.shareRef === page.shareRef)) {
-      actions.push(['UpdateRecord', '_grist_Pages', page.id, { shareRef: 0 }], ['RemoveRecord', '_grist_Shares', page.shareRef]);
-    }
-  }
-  if (actions.length) await apply(actions);
-}
-
-// Tables techniques sans page : elles restent dans « Données source », pas dans la liste des
-// pages. Seule la page propre à la table est retirée (celle qui ne montre qu'elle).
-export async function dropPages(tableIds) {
-  const [tables, sections] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section')]);
-  const views = tables.filter(tb => tableIds.includes(tb.tableId) && tb.primaryViewId).filter(tb =>
-    sections.filter(s => s.parentId === tb.primaryViewId).every(s => s.tableRef === tb.id)).map(tb => tb.primaryViewId);
-  if (views.length) await apply(views.map(v => ['RemoveView', v]));
-}
-
-// Page commune aux vues d'export de la version 0.3 (SOURCE), effacée avec l'ancien montage. 0 si
-// elle n'existe pas.
-const EXPORTS_PAGE = 'Synchro_Exports';
-export async function exportsViewRef() {
-  const view = (await fetchRows('_grist_Views')).find(v => v.name === EXPORTS_PAGE);
-  return view ? view.id : 0;
-}
-
-// Retire une colonne de la page principale de sa table (elle reste dans les données brutes).
-export async function hideColumn(tableId, colId) {
-  const table = (await fetchRows('_grist_Tables')).find(tb => tb.tableId === tableId);
-  const column = (await fetchRows('_grist_Tables_column')).find(c => c.parentId === table.id && c.colId === colId);
-  const sections = new Set((await fetchRows('_grist_Views_section')).filter(s => s.parentId === table.primaryViewId).map(s => s.id));
-  const fields = (await fetchRows('_grist_Views_section_field')).filter(f => f.colRef === column.id && sections.has(f.parentId));
-  await apply(fields.length ? [['BulkRemoveRecord', '_grist_Views_section_field', fields.map(f => f.id)]] : []);
-}
-
-// Page qui porte ce widget : la seule section « personnalisée » dont l'adresse est celle de cette
-// page. Sinon (aucune ou plusieurs), 0 : le formulaire va sur une nouvelle page.
-function widgetViewRef(sections) {
-  const here = location.origin + location.pathname;
-  const mine = sections.filter((section) => {
-    if (section.parentKey !== 'custom') return false;
-    try {
-      const url = new URL(JSON.parse(JSON.parse(section.options || '{}').customView || '{}').url);
-      return url.origin + url.pathname === here;
-    } catch (e) {
-      return false;
-    }
-  });
-  return mine.length === 1 ? mine[0].parentId : 0;
-}

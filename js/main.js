@@ -3,14 +3,17 @@
 import { GRIST_ORIGINS, VERSION } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
-import { SYNC_TABLE } from './core.js';
+import { SYNC_TABLE } from './logic/common.js';
 import { readSchema } from './grist.js';
-import { legacyJournals, legacyTables, readSourceNote, receivedJournals } from './tables.js';
+import { legacyTables, readSourceNote } from './source/synchro.js';
+import { legacyJournals, receivedJournals } from './target/journals.js';
 import { copyField, el, errorText, message, openModal } from './ui.js';
 import { roleGuide, widgetAddress } from './guide.js';
 import { tutorialView } from './tutorial.js';
-import { renderSource, startAutoCatchUp } from './source.js';
-import { consolidateAll, renderTarget, startAutoConsolidation } from './target.js';
+import { refreshSource, renderSource } from './source/tab.js';
+import { startAutoCatchUp } from './source/resend.js';
+import { refreshTarget, renderTarget } from './target/tab.js';
+import { consolidateAll, startAutoConsolidation } from './target/loop.js';
 
 const $ = id => document.getElementById(id);
 
@@ -112,8 +115,8 @@ async function start() {
     return e.message === 'timeout' ? showStartProblem(t('start.slow'), { reload: true }) : showStartProblem(t('start.access'));
   }
 
-  startAutoConsolidation();
-  startAutoCatchUp();
+  startAutoConsolidation(refreshTarget);
+  startAutoCatchUp(refreshSource);
   const schema = await readSchema();
   const journals = receivedJournals(schema);
   // Échange dont le formulaire de retour vient d'être publié : l'assistant reprend dans Envoyer.
