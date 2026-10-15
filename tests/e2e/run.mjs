@@ -292,16 +292,15 @@ try {
   await widget().getByText(`Données de ${env.email}`).waitFor();
   step('CIBLE : Contacts et Communes consolidées, propriétaire affiché');
 
-  // --- Tables techniques rangées sous la page du widget, destination propre
-  const tucked = async (doc) => {
-    const list = (await api('POST', `/docs/${doc}/sql`, { sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
-    const at = list.findIndex(p => p.indentation === 0 && JSON.parse(p.options || '{}').collapsed);
-    assert.ok(at >= 0, 'page du widget repliée');
-    return list.slice(at + 1).filter(p => p.indentation === 1).map(p => p.name).sort();
-  };
-  assert.deepEqual((await tucked(source.doc)).filter(name => name.startsWith('Synchro_')), ['Synchro_Contacts', 'Synchro_Villes']);
-  assert.equal((await tucked(source.doc)).length, 4, 'vues d\'export rangées aussi');
-  assert.deepEqual(await tucked(target.doc), ['Journal_Communes', 'Journal_Contacts']);
+  // --- Tables techniques sans page (« Données source »), sauf une page commune aux vues d'export
+  // de la SOURCE, rangée sous la page du widget ; destination propre
+  const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
+    sql: 'select p.indentation, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
+  assert.deepEqual((await pagesOf(source.doc)).map(p => `${p.indentation}:${p.name}`),
+    ['0:Table1', '0:Contacts', '0:Villes', '0:Synchro', '1:Synchro_Exports'], 'SOURCE : une seule page technique');
+  assert.deepEqual((await pagesOf(target.doc)).map(p => p.name).sort(), ['Communes', 'Contacts', 'Synchro', 'Table1'], 'CIBLE : aucune page technique');
+  const sourceTables = (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId);
+  assert.ok(['Synchro_Contacts', 'Synchro_Villes', 'Contacts_summary_id_sync', 'Villes_summary_id_sync'].every(id => sourceTables.includes(id)), 'tables techniques gardées');
   const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
   assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
   const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
@@ -312,7 +311,7 @@ try {
     const spec = JSON.parse(views[0].fields.layoutSpec || '{}');
     return (spec.collapsed || []).length === 2 && spec;
   }, 'formulaires repliés');
-  step('SOURCE et CIBLE : une table technique par table, rangée ; destination sans colonne technique ; formulaires repliés');
+  step('SOURCE et CIBLE : tables techniques sans page (une page commune aux vues d\'export) ; destination sans colonne technique ; formulaires repliés');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');

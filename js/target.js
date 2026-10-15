@@ -5,7 +5,7 @@ import {
   APPLIED_COL, AUTHOR_COL, KEY_COL, LIST_COL, buildReply, buildWebhookUrl, copyColumns, expandRows, parseFormLink, parseInvitation,
   exportTableId, listTableId, planConsolidation, planPull, planPurge, recentChanges, sentColumns, toTableId,
 } from './core.js';
-import { apply, collapseForms, docIdentity, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
+import { apply, collapseForms, docIdentity, dropPages, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
 import {
   JOURNAL_PREFIX, addDestColumnsActions, createReceivingTables, destColumns, readNote, receivedTables, removeTechnicalTables,
   upgradeJournal, writeNote,
@@ -178,6 +178,8 @@ export async function renderTarget(root = container) {
     roleGuide({ you: 'target', open: !cards.length })].filter(Boolean));
   // Les journaux qui reçoivent déjà n'ont plus besoin de leur formulaire à l'écran.
   if (!readOnly) collapseForms(groups.filter(g => !g.waiting).flatMap(g => g.pairs.map(p => p.journal))).catch(() => {});
+  // Mises en place d'avant : les journaux perdent leur page (ils restent dans les données).
+  if (!readOnly) dropPages(groups.flatMap(g => g.pairs.map(p => p.journal))).catch(() => {});
   const waiting = groups.find(g => g.waiting);
   if (waiting && !readOnly && !wizardOpened) {
     wizardOpened = true;

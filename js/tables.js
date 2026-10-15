@@ -9,7 +9,9 @@ import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, GROUP_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, ORDER_COL, RECEIVED_COL, SCHEMA_COL,
   STATE_COL, exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
 } from './core.js';
-import { apply, fetchRows, hideColumn, readSchema, tidyPages, tuckUnderWidgetPage } from './grist.js';
+import {
+  EXPORTS_PAGE, apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages, tuckUnderWidgetPage,
+} from './grist.js';
 
 export { JOURNAL_PREFIX };
 
@@ -33,7 +35,7 @@ export async function createListTable(tableId) {
       { id: SCHEMA_COL, type: 'Text', isFormula: false }]],
     ['AddRecord', id, null, {}],
   ]);
-  await tuckUnderWidgetPage([id]);
+  await dropPages([id]);
 }
 
 // Vue d'export de `tableId` (créée si besoin, rangée sous la page du widget) avec ces colonnes
@@ -44,9 +46,13 @@ export async function setExport(tableId, columns) {
   const schema = await readSchema();
   if (!schema.has(id)) {
     const key = schema.columns(tableId).find(c => c.colId === KEY_COL);
-    const created = (await apply([['CreateViewSection', schema.table(tableId).id, 0, 'record', [key.id], null]])).retValues[0];
+    const page = await exportsViewRef();
+    const created = (await apply([['CreateViewSection', schema.table(tableId).id, page, 'record', [key.id], null]])).retValues[0];
     await apply(exportColumnsActions(id));
-    await tuckUnderWidgetPage([], [created.viewRef]);
+    if (!page) {
+      await apply([['UpdateRecord', '_grist_Views', created.viewRef, { name: EXPORTS_PAGE }]]);
+      await tuckUnderWidgetPage([], [created.viewRef]);
+    }
   }
   const list = listTableId(tableId);
   const ids = (await fetchRows(list)).map(r => r.id);
@@ -112,7 +118,7 @@ export async function createReceivingTables({ journal, dest, columns, note, map 
   await apply(addDestColumnsActions(await readSchema(), dest, columns, map));
   await writeNote(await readSchema(), journal, note);
   await hideColumn(dest, KEY_COL);
-  await tuckUnderWidgetPage([journal]);
+  await dropPages([journal]);
 }
 
 // Note JSON dans la description de la colonne Synchro_Ids d'une table technique.

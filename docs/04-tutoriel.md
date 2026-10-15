@@ -28,7 +28,8 @@ courriel.
 **Ajouter**, **Ajouter une page**, vue **Personnalisée** (n'importe quelle table), **Ajouter une
 page** ; **URL personnalisée**, coller l'adresse du widget, **Ajouter un widget** (Grist peut
 demander de confirmer) ; dans le panneau de droite, accepter l'**accès complet**. Renommer la
-page, par exemple « Synchro » : les tables techniques se rangeront dessous, repliées.
+page, par exemple « Synchro ». Les tables techniques n'ont pas de page (elles sont dans « Données
+source ») ; côté SOURCE, une seule page `Synchro_Exports` se range sous celle du widget.
 
 ![Ajouter une page](images/00a-installer-ajouter.png)
 ![Vue Personnalisée](images/00b-installer-page.png)
@@ -107,7 +108,7 @@ Ici, `Ville` va dans `Commune`, et Lyon, déjà là avec une note, est rattaché
 
 ![Colonnes de la table existante](images/08b-cible-colonnes.png)
 
-Le widget crée un `Journal_<table>` par table (rangé sous sa page) et publie sur sa page un
+Le widget crée un `Journal_<table>` par table (sans page, dans « Données source ») et publie sur sa page un
 formulaire de réception par journal. Grist recharge alors le widget : l'assistant se rouvre seul
 à l'étape suivante.
 

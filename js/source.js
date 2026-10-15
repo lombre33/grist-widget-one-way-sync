@@ -6,7 +6,7 @@ import {
   PUBLIC_MEMO, maskKey, masterTableId, missingSyncColumns, parseReply, parseWebhookUrl, prepareSourceActions, publicAclActions,
 } from './core.js';
 import {
-  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
+  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, dropPages, fetchRows, listWebhooks, readSchema,
   setWebhookEnabled,
 } from './grist.js';
 import {
@@ -105,6 +105,8 @@ export async function renderSource(root = container) {
   // général posé par le widget reste en place, même sans partage.
   const open = await isPublic((await grist.docApi.getAccessToken({ readOnly: true })).baseUrl);
   if (!ownerOnly) await syncPublicRules(shares, open);
+  // Mises en place d'avant : les tables listes perdent leur page (elles restent dans les données).
+  if (!ownerOnly) await dropPages(tables.map(listTableId)).catch(() => {});
 
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },

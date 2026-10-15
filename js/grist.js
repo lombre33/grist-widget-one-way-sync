@@ -170,6 +170,24 @@ export async function tidyPages(viewRefs) {
   if (actions.length) await apply(actions);
 }
 
+// Tables techniques sans page : elles restent dans « Données source », pas dans la liste des
+// pages. Seule la page propre à la table est retirée (celle qui ne montre qu'elle). Une table de
+// résumé ne peut pas perdre sa dernière section (Grist l'efface avec) : voir `exportsViewRef`.
+export async function dropPages(tableIds) {
+  const [tables, sections] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section')]);
+  const views = tables.filter(tb => tableIds.includes(tb.tableId) && tb.primaryViewId).filter(tb =>
+    sections.filter(s => s.parentId === tb.primaryViewId).every(s => s.tableRef === tb.id)).map(tb => tb.primaryViewId);
+  if (views.length) await apply(views.map(v => ['RemoveView', v]));
+}
+
+// Page commune aux vues d'export (SOURCE), rangée sous la page du widget : une page, quel que soit
+// le nombre de tables envoyées. 0 si elle n'existe pas encore.
+export const EXPORTS_PAGE = 'Synchro_Exports';
+export async function exportsViewRef() {
+  const view = (await fetchRows('_grist_Views')).find(v => v.name === EXPORTS_PAGE);
+  return view ? view.id : 0;
+}
+
 // Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
 // celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
 // `viewRefs` : autres pages à ranger (celle d'une vue d'export, qui n'est pas une page principale).

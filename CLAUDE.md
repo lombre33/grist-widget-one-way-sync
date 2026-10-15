@@ -138,3 +138,8 @@ Effacer une table efface ses sections, mais pas leurs cases dans `layoutSpec` (r
 les numéros de sections sont réutilisés ensuite) ni le partage de la page (`_grist_Pages.shareRef`
 et `_grist_Shares`, donc la clé d'écriture). `tidyPages` nettoie les deux après
 `removeTechnicalTables`.
+
+Pages : les tables techniques n'ont pas de page (`dropPages`, « Données source » seulement), sauf
+la page commune `Synchro_Exports` des vues d'export : Grist efface une table de résumé dont la
+dernière section disparaît (vérifié). Créer une section sur une autre page que celle du widget ne
+recharge pas le widget.

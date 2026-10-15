@@ -67,7 +67,9 @@ visite (20 au plus), synchronisation immédiate, arrêt de la réception.
 
 ## Ce que le widget écrit dans les documents
 
-Ses tables techniques sont rangées sous la page du widget, repliée par défaut. Pas de table de
+Ses tables techniques n'ont pas de page : elles ne se voient que dans « Données source ». Seule
+exception, côté SOURCE, une page `Synchro_Exports` rangée sous la page du widget porte les vues
+d'export (Grist efface une table de résumé qui n'est plus montrée nulle part). Pas de table de
 réglages.
 
 | Document | Ajouts |
