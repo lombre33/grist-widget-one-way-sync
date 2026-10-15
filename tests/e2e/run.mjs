@@ -346,6 +346,7 @@ try {
   // --- Relais : la CIBLE peut renvoyer une table reçue ; ses journaux ne sont pas proposés
   await widget().getByRole('tab', { name: 'Envoyer' }).click();
   await button('Nouveau destinataire').click();
+  await dialog().getByRole('checkbox', { name: 'Contacts' }).waitFor();
   const offered = await dialog().locator('.check-list label').allTextContents();
   assert.ok(offered.some(l => l.includes('Contacts')) && !offered.some(l => l.includes('Journal_')), 'journaux exclus de l\'envoi');
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
@@ -380,9 +381,11 @@ try {
   await button('Colonnes').click();
   await dialog().getByRole('checkbox', { name: 'Interne' }).first().check();
   await dialogButton('Enregistrer').click();
+  await dialog().getByText(/Colonnes enregistrées : 5 lignes repartent/).waitFor();
+  await dialogButton('Fermer').click();
   await dialog().waitFor({ state: 'detached' });
   await openWidget(target.url);
-  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Interne === 'i1'), 'colonne ajoutée reçue');
+  await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue, valeurs existantes comprises');
   step('SOURCE puis CIBLE : colonne ajoutée à l\'export, créée et remplie dans la destination');
 
   // --- Arrêts : la CIBLE efface ses journaux, la SOURCE révoque et efface ses tables techniques

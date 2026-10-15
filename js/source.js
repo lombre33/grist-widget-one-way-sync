@@ -62,7 +62,9 @@ async function notePause(r, pausing) {
     const at = pausing && Math.max(0, ...(await fetchRows(f.table)).map(row => row[ORDER_COL] || 0));
     const id = listTableId(f.table);
     const note = (readNote(schema, id) || []).filter(e => !(e.mode === PAUSE && e.hook === f.main.id));
-    await writeNote(schema, id, pausing ? [...note, { id: `${PAUSE}-${f.main.id}`, mode: PAUSE, hook: f.main.id, at }] : note);
+    // Les colonnes aussi : en changer pendant la pause ne touche pas MajLe, il faut alors tout renvoyer.
+    const columns = pausing && JSON.stringify(await readExport(f.table));
+    await writeNote(schema, id, pausing ? [...note, { id: `${PAUSE}-${f.main.id}`, mode: PAUSE, hook: f.main.id, at, columns }] : note);
   }
 }
 
@@ -231,17 +233,22 @@ async function resume(r, enable, out) {
   const schema = await readSchema();
   const plans = [];
   for (const f of r.feeds) {
-    const since = (pauseEntry(schema, f) || {}).at;
+    const entry = pauseEntry(schema, f) || {};
     const rows = await fetchRows(f.table);
-    const ids = since === undefined ? rows.map(row => row.id) : rows.filter(row => row[ORDER_COL] > since).map(row => row.id);
-    plans.push({ table: f.table, ids, all: since === undefined });
+    const reshaped = entry.columns !== undefined && entry.columns !== JSON.stringify(await readExport(f.table));
+    const all = entry.at === undefined || reshaped;
+    const ids = all ? rows.map(row => row.id) : rows.filter(row => row[ORDER_COL] > entry.at).map(row => row.id);
+    plans.push({ table: f.table, ids, unknown: entry.at === undefined, reshaped });
   }
   const n = plans.reduce((sum, p) => sum + p.ids.length, 0);
-  const all = plans.filter(p => p.all).map(p => p.table);
+  const unknown = plans.filter(p => p.unknown).map(p => p.table);
+  const reshaped = plans.filter(p => p.reshaped && !p.unknown).map(p => p.table);
   const choice = (value, label, help, checked) => [el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'gristsync-resume', value, checked }), el('strong', {}, label)), el('p', { class: 'muted small choice-help' }, help)];
   const body = el('div', { class: 'form', role: 'radiogroup' },
-    choice('catchup', t('send.resume.catchup'), t('send.resume.catchup.help', { n }) + (all.length ? ' ' + t('send.resume.all', { tables: all.join(', ') }) : ''), true),
+    choice('catchup', t('send.resume.catchup'), [t('send.resume.catchup.help', { n }),
+      unknown.length ? t('send.resume.all', { tables: unknown.join(', ') }) : '',
+      reshaped.length ? t('send.resume.columns', { tables: reshaped.join(', ') }) : ''].filter(Boolean).join(' '), true),
     choice('as-is', t('send.resume.asIs'), t('send.resume.asIs.help'), false));
   const picked = await new Promise((resolve) => {
     let answered = false;
@@ -308,11 +315,19 @@ async function editColumns(r, out) {
       buttons: [{ label: t('common.cancel') }, {
         label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, async () => {
           if (fields.some(f => !f.values.length)) throw new Error('noColumn');
+          let n = 0;
           for (const f of fields) {
-            await setExport(f.table, f.usable.filter(c => f.values.includes(c.id)));
-            if ((await fetchRows(f.table)).length > 1000 - CHUNK) await sendAll(f.table, out);
+            const before = (await readExport(f.table)).map(c => c.id).join();
+            const chosen = f.usable.filter(c => f.values.includes(c.id));
+            if (chosen.map(c => c.id).join() === before) continue;
+            // Changer la formule de la vue d'export renvoie chaque ligne avec les colonnes choisies.
+            await setExport(f.table, chosen);
+            const rows = (await fetchRows(f.table)).length;
+            if (rows > 1000 - CHUNK) await sendAll(f.table, report);
+            n += rows;
           }
-          m.close();
+          report.replaceChildren(message('ok', n ? t('send.columns.sent', { n }) : t('send.columns.same')));
+          m.setButtons([{ label: t('common.close'), kind: 'btn-primary' }]);
         }),
       }],
     });
