@@ -22,6 +22,8 @@ export const isUserTable = id => id !== SYNC_TABLE && !id.startsWith('Synchro_')
 // ---------------------------------------------------------------------------------------------
 // SOURCE
 
+const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
+
 // Lignes de Synchro ([] sans la table). `schema` : instantané déjà lu, s'il y en a un.
 export const syncRows = async (schema = null) => ((schema || await readSchema()).has(SYNC_TABLE) ? fetchRows(SYNC_TABLE) : []);
 
@@ -57,14 +59,19 @@ async function refreshFormulas(schema, rows) {
 // colonne de suivi (marque d'envoi coupé des lots, suivi des clés) accepte du texte et surveille le
 // lot et la liste (dépendances posées après coup : Grist les refuse à la création), les formules
 // sont celles de cette version, pour les tables de `rows` (lignes de Synchro, ou à venir), et
-// chaque table d'un export a son suivi des clés. Rend vrai si quelque chose a changé.
+// chaque table d'un export a son suivi des clés. Synchro n'a pas de colonne manualSort : le webhook
+// l'enverrait, et chaque ligne reçue se placerait au même rang dans le journal ; au bout d'une
+// cinquantaine d'envois en attente (page de la CIBLE fermée), Grist renumérote les lignes voisines,
+// ce que la clé du formulaire n'a pas le droit de faire (403), et la file se bloque (vérifié). Rend
+// vrai si quelque chose a changé.
 export async function ensureSyncTable(rows = null) {
   let schema = await readSchema();
   if (!schema.has(SYNC_TABLE)) return false;
   const have = new Set(schema.columns(SYNC_TABLE).map(c => c.colId));
   const missing = syncColumns([]).filter(c => !have.has(c.id));
-  if (missing.length) {
-    await apply(missing.map(({ id, ...info }) => ['AddColumn', SYNC_TABLE, id, info]));
+  const sorted = have.has(SORT_COL);
+  if (missing.length || sorted) {
+    await apply([...missing.map(({ id, ...info }) => ['AddColumn', SYNC_TABLE, id, info]), ...(sorted ? [['RemoveColumn', SYNC_TABLE, SORT_COL]] : [])]);
     schema = await readSchema();
   }
   const cols = schema.columns(SYNC_TABLE);
@@ -76,7 +83,7 @@ export async function ensureSyncTable(rows = null) {
   const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
   const track = addTrackRowsAction(await fetchRows(SYNC_TABLE));
   if (track) await apply([track]);
-  return missing.length > 0 || depsChanged || formulasChanged || Boolean(track);
+  return missing.length > 0 || sorted || depsChanged || formulasChanged || Boolean(track);
 }
 
 // MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction), et
