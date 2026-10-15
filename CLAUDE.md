@@ -184,6 +184,14 @@ d'aide de `img/`). Les instances autorisées sont à la fois dans `js/config.js`
 `index.html`. Aide intégrée (V0.3) : onglet Tutoriel (`js/tutorial.js`), « Qui fait quoi ? » et
 « Copier avec les consignes » (`js/guide.js`), aide en images à chaque étape des assistants.
 
+Piège vérifié le 15 octobre (V0.4.4) : la table `Synchro` n'a pas de colonne `manualSort`
+(`ensureSyncTable` la retire). Le webhook l'envoyait : chaque ligne reçue visait le même rang du
+journal, et après une cinquantaine d'envois en attente (page CIBLE fermée), Grist renumérotait les
+lignes voisines, refusé à la clé du formulaire (403 « Blocked by table update access rules »),
+file bloquée. Grist borne aussi : file de 1 000 événements par document (au-delà, il bloque les
+écritures du document), 10 requêtes simultanées par document (429), historique de 1 000 actions
+ou 1 Go (une cellule recalculée à chaque ajout y est copiée deux fois par action).
+
 Pièges : toute écriture REST depuis le widget doit porter `X-Requested-With` (sinon 401, vu comme
 une erreur CORS ; un `POST` anonyme en JSON passe sans) ; changer une règle d'accès recharge le document, donc le widget. Désactiver un
 webhook remet à zéro son état d'envoi (`lastSuccessTime` perdu) et Grist ne met rien en file
