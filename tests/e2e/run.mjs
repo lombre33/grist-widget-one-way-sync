@@ -649,7 +649,7 @@ try {
     const cols = await records(source.doc, '_grist_Tables_column');
     const mark = cols.find(c => c.id === markRef);
     const rows = await records(source.doc, 'Synchro');
-    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark.type === 'Any' && (mark.recalcDeps || []).length === 3 &&
+    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark.type === 'Any' && (mark.recalcDeps || []).length === 4 &&
       rows.filter(r => r.Synchro_Type === 'suivi').length === rows.filter(r => r.Synchro_Type === 'cles').length &&
       !cols.some(c => c.colId === 'manualSort' && c.parentId === synchroRef);
   }, 'montage 0.4 mis à niveau');
