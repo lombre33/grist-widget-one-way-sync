@@ -44,18 +44,12 @@ export async function docIdentity() {
   return { ...parseDocBaseUrl(baseUrl), baseUrl };
 }
 
-// Nom du document et niveau d'accès de la personne (`owners`, `editors` ou `viewers`), lus par
-// l'API REST avec un jeton en lecture seule. Vide si Grist ne répond pas : rien n'en dépend.
-export async function docInfo() {
-  try {
-    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
-    const response = await fetch(`${baseUrl}?auth=${encodeURIComponent(token)}`);
-    const info = response.ok ? await response.json() : {};
-    return { name: String(info.name || ''), access: String(info.access || '') };
-  } catch (e) {
-    return { name: '', access: '' };
-  }
-}
+// La personne ne fait que lire le document : Grist le dit dans l'adresse du widget (`readonly`).
+// Le nom du document, lui, n'est pas lisible : l'API REST refuse au jeton la fiche du document.
+export const isReadOnly = () => new URLSearchParams(location.search).get('readonly') === 'true';
+
+// Propriétaire du document : seul un propriétaire lit la liste des webhooks.
+export const isOwner = () => listWebhooks().then(() => true, () => false);
 
 // Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
 // léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture

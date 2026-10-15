@@ -4,14 +4,16 @@
 // Une table que la SOURCE ajoute à l'export arrive dans le même journal : une fenêtre demande où
 // la ranger.
 import {
-  APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl, docLabel,
-  copyColumns, destRefs, expandRows, followRenames, freeTableId, newColumnsMap, nextGaps, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack,
-  isRaw, recentChanges, rowsByTable, sentColumns, toTableId,
+  APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl,
+  copyColumns, destRefs, exchangeMap, expandRows, followRenames, freeTableId, newColumnsMap, nextGaps, parseFormLink, parseInvitation, planConsolidation, planPull,
+  planPurge, planUnpack, isRaw, randomHex, recentChanges, rowsByTable, sentColumns, toTableId,
 } from './core.js';
-import { apply, collapseForms, docIdentity, docInfo, dropPages, ensureForm, fetchRows, formPages, readSchema, renewFormLink, withLock } from './grist.js';
 import {
-  addDestColumnsActions, createJournal, destColumns, isUserTable, legacyJournals, prepareDest, readNote, receivedDests, receivedJournals,
-  removeTechnicalTables, syncRows, upgradeJournal, writeNote,
+  apply, collapseForms, docIdentity, dropPages, ensureForm, fetchRows, formPages, isOwner, isReadOnly, readSchema, renewFormLink, withLock,
+} from './grist.js';
+import {
+  addDestColumnsActions, awaitingPartner, createJournal, destColumns, endExchange, isUserTable, legacyJournals, prepareDest, receivedDests, receivedJournals,
+  removeTechnicalTables, syncRows, updateJournalNote, upgradeJournal, wireExchange,
 } from './tables.js';
 import { confirmDialog, copyButton, copyField, el, errorText, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
@@ -122,6 +124,7 @@ function flooded(journal, raw) {
 // Chaque étape est un seul lot d'écritures, donc tout ou rien.
 async function consolidate(schema, { journal, note }) {
   if (note.mode === 'public' && await pull(note, journal)) lastArrival = Date.now();
+  const exchange = note.mode === 'echange';
   let rows = await fetchRows(journal);
   const raw = rows.filter(isRaw);
   const flood = flooded(journal, raw);
@@ -148,6 +151,9 @@ async function consolidate(schema, { journal, note }) {
 
   const tables = [];
   const updates = new Map(); // table -> entrée à noter : destination renommée, colonnes arrivées après coup
+  // Échange : la ligne 'echange' de l'export, touchée dans le lot d'écritures qui recopie (voir
+  // syncFormulas) : les lignes reçues ne repartent pas vers l'autre document.
+  const swap = exchange ? (await syncRows(schema)).find(r => r[EXPORT_COL] === note.export && r[TYPE_COL] === KIND.swap) : null;
   for (const noted of note.tables) {
     let entry = followRenames(noted, schema);
     const tableRows = groups.get(entry.table) || [];
@@ -156,6 +162,7 @@ async function consolidate(schema, { journal, note }) {
       continue;
     }
     const sent = sentColumns(tableRows, entry.columns || []);
+    if (exchange) entry = { ...entry, map: exchangeMap(sent, entry.map) };
     // Colonne ajoutée à l'export après coup : elle ne remplace jamais une colonne de la
     // destination qui porte déjà son nom (elle prend un nom libre, noté dans la correspondance).
     const map = newColumnsMap(entry, destColumns(sent), schema.columns(entry.dest).map(c => c.colId));
@@ -177,16 +184,20 @@ async function consolidate(schema, { journal, note }) {
       continue;
     }
     const { actions, stats } = planConsolidation({
-      journalRows: tableRows, destRows: await fetchRows(entry.dest), copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '',
+      journalRows: tableRows, destRows: await fetchRows(entry.dest), copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '', exchange,
     });
-    await apply(actions);
+    const written = stats.added + stats.updated + stats.removed > 0;
+    await apply(swap && written ? [['UpdateRecord', SYNC_TABLE, swap.id, { [RESEND_COL]: randomHex(4) }], ...actions] : actions);
     if (actions.length) settled.delete(key);
     else settled.set(key, signature);
     tables.push({ entry, stats, copyCols });
   }
   if (updates.size) {
     const noted = ({ dest, map, match, refs }) => JSON.parse(JSON.stringify({ dest, map, match, refs }));
-    await updateJournalNote(journal, n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, ...noted(updates.get(tb.table)) } : tb)) }));
+    const next = { ...note, tables: note.tables.map(tb => (updates.has(tb.table) ? { ...tb, ...noted(updates.get(tb.table)) } : tb)) };
+    await updateJournalNote(journal, n => ({ ...n, tables: next.tables }));
+    // Échange, côté CIBLE : l'export de retour suit (destination renommée, colonne arrivée).
+    if (exchange && !note.retour) await wireExchange(next);
   }
   const after = await fetchRows(journal);
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
@@ -222,21 +233,23 @@ export async function consolidateAll() {
       let upgraded = false;
       for (const { journal } of receivedJournals(schema)) upgraded = (await upgradeJournal(schema, journal)) || upgraded;
       if (upgraded) schema = await readSchema();
-      for (const received of receivedJournals(schema)) {
+      for (const received of receivedJournals(schema).filter(r => !awaitingPartner(r.note))) {
         const { journal } = received;
         const before = results.get(journal);
         const offersBefore = JSON.stringify(offers.get(journal) || []);
         const at = Date.now() / 1000;
         try {
           const pass = await consolidate(schema, received);
-          results.set(journal, { at, rows: pass.rows, gaps: JSON.stringify([pass.note.missing, pass.note.big]) });
+          // Ce que la carte montre du journal : lignes manquantes, trop grosses, arrivées suspectes.
+          const gaps = JSON.stringify([pass.note.missing, pass.note.big, pass.note.suspect]);
+          results.set(journal, { at, rows: pass.rows, gaps });
           for (const tb of pass.tables) {
             const key = tableKey(journal, tb.table);
             const was = results.get(key);
             results.set(key, tb.error ? { at, error: true, text: tb.error } : { at, text: summary(tb.stats), ...tb });
             changed ||= Boolean(tb.error) !== Boolean(was && was.error) || Boolean(tb.stats && tb.stats.added + tb.stats.updated + tb.stats.removed);
           }
-          changed ||= !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== JSON.stringify([pass.note.missing, pass.note.big])
+          changed ||= !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== gaps
             || offersBefore !== JSON.stringify(offers.get(journal) || []);
           readOnly = viewer;
           schema = await readSchema();
@@ -261,18 +274,19 @@ export async function consolidateAll() {
 // ---------------------------------------------------------------------------------------------
 // Tableau de bord : une carte par export reçu. Un journal encore vide attend son lien.
 
+// Le journal de retour d'un Échange se règle depuis l'onglet Envoyer : il n'attend jamais son lien ici.
 async function receivedGroups(schema) {
   const groups = [];
-  for (const { journal, note } of receivedJournals(schema)) {
+  for (const { journal, note } of receivedJournals(schema).filter(r => !awaitingPartner(r.note))) {
     const known = results.get(journal);
     const rows = known ? known.rows : (await fetchRows(journal)).length;
-    groups.push({ journal, note, public: note.mode === 'public', waiting: note.mode !== 'public' && !rows });
+    groups.push({ journal, note, public: note.mode === 'public', waiting: note.mode !== 'public' && !note.retour && !rows });
   }
   return groups;
 }
 
 export async function renderTarget(root = container) {
-  if (!container) viewer = (await docInfo()).access === 'viewers';
+  if (!container) viewer = isReadOnly();
   container = root;
   readOnly ||= viewer;
   const schema = await readSchema();
@@ -299,8 +313,9 @@ export async function renderTarget(root = container) {
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty')),
     roleGuide({ you: 'target', open: !cards.length })].filter(Boolean));
   if (readOnly) return;
-  // Les journaux qui reçoivent déjà n'ont plus besoin de leur formulaire à l'écran.
-  collapseForms(groups.filter(g => !g.waiting).map(g => g.journal)).catch(() => {});
+  // Les journaux qui reçoivent déjà n'ont plus besoin de leur formulaire à l'écran. Pas pendant
+  // qu'une fenêtre est ouverte : la page change de disposition, Grist recrée le cadre du widget.
+  if (!document.querySelector('.scrim')) collapseForms(groups.filter(g => !g.waiting).map(g => g.journal)).catch(() => {});
   dropPages(groups.map(g => g.journal)).catch(() => {});
   const waiting = groups.find(g => g.waiting);
   if (waiting && !wizardOpened) {
@@ -332,12 +347,13 @@ function syncCard(group) {
     return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${entry.table} → ${entry.dest}${when}`);
   };
   const from = (note.from || {}).email;
-  const fromDoc = docLabel((note.from || {}).docName, (note.from || {}).docId);
+  const fromDoc = (note.from || {}).docId || '';
   const pending = offers.get(journal) || [];
   return el('article', { class: 'card', 'data-journal': journal },
     el('div', { class: 'card-head' }, el('strong', {}, note.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
     from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
     group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
+    note.mode === 'echange' ? el('p', { class: 'muted small' }, t('recv.exchange')) : null,
     note.tables.map(line),
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
@@ -348,7 +364,7 @@ function syncCard(group) {
     note.refused.length ? el('p', { class: 'muted small' }, t('recv.offer.refusedList', { tables: note.refused.join(', ') })) : null,
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
-      group.public ? null : el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
+      group.public || note.retour ? null : el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
         icon('link'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
       el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => stopReceiving(group) },
         icon('stop'), t('recv.action.stop'))));
@@ -401,13 +417,16 @@ function legacyCard(journals, out) {
 }
 
 // Arrêter de recevoir : efface le journal (et son formulaire, donc la clé d'écriture) ; les tables
-// de destination et leurs lignes restent.
+// de destination et leurs lignes restent. Un Échange s'arrête dans les deux sens (voir endExchange).
 async function stopReceiving(group) {
+  const { note } = group;
+  const exchange = note.mode === 'echange';
   const ok = await confirmDialog({
-    title: t('recv.stop.title', { name: group.note.name }), body: t('recv.stop.body', { journal: group.journal }), confirmLabel: t('recv.action.stop'),
+    title: t('recv.stop.title', { name: note.name }), body: t(exchange ? 'send.revoke.exchange' : 'recv.stop.body', { journal: group.journal }), confirmLabel: t('recv.action.stop'),
   });
   if (!ok) return;
-  await removeTechnicalTables([group.journal]);
+  if (exchange) await endExchange(note.export, { keepExport: Boolean(note.retour) });
+  else await removeTechnicalTables([group.journal]);
   for (const key of [...results.keys()]) if (key === group.journal || key.startsWith(`${group.journal}|`)) results.delete(key);
   offers.delete(group.journal);
   await renderTarget();
@@ -476,11 +495,6 @@ async function labelDialog(group) {
   });
 }
 
-async function updateJournalNote(journal, change) {
-  const schema = await readSchema();
-  await writeNote(schema, journal, change(readNote(schema, journal)));
-}
-
 // ---------------------------------------------------------------------------------------------
 // Destination d'une table reçue : nouvelle (nom libre) ou existante (liste filtrable). Une table
 // existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
@@ -529,12 +543,13 @@ function mappingBlock(schema, table, dest, columns) {
 // Une destination ne reçoit qu'une table, d'un seul export, et n'est ni une table du widget, ni
 // une table que ce document envoie lui-même (ses lignes, absentes des listes de la SOURCE, y
 // seraient effacées ; le relais, lui, reçoit d'abord puis envoie). Copie dans le même document :
-// une table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]).
-async function checkDests(schema, plans, fromDocId) {
+// une table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]). Échange (`exportId`) :
+// une table que ce document envoie dans le même Échange peut recevoir.
+async function checkDests(schema, plans, fromDocId, exportId = null) {
   const taken = receivedDests(schema).map(d => d.dest);
   const dests = plans.map(p => p.dest);
   if (new Set(dests).size !== dests.length || dests.some(d => taken.includes(d) || !isUserTable(d))) throw new Error('destTaken');
-  const sent = new Set((await syncRows(schema)).map(r => r[TABLE_COL]));
+  const sent = new Set((await syncRows(schema)).filter(r => !exportId || r[EXPORT_COL] !== exportId).map(r => r[TABLE_COL]));
   if (dests.some(d => sent.has(d))) throw new Error('destExported');
   if (fromDocId && fromDocId === (await docIdentity()).docId && plans.some(p => p.dest === p.table)) throw new Error('loop');
 }
@@ -548,17 +563,20 @@ async function offerDialog(group, offer) {
   const pick = destField(schema, offer.table);
   const report = el('div', { class: 'report' });
   const step = el('div', { class: 'form' });
+  const exchange = group.note.mode === 'echange';
   const accept = async (entry, m) => {
     await prepareDest({ dest: entry.dest, columns: offer.columns, map: entry.map });
     // Deux éditeurs qui rangent la même table : la première réponse compte.
     await updateJournalNote(group.journal, note => (note.tables.some(tb => tb.table === entry.table) ? note : { ...note, tables: [...note.tables, entry] }));
+    // Échange, côté CIBLE : la table rangée repart aussi vers la SOURCE.
+    if (exchange && !group.note.retour) await wireExchange(receivedJournals(await readSchema()).find(r => r.journal === group.journal).note);
     m.close();
     await consolidateAll();
     await renderTarget();
   };
   const choose = async (m) => {
     const dest = pick.dest();
-    await checkDests(schema, [{ table: offer.table, dest }], (group.note.from || {}).docId);
+    await checkDests(schema, [{ table: offer.table, dest }], (group.note.from || {}).docId, exchange ? group.note.export : null);
     const entry = { table: offer.table, dest, columns: offer.columns };
     if (!schema.has(dest)) return accept(entry, m);
     const mapping = mappingBlock(schema, offer.table, dest, offer.columns);
@@ -608,7 +626,11 @@ function receiveWizard(group = null) {
     wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report, stepHelp(['t-code']), roleGuide({ you: 'target', current: 1 })],
       [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
         const invitation = parseInvitation(area.value);
-        if (invitation.mode === 'public' && new URL(invitation.base).origin !== (await docIdentity()).origin) throw new Error('otherInstance');
+        const { origin } = await docIdentity();
+        if (invitation.mode === 'public' && new URL(invitation.base).origin !== origin) throw new Error('otherInstance');
+        // Échange : ce document enverra aussi, par un webhook vers la même instance.
+        if (invitation.mode === 'echange' && invitation.retourOrigin !== origin) throw new Error('otherInstance');
+        if (invitation.mode === 'echange' && !(await isOwner())) throw new Error('exchangeOwner');
         const known = receivedJournals(await readSchema()).find(r => r.note.export === invitation.export);
         if (known) return relink(known, invitation);
         return showDest(invitation);
@@ -616,13 +638,16 @@ function receiveWizard(group = null) {
   }
 
   // Nouvelle invitation pour un export déjà reçu (lien coupé, destinataire révoqué) : la même
-  // réception reprend, avec son journal et ses tables, si l'invitation vient du même document.
+  // réception reprend, avec son journal et ses tables, si l'invitation vient du même document,
+  // dans le même mode. Un Échange rebranche son retour sur la nouvelle adresse.
   async function relink(known, invitation) {
-    const same = invitation.mode !== 'public' && known.note.mode !== 'public' && (known.note.from || {}).docId === invitation.from.docId;
+    const same = invitation.mode !== 'public' && invitation.mode === (known.note.mode || 'reponse') && !known.note.retour
+      && (known.note.from || {}).docId === invitation.from.docId;
     if (!same) throw new Error('alreadyReceived');
     const { id, secret, name, from } = invitation;
     await updateJournalNote(known.journal, n => ({ ...n, id, secret, name, from }));
     const note = receivedJournals(await readSchema()).find(r => r.journal === known.journal).note;
+    if (invitation.mode === 'echange') await wireExchange(note, invitation.retour);
     await ensureForm(known.journal);
     return showLink({ journal: known.journal, note }, message('info', t('recv.relink')));
   }
@@ -633,7 +658,7 @@ function receiveWizard(group = null) {
     const rows = invitation.tables.map(tb => ({ tb, pick: destField(schema, tb.table) }));
     const report = el('div', { class: 'report' });
     const from = invitation.from.email;
-    const fromDoc = docLabel(invitation.from.docName, invitation.from.docId);
+    const fromDoc = invitation.from.docId;
     const next = async () => {
       const now = await readSchema();
       const plans = rows.map(({ tb, pick }) => ({ tb, dest: pick.dest() }));
@@ -647,7 +672,8 @@ function receiveWizard(group = null) {
       el('p', { class: 'field-title' }, t('recv.dest')),
       ...rows.map(r => el('div', { class: 'dest-row' }, el('span', {}, `${r.tb.table} →`), r.pick.node)),
       message('info', t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
-      report, stepHelp(['t-dest']), roleGuide({ you: 'target', current: 1 }),
+      invitation.mode === 'echange' ? message('info', t('recv.consent.echange')) : null,
+      report, stepHelp(['t-dest']), roleGuide({ you: 'target', mode: invitation.mode, current: 1 }),
     ], [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
   }
 
@@ -670,12 +696,15 @@ function receiveWizard(group = null) {
     const journal = freeTableId(JOURNAL_PREFIX + toTableId(invitation.name, 'Export'), schema.tableIds);
     const note = {
       id: invitation.id, export: invitation.export, name: invitation.name, secret: invitation.secret, from: invitation.from,
-      ...(invitation.mode === 'public' ? { mode: 'public', base: invitation.base } : {}),
+      ...(invitation.mode === 'public' ? { mode: 'public', base: invitation.base } : invitation.mode === 'echange' ? { mode: 'echange' } : {}),
       tables: plans.map(p => ({ table: p.tb.table, dest: p.dest, columns: p.tb.columns, ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}) })),
       refused: [], missing: {},
     };
     for (const p of plans) await prepareDest({ dest: p.dest, columns: p.tb.columns, map: p.map });
     await createJournal(journal, note);
+    // Échange : l'envoi de retour est branché avant la publication du formulaire (qui recrée le
+    // cadre du widget) ; l'adresse de retour, un droit d'écriture, n'est notée nulle part ailleurs.
+    if (invitation.mode === 'echange') await wireExchange(note, invitation.retour);
     if (invitation.mode === 'public') {
       wizard.setSteps(steps.slice(0, 2));
       wizard.show(STEP.link, [message('ok', t('recv.public.done')), roleGuide({ you: 'target', mode: 'public', current: 1 })], [{ label: t('common.close'), kind: 'btn-primary' }]);
@@ -688,13 +717,11 @@ function receiveWizard(group = null) {
 
   // 3. Lien du formulaire de réception.
   async function showLink(g, intro = null) {
-    const page = (await formPages()).get(g.journal);
     const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('recv.link.title') });
     const report = el('div', { class: 'report' });
-    const where = page && !page.samePage ? t('recv.link.where.other', { page: page.name }) : t('recv.link.where');
-    const figure = (text, src) => el('figure', { class: 'help-figure' }, el('figcaption', {}, text), el('img', { src, alt: '' }));
+    const where = await formWhere(g.journal);
     wizard.show(STEP.link, [intro, el('p', {}, t('recv.link.help', { where, n: g.note.tables.length })),
-      figure(t('recv.link.step1'), 'img/aide-partager.png'), figure(t('recv.link.step2'), 'img/aide-copier.png'), input, report, roleGuide({ you: 'target', current: 2 })],
+      ...linkFigures(), input, report, roleGuide({ you: 'target', mode: g.note.mode === 'echange' ? 'echange' : 'reponse', current: 2 })],
     [{ label: t('common.later') }, { label: t('recv.link.check'), kind: 'btn-primary', onClick: () => run(null, report, () => check(g, input.value)) }]);
   }
 
@@ -702,27 +729,36 @@ function receiveWizard(group = null) {
     if (!parseFormLink(link)) throw new Error('formLink');
     const url = buildWebhookUrl(link, g.journal);
     await testUrl(url);
-    const [identity, info] = await Promise.all([docIdentity(), docInfo()]);
+    const identity = await docIdentity();
     const code = buildReply({
-      id: g.note.id, secret: g.note.secret, url,
+      id: g.note.id, secret: g.note.secret, url, retour: g.note.mode === 'echange' ? g.note.tables.map(tb => ({ table: tb.dest, dest: tb.table })) : null,
       recipient: {
-        email: await myEmail(g.journal), docId: identity.docId, docName: info.name, team: identity.team,
+        email: await myEmail(g.journal), docId: identity.docId, team: identity.team,
         at: new Date().toISOString().slice(0, 16).replace('T', ' '),
       },
     });
     // 4. Réponse à renvoyer.
     wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), copyField(code),
-      el('div', { class: 'handoff' }, copyButton(() => handoffText('source', 'reponse', 3, code), t('guide.copyHandoff')),
+      el('div', { class: 'handoff' }, copyButton(() => handoffText('source', g.note.mode === 'echange' ? 'echange' : 'reponse', 3, code), t('guide.copyHandoff')),
         el('span', { class: 'muted small' }, t('guide.copyHandoff.help'))),
-      roleGuide({ you: 'target', current: 3, open: true }), stepHelp(['t-reply', 's-reply', 's-load', 't-daily'])],
+      roleGuide({ you: 'target', mode: g.note.mode === 'echange' ? 'echange' : 'reponse', current: 3, open: true }), stepHelp(['t-reply', 's-reply', 's-load', 't-daily'])],
     [{ label: t('common.close'), kind: 'btn-primary' }]);
   }
 }
 
+// Où est le formulaire d'un journal, et les deux images qui montrent comment copier son lien.
+export async function formWhere(journal) {
+  const page = (await formPages()).get(journal);
+  return page && !page.samePage ? t('recv.link.where.other', { page: page.name }) : t('recv.link.where');
+}
+
+export const linkFigures = () => [['recv.link.step1', 'img/aide-partager.png'], ['recv.link.step2', 'img/aide-copier.png']]
+  .map(([key, src]) => el('figure', { class: 'help-figure' }, el('figcaption', {}, t(key)), el('img', { src, alt: '' })));
+
 // Envoie une ligne vide par la clé, comme le fera le webhook (le nettoyage du journal l'efface) :
 // valide d'un coup la clé, la publication, le nom de la table et `?flat=1`. Écriture anonyme
 // en JSON : l'en-tête Content-Type suffit à Grist (pas besoin de X-Requested-With).
-async function testUrl(url) {
+export async function testUrl(url) {
   let response;
   try {
     response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([{ [KEY_COL]: '' }]) });

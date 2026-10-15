@@ -3,19 +3,21 @@
 // destinataire, filtré par Grist sur les lignes de son export. Les exports, les invitations en
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
-  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL, STATE_COL,
-  SYNC_TABLE, TABLE_COL, TYPE_COL, addSpent, budgetWait, buildInvitation, chargeBusy, parseCharge, chunk, chunkMark, conditionExport, docLabel, exportCondition, exportTables, exportableColumns,
-  fillKeyActions, hookName, isPublicRule, listOverdue, listRequest, loopingTables, maskKey, missingSyncColumns, parseList, parseLot, parseReply,
-  prepareSourceActions, publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex, trackState,
+  AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL, STATE_COL,
+  SYNC_TABLE, TABLE_COL, TYPE_COL, addSpent, budgetWait, buildInvitation, buildWebhookUrl, chargeBusy, parseCharge, chunk, chunkMark, conditionExport,
+  exportCondition, exportTables, exportableColumns, fillKeyActions, freeTableId, hookName, hooksOf, isPublicRule, listOverdue, listRequest, loopingTables, maskKey,
+  missingSyncColumns, parseFormLink, parseList, parseLot, parseReply, prepareSourceActions, publicAclActions, publicAclRules, randomHex, resendValue, rowsSince,
+  toHex, toTableId, trackState,
 } from './core.js';
 import {
-  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, docInfo, fetchRows, listWebhooks, readSchema, renameWebhook, selectRows,
+  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, ensureForm, fetchRows, listWebhooks, readSchema, renameWebhook, selectRows,
   setWebhookEnabled, webhookConditions, withLock,
 } from './grist.js';
 import {
-  chargeRow, ensureSyncTable, isCharge, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
-  writeSourceNote, writeSync,
+  addDeleteColumns, chargeRow, createJournal, endExchange, ensureSyncTable, isCharge, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport,
+  removeLegacy, removeTechnicalTables, saveExport, syncRows, updateJournalNote, updateSourceNote, writeSync,
 } from './tables.js';
+import { formWhere, linkFigures, testUrl } from './target.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
@@ -27,14 +29,15 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const dateText = ms => new Date(ms).toLocaleString(LANG);
 const timeText = sec => new Date(sec * 1000).toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
 const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
+// Exports en Échange : ceux qui ont une ligne 'echange'.
+const swapExports = rows => new Set(rows.filter(r => r[TYPE_COL] === KIND.swap).map(r => r[EXPORT_COL]));
 // Ligne Synchro qui demande d'envoyer la liste complète de sa table : renvoi de la liste interrompu
 // (la demande est restée dans la ligne 'cles'), ou trop de clés parties d'un coup (suivi).
 const listDue = r => (r[TYPE_COL] === KIND.keys && Boolean(r[RESEND_COL])) || listOverdue(r);
-// Destinataires d'un export : les webhooks sur Synchro dont la condition nomme cet export.
-const hooksOf = (hooks, conditions, exportId) => hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === exportId);
 
 let container;
 let notice = null; // message à montrer au prochain affichage (fin d'un renvoi)
+let resumed = false; // l'assistant d'un Échange ne se rouvre seul qu'une fois par chargement
 
 // ---------------------------------------------------------------------------------------------
 // État du document : exports (note + lignes Synchro), destinataires (webhooks sur Synchro, rangés
@@ -85,12 +88,6 @@ function drift(schema, tables) {
     }).map(c => `${table}.${c.id}`);
   });
   return { lost, changed };
-}
-
-async function updateNote(change) {
-  const note = readSourceNote(await readSchema());
-  change(note);
-  await writeSourceNote(note);
 }
 
 // Lien public : le document est-il lisible sans identifiant ? (requête anonyme) Vrai, faux, ou
@@ -151,6 +148,13 @@ export async function renderSource(root = container) {
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t('send.empty')),
     roleGuide({ you: 'source', open: !cards.length })].filter(Boolean));
+  // Échange dont le formulaire de retour vient d'être publié (Grist a recréé le cadre du widget) :
+  // l'assistant reprend à l'étape du lien.
+  const pending = state.exports.flatMap(exp => exp.invitations.filter(inv => inv.journal && !inv.ready).map(inv => [exp, inv]))[0];
+  if (pending && !resumed && !state.ownerOnly && !document.querySelector('.scrim')) {
+    resumed = true;
+    recipientWizard(...pending);
+  }
 }
 
 // Bouton d'une carte : grisé pour qui n'est pas propriétaire, ou avec la raison (`reason`).
@@ -192,6 +196,12 @@ function exportCard(exp, state, open, out) {
     const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
     notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
   };
+  // Échange : un seul destinataire ; l'export de retour (reçu d'un autre document) se règle depuis
+  // l'onglet Recevoir.
+  const single = exp.echange || exp.invitations.some(inv => inv.journal) ? t('send.exchange.single') : '';
+  const button = (label, iconName, onclick, primary = false, reason = '') => el('button', {
+    class: `btn btn-small ${primary ? 'btn-primary' : ''}`, type: 'button', disabled: ownerOnly || Boolean(reason), title: reason || null, onclick,
+  }, icon(iconName), label);
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, exp.tables.map(tb => t(tb.filter ? 'send.export.tableFiltered' : 'send.export.table',
@@ -199,10 +209,11 @@ function exportCard(exp, state, open, out) {
     exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
     exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
     exp.partial ? message('info', t('send.export.partial')) : null,
+    exp.retour ? message('info', t('send.exchange.managed')) : exp.echange ? el('p', { class: 'muted small' }, t('send.exchange.with')) : null,
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
-      el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => recipientWizard(exp) }, icon('plus'), t('send.action.addPerson')),
-      el('button', { class: 'btn btn-small', type: 'button', disabled: ownerOnly, onclick: () => exportWizard(exp) }, icon('edit'), t('send.action.edit')),
+      exp.retour ? null : button(t('send.action.addPerson'), 'plus', () => recipientWizard(exp), true, single),
+      exp.retour ? null : button(t('send.action.edit'), 'edit', () => exportWizard(exp)),
       action(t('send.action.load'), 'send', load, { reason: n ? '' : t('send.load.nobody') }),
       action(t('send.action.delete'), 'trash', () => deleteExport(exp), { kind: 'btn-danger-text' })));
 }
@@ -225,13 +236,19 @@ function personRow(exp, h, ownerOnly, out) {
       action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
 }
 
+// Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et
+// son code peut être refait (nouveau secret) : il n'est gardé nulle part.
 function inviteRow(exp, inv, ownerOnly, out) {
+  const button = (label, iconName, onclick, primary) => el('button', { class: `btn btn-small ${primary ? 'btn-primary' : ''}`, type: 'button', disabled: ownerOnly, onclick },
+    icon(iconName), label);
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },
       el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), pill('invited', 'pending')),
-    el('p', { class: 'muted small' }, inv.hash ? t('send.secret.on') : t('send.secret.off')),
+    el('p', { class: 'muted small' }, inv.journal && !inv.ready ? t('send.mode.echange') : inv.hash ? t('send.secret.on') : t('send.secret.off')),
     el('div', { class: 'person-actions' },
-      el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => recipientWizard(exp, inv) }, icon('paste'), t('send.reply')),
+      inv.journal && !inv.ready ? button(t('send.back.resume'), 'link', () => recipientWizard(exp, inv), true)
+        : button(t('send.reply'), 'paste', () => recipientWizard(exp, inv), true),
+      inv.journal && inv.ready ? button(t('send.back.again'), 'key', () => recipientWizard(exp, { ...inv, ready: false })) : null,
       actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, { kind: 'btn-danger-text' })));
 }
 
@@ -277,7 +294,7 @@ function legacyCard(state, out) {
 async function pause(exp, h) {
   let at = 0;
   for (const { table } of exp.tables) for (const r of await fetchRows(table)) at = Math.max(at, r[ORDER_COL] || 0);
-  await updateNote((note) => {
+  await updateSourceNote((note) => {
     note.pauses = note.pauses.filter(p => p.hook !== h.id).concat([{ hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }]);
   });
   await setWebhookEnabled(h.id, false);
@@ -311,22 +328,32 @@ async function resume(exp, h, out) {
   });
   if (!picked) return;
   await setWebhookEnabled(h.id, true);
-  await updateNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
+  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
   // Le renvoi pose sa marque avant tout : s'il s'interrompt, le rattrapage automatique le finit.
   if (picked === 'catchup') await resendTables(exp.id, exp.tables.map(tb => tb.table), out, since);
 }
 
-// Révoquer une personne : son webhook disparaît, les autres destinataires continuent.
+// Révoquer une personne : son webhook disparaît, les autres destinataires continuent. Un Échange
+// s'arrête dans les deux sens (voir endExchange).
 async function revoke(exp, h) {
-  const ok = await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body: t('send.revoke.body'), confirmLabel: t('send.action.revoke') });
+  const body = t(exp.echange ? 'send.revoke.exchange' : 'send.revoke.body');
+  const ok = await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body, confirmLabel: t('send.action.revoke') });
   if (!ok) return;
+  if (exp.echange) {
+    await endExchange(exp.id, { keepExport: !exp.retour });
+    return;
+  }
   await deleteWebhook(h.id);
-  await updateNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
+  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
 }
 
+// Annuler une invitation ; celle d'un Échange emporte son journal de retour (et la clé d'écriture
+// de son formulaire).
 async function cancelInvitation(inv) {
   const ok = await confirmDialog({ title: t('send.cancel.title'), body: t('send.cancel.body'), confirmLabel: t('send.action.cancel') });
-  if (ok) await updateNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
+  if (!ok) return;
+  await updateSourceNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
+  if (inv.journal) await removeTechnicalTables([inv.journal]);
 }
 
 // Débloquer : la file de Grist est commune au document, la vider abandonne les envois en attente
@@ -349,8 +376,12 @@ async function clearAndMark() {
 async function deleteExport(exp) {
   const ok = await confirmDialog({ title: t('send.delete.title', { name: exp.name }), body: t('send.delete.body', { n: exp.recipients.length }), confirmLabel: t('send.action.delete') });
   if (!ok) return;
+  if (exp.echange || exp.invitations.some(inv => inv.journal)) {
+    await endExchange(exp.id, { keepExport: false });
+    return;
+  }
   for (const h of exp.recipients) await deleteWebhook(h.id);
-  await updateNote((note) => {
+  await updateSourceNote((note) => {
     note.exports = note.exports.filter(e => e.id !== exp.id);
     note.invitations = note.invitations.filter(i => i.export !== exp.id);
     note.pauses = note.pauses.filter(p => p.export !== exp.id);
@@ -362,8 +393,8 @@ async function deleteExport(exp) {
 // Lien public
 
 async function publicCode(exp) {
-  const [{ origin, docId, baseUrl }, { name: docName }] = await Promise.all([docIdentity(), docInfo()]);
-  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId, docName }, tables: exp.tables });
+  const { origin, docId, baseUrl } = await docIdentity();
+  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables });
 }
 
 // Bouton « copier avec les consignes » : le code et les étapes de la CIBLE, prêts pour un courriel.
@@ -381,7 +412,7 @@ async function showPublicCode(exp) {
 async function stopPublic(exp) {
   const ok = await confirmDialog({ title: t('send.public.stopTitle', { name: exp.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.public.stop') });
   if (!ok) return;
-  await updateNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: false } : e)); });
+  await updateSourceNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: false } : e)); });
   await saveExport(exp.id, exp.tables, { isPublic: false });
 }
 
@@ -453,7 +484,8 @@ async function resendLocked(exportId, tables, out, since) {
     // Marque effacée à part : écrite avec le lot ordinaire, elle cacherait un nouvel envoi coupé.
     await writeSync([lot], { [MISSING_COL]: 0 });
     await writeSync([lot], { [RESEND_COL]: '' });
-    await sendList(exportId, table, hookIds);
+    // Un Échange n'efface rien d'après les listes des clés : inutile de l'envoyer.
+    if (!swapExports(await syncRows()).has(exportId)) await sendList(exportId, table, hookIds);
   }
   if (out) out.replaceChildren();
   return total;
@@ -516,7 +548,8 @@ async function catchUp() {
       if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) return 0;
       const late = rows.filter(r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0);
       const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
-      const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)));
+      const swaps = swapExports(rows);
+      const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)) && !swaps.has(r[EXPORT_COL]));
       if (!late.length && !lists.length) return 0;
       await withCharge(async () => {
         for (const row of late) {
@@ -732,8 +765,8 @@ function exportWizard(exp = null) {
       });
     }
     const id = exp ? exp.id : randomHex(8);
-    const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public) });
-    await updateNote((note) => {
+    const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public), swap: Boolean(exp && exp.echange) });
+    await updateSourceNote((note) => {
       const others = note.exports.filter(e => e.id !== id);
       note.exports = [...others, { ...(exp ? note.exports.find(e => e.id === id) : {}), id, name, at: exp ? exp.at : now() }];
     });
@@ -780,7 +813,8 @@ function filterField(table, columns, current, onChange) {
 // ---------------------------------------------------------------------------------------------
 // Assistant d'ajout d'un destinataire : Options, Invitation, Réponse, Envoi (Options et Invitation
 // seulement pour le lien public). Une invitation en attente le rouvre à l'étape Réponse
-// (`pending`).
+// (`pending`), ou à l'étape Invitation pour un Échange qui attend le lien de son formulaire de
+// retour.
 
 const STEP = { options: 0, invitation: 1, reply: 2, load: 3 };
 
@@ -788,34 +822,39 @@ function recipientWizard(exp, pending = null) {
   const steps = ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k));
   const wizard = openWizard({ title: t('send.person.title', { name: exp.name }), steps, onClose: () => renderSource() });
   const cancel = { label: t('common.cancel') };
-  if (pending) return showReply(pending);
+  if (pending) return pending.journal && !pending.ready ? showBack(pending) : showReply(pending);
   return showOptions();
 
-  // 1. Mode (réponse ou lien public) et secret (sans objet pour le lien public : grisé).
+  // 1. Mode (réponse, lien public ou Échange) et secret (sans objet pour le lien public : grisé).
+  // L'Échange suppose un export sans autre destinataire.
   function showOptions() {
     const secretBox = el('input', { type: 'checkbox', checked: true });
     const secretPart = el('div', { class: 'form' }, el('label', { class: 'check' }, secretBox, t('send.secret')), el('p', { class: 'muted small' }, t('send.secret.help')));
-    const publicPart = el('div', { class: 'hidden' }, message('warn', t('send.public.warn')));
+    const parts = { public: el('div', { class: 'hidden' }, message('warn', t('send.public.warn'))), echange: el('div', { class: 'hidden' }, message('info', t('send.mode.echange.help'))) };
     const radio = (value, label, checked, disabled) => el('label', { class: 'check' },
       el('input', { type: 'radio', name: 'gristsync-mode', value, checked, disabled, onchange: () => {
-        secretBox.disabled = value === 'public'; publicPart.classList.toggle('hidden', value !== 'public');
+        secretBox.disabled = value === 'public';
+        for (const [key, part] of Object.entries(parts)) part.classList.toggle('hidden', value !== key);
       } }), label);
     const report = el('div', { class: 'report' });
     const mode = () => (document.querySelector('input[name="gristsync-mode"]:checked') || {}).value;
+    const exchangeOk = !exp.recipients.length && !exp.invitations.length && !exp.public;
     wizard.show(STEP.options, [
       message('info', t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
       el('p', { class: 'field-title', id: 'gristsync-mode-title' }, t('send.mode')),
       el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-mode-title' },
         radio('reponse', t('send.mode.reply'), true, false),
-        radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public)),
-      secretPart, publicPart, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
-    ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(mode() !== 'public' && secretBox.checked, mode() === 'public')) }]);
+        radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public),
+        radio('echange', exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), false, !exchangeOk)),
+      secretPart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
+    ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(mode() !== 'public' && secretBox.checked, mode())) }]);
   }
 
   // 2. Invitation : le code à transmettre ; elle attend sa réponse sur la carte de l'export.
-  async function invite(withSecret, isPublicMode) {
-    if (isPublicMode) {
-      await updateNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: true } : e)); });
+  async function invite(withSecret, mode) {
+    if (mode === 'echange') return openBack(withSecret);
+    if (mode === 'public') {
+      await updateSourceNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: true } : e)); });
       await saveExport(exp.id, exp.tables, { isPublic: true });
       // Les règles d'accès sont posées à la fermeture (le document se recharge alors).
       const code = await publicCode(exp);
@@ -827,13 +866,51 @@ function recipientWizard(exp, pending = null) {
     }
     const secret = withSecret ? randomHex(16) : '';
     const entry = { id: randomHex(8), export: exp.id, hash: secret ? await sha256(secret) : '', at: now() };
-    await updateNote((note) => { note.invitations = [...note.invitations, entry]; });
-    const [{ origin, docId }, { name: docName }, rows] = await Promise.all([docIdentity(), docInfo(), syncRows()]);
+    await updateSourceNote((note) => { note.invitations = [...note.invitations, entry]; });
+    await showInvitation(entry, secret);
+  }
+
+  async function showInvitation(entry, secret, retour = '') {
+    const mode = retour ? 'echange' : 'reponse';
+    const [{ origin, docId }, rows] = await Promise.all([docIdentity(), syncRows()]);
     const email = (rows.find(r => r[EXPORT_COL] === exp.id) || {})[AUTHOR_COL] || '';
-    const code = buildInvitation({ id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId, docName }, tables: exp.tables });
-    wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code), handoff('reponse', code),
-      roleGuide({ you: 'source', current: 1, open: true }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
+    const code = buildInvitation({ id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId }, tables: exp.tables, retour });
+    wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code), handoff(mode, code),
+      roleGuide({ you: 'source', mode, current: 1, open: true }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
     [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
+  }
+
+  // 2 bis. Échange : un journal de retour, que la CIBLE remplira par le formulaire publié ici sur
+  // la page du widget (Grist recrée alors le cadre du widget : l'assistant reprend à l'étape du
+  // lien au chargement). Le secret est tiré quand le code est fait, et le code n'est gardé nulle
+  // part : il peut être refait.
+  async function openBack(withSecret) {
+    const schema = await readSchema();
+    const journal = freeTableId(JOURNAL_PREFIX + toTableId(exp.name, 'Export'), schema.tableIds);
+    const entry = { id: randomHex(8), export: exp.id, hash: '', at: now(), journal, withSecret };
+    await createJournal(journal, { id: entry.id, export: exp.id, name: exp.name, secret: '', from: {}, mode: 'echange', retour: true, tables: [], refused: [], missing: {} });
+    await updateSourceNote((note) => { note.invitations = [...note.invitations, entry]; });
+    wizard.show(STEP.invitation, message('info', t('recv.publishing')), []);
+    resumed = true; // ce chargement-ci n'a plus à rouvrir l'assistant
+    await ensureForm(journal);
+    return showBack(entry);
+  }
+
+  async function showBack(inv) {
+    await ensureForm(inv.journal);
+    const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('send.back.title') });
+    const report = el('div', { class: 'report' });
+    wizard.show(STEP.invitation, [el('p', {}, t('send.back.help', { where: await formWhere(inv.journal) })), ...linkFigures(), input, report,
+      roleGuide({ you: 'source', mode: 'echange', current: 0 })],
+    [{ label: t('common.later') }, { label: t('recv.link.check'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
+      if (!parseFormLink(input.value)) throw new Error('formLink');
+      const retour = buildWebhookUrl(input.value, inv.journal);
+      await testUrl(retour);
+      const secret = inv.withSecret ? randomHex(16) : '';
+      const entry = { ...inv, hash: secret ? await sha256(secret) : '', ready: true };
+      await updateSourceNote((note) => { note.invitations = note.invitations.map(i => (i.id === inv.id ? entry : i)); });
+      await showInvitation(entry, secret, retour);
+    }) }]);
   }
 
   // 3. Réponse : vérifier, montrer la fiche, approuver. La réponse doit désigner cette invitation
@@ -846,9 +923,12 @@ function recipientWizard(exp, pending = null) {
       const reply = parseReply(area.value, origin);
       if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
       if (loopingTables(exp.tables.map(tb => tb.table), reply.recipient.docId, receivedDests(await readSchema())).length) throw new Error('loop');
+      // Échange : la réponse dit où la CIBLE a rangé chaque table de l'export.
+      if (Boolean(inv.journal) !== Boolean(reply.retour) || (reply.retour || []).some(b => !exp.tables.some(tb => tb.table === b.dest))) throw new Error('codeInvalid');
       const r = reply.recipient;
-      const fiche = [[t('send.reply.tables'), exp.tables.map(tb => tb.table).join(', ')], [t('send.reply.email'), r.email],
-        [t('send.reply.doc'), r.docId === docId ? `${docLabel(r.docName, r.docId)} · ${t('send.reply.sameDoc')}` : docLabel(r.docName, r.docId)], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
+      const tables = reply.retour ? reply.retour.map(b => t('send.exchange.map', b)).join(', ') : exp.tables.map(tb => tb.table).join(', ');
+      const fiche = [[t('send.reply.tables'), tables], [t('send.reply.email'), r.email],
+        [t('send.reply.doc'), r.docId === docId ? `${r.docId} · ${t('send.reply.sameDoc')}` : r.docId], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
       report.replaceChildren(...[el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
         reply.secret ? null : message('warn', t('send.reply.nosecret')),
         el('p', { class: 'muted small' }, maskKey(reply.url))].filter(Boolean));
@@ -859,14 +939,26 @@ function recipientWizard(exp, pending = null) {
     wizard.show(STEP.reply, body, [{ label: t('common.later') }, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
   }
 
-  // Un webhook sur Synchro, filtré sur l'export, vers le journal de la CIBLE.
+  // Un webhook sur Synchro, filtré sur l'export, vers le journal de la CIBLE. Échange : l'export
+  // reçoit sa ligne 'echange', et le journal de retour sait d'où viennent ses tables : il commence
+  // à recopier.
   async function approve(inv, reply) {
     const r = reply.recipient;
     await createWebhook({
-      name: hookName(exp.name, exp.id), memo: [r.email, docLabel(r.docName, r.docId), r.team].filter(Boolean).join(' · '), url: reply.url,
+      name: hookName(exp.name, exp.id), memo: [r.email, r.docId, r.team].filter(Boolean).join(' · '), url: reply.url,
       tableId: SYNC_TABLE, condition: exportCondition(exp.id),
     });
-    await updateNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
+    if (inv.journal) {
+      await addDeleteColumns(exp.tables.map(tb => tb.table));
+      await saveExport(exp.id, exp.tables, { swap: true });
+      await updateJournalNote(inv.journal, n => ({
+        ...n, from: { email: r.email, docId: r.docId }, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
+      }));
+    }
+    await updateSourceNote((note) => {
+      note.invitations = note.invitations.filter(i => i.id !== inv.id);
+      if (inv.journal) note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, echange: true } : e));
+    });
     await showLoad();
   }
 

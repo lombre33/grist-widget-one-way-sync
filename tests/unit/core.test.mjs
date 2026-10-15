@@ -5,7 +5,7 @@ import {
   BUDGET_WINDOW, LEASE_S, RESEND_BUDGET, addSpent, budgetWait, chargeBusy, parseCharge,
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
   sentColumns, compareVersion, copyColumns, chunkMark, majleAction, rowsSince, addTrackRowsAction, bucketOf, crc32, listOverdue, listRequest, parseList, trackState, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
-  newColumnsMap, nextGaps, docLabel, followRenames, destRefs, rowFilter, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
+  newColumnsMap, nextGaps, followRenames, destRefs, rowFilter, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
 
@@ -115,6 +115,65 @@ const gone = (id, t, keys, extra = {}, left = []) => ({ id, id_sync: '', ...extr
   seaux: Object.fromEntries(keys.map(k => [bucketOf(k), left.filter(x => bucketOf(x) === bucketOf(k))])) }) });
 const part = (id, n, t, keys, last, mark = 'm1') => ({ id, id_sync: '', Synchro_Ids: JSON.stringify({ liste: { marque: mark, n, t, cles: keys, fin: last } }) });
 
+test('Échange : la version la plus récente gagne et écrit MajLe ; les listes des clés sont sans effet', () => {
+  const swap = (journalRows, destRows) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', exchange: true });
+  const destRows = [{ id: 1, id_sync: 'a', Nom: 'ici', MajLe: 20 }, { id: 2, id_sync: 'b', Nom: 'ici', MajLe: 20 }, { id: 3, id_sync: 'c', Nom: 'ici', MajLe: null },
+    { id: 4, id_sync: 'd', Nom: 'ici', MajLe: 20 }, { id: 5, id_sync: 'e', Nom: 'ici', MajLe: 20 }];
+  const journalRows = [j(1, 'a', 30, { Nom: 'là-bas' }), j(2, 'b', 10, { Nom: 'ancienne' }), j(3, 'c', 5, { Nom: 'là-bas' }), j(4, 'd', 20, { Nom: 'même heure' }),
+    j(5, 'e', 15, { Supprime: true }), j(6, 'f', null, { Nom: 'nouvelle' }), list(7, ['a']), gone(8, 40, ['b'])];
+  const { actions, stats } = swap(journalRows, destRows);
+  assert.deepEqual(stats, { added: 1, updated: 2, removed: 0 }, 'rien n\'est effacé : ni par la liste, ni par une suppression plus ancienne que la ligne d\'ici');
+  assert.deepEqual(actions, [
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a', 'c', 'f'] }, { Nom: ['là-bas', 'là-bas', 'nouvelle'], MajLe: [30, 5, null] }, { on_many: 'all' }],
+    marked([7, 8, 1, 2, 3, 4, 5, 6], ['', '', 'modif', '', 'modif', '', '', 'ajout']),
+  ]);
+  const deleted = swap([j(1, 'e', 25, { Supprime: true })], destRows);
+  assert.deepEqual(deleted.actions[0], ['BulkRemoveRecord', 'Dest', [5]], 'Supprime plus récente : la ligne est effacée');
+  const applied = [{ ...destRows[0], Nom: 'là-bas', MajLe: 30 }, ...destRows.slice(1)];
+  assert.deepEqual(swap([j(1, 'a', 30, { Nom: 'là-bas' })], applied).actions, [marked([1], [''])], 'sa propre version revenue (écho) est sans effet');
+  const matched = planConsolidation({ journalRows: [j(1, 'x', 50, { Nom: 'Lyon' })], destRows: [{ id: 9, id_sync: '', Nom: 'Lyon' }], copyCols: [['Nom', 'Nom']],
+    destTable: 'Dest', journalTable: 'J', matchCol: 'Nom', exchange: true });
+  assert.deepEqual(matched.actions[0], ['BulkUpdateRecord', 'Dest', [9], { id_sync: ['x'], Nom: ['Lyon'], MajLe: [50] }], 'rattachement : MajLe aussi');
+});
+
+test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
+  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
+  const id = '0123456789abcdef';
+  const exportId = 'fedcba9876543210';
+  const retour = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Annuaire/records?flat=1';
+  const inv = parseInvitation(buildInvitation({ id, exportId, name: 'Annuaire', origin: 'https://g.fr', secret: SECRET, retour, tables: [{ table: 'Contacts', columns }] }));
+  assert.equal(inv.mode, 'echange');
+  assert.equal(inv.retour, retour);
+  assert.equal(inv.retourOrigin, 'https://g.fr');
+  for (const wrong of ['https://g.fr/api/docs/d/tables/T/records?flat=1', retour.replace('?flat=1', ''), 'javascript:alert(1)']) {
+    assert.throws(() => parseInvitation(buildInvitation({ id, exportId, name: 'x', origin: '', retour: wrong, tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, wrong);
+  }
+  const url = 'https://g.fr/o/eq/api/s/Xyz789/tables/Journal_Annuaire/records?flat=1';
+  const recipient = { email: 'b@c.fr', docId: 'doc2' };
+  const reply = parseReply(buildReply({ id, recipient, url, retour: [{ table: 'Contacts_2', dest: 'Contacts', extra: 1 }] }), 'https://g.fr');
+  assert.deepEqual(reply.retour, [{ table: 'Contacts_2', dest: 'Contacts' }]);
+  assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').retour, undefined, 'réponse ordinaire');
+  for (const wrong of [[], [{ table: 'a;b', dest: 'Contacts' }], [{ table: 'A', dest: 'C' }, { table: 'B', dest: 'C' }], 'Contacts']) {
+    assert.throws(() => parseReply(buildReply({ id, recipient, url, retour: wrong }), 'https://g.fr'), /codeInvalid/, JSON.stringify(wrong));
+  }
+});
+
+test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'autre document', () => {
+  const E = '0123456789abcdef';
+  const columns = [{ id: 'Nom_2', type: 'Text', label: 'Nom', source: 'Text', visible: '', as: 'Nom' }];
+  const { actions } = exportRowsActions([], E, [{ table: 'Contacts', columns }], { swap: true });
+  const values = actions[0][3];
+  assert.deepEqual(values.Synchro_Type, ['cles', 'lot', 'suivi', 'echange']);
+  assert.deepEqual(values.Synchro_Table, ['Contacts', 'Contacts', 'Contacts', '']);
+  assert.equal(values.Synchro_Colonnes[0], '[{"id":"Nom_2","type":"Text","label":"Nom","source":"Text","visible":"","as":"Nom"}]');
+  const rows = values.Synchro_Type.map((type, i) => ({ id: i + 1, ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v[i]])) }));
+  assert.deepEqual(exportTables(rows, E).map(tb => tb.table), ['Contacts'], 'la ligne \'echange\' n\'est pas une table');
+  assert.deepEqual(exportRowsActions(rows, E, [{ table: 'Contacts', columns }], { swap: true }).actions, []);
+  assert.deepEqual(exportRowsActions(rows, E, [{ table: 'Contacts', columns }]).actions, [['BulkRemoveRecord', 'Synchro', [4]]]);
+  assert.deepEqual(sentColumns([{ id: 1, Synchro_Colonnes: values.Synchro_Colonnes[0] }]), [{ id: 'Nom_2', type: 'Text', label: 'Nom', as: 'Nom' }]);
+  assert.deepEqual(sentColumns([{ id: 1, Synchro_Colonnes: '[{"id":"Nom","type":"Text","as":"a b"}]' }]), [], 'nom dans l\'autre document invalide');
+});
+
 test('seau d\'une clé : CRC-32 comme zlib.crc32 en Python, 256 seaux', () => {
   assert.equal(crc32('123456789'), 0xcbf43926, 'valeur de contrôle du CRC-32');
   assert.equal(crc32('été'), 0x44d16cd4, 'UTF-8, comme str.encode() en Python');
@@ -198,7 +257,9 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   const { keys, lot, state } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
   assert.match(keys, /^if \$Synchro_Type == "empreinte":\n  import zlib\n  c = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="complet"\)\.Synchro_Lot or ""\n  return "%d:%08x" % \(len\(c\), zlib\.crc32\(c\.encode\(\)\)\)\n/,
     'empreinte de l\'instantané public : la CIBLE ne le relit que s\'il change');
-  assert.match(keys, /\nif \$Synchro_Type not in \("cles", "suivi"\): return ""\ntables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
+  assert.match(keys, /\nif \$Synchro_Type not in \("cles", "suivi"\): return ""\n.*\ntables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
+  assert.match(keys, /\nif \$Synchro_Type == "cles" and Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\.id: return ""\n/,
+    'Échange : la liste des clés ne part pas');
   assert.match(keys, /  sums = \[zlib\.crc32\(str\(r\.id_sync\)\.encode\(\)\) for r in src\.all if r\.id_sync and keep\(r\)\]\n  return "%d:%08x" % \(len\(sums\), sum\(sums\) & 0xffffffff\)/,
     'suivi : nombre de clés et somme de leurs CRC-32, recalculés à chaque changement des clés');
   assert.match(keys, /s = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="suivi"\)/);
@@ -221,15 +282,19 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /if capped and n > max\(budget, room\):\n    big\.append\(r\.id_sync\)\n    continue/, 'une ligne plus grosse qu\'un envoi est signalée');
   assert.match(lot, /if capped and out and size \+ n > budget: break/, 'la première ligne part seule, même au-delà du plafond');
   assert.match(lot, /  if not capped and size > 2000000: return json\.dumps\(\{"lignes": \[\], "total": len\(rows\), "trop": True\}\)/, 'instantané public plafonné');
-  assert.match(lot, /  touched = \[r for r in rows if \(v\(getattr\(r, "RecalculLe", None\)\) or 0\) > v\(cut\)\]\n  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut\)/,
+  assert.match(lot, /  touched = \[r for r in rows if \(v\(getattr\(r, "RecalculLe", None\)\) or 0\) > v\(cut\)\]\n/,
     'seule RecalculLe (un nombre) est lue sur toutes les lignes, MajLe sur les lignes recalculées');
-  assert.match(lot, /undone = set\(r\.id for r in touched if r\.id not in recent and not echo\(r\)\)/,
+  assert.match(lot, /  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut and not \(swap and echo\(r\)\)\)/,
+    'une ligne reçue par l\'Échange ne repart pas vers l\'autre document, même dans les 5 secondes');
+  assert.match(lot, /undone = set\(r\.id for r in touched if r\.id not in recent and r\.id not in fresh and not echo\(r\)\)/,
     'une ligne annulée (RecalculLe récent, MajLe ancienne) repart');
-  assert.match(lot, /    x = getattr\(r, "RecuLe", None\)\n    return bool\(x and abs\(v\(x\) - v\(getattr\(r, "RecalculLe"\)\)\) < 1\)/,
-    'une ligne écrite par la consolidation d\'un Échange : RecuLe et RecalculLe recalculées ensemble');
+  assert.match(lot, /  stamps = \[x\.Sync_Etat for x in Synchro\.lookupRecords\(Synchro_Type="echange"\) if isinstance\(x\.Sync_Etat, \(int, float\)\)\]/,
+    'heures des dernières consolidations d\'Échange');
+  assert.match(lot, /    t, m = v\(getattr\(r, "RecalculLe"\)\) or 0, v\(r\.MajLe\) or 0\n    return any\(abs\(t - s\) < 1 and m < s for s in stamps\)/,
+    'écho : ligne recalculée par la consolidation, MajLe plus ancienne qu\'elle');
   assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\.id/);
   assert.match(lot, /  fresh = set\(\) if swap else set\(r\.id for r in touched if r\.id not in recent and echo\(r\)\)/,
-    'une ligne reçue par l\'Échange part vers les autres exports, pas vers l\'autre document');
+    'une ligne reçue par l\'Échange part vers les autres exports (relais), à l\'heure de sa version');
   assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
   assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
@@ -248,7 +313,7 @@ test('suivi des clés et envoi coupé : une colonne de déclenchement, nommée c
   const { state } = syncFormulas(['Contacts']);
   const mark = syncColumns(['Contacts']).find(c => c.id === 'Sync_Etat');
   assert.deepEqual(mark, { id: 'Sync_Etat', type: 'Any', isFormula: false, formula: state, recalcWhen: 0 });
-  assert.match(state, /^import json\nif \$Synchro_Type == "lot":\n  lot = json\.loads\(\$Synchro_Lot or "\{\}"\)\n  if lot\.get\("depuis"\) and not lot\.get\("renvoi"\):\n/,
+  assert.match(state, /^import json\nif \$Synchro_Type == "echange": return NOW\(\)\.timestamp\(\)\nif \$Synchro_Type == "lot":\n  lot = json\.loads\(\$Synchro_Lot or "\{\}"\)\n  if lot\.get\("depuis"\) and not lot\.get\("renvoi"\):\n/,
     'lot : un renvoi coupé ne pose pas de marque');
   assert.match(state, /    return min\(value, lot\["depuis"\]\) if value else lot\["depuis"\]\n  return value\nif \$Synchro_Type != "suivi": return value\n/, 'la plus ancienne date reste');
   assert.match(state, /  b = h \* 256 >> 32\n  sums\[b\] = \(sums\[b\] \+ h\) & 0xffffffff\n  if r\.id > top: fresh\[b\] = \(fresh\[b\] \+ h\) & 0xffffffff/,
@@ -526,11 +591,10 @@ test('invitation : aller-retour, plusieurs tables, refus des codes invalides', (
 test('réponse : même instance, une adresse par clé de formulaire seulement', () => {
   const url = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Annuaire/records?flat=1';
   const id = '0123456789abcdef';
-  const recipient = { email: 'a@b.fr', docId: 'doc1', docName: 'Annuaire', team: 'eq', at: '2026-10-14', extra: 'x' };
+  const recipient = { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14', extra: 'x' };
   const reply = parseReply(buildReply({ id, secret: SECRET, recipient, url }), 'https://g.fr');
   assert.equal(reply.url, url);
-  assert.equal(docLabel(reply.recipient.docName, reply.recipient.docId), 'Annuaire (doc1)', 'le document par son nom et son identifiant');
-  assert.equal(docLabel('', 'doc1'), 'doc1');
+  assert.deepEqual({ ...reply.recipient }, { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14' }, 'seulement les champs connus');
   assert.equal(reply.secret, SECRET);
   assert.equal(reply.recipient.extra, undefined);
   assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').secret, '');

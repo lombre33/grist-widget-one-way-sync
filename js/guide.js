@@ -8,6 +8,7 @@ import { copyField, el } from './ui.js';
 const STEPS = {
   reponse: [['source', 'guide.s1'], ['target', 'guide.t1'], ['target', 'guide.t2'], ['source', 'guide.s2'], ['target', 'guide.t3']],
   public: [['source', 'guide.p.s1'], ['target', 'guide.p.t1']],
+  echange: [['source', 'guide.e.s1'], ['target', 'guide.e.t1'], ['target', 'guide.t2'], ['source', 'guide.s2'], ['target', 'guide.e.t3']],
 };
 
 export const widgetAddress = () => location.origin + location.pathname.replace(/index\.html$/, '');
@@ -21,7 +22,7 @@ export function roleGuide({ you = null, mode = 'reponse', current = -1, open = f
   return el('details', { class: 'guide', open },
     el('summary', {}, t('guide.title')),
     el('ol', { class: 'guide-steps' }, steps),
-    mode === 'reponse' ? el('p', { class: 'muted small' }, t('guide.publicNote')) : null,
+    mode === 'public' ? null : el('p', { class: 'muted small' }, t('guide.publicNote')),
     el('p', { class: 'small' }, t('guide.install')), copyField(widgetAddress()));
 }
 

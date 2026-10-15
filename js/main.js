@@ -5,7 +5,7 @@ import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
 import { SYNC_TABLE } from './core.js';
 import { readSchema } from './grist.js';
-import { legacyJournals, legacyTables, receivedJournals } from './tables.js';
+import { legacyJournals, legacyTables, readSourceNote, receivedJournals } from './tables.js';
 import { copyField, el, errorText, message, openModal } from './ui.js';
 import { roleGuide, widgetAddress } from './guide.js';
 import { tutorialView } from './tutorial.js';
@@ -115,11 +115,14 @@ async function start() {
   startAutoConsolidation();
   startAutoCatchUp();
   const schema = await readSchema();
-  if (receivedJournals(schema).length || legacyJournals(schema).length) {
-    await select('receive');
-    consolidateAll();
-  } else if (schema.has(SYNC_TABLE) || legacyTables(schema).length) await select('send');
+  const journals = receivedJournals(schema);
+  // Échange dont le formulaire de retour vient d'être publié : l'assistant reprend dans Envoyer.
+  // Le journal de retour d'un Échange fait partie de l'envoi : il n'ouvre pas Recevoir.
+  const backLink = readSourceNote(schema).invitations.some(inv => inv.journal && !inv.ready);
+  if (!backLink && (journals.some(r => !r.note.retour) || legacyJournals(schema).length)) await select('receive');
+  else if (schema.has(SYNC_TABLE) || legacyTables(schema).length) await select('send');
   else showHome();
+  if (journals.length) consolidateAll();
 }
 
 start();

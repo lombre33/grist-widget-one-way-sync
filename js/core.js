@@ -8,11 +8,6 @@ export const ORDER_COL = 'MajLe';
 // Heure du dernier recalcul de MajLe (formule ordinaire). Une annulation (Ctrl+Z) remet MajLe à sa
 // valeur d'avant, mais Grist recalcule cette colonne : c'est ainsi que le lot repère une annulation.
 export const RECALC_COL = 'RecalculLe';
-// Échange : heure (NOW()) où la consolidation a écrit la ligne (formule de déclenchement sur
-// MajLe). La consolidation y écrit MajLe à l'heure de la version reçue : la ligne ressemble alors à
-// une annulation (MajLe ancienne, RecalculLe recalculée à l'instant), mais RecuLe, recalculée dans le
-// même lot, la désigne comme reçue. Elle ne repart pas vers l'autre document (pas d'écho).
-export const ECHO_COL = 'RecuLe';
 export const DELETE_COL = 'Supprime'; // facultative : prise en compte si la table SOURCE l'a
 export const LIST_COL = 'Synchro_Ids'; // liste des clés existantes, envoyée par la SOURCE
 export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
@@ -40,7 +35,8 @@ export const MISSING_COL = STATE_COL;
 // Même colonne, ligne 'suivi' : le suivi des clés de la table, par seaux (JSON, voir syncFormulas).
 export const TRACK_COL = STATE_COL;
 // Types de ligne. Les webhooks n'envoient que les listes et les lots ('cles', 'lot') ; le suivi des
-// clés, le filtre de lignes et la marque d'un export en Échange ('echange') restent dans la SOURCE ;
+// clés, le filtre de lignes et la ligne d'un export en Échange ('echange', voir syncFormulas)
+// restent dans la SOURCE ;
 // 'complet' et son empreinte ('empreinte') ne sont lus que par le lien public. Une seule ligne
 // 'charge', d'aucun export, suit les renvois du document (voir parseCharge).
 export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge' };
@@ -151,9 +147,14 @@ export function freeTableId(base, taken) {
 //    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes, au
 //    plus PUBLIC_MAX octets (au-delà, aucune : `trop`).
 // Une ligne annulée (Ctrl+Z : MajLe revenue en arrière, RECALC_COL recalculée à l'instant) part avec
-// l'heure de l'annulation, pour l'emporter sur la version qu'elle annule. Une ligne écrite par la
-// consolidation d'un Échange (ECHO_COL recalculée en même temps que RECALC_COL) part avec l'heure
-// de sa version vers les autres exports, et pas vers l'autre document de l'Échange.
+// l'heure de l'annulation, pour l'emporter sur la version qu'elle annule.
+// Échange : la consolidation écrit les lignes reçues avec MajLe à l'heure de leur version, et
+// touche dans le même lot d'écritures la ligne 'echange' de l'export, dont MISSING_COL prend alors
+// l'heure (formule de déclenchement). Grist recalcule tout le lot d'écritures d'un coup : une ligne
+// recalculée à cette heure-là (à une seconde près) et dont MajLe est plus ancienne vient de
+// l'autre document. Elle n'y repart pas (pas d'écho) ; vers les autres exports (relais), elle part
+// avec l'heure de sa version. Une modification ici a une MajLe plus récente que la ligne
+// 'echange' : elle part toujours.
 // Une valeur est lue à part : une cellule en erreur part vide sans bloquer les autres. Dates en
 // secondes (format de Grist), Référence par son texte affiché. Un lot coupé dit depuis quand
 // (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste. `Supprime`
@@ -193,7 +194,10 @@ export function syncFormulas(tables) {
     '  import zlib',
     `  c = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.full}").${LOT_COL} or ""`,
     '  return "%d:%08x" % (len(c), zlib.crc32(c.encode()))',
-    `if $${TYPE_COL} not in ("${KIND.keys}", "${KIND.track}"): return ""`, pick, 'if src is None: return ""', ...read,
+    `if $${TYPE_COL} not in ("${KIND.keys}", "${KIND.track}"): return ""`,
+    // Échange : l'autre document n'efface rien d'après la liste des clés, elle ne part pas.
+    `if $${TYPE_COL} == "${KIND.keys}" and ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id: return ""`,
+    pick, 'if src is None: return ""', ...read,
     `if $${TYPE_COL} == "${KIND.track}":`,
     '  import zlib',
     `  sums = [zlib.crc32(str(r.${KEY_COL}).encode()) for r in src.all if r.${KEY_COL} and keep(r)]`,
@@ -218,16 +222,17 @@ export function syncFormulas(tables) {
     'undone = set()',
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id`,
+    `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     // Seule RECALC_COL (un nombre : lu vite) est lue sur toutes les lignes ; les dates, bien plus
     // lentes à lire, seulement sur les lignes recalculées depuis moins de WINDOW_S secondes.
     `  touched = [r for r in rows if (v(getattr(r, "${RECALC_COL}", None)) or 0) > v(cut)]`,
-    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut)`,
     '  def echo(r):',
-    `    x = getattr(r, "${ECHO_COL}", None)`,
-    `    return bool(x and abs(v(x) - v(getattr(r, "${RECALC_COL}"))) < 1)`,
+    `    t, m = v(getattr(r, "${RECALC_COL}")) or 0, v(r.${ORDER_COL}) or 0`,
+    '    return any(abs(t - s) < 1 and m < s for s in stamps)',
+    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut and not (swap and echo(r)))`,
     '  fresh = set() if swap else set(r.id for r in touched if r.id not in recent and echo(r))',
-    '  undone = set(r.id for r in touched if r.id not in recent and not echo(r))',
+    '  undone = set(r.id for r in touched if r.id not in recent and r.id not in fresh and not echo(r))',
     // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
     // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
     `  if len(touched) == len(rows) > (0 if swap else ${SMALL_TABLE}): undone = set()`,
@@ -258,6 +263,7 @@ export function syncFormulas(tables) {
   ].join('\n');
   const state = [
     'import json',
+    `if $${TYPE_COL} == "${KIND.swap}": return NOW().timestamp()`,
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  lot = json.loads($${LOT_COL} or "{}")`,
     '  if lot.get("depuis") and not lot.get("renvoi"):',
@@ -305,7 +311,7 @@ export function syncColumns(tables) {
     { id: RESEND_COL, type: 'Text', isFormula: false },
     { id: LIST_COL, type: 'Text', isFormula: true, formula: keys },
     { id: LOT_COL, type: 'Text', isFormula: true, formula: lot },
-    // Formule de déclenchement : ses dépendances (Synchro_Lot et Synchro_Ids) sont posées après coup.
+    // Formule de déclenchement : ses dépendances (Synchro_Lot, Synchro_Ids, Synchro_Renvoi) sont posées après coup.
     { id: TRACK_COL, type: 'Any', isFormula: false, formula: state, recalcWhen: 0 },
     // E-mail de la personne qui crée l'export : présenté à la CIBLE comme propriétaire.
     { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 },
@@ -316,8 +322,9 @@ export function syncColumns(tables) {
 // filtre s'il en a un, et son instantané complet s'il est partagé par lien public. `rows` : lignes Synchro existantes. Rend les actions qui
 // amènent l'export à `tables` ([{ table, columns }], colonnes de `exportableColumns`) : lignes
 // ajoutées, colonnes changées, lignes des tables retirées effacées. `changed` : tables nouvelles
-// ou aux colonnes changées, dont les lignes sont à renvoyer.
-export function exportRowsActions(rows, exportId, tables, { isPublic = false } = {}) {
+// ou aux colonnes changées, dont les lignes sont à renvoyer. Un export en Échange (`swap`) a en plus
+// sa ligne 'echange' (sans table).
+export function exportRowsActions(rows, exportId, tables, { isPublic = false, swap = false } = {}) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId);
   const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full, KIND.mark] : [])];
   const add = [];
@@ -325,7 +332,7 @@ export function exportRowsActions(rows, exportId, tables, { isPublic = false } =
   const changed = [];
   const wanted = new Set(); // `table|type` des lignes à garder
   for (const { table, columns, filter } of tables) {
-    const schema = JSON.stringify(columns.map(({ id, type, label, source, visible }) => ({ id, type, label, source, visible })));
+    const schema = JSON.stringify(columns.map(({ id, type, label, source, visible, as }) => ({ id, type, label, source, visible, ...(as ? { as } : {}) })));
     const kept = rowFilter(filter);
     // Valeur de Synchro_Colonnes par type de ligne : les colonnes, ou le filtre de la table.
     const values = new Map([...kinds.map(kind => [kind, schema]), ...(kept ? [[KIND.filter, JSON.stringify(kept)]] : [])]);
@@ -338,6 +345,10 @@ export function exportRowsActions(rows, exportId, tables, { isPublic = false } =
       if (!row) add.push({ [EXPORT_COL]: exportId, [TABLE_COL]: table, [TYPE_COL]: kind, [SCHEMA_COL]: value, [RESEND_COL]: '' });
       else if (row[SCHEMA_COL] !== value) update.push([row.id, value]);
     }
+  }
+  if (swap) {
+    wanted.add(`|${KIND.swap}`);
+    if (!mine.some(r => r[TYPE_COL] === KIND.swap)) add.push({ [EXPORT_COL]: exportId, [TABLE_COL]: '', [TYPE_COL]: KIND.swap, [SCHEMA_COL]: '', [RESEND_COL]: '' });
   }
   const remove = mine.filter(r => !wanted.has(`${r[TABLE_COL]}|${r[TYPE_COL]}`)).map(r => r.id);
   const cols = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
@@ -361,7 +372,7 @@ export function addTrackRowsAction(rows) {
 
 // Tables et colonnes d'un export, lues dans ses lignes Synchro.
 export function exportTables(rows, exportId) {
-  const mine = rows.filter(r => r[EXPORT_COL] === exportId);
+  const mine = rows.filter(r => r[EXPORT_COL] === exportId && r[TYPE_COL] !== KIND.swap);
   const tables = new Map();
   for (const r of mine) {
     if (r[TYPE_COL] !== KIND.filter && !tables.has(r[TABLE_COL])) tables.set(r[TABLE_COL], parseJson(r[SCHEMA_COL], []) || []);
@@ -398,6 +409,27 @@ export function conditionExport(text) {
 
 // Nom du webhook d'un destinataire : lisible dans les réglages de Grist, avec l'export en fin.
 export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
+
+// Destinataires d'un export : les webhooks sur Synchro dont la condition nomme cet export
+// (`conditions` : texte de la condition par webhook, voir webhookConditions).
+export const hooksOf = (hooks, conditions, exportId) =>
+  hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === exportId);
+
+// Échange, côté CIBLE : ce que ce document renvoie à la SOURCE. Chaque destination (`entries` :
+// tables de la note du journal) part avec les colonnes qui reçoivent une colonne de la SOURCE,
+// chacune avec son nom là-bas (`as`). `columnsOf(table)` : ses colonnes envoyables.
+export function exchangeTables(entries, columnsOf) {
+  return entries.map((entry) => {
+    const map = entry.map || {};
+    const back = new Map([...new Set([...(entry.columns || []).map(c => c.id), ...Object.keys(map)])].map(id => [map[id] || id, id]));
+    const columns = (columnsOf(entry.dest) || []).filter(c => !c.blocked && back.has(c.id)).map(c => ({ ...c, as: back.get(c.id) }));
+    return { table: entry.dest, columns, filter: null };
+  }).filter(tb => tb.columns.length);
+}
+
+// Échange, côté SOURCE : correspondance des colonnes reçues (colonne de l'autre document -> d'ici),
+// lue dans leur nom là-bas (`as`). Un choix fait dans la fenêtre d'une table ajoutée l'emporte.
+export const exchangeMap = (sent, map = {}) => ({ ...Object.fromEntries(sent.filter(c => c.as).map(c => [c.id, c.as])), ...map });
 
 // Renvoi de lignes (numéros de ligne de la table SOURCE) : une marque nouvelle à chaque fois,
 // pour que la valeur change même si les lignes sont les mêmes.
@@ -516,15 +548,16 @@ export function parseLot(text) {
 // colonnes de la synchro et colonnes internes de Grist. Les pièces jointes ne peuvent pas partir
 // (`blocked`). Une Référence part comme le texte qu'elle affiche.
 export function exportableColumns(cols) {
-  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, ECHO_COL, DELETE_COL]);
+  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
   return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map(c => ({
     id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type,
     visible: c.visible || '', blocked: c.type === 'Attachments',
   }));
 }
 
-// Description des colonnes envoyées, telle que la CIBLE la reçoit.
-const exportSchema = columns => columns.map(({ id, type, label }) => ({ id, type, label }));
+// Description des colonnes envoyées, telle que la CIBLE la reçoit. Dans un Échange, `as` donne le
+// nom de la colonne dans l'autre document (voir exchangeTables).
+const exportSchema = columns => columns.map(({ id, type, label, as }) => ({ id, type, label, ...(as ? { as } : {}) }));
 
 // Colonnes de la synchro qui manquent à la table SOURCE.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, RECALC_COL].filter(id => !cols.some(c => c.colId === id));
@@ -534,13 +567,25 @@ export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, RECALC_COL].filte
 // cinq fois plus lentement (mesuré : 190 ms contre 38 ms sur 12 000 lignes).
 export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW().timestamp()` };
 
+// Clé id_sync posée à la création d'une ligne (formule de déclenchement UUID()), sur une colonne
+// qui existe déjà : celle d'une destination d'Échange, qui envoie aussi ses lignes nouvelles. Les
+// lignes déjà là gardent leur clé.
+export function keyTriggerAction(tableId, cols) {
+  const key = cols.find(c => c.colId === KEY_COL);
+  return key && !key.isFormula && key.formula !== 'UUID()' ? ['ModifyColumn', tableId, KEY_COL, { formula: 'UUID()', recalcWhen: 0 }] : null;
+}
+
+// Échange : la case Supprime efface une ligne des deux côtés ; elle est ajoutée aux tables qui
+// n'en ont pas.
+export const deleteColumnAction = (tableId, cols) =>
+  (cols.some(c => c.colId === DELETE_COL) ? null : ['AddColumn', tableId, DELETE_COL, { type: 'Bool', isFormula: false }]);
+
 // id_sync : UUID posé à la création. MajLe : NOW() à toute modification de la ligne.
 export function prepareSourceActions(tableId, missing) {
   const specs = {
     [KEY_COL]: { type: 'Text', isFormula: false, formula: 'UUID()', recalcWhen: 0 },
     [ORDER_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 2 },
     [RECALC_COL]: RECALC_SPEC,
-    [ECHO_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 0 },
   };
   return missing.map(colId => ['AddColumn', tableId, colId, specs[colId]]);
 }
@@ -734,7 +779,7 @@ export function rowsByTable(journalRows) {
 // Colonnes recopiées, en couples [colonne du Journal, colonne de la destination] : colonnes
 // envoyées présentes des deux côtés (sous le nom choisi dans `map`, sinon le même), hors colonnes
 // techniques de la synchro et formules de la destination. La destination ne garde que `id_sync`.
-const TECHNICAL = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, RECALC_COL, ECHO_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL,
+const TECHNICAL = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL,
   DATA_COL, SCHEMA_COL, EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, LOT_COL]);
 export function copyColumns(journalCols, destCols, map = {}) {
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
@@ -867,7 +912,11 @@ function completeLists(pending) {
 //    dernière version de la clé, à la date d'arrivée de la liste.
 // Une retouche manuelle survit donc jusqu'à la prochaine modification côté SOURCE, et rejouer le
 // plan après application ne change rien (idempotent).
-export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '' }) {
+// Échange (`exchange`) : la destination est aussi envoyée à l'autre document. La version la plus
+// récente gagne : une version reçue n'a d'effet que si elle est plus récente que la ligne d'ici
+// (MajLe), et elle y écrit MajLe à son heure. Les listes des clés sont sans effet : une clé absente
+// de la liste de l'autre document peut n'y être pas encore arrivée ; seule `Supprime` efface.
+export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false }) {
   const destByKey = new Map();
   const unkeyed = new Map(); // valeur de matchCol -> lignes de la destination sans clé
   for (const row of destRows) {
@@ -907,7 +956,8 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
     }
     return byBucket;
   };
-  const pending = pendingLists(journalRows);
+  const pending = exchange ? [] : pendingLists(journalRows);
+  if (exchange) for (const { row } of pendingLists(journalRows)) marks.set(row.id, '');
   const mark = lastMark(pending);
   for (const { row, list } of pending) {
     if (list.buckets) {
@@ -931,8 +981,13 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const upserts = [];
   const attached = []; // [ligne de la destination, version]
   const stats = { added: 0, updated: 0, removed: 0 };
+  const newest = rows => rows.map(r => r[ORDER_COL]).reduce((a, b) => (compareOrder(a, b) >= 0 ? a : b), null);
   for (const [key, version] of latest) {
     if (isTrue(version.row[APPLIED_COL])) continue;
+    if (exchange && destByKey.has(key) && compareOrder(version.order, newest(destByKey.get(key))) <= 0) {
+      marks.set(version.id, '');
+      continue;
+    }
     if (isTrue(version.row[DELETE_COL])) gone.add(key);
     if (gone.has(key)) {
       marks.set(version.id, destByKey.has(key) ? 'suppression' : '');
@@ -968,6 +1023,7 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const values = (versions) => {
     const out = {};
     for (const [from, to] of copyCols) out[to] = versions.map(v => v.row[from] ?? null);
+    if (exchange) out[ORDER_COL] = versions.map(v => v.order ?? null);
     return out;
   };
   const actions = chunk(upserts).map(part =>
@@ -1100,17 +1156,21 @@ function fromBase64UrlSafe(text) {
 
 function validColumns(cols) {
   return Array.isArray(cols) && cols.length > 0 && new Set(cols.map(c => c && c.id)).size === cols.length &&
-    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z0-9:_/+-]+$/.test(c.type)); // DateTime:Europe/Paris
+    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z0-9:_/+-]+$/.test(c.type) // DateTime:Europe/Paris
+      && (c.as === undefined || COL_ID.test(c.as)));
 }
 
 // Une invitation donne accès à un export (`export`, ses tables et colonnes) pour une personne :
 // `id` la désigne dans la réponse ; `secret`, facultatif et choisi à la création, prouve que la
 // réponse vient de quelqu'un qui l'a reçue (la SOURCE n'en garde que l'empreinte).
 // Mode « lien public » (`base` : adresse REST du document SOURCE) : pas de réponse, la CIBLE lit
-// les instantanés de l'export elle-même, sans identifiant.
-export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '' }) {
+// les instantanés de l'export elle-même, sans identifiant. Mode « Échange » (`retour` : adresse
+// d'écriture du journal de retour de la SOURCE) : la CIBLE renvoie ses modifications à cette
+// adresse, par un webhook à elle.
+export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '' }) {
   return encodeCode({
-    kind: 'invitation', id, export: exportId, name, origin, secret, from, ...(base ? { mode: 'public', base } : {}),
+    kind: 'invitation', id, export: exportId, name, origin, secret, from,
+    ...(base ? { mode: 'public', base } : retour ? { mode: 'echange', retour } : {}),
     tables: tables.map(({ table, columns }) => ({ table, columns: exportSchema(columns) })),
   });
 }
@@ -1121,19 +1181,21 @@ export function parseInvitation(text) {
     Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && COL_ID.test(tb.table) && validColumns(tb.columns)) &&
     new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
   const publicBase = inv.mode === 'public' ? safeDocBaseUrl(inv.base) : '';
-  if (!ok || (inv.mode === 'public' && !publicBase)) throw new Error('codeInvalid');
+  const back = inv.mode === 'echange' ? parseWebhookUrl(inv.retour) : null;
+  if (!ok || (inv.mode === 'public' && !publicBase) || (inv.mode === 'echange' && !(back && back.flat))) throw new Error('codeInvalid');
   const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
   return {
     id: inv.id, export: inv.export, name: inv.name.slice(0, 200), secret: inv.secret || '', origin: String(inv.origin || ''),
-    mode: publicBase ? 'public' : 'reponse', base: publicBase,
-    from: Object.fromEntries(['email', 'docId', 'docName'].map(k => [k, String(from[k] ?? '').slice(0, 200)])),
+    mode: publicBase ? 'public' : back ? 'echange' : 'reponse', base: publicBase, ...(back ? { retour: inv.retour, retourOrigin: back.origin } : {}),
+    from: Object.fromEntries(['email', 'docId'].map(k => [k, String(from[k] ?? '').slice(0, 200)])),
     tables: inv.tables.map(tb => ({ table: tb.table, columns: exportSchema(tb.columns) })),
   };
 }
 
-// `url` : l'adresse d'écriture du journal de l'export dans la CIBLE.
-export function buildReply({ id, secret = '', recipient, url }) {
-  return encodeCode({ kind: 'reponse', id, secret, recipient, url });
+// `url` : l'adresse d'écriture du journal de l'export dans la CIBLE. Échange : `retour` dit où la
+// CIBLE a rangé chaque table ([{ table: table de la CIBLE, dest: table de la SOURCE }]).
+export function buildReply({ id, secret = '', recipient, url, retour = null }) {
+  return encodeCode({ kind: 'reponse', id, secret, recipient, url, ...(retour ? { retour } : {}) });
 }
 
 // `sourceOrigin` : origine de l'instance du document SOURCE. Le webhook ne part que vers la même
@@ -1147,8 +1209,13 @@ export function parseReply(text, sourceOrigin) {
   }
   if (target.origin !== sourceOrigin) throw new Error('otherInstance');
   const r = reply.recipient;
-  const recipient = Object.fromEntries(['email', 'docId', 'docName', 'team', 'at'].map(k => [k, String(r[k] ?? '').slice(0, 200)]));
-  return { id: reply.id, secret: reply.secret || '', recipient, url: reply.url };
+  const recipient = Object.fromEntries(['email', 'docId', 'team', 'at'].map(k => [k, String(r[k] ?? '').slice(0, 200)]));
+  const out = { id: reply.id, secret: reply.secret || '', recipient, url: reply.url };
+  if (reply.retour === undefined) return out;
+  const back = Array.isArray(reply.retour) ? reply.retour : [];
+  const unique = key => new Set(back.map(b => b && b[key])).size === back.length;
+  if (!back.length || !back.every(b => b && COL_ID.test(b.table) && COL_ID.test(b.dest)) || !unique('table') || !unique('dest')) throw new Error('codeInvalid');
+  return { ...out, retour: back.map(({ table, dest }) => ({ table, dest })) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1200,8 +1267,6 @@ function safeDocBaseUrl(text) {
   }
 }
 
-// Un document pour les personnes : son nom et son identifiant, « Annuaire (i446PPRFLcTP) ».
-export const docLabel = (name, id) => (name ? `${name} (${id})` : String(id || ''));
 
 // `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>
 export function parseDocBaseUrl(baseUrl) {

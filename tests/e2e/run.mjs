@@ -207,13 +207,13 @@ try {
 
   // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
   // publié, rendre la réponse.
-  async function accept(doc, url, code) {
+  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.') {
     await openWidget(url);
     await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
     await button('Accepter une invitation').click();
     await dialog().locator('textarea.code').first().fill(code);
     await dialogButton('Continuer').click();
-    await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
+    await dialog().getByText(tables).waitFor();
     await dialogButton('Continuer').click();
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
@@ -225,8 +225,8 @@ try {
     return code2;
   }
   // SOURCE : coller la réponse sur la ligne de l'invitation, approuver, envoyer l'existant.
-  async function approve(reply, shots = false) {
-    await openWidget(source.url);
+  async function approve(reply, { shots = false, url = source.url } = {}) {
+    await openWidget(url);
     await button('Coller la réponse').click();
     await dialog().locator('textarea.code').first().fill(reply);
     await dialogButton('Vérifier').click();
@@ -241,6 +241,95 @@ try {
     await dialog().waitFor({ state: 'detached' });
   }
   const rawRows = async (doc, journal) => (await records(doc, journal)).filter(r => r.Synchro_Type);
+
+  // --- Échange : deux documents se tiennent à jour l'un l'autre. A invite (formulaire de retour
+  // publié chez A, son lien dans le code), B accepte et répond, A approuve. Une modification va
+  // d'un côté à l'autre sans revenir (pas d'écho) ; la plus récente l'emporte ; la case Supprime
+  // efface des deux côtés.
+  async function exchangeSteps() {
+    const a = await newDocWithWidget('Échange A', [
+      ['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }]],
+      ['BulkAddRecord', 'Fiches', [null, null, null], { Nom: ['Anna', 'Basile', 'Céline'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
+    ]);
+    const b = await newDocWithWidget('Échange B');
+    await openWidget(a.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Fiches' }).check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Partage');
+    await dialogButton('Créer l’export').click();
+    await dialogButton('Ajouter un destinataire').click();
+    await dialog().getByRole('radio', { name: /Échange/ }).check();
+    await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
+    await dialogButton('Créer l’invitation').click();
+    const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
+    await openWidget(a.url); // l'assistant reprend à l'étape du lien de retour
+    await dialog().getByLabel('Lien du formulaire de retour').fill(`${TEAM}/forms/${await formKey(a.doc)}/${back[0].id}`);
+    await dialogButton('Tester le lien').click();
+    await dialog().getByText('Transmettez ce code').waitFor();
+    const code = await dialog().locator('textarea.code').first().inputValue();
+    await dialogButton('Plus tard').click();
+    assert.ok(!JSON.stringify(await api('POST', `/docs/${a.doc}/sql`, { sql: 'select description from _grist_Tables_column' })).includes('/api/s/'),
+      'adresse de retour notée nulle part chez A');
+    const answer = await accept(b.doc, b.url, code, '« Partage » : table Fiches.');
+    const bHooks = (await api('GET', `/docs/${b.doc}/webhooks`)).webhooks;
+    assert.equal(bHooks.length, 1, 'B renvoie vers A par un webhook');
+    await approve(answer, { url: a.url });
+    const fiches = async doc => Object.fromEntries((await records(doc, 'Fiches')).map(r => [r.Nom, r]));
+    const aRows = await fiches(a.doc);
+    assert.ok(Object.values(aRows).every(r => r.Supprime === false), 'A : case Supprime ajoutée');
+    await openWidget(b.url);
+    const bRows = await waitFor(async () => { const r = await fiches(b.doc); return Object.keys(r).length === 3 && r; }, 'B reçoit les fiches de A');
+    assert.deepEqual(Object.values(bRows).map(r => `${r.Nom}:${r.Ville}:${r.id_sync === aRows[r.Nom].id_sync}`).sort(), ['Anna:Lyon:true', 'Basile:Paris:true', 'Céline:Nantes:true']);
+    assert.ok(['MajLe', 'RecalculLe', 'Supprime'].every(c => c in bRows.Anna), 'B : colonnes de l\'envoi de retour');
+    await widget().getByText('Échange : vos modifications de ces tables repartent vers ce document.').waitFor();
+    // Lignes de A recopiées chez B : rien ne repart vers A.
+    const sentLines = async (doc, table) => (await rawRows(doc, table)).flatMap(r => (r.Synchro_Type === 'lot' ? JSON.parse(r.Synchro_Lot || '{}').lignes || [] : []));
+    const aJournal = (await records(a.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_')).tableId;
+    const bJournal = (await records(b.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_')).tableId;
+    await new Promise(r => setTimeout(r, 3000));
+    assert.deepEqual(await sentLines(a.doc, aJournal), [], 'pas d\'écho vers A');
+    assert.ok(!(await rawRows(a.doc, aJournal)).some(r => r.Synchro_Type === 'cles' && r.Synchro_Ids), 'pas de liste des clés dans un Échange');
+
+    // B modifie et ajoute : A reçoit, sans écho vers B.
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bRows.Basile.id, { Ville: 'Brest' }], ['AddRecord', 'Fiches', null, { Nom: 'Damien', Ville: 'Metz' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => { const r = await fiches(a.doc); return r.Basile.Ville === 'Brest' && r.Damien && r.Damien.Ville === 'Metz'; }, 'A reçoit les modifications de B');
+    const damien = (await fiches(b.doc)).Damien.id_sync;
+    assert.match(damien, /^[0-9a-f-]{36}$/, 'B : clé posée à la création');
+    assert.equal((await fiches(a.doc)).Damien.id_sync, damien, 'même clé des deux côtés');
+    await new Promise(r => setTimeout(r, 3000));
+    assert.ok(!(await sentLines(b.doc, bJournal)).some(l => ['Brest', 'Metz'].includes(l[3].Ville)), 'pas d\'écho vers B');
+
+    // A modifie : B reçoit.
+    await applyActions(a.doc, [['UpdateRecord', 'Fiches', aRows.Anna.id, { Ville: 'Lille' }]]);
+    await openWidget(b.url);
+    await waitFor(async () => (await fiches(b.doc)).Anna.Ville === 'Lille', 'B reçoit la modification de A');
+
+    // Les deux modifient Céline, B d'abord : la version de A, plus récente, l'emporte des deux côtés.
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bRows.Céline.id, { Ville: 'Rennes' }]]);
+    await waitFor(async () => (await sentLines(a.doc, aJournal)).some(l => l[3].Ville === 'Rennes'), 'version de B arrivée chez A');
+    await applyActions(a.doc, [['UpdateRecord', 'Fiches', aRows.Céline.id, { Ville: 'Dijon' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => !(await sentLines(a.doc, aJournal)).length, 'A a lu la version de B');
+    assert.equal((await fiches(a.doc)).Céline.Ville, 'Dijon', 'A garde sa version, plus récente');
+    await openWidget(b.url);
+    await waitFor(async () => (await fiches(b.doc)).Céline.Ville === 'Dijon', 'B prend la version de A, plus récente');
+
+    // B coche Supprime : la ligne disparaît chez A, reste cochée chez B.
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bRows.Anna.id, { Supprime: true }]]);
+    await openWidget(a.url);
+    await waitFor(async () => !(await fiches(a.doc)).Anna, 'Supprime cochée chez B : ligne effacée chez A');
+    assert.equal((await fiches(b.doc)).Anna.Supprime, true);
+    step('Échange : modifications dans les deux sens, sans écho, la plus récente l\'emporte, Supprime efface des deux côtés');
+  }
+  if (process.env.ONLY_EXCHANGE) {
+    await exchangeSteps();
+    assert.deepEqual(errors, [], 'aucune erreur dans la console');
+    process.exit(0);
+  }
 
   if (process.env.CAPTURES) await installShots();
   if (process.env.INSTALL_ONLY) process.exit(0);
@@ -333,7 +422,7 @@ try {
   step('CIBLE : un journal pour l\'export, un formulaire, réponse produite');
 
   // --- SOURCE : approuver, envoyer l'existant ; un webhook sur Synchro, filtré sur l'export
-  await approve(reply, true);
+  await approve(reply, { shots: true });
   await widget().getByText('Actif').first().waitFor();
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
   assert.deepEqual(hooks.map(h => h.fields.tableId), ['Synchro']);
@@ -366,6 +455,18 @@ try {
   assert.deepEqual(dest.map(r => `${r.Nom}:${r.Ville}:${r.Lieu}`).sort(), ['Alice:Lyon:Lyon', 'Bob:Paris:Paris', 'Chloé:Nantes:', 'Dora:Brest:']);
   await widget().getByText(`Données de ${env.email}`).waitFor();
   step('CIBLE : Contacts consolidée, propriétaire affiché');
+
+  // --- Un lecteur de la CIBLE voit les boutons grisés d'emblée
+  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'lecteur@sync.local': 'viewers' } } });
+  const viewerContext = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1100, height: 700 } });
+  const viewerPage = await viewerContext.newPage();
+  await viewerPage.goto(`${env.grist}/test/login?username=lecteur@sync.local&name=Lecteur&next=${env.grist}/`);
+  await viewerPage.goto(target.url);
+  const viewerWidget = viewerPage.frameLocator('iframe').first();
+  await viewerWidget.getByText('Lecture seule : un éditeur doit ouvrir cette page').waitFor({ timeout: 30000 });
+  assert.ok(await viewerWidget.getByRole('button', { name: 'Accepter une invitation' }).isDisabled(), 'lecteur : boutons grisés');
+  await viewerContext.close();
+  step('CIBLE : un lecteur voit les boutons grisés d\'emblée');
 
   // --- Pages et tables : aucune page technique, une seule table technique côté SOURCE
   const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
@@ -818,6 +919,8 @@ try {
   await widget().getByText('Aucun export.', { exact: false }).waitFor();
   assert.equal((await anon('Contacts')).status, 403, 'reste du document toujours caché tant qu\'il est public');
   step('Lien public coupé, export supprimé : plus rien de lisible');
+
+  await exchangeSteps();
 
   // --- Montages d'avant la version 0.4 : signalés, effacés d'un clic
   const idSyncRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'id_sync' && c.parentId === contactsRefId).id;
