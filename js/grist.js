@@ -138,6 +138,38 @@ export async function collapseForms(tableIds) {
   await apply([['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(root) }]]);
 }
 
+// Après l'effacement de tables : leurs sections (dont les formulaires) disparaissent, mais pas
+// leurs cases dans la disposition de la page, ni dans la barre des repliés (vérifié : les numéros
+// de sections sont ensuite réutilisés). On les retire, et une page qui n'a plus de formulaire
+// publié perd son partage : la clé d'écriture disparaît avec lui.
+export async function tidyPages(viewRefs) {
+  const [sections, views, pages] = await Promise.all([fetchRows('_grist_Views_section'), fetchRows('_grist_Views'), fetchRows('_grist_Pages')]);
+  const actions = [];
+  for (const viewRef of viewRefs) {
+    const view = views.find(v => v.id === viewRef);
+    if (!view) continue;
+    const here = sections.filter(s => s.parentId === viewRef);
+    const ids = new Set(here.map(s => s.id));
+    if (view.layoutSpec) {
+      const layout = JSON.parse(view.layoutSpec);
+      const keep = box => {
+        if (box.leaf !== undefined) return ids.has(box.leaf) ? box : null;
+        return { ...box, children: (box.children || []).map(keep).filter(Boolean) };
+      };
+      const { collapsed = [], ...tree } = layout;
+      const tidy = { ...keep(tree), collapsed: collapsed.filter(c => ids.has(c.leaf)) };
+      if (!tidy.collapsed.length) delete tidy.collapsed;
+      if (JSON.stringify(tidy) !== view.layoutSpec) actions.push(['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(tidy) }]);
+    }
+    const page = pages.find(p => p.viewRef === viewRef);
+    const published = here.some(s => JSON.parse(s.shareOptions || '{}').publish);
+    if (page && page.shareRef && !published && !pages.some(p => p.id !== page.id && p.shareRef === page.shareRef)) {
+      actions.push(['UpdateRecord', '_grist_Pages', page.id, { shareRef: 0 }], ['RemoveRecord', '_grist_Shares', page.shareRef]);
+    }
+  }
+  if (actions.length) await apply(actions);
+}
+
 // Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
 // celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
 // `viewRefs` : autres pages à ranger (celle d'une vue d'export, qui n'est pas une page principale).

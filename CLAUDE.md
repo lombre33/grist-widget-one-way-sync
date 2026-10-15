@@ -133,3 +133,8 @@ Relais (A → B → C) : possible, la table reçue garde les `id_sync` de A ; le
 les clés vides (une ligne locale à clé serait effacée par la prochaine liste de A). Les boucles
 (retour vers le document d'origine, table vers elle-même) sont refusées à « Vérifier » par
 `loopingTables`. Le second saut dépend de la page du widget ouverte dans B.
+
+Effacer une table efface ses sections, mais pas leurs cases dans `layoutSpec` (repliés compris ;
+les numéros de sections sont réutilisés ensuite) ni le partage de la page (`_grist_Pages.shareRef`
+et `_grist_Shares`, donc la clé d'écriture). `tidyPages` nettoie les deux après
+`removeTechnicalTables`.

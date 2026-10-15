@@ -389,6 +389,14 @@ try {
   await button('Arrêter la réception').click();
   await dialogButton('Arrêter la réception').click();
   await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'journaux effacés');
+  // Formulaires partis aussi : plus de section de formulaire, plus de case dans la page du widget
+  // (repliés compris), plus de partage, donc plus de clé d'écriture.
+  await waitFor(async () => !(await records(target.doc, '_grist_Shares')).length, 'partage des formulaires retiré');
+  const targetSections = await records(target.doc, '_grist_Views_section');
+  assert.ok(!targetSections.some(sc => sc.parentKey === 'form'), 'formulaires effacés');
+  const synchroPage = (await records(target.doc, '_grist_Views')).find(v => v.name === 'Synchro');
+  const leaves = JSON.stringify(JSON.parse(synchroPage.layoutSpec || '{}')).match(/"leaf":\d+/g) || [];
+  assert.ok(leaves.every(l => targetSections.some(sc => sc.id === Number(l.slice(7)) && sc.parentId === synchroPage.id)), 'disposition de la page nettoyée');
   assert.equal((await records(target.doc, 'Contacts')).length, 4, 'destination gardée');
   await openWidget(source.url);
   await button('Révoquer').click();

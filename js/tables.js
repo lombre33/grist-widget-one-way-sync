@@ -9,7 +9,7 @@ import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, GROUP_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, ORDER_COL, RECEIVED_COL, SCHEMA_COL,
   STATE_COL, exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
 } from './core.js';
-import { apply, fetchRows, hideColumn, readSchema, tuckUnderWidgetPage } from './grist.js';
+import { apply, fetchRows, hideColumn, readSchema, tidyPages, tuckUnderWidgetPage } from './grist.js';
 
 export { JOURNAL_PREFIX };
 
@@ -139,6 +139,7 @@ export async function removeTechnicalTables(tableIds) {
   const left = new Set(sections.map(s => s.parentId));
   const still = new Set(existing.map(v => v.id));
   await apply([...views].filter(v => still.has(v) && !left.has(v)).map(v => ['RemoveView', v]));
+  await tidyPages([...views].filter(v => still.has(v) && left.has(v)));
 }
 
 // SOURCE : tables techniques d'une table qui n'est plus envoyée (liste et vue d'export).
