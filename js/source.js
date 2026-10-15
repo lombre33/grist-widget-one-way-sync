@@ -20,6 +20,7 @@ import { checkList, confirmDialog, copyButton, copyField, el, icon, message, ope
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
 import { LANG, t, typeName } from './i18n.js';
+import { readPref, writePref } from './prefs.js';
 
 const now = () => Date.now() / 1000;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -552,8 +553,16 @@ async function lightRows() {
 // Renvois ménagés (voir parseCharge) : la ligne 'charge' de Synchro dit quelle page renvoie et ce
 // qui est parti ces dix dernières minutes. Une page qui dépasse le budget attend, en donnant signe
 // de vie ; une autre page (autre personne, autre navigateur) ne lance rien pendant ce temps.
-const PAGE = randomHex(4);
+const BROWSER = readPref('browser') || randomHex(4);
+writePref('browser', BROWSER);
+const PAGE = `${BROWSER}.${randomHex(4)}`;
 let charge = null; // { id, state, saved, out } pendant un renvoi de cette page
+
+// Page fermée en plein renvoi : elle rend la main si Grist reçoit encore son écriture (sinon une
+// autre page de ce navigateur la reprend aussitôt, une autre personne après LEASE_S secondes).
+window.addEventListener('pagehide', () => {
+  if (charge) apply([['UpdateRecord', SYNC_TABLE, charge.id, { [RESEND_COL]: JSON.stringify({ ...charge.state, par: '', reprise: 0 }) }]]);
+});
 
 async function readCharge() {
   const rows = await selectRows(SYNC_TABLE, [TYPE_COL, RESEND_COL]);
@@ -587,6 +596,11 @@ async function saveCharge() {
   await writeSync([charge.id], { [RESEND_COL]: JSON.stringify(charge.state) });
 }
 
+// Signe de vie pendant une longue attente (file d'envoi, budget).
+async function beat() {
+  if (charge && now() - charge.saved > 20) await saveCharge();
+}
+
 // Octets partis (une copie par destinataire). Au-delà du budget, attendre que la fenêtre se vide.
 async function spend(bytes) {
   charge.state = addSpent(charge.state, now(), bytes);
@@ -601,7 +615,7 @@ async function spend(bytes) {
     }
     charge.state.reprise = 0;
   }
-  if (now() - charge.saved > 20) await saveCharge();
+  await beat();
 }
 
 function chargeNotice(state) {
@@ -625,6 +639,7 @@ async function waitForQueue(hookIds) {
     const hooks = (await listWebhooks()).filter(h => hookIds.includes(h.id));
     if (hooks.some(tooLarge)) throw new Error('tooLarge');
     if (!hooks.some(h => h.usage && h.usage.numWaiting)) return;
+    await beat();
     await sleep(1500);
   }
   throw new Error('queueStuck');

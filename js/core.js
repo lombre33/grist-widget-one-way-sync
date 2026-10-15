@@ -411,7 +411,7 @@ export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
 // modifications ordinaires ne passent pas par là : elles partent toujours.
 export const RESEND_BUDGET = 20000000;
 export const BUDGET_WINDOW = 600;
-export const LEASE_S = 300;
+export const LEASE_S = 120;
 
 export function parseCharge(text) {
   const c = parseJson(text, null) || {};
@@ -422,8 +422,13 @@ export function parseCharge(text) {
   };
 }
 
-// Un autre que `tag` renvoie, et a donné signe de vie depuis moins de LEASE_S secondes.
-export const chargeBusy = (charge, tag, now) => Boolean(charge.par) && charge.par !== tag && now - charge.le < LEASE_S;
+// Une autre page renvoie, et a donné signe de vie depuis moins de LEASE_S secondes. Une page se
+// nomme `navigateur.page` ; la question n'est posée que sous le verrou du navigateur (une page de ce
+// navigateur qui renverrait encore le tiendrait) : une page du même navigateur est donc fermée.
+export function chargeBusy(charge, page, now) {
+  const browser = id => id.split('.')[0];
+  return Boolean(charge.par) && browser(charge.par) !== browser(page) && now - charge.le < LEASE_S;
+}
 
 // Ajoute `bytes` octets envoyés à l'instant `now` ; oublie ce qui est sorti de la fenêtre.
 export function addSpent(charge, now, bytes) {

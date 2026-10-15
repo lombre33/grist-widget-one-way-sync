@@ -356,7 +356,8 @@ try {
   const lotOf = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
   assert.equal((await lotOf()).Sync_Etat, 1, 'lot noté à renvoyer en entier');
   await holdCharge('');
-  await waitFor(async () => !(await lotOf()).Sync_Etat, 'renvoi noté parti seul, la main rendue', 60000);
+  const released = async () => !JSON.parse((await records(source.doc, 'Synchro')).find(r => r.id === chargeRow.id).Synchro_Renvoi).par;
+  await waitFor(async () => !(await lotOf()).Sync_Etat && await released(), 'renvoi noté parti seul, la main rendue', 60000);
   step('SOURCE : un renvoi à la fois par document, celui d\'une autre page attend son tour');
 
   // --- CIBLE : dépliage et consolidation à l'ouverture

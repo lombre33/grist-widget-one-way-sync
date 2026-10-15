@@ -1,6 +1,7 @@
-// Préférences de la personne dans le stockage local du navigateur : langue, thème, et l'heure de sa
-// dernière visite par document CIBLE (`visit.<docId>`, pour l'historique). Aucune donnée du document
-// n'y est écrite.
+// Préférences de la personne dans le stockage local du navigateur : langue, thème, l'heure de sa
+// dernière visite par document CIBLE (`visit.<docId>`, pour l'historique) et un identifiant
+// tiré au hasard pour ce navigateur (`browser`, voir chargeBusy). Aucune donnée du document n'y est
+// écrite.
 const PREFIX = 'gristsync.';
 
 export function readPref(name) {

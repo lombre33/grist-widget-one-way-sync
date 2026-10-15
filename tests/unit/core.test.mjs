@@ -426,10 +426,12 @@ test('CIBLE : lignes forgées par le lien du formulaire effacées et comptées, 
 test('renvois ménagés : un à la fois par document, budget par fenêtre de dix minutes', () => {
   assert.deepEqual(parseCharge(''), { par: '', le: 0, reprise: 0, envoye: [] });
   assert.deepEqual(parseCharge('{"par": "a", "le": 5, "envoye": [[60, 10], "x"]}'), { par: 'a', le: 5, reprise: 0, envoye: [[60, 10]] });
-  const held = { ...parseCharge(''), par: 'a', le: 1000 };
-  assert.equal(chargeBusy(held, 'b', 1100), true, 'une autre page renvoie');
-  assert.equal(chargeBusy(held, 'a', 1100), false, 'c\'est cette page');
-  assert.equal(chargeBusy(held, 'b', 1000 + LEASE_S), false, 'sans signe de vie, une autre page reprend');
+  const held = { ...parseCharge(''), par: 'n1.a', le: 1000 };
+  assert.equal(chargeBusy(held, 'n2.b', 1100), true, 'une page d\'un autre navigateur renvoie');
+  assert.equal(chargeBusy(held, 'n1.a', 1100), false, 'c\'est cette page');
+  assert.equal(chargeBusy(held, 'n1.c', 1100), false, 'page du même navigateur, fermée (elle tiendrait le verrou)');
+  assert.equal(chargeBusy(held, 'n2.b', 1000 + LEASE_S), false, 'sans signe de vie, une autre page reprend');
+  assert.equal(chargeBusy({ ...held, par: '' }, 'n2.b', 1100), false);
   let c = addSpent(parseCharge(''), 1000, 5);
   c = addSpent(c, 1010, 7);
   assert.deepEqual(c.envoye, [[960, 12]], 'une entrée par minute');
