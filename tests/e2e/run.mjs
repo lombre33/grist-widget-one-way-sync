@@ -705,6 +705,8 @@ try {
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
   ])).ok, 'le lien du formulaire accepte n\'importe quelle ligne');
   await widget().getByRole('tab', { name: 'Recevoir' }).click();
+  // Rien n'est arrivé depuis plus d'une minute : le passage suivant viendrait dans une minute.
+  await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await widget().getByText('Arrivées suspectes').waitFor();
   await widget().getByText(/3\s+lignes rejetées/).waitFor();
   assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Pirate'), 'rien de recopié');
