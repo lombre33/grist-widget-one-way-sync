@@ -4,7 +4,7 @@ import { GRIST_ORIGINS, VERSION } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
 import { readSchema } from './grist.js';
-import { receivedTables, sentTables } from './tables.js';
+import { SYNC_TABLE, legacyJournals, legacyTables, receivedJournals } from './tables.js';
 import { copyField, el, message, openModal } from './ui.js';
 import { roleGuide, widgetAddress } from './guide.js';
 import { tutorialView } from './tutorial.js';
@@ -92,7 +92,11 @@ async function start() {
 
   startAutoConsolidation();
   const schema = await readSchema();
-  if (receivedTables(schema).length) { await select('receive'); consolidateAll(); } else if (sentTables(schema).length) await select('send'); else showHome();
+  if (receivedJournals(schema).length || legacyJournals(schema).length) {
+    await select('receive');
+    consolidateAll();
+  } else if (schema.has(SYNC_TABLE) || legacyTables(schema).length) await select('send');
+  else showHome();
 }
 
 start();

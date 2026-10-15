@@ -11,7 +11,7 @@ export const apply = actions => (actions.length ? grist.docApi.applyUserActions(
 
 // Instantané des métadonnées du document (tables et colonnes), lu en deux requêtes : chaque
 // écran ou passage de synchro le lit une fois, puis le relit après une écriture qui change le
-// schéma. Les tables de résumé (vues d'export) et les tables cachées de Grist ne sont pas
+// schéma. Les tables de résumé et les tables cachées de Grist ne sont pas
 // listées, mais `has` et `columns` les connaissent.
 export async function readSchema() {
   const [tables, columns] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Tables_column')]);
@@ -63,14 +63,44 @@ async function rest(method, path, body) {
 
 export const listWebhooks = async () => (await rest('GET', '/webhooks')).webhooks;
 
-export async function createWebhook({ name, memo, url, tableId }) {
-  const result = await rest('POST', '/webhooks', {
-    webhooks: [{ fields: { name, memo, url, tableId, eventTypes: ['add', 'update'], enabled: true, isReadyColumn: null } }],
-  });
-  return result.webhooks[0].id;
+// Un webhook par destinataire, sur la table Synchro, filtré par `condition` (formule évaluée par
+// Grist sur chaque ligne : seules celles de l'export partent). Grist accepte les conditions depuis
+// la version 1.7.11 : une instance plus ancienne refuse le champ, ou l'ignore ; le widget vérifie
+// donc la condition enregistrée et efface le webhook si elle manque (il recevrait tout).
+export async function createWebhook({ name, memo, url, tableId, condition }) {
+  let result;
+  try {
+    result = await rest('POST', '/webhooks', {
+      webhooks: [{ fields: { name, memo, url, tableId, condition, eventTypes: ['add', 'update'], enabled: true, isReadyColumn: null } }],
+    });
+  } catch (e) {
+    if (/condition/i.test(e.message)) throw new Error('gristTooOld');
+    throw e;
+  }
+  const id = result.webhooks[0].id;
+  if ((await webhookConditions()).get(id) !== condition) {
+    await deleteWebhook(id).catch(() => {});
+    throw new Error('gristTooOld');
+  }
+  return id;
+}
+
+// Condition de chaque webhook du document (texte de la formule), par identifiant de webhook :
+// lue dans _grist_Triggers, où Grist garde aussi l'identifiant de chaque webhook.
+export async function webhookConditions() {
+  const conditions = new Map();
+  for (const trigger of await fetchRows('_grist_Triggers')) {
+    let text = '';
+    try { text = (JSON.parse(trigger.condition || '{}') || {}).text || ''; } catch (e) { /* condition illisible */ }
+    let actions = [];
+    try { actions = JSON.parse(trigger.actions || '[]') || []; } catch (e) { /* actions illisibles */ }
+    for (const action of actions) if (action && action.type === 'webhook') conditions.set(action.id, text);
+  }
+  return conditions;
 }
 
 export const setWebhookEnabled = (id, enabled) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { enabled });
+export const renameWebhook = (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name });
 export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
 export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
 
@@ -180,38 +210,12 @@ export async function dropPages(tableIds) {
   if (views.length) await apply(views.map(v => ['RemoveView', v]));
 }
 
-// Page commune aux vues d'export (SOURCE), rangée sous la page du widget : une page, quel que soit
-// le nombre de tables envoyées. 0 si elle n'existe pas encore.
-export const EXPORTS_PAGE = 'Synchro_Exports';
+// Page commune aux vues d'export de la version 0.3 (SOURCE), effacée avec l'ancien montage. 0 si
+// elle n'existe pas.
+const EXPORTS_PAGE = 'Synchro_Exports';
 export async function exportsViewRef() {
   const view = (await fetchRows('_grist_Views')).find(v => v.name === EXPORTS_PAGE);
   return view ? view.id : 0;
-}
-
-// Range les pages de ces tables sous la page du widget, à la fin de ses sous-pages, et replie
-// celle-ci par défaut : les tables techniques ne s'empilent pas dans la liste des pages.
-// `viewRefs` : autres pages à ranger (celle d'une vue d'export, qui n'est pas une page principale).
-export async function tuckUnderWidgetPage(tableIds, viewRefs = []) {
-  const viewRef = await widgetViewRef();
-  if (!viewRef) return;
-  const [tables, allPages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Pages')]);
-  const views = new Set([...tables.filter(tb => tableIds.includes(tb.tableId)).map(tb => tb.primaryViewId), ...viewRefs]);
-  const moving = allPages.filter(p => views.has(p.viewRef));
-  const pages = allPages.filter(p => !views.has(p.viewRef)).sort((a, b) => a.pagePos - b.pagePos);
-  const at = pages.findIndex(p => p.viewRef === viewRef);
-  if (at < 0 || !moving.length) return;
-  const parent = pages[at];
-  let last = at;
-  while (last + 1 < pages.length && pages[last + 1].indentation > parent.indentation) last++;
-  const low = pages[last].pagePos;
-  const high = last + 1 < pages.length ? pages[last + 1].pagePos : low + 1;
-  const step = (high - low) / (moving.length + 1);
-  const options = { ...JSON.parse(parent.options || '{}'), collapsed: true };
-  await apply([
-    ['BulkUpdateRecord', '_grist_Pages', moving.map(p => p.id), {
-      pagePos: moving.map((_, i) => low + step * (i + 1)), indentation: moving.map(() => parent.indentation + 1) }],
-    ['UpdateRecord', '_grist_Pages', parent.id, { options: JSON.stringify(options) }],
-  ]);
 }
 
 // Retire une colonne de la page principale de sa table (elle reste dans les données brutes).

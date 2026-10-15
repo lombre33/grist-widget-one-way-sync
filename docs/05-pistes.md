@@ -12,17 +12,30 @@
 - Carte SOURCE : dernier envoi reçu. Révoquer efface les tables techniques devenues inutiles ;
   la CIBLE peut arrêter la réception.
 
+## Faites le 15 octobre 2026 (version 0.4)
+
+- Exports : un nom, des tables et leurs colonnes ; des destinataires ajoutés un à un, révocables
+  un à un, sans refaire l'export.
+- Une seule table technique côté SOURCE (`Synchro`), quel que soit le nombre d'exports et de
+  tables ; un webhook par destinataire, filtré par Grist sur son export.
+- Ajouter une table à un export : la CIBLE la range (nouvelle table ou existante) dans une fenêtre,
+  ou la refuse. Un journal et un formulaire par export côté CIBLE.
+- Un renvoi des mêmes valeurs ne défait plus une retouche faite à la main dans la CIBLE.
+- `Supprime` n'est plus ajoutée : prise en compte seulement si la table l'a déjà.
+
 ## Encore possibles, sans alourdir l'outil
 
-1. **Filtre de lignes par table** : n'envoyer que les lignes qui passent une condition simple
-   (colonne = valeur). La vue d'export le permet : une ligne qui sort du filtre part une dernière
-   fois marquée supprimée.
-2. **Colonnes différentes par destinataire** : aujourd'hui une table n'a qu'une vue d'export,
-   commune à tous ses destinataires. Il faudrait une vue par destinataire.
-3. **Ajouter une table à un envoi existant** : aujourd'hui, une nouvelle invitation.
+1. **Échange (synchro dans les deux sens)** : choisi par Antoine le 15 octobre, après les exports.
+   Deux exports croisés entre deux documents, avec une règle de conflit simple et un test d'écho
+   (une ligne reçue ne doit pas repartir vers son document d'origine).
+2. **Filtre de lignes par table** : n'envoyer que les lignes qui passent une condition simple
+   (colonne = valeur). La formule du lot le permet : une ligne qui sort du filtre part une
+   dernière fois marquée supprimée.
+3. **Valeurs de Référence à jour tout de suite** : aujourd'hui, une valeur affichée par une
+   Référence part à la prochaine modification de sa ligne. Un renvoi des lignes concernées, quand
+   la table référencée change, réglerait ce cas.
 
 ## À éviter, pour rester simple
 
-- Une synchro dans les deux sens : conflits, droits croisés, file bloquante des deux côtés.
 - Des notifications par courriel : il faudrait un service tiers.
 - Un tableau de bord multi-documents : chaque document reste maître de ses branchements.

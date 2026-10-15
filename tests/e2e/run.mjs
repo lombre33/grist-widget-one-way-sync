@@ -1,8 +1,9 @@
 // Test d'intégration : le parcours complet, dans un vrai Grist (tests/e2e/start-grist.sh) et un
-// vrai navigateur (Playwright). Deux documents, le widget installé dans chacun :
-//   SOURCE : préparer deux tables, inviter (avec secret) ;  CIBLE : accepter, coller le lien,
-//   répondre ;  SOURCE : approuver, envoyer l'existant ;  CIBLE : consolider ; puis ajout,
-//   modification, suppression logique et vraie suppression côté SOURCE, vérifiées dans la CIBLE.
+// vrai navigateur (Playwright). Trois documents, le widget installé dans chacun :
+//   SOURCE : créer un export, inviter (avec secret) ;  CIBLE : accepter, coller le lien, répondre ;
+//   SOURCE : approuver, envoyer l'existant ;  CIBLE : consolider ; ajout, modification, suppression
+//   logique et vraie suppression ; un second destinataire, puis sa seule révocation ; une table
+//   ajoutée à l'export (fenêtre côté CIBLE, table existante) ; pause et reprise ; lien public.
 // Seul écart avec un humain : le lien du formulaire est lu dans la base du serveur de test au lieu
 // d'être copié depuis le bouton « Partager » de Grist (hors du widget).
 import { chromium } from 'playwright';
@@ -137,19 +138,23 @@ const shot = async name => { if (process.env.CAPTURES) { await clean(); await pa
 
 // --- Documents
 const source = await newDocWithWidget('Source', [
-  // Interne n'est pas cochée à l'invitation : elle ne doit arriver qu'une fois ajoutée à l'export.
-  // Delta, numérique et jamais envoyée : Grist en mettrait le total dans la vue d'export (bug du 15/10).
-  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }, { id: 'Interne', type: 'Text' }, { id: 'Delta', type: 'Numeric' }]],
-  ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'], Interne: ['i1', 'i2', 'i3'], Delta: [1, 2, 3] }],
+  // Interne n'est pas cochée à la création : elle ne doit arriver qu'une fois ajoutée à l'export.
+  // Supprime existe déjà : la suppression logique est prise en compte (le widget ne l'ajoute plus).
+  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }, { id: 'Interne', type: 'Text' }, { id: 'Delta', type: 'Numeric' },
+    { id: 'Supprime', type: 'Bool' }]],
+  ['BulkAddRecord', 'Contacts', [null, null, null, null], { Nom: ['Alice', 'Bob', 'Chloé', 'Dora'], Ville: ['Lyon', 'Paris', 'Nantes', 'Brest'],
+    Interne: ['i1', 'i2', 'i3', 'i4'], Delta: [1, 2, 3, 4] }],
   ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
 // La CIBLE a déjà un référentiel « Communes » (colonne Commune, une ligne Lyon annotée), choisi
-// comme destination de Villes : Ville va dans Commune, et Lyon est rattachée au lieu d'être doublée.
+// comme destination de Villes quand la SOURCE l'ajoute à l'export : Ville va dans Commune, et Lyon
+// est rattachée au lieu d'être doublée.
 const target = await newDocWithWidget('Cible', [
   ['AddTable', 'Communes', [{ id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }]],
   ['AddRecord', 'Communes', null, { Commune: 'Lyon', Note: 'déjà là' }],
 ]);
+const target2 = await newDocWithWidget('Cible 2');
 step('documents SOURCE et CIBLE créés');
 
 const browser = await chromium.launch();
@@ -177,14 +182,60 @@ async function openWidget(url) {
 try {
   const dialog = () => widget().getByRole('dialog');
   const dialogButton = name => dialog().getByRole('button', { name, exact: true });
+  const pick = async (field, option) => {
+    await dialog().getByRole('button', { name: field, exact: true }).click();
+    await dialog().getByRole('option', { name: option, exact: true }).click();
+  };
+  const formKey = async (doc) => {
+    const share = (await records(doc, '_grist_Shares'))[0];
+    return execFileSync('docker', ['exec', env.container, 'python3', '-c',
+      `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
+  };
+  const publishedForms = async doc => (await records(doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
+
+  // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
+  // publié, rendre la réponse.
+  async function accept(doc, url, code) {
+    await openWidget(url);
+    await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
+    await button('Accepter une invitation').click();
+    await dialog().locator('textarea.code').first().fill(code);
+    await dialogButton('Continuer').click();
+    await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
+    await dialogButton('Continuer').click();
+    const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
+    await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
+    await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(doc)}/${forms[0].id}`);
+    await dialogButton('Tester le lien').click();
+    await dialog().getByText('Le lien fonctionne').waitFor();
+    const code2 = await dialog().locator('textarea.code').first().inputValue();
+    await dialogButton('Fermer').click();
+    return code2;
+  }
+  // SOURCE : coller la réponse sur la ligne de l'invitation, approuver, envoyer l'existant.
+  async function approve(reply, shots = false) {
+    await openWidget(source.url);
+    await button('Coller la réponse').click();
+    await dialog().locator('textarea.code').first().fill(reply);
+    await dialogButton('Vérifier').click();
+    await dialog().getByText(env.email).waitFor();
+    if (shots) await shot('11-source-fiche');
+    await dialogButton('Approuver et brancher').click();
+    await dialog().getByText('Branché').waitFor();
+    if (shots) await shot('12-source-envoi');
+    await dialogButton('Envoyer').click();
+    await dialog().getByText('Lignes existantes envoyées').waitFor();
+    await dialogButton('Fermer').click();
+    await dialog().waitFor({ state: 'detached' });
+  }
+  const rawRows = async (doc, journal) => (await records(doc, journal)).filter(r => r.Synchro_Type);
 
   if (process.env.CAPTURES) await installShots();
   if (process.env.INSTALL_ONLY) process.exit(0);
-  // --- SOURCE : assistant d'envoi, étapes Tables, Préparation, Options, Invitation
+  // --- Accueil et Tutoriel
   await openWidget(source.url);
   await widget().locator('.guide-steps').waitFor();
   await shot('01-accueil');
-  // Onglet Tutoriel : tout le parcours, filtrable par rôle, captures chargées.
   await widget().getByRole('tab', { name: 'Tutoriel' }).click();
   await widget().locator('.tuto-section').first().waitFor();
   await widget().getByRole('button', { name: 'Je suis la CIBLE' }).click();
@@ -192,163 +243,220 @@ try {
   await widget().getByRole('button', { name: 'Tout', exact: true }).click();
   assert.ok(await widget().locator('.tuto-shot img').first().evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
   await shot('16-tutoriel');
+
+  // --- SOURCE : un export (Tables, Colonnes, Nom), puis son premier destinataire
   await openWidget(source.url);
-  await widget().locator('.tile', { hasText: 'Envoyer une table' }).click();
-  await button('Nouveau destinataire').click();
+  await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+  await button('Nouvel export').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
-  await dialog().getByRole('checkbox', { name: 'Villes' }).check();
   await shot('02-source-tables');
   await dialogButton('Continuer').click();
-  await dialog().getByText('Le widget doit ajouter').waitFor();
+  await dialog().getByText('Le widget ajoutera').waitFor();
+  assert.equal(await dialog().getByRole('checkbox', { name: 'Supprime' }).count(), 0, 'Supprime n\'est pas une colonne envoyée');
   await dialog().getByRole('checkbox', { name: 'Interne' }).uncheck();
   await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
-  await shot('03-source-preparation');
-  await dialogButton('Préparer pour la synchro').click();
-  await dialog().getByText('Prêt à envoyer : 2 tables').waitFor();
-  await shot('04-source-options');
+  await shot('03-source-colonnes');
+  assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'rien d\'écrit avant la fin de l\'assistant');
+  await dialogButton('Continuer').click();
+  await dialog().getByLabel('Nom de l’export').fill('Annuaire');
+  await shot('03b-source-nom');
+  await dialogButton('Créer l’export').click();
+  await dialog().getByText('Export « Annuaire » créé.').waitFor();
   const contacts = await records(source.doc, 'Contacts');
+  const contactsRefId = await tableRef(source.doc, 'Contacts');
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
-  assert.ok((await records(source.doc, 'Synchro_Contacts'))[0].Synchro_Ids.startsWith('ids:'));
+  const synchro = await records(source.doc, 'Synchro');
+  assert.deepEqual(synchro.map(r => `${r.Synchro_Table}:${r.Synchro_Type}`), ['Contacts:cles', 'Contacts:lot']);
+  assert.match(synchro[0].Synchro_Export, /^[0-9a-f]{16}$/);
+  assert.match(synchro[0].Synchro_Ids, /^ids:/);
+  assert.deepEqual(JSON.parse(synchro[0].Synchro_Colonnes).map(c => c.id), ['Nom', 'Ville']);
+  await dialogButton('Ajouter un destinataire').click();
+  await dialog().getByText('Tables de l’export : Contacts.').waitFor();
+  await shot('04-source-options');
   await dialogButton('Créer l’invitation').click();
+  await dialog().getByText('Transmettez ce code').waitFor();
   const invitation = await dialog().locator('textarea.code').first().inputValue();
-  assert.ok(invitation.startsWith('GRISTSYNC1.'));
-  // Qui fait quoi : l'étape attendue est celle de la CIBLE, avec ses consignes à copier.
+  assert.ok(invitation.startsWith('GRISTSYNC2.'));
   assert.match(await dialog().locator('.guide-steps li.current').innerText(), /CIBLE[\s\S]*Accepter une invitation/);
   await dialogButton('Copier avec les consignes').waitFor();
   await shot('05-source-invitation');
   await dialogButton('Plus tard').click();
-  await widget().getByText('En attente de réponse').waitFor();
+  await widget().locator('.person').getByText('En attente de réponse').waitFor();
   await shot('06-source-attente');
-  step('SOURCE : deux tables préparées, invitation créée');
+  step('SOURCE : export créé (une table technique, Synchro), invitation créée');
 
-  // --- CIBLE : assistant de réception, étapes Code, Destinations, Lien, Réponse
+  // --- CIBLE : Code, Destinations, Lien, Réponse
   await openWidget(target.url);
-  await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
+  await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
   await button('Accepter une invitation').click();
   await dialog().locator('textarea.code').first().fill(invitation);
   await shot('07-cible-code');
   await dialogButton('Continuer').click();
-  await dialog().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
+  await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
-  const pick = async (field, option) => {
-    await dialog().getByRole('button', { name: field, exact: true }).click();
-    await dialog().getByRole('option', { name: option, exact: true }).click();
-  };
-  await pick('Villes', 'Communes');
   await shot('08-cible-destinations');
   await dialogButton('Continuer').click();
-  await pick('Ville', 'Commune');
-  await pick('Rattacher les lignes déjà là par la colonne', 'Commune');
-  await shot('08b-cible-colonnes');
-  await dialogButton('Créer les tables').click();
-  // Les deux formulaires sont publiés sur la page du widget (le cadre est recréé à chaque ajout).
-  const formSections = await waitFor(async () => {
-    const sections = (await records(target.doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
-    return sections.length === 2 && sections;
-  }, 'deux formulaires publiés');
+  const formSections = await waitFor(async () => { const f = await publishedForms(target.doc); return f.length === 1 && f; }, 'formulaire publié');
   const widgetSection = (await records(target.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
-  assert.ok(formSections.every(sc => sc.parentId === widgetSection.parentId), 'formulaires sur la page du widget');
-  const share = (await records(target.doc, '_grist_Shares'))[0];
-  const key = execFileSync('docker', ['exec', env.container, 'python3', '-c',
-    `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
+  assert.equal(formSections[0].parentId, widgetSection.parentId, 'formulaire sur la page du widget');
   await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
   await dialog().getByLabel('Lien du formulaire').waitFor();
-  await dialog().getByText(/2 formulaires de réception .* Ils ont tous le même lien/).waitFor();
-  await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; })); // le texte, pas le champ
+  await dialog().getByText(/il sert pour toutes les tables de l’export/).waitFor();
+  await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; }));
   await shot('09-cible-lien');
   if (process.env.CAPTURES) await helpShots();
-  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
+  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(target.doc)}/${formSections[0].id}`);
   await dialogButton('Tester le lien').click();
   await dialog().getByText('Le lien fonctionne').waitFor();
   const reply = await dialog().locator('textarea.code').first().inputValue();
   await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
-  step('CIBLE : tables créées (dont une existante), formulaires publiés, un lien pour les deux, réponse produite');
+  step('CIBLE : un journal pour l\'export, un formulaire, réponse produite');
 
-  // --- SOURCE : la carte de l'invitation rouvre l'assistant à l'étape Réponse, puis Envoi
-  await openWidget(source.url);
-  await button('Coller la réponse').click();
-  await dialog().locator('textarea.code').first().fill(reply);
-  await dialogButton('Vérifier').click();
-  await dialog().getByText(env.email).waitFor();
-  await shot('11-source-fiche');
-  await dialogButton('Approuver et brancher').click();
-  await dialog().getByText('Branché').waitFor();
-  await shot('12-source-envoi');
-  await dialogButton('Envoyer').click();
-  await dialog().getByText('Lignes existantes envoyées').waitFor();
-  await dialogButton('Fermer').click();
+  // --- SOURCE : approuver, envoyer l'existant ; un webhook sur Synchro, filtré sur l'export
+  await approve(reply, true);
   await widget().getByText('Actif').first().waitFor();
-  await shot('13-source-actif');
   const hooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
-  assert.deepEqual(hooks.map(h => h.fields.tableId).sort(), ['Contacts_summary_id_sync', 'Synchro_Contacts', 'Synchro_Villes', 'Villes_summary_id_sync']);
-  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).length >= 3, 'lignes reçues dans le journal');
-  step('SOURCE : quatre webhooks créés, lignes existantes envoyées');
+  assert.deepEqual(hooks.map(h => h.fields.tableId), ['Synchro']);
+  const triggers = (await api('POST', `/docs/${source.doc}/sql`, { sql: 'select condition from _grist_Triggers' })).records;
+  assert.equal(JSON.parse(triggers[0].fields.condition).text, `rec.Synchro_Export == "${synchro[0].Synchro_Export}" and rec.Synchro_Type in ("cles", "lot")`);
+  await waitFor(async () => (await records(target.doc, 'Journal_Annuaire')).length >= 2, 'liste et lot reçus dans le journal');
+  step('SOURCE : un webhook filtré sur l\'export, lignes existantes envoyées');
 
-  // --- CIBLE : consolidation à l'ouverture
+  // --- CIBLE : dépliage et consolidation à l'ouverture
   await openWidget(target.url);
-  const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 3 && rows; }, 'consolidation');
-  assert.deepEqual(dest.map(r => r.Nom).sort(), ['Alice', 'Bob', 'Chloé']);
-  const communes = await waitFor(async () => { const rows = await records(target.doc, 'Communes'); return rows.length === 2 && rows.every(r => r.id_sync) && rows; }, 'seconde table consolidée');
-  assert.deepEqual(communes.map(r => `${r.Commune}:${r.Note}`).sort(), ['Lyon:déjà là', 'Paris:'], 'Lyon rattachée, pas doublée');
+  const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 4 && rows; }, 'consolidation');
+  assert.deepEqual(dest.map(r => `${r.Nom}:${r.Ville}`).sort(), ['Alice:Lyon', 'Bob:Paris', 'Chloé:Nantes', 'Dora:Brest']);
   await widget().getByText(`Données de ${env.email}`).waitFor();
-  step('CIBLE : Contacts et Communes consolidées, propriétaire affiché');
+  step('CIBLE : Contacts consolidée, propriétaire affiché');
 
-  // --- Tables techniques sans page (« Données source »), sauf une page commune aux vues d'export
-  // de la SOURCE, rangée sous la page du widget ; destination propre
+  // --- Pages et tables : aucune page technique, une seule table technique côté SOURCE
   const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
     sql: 'select p.indentation, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
-  assert.deepEqual((await pagesOf(source.doc)).map(p => `${p.indentation}:${p.name}`),
-    ['0:Table1', '0:Contacts', '0:Villes', '0:Synchro', '1:Synchro_Exports'], 'SOURCE : une seule page technique');
+  assert.deepEqual((await pagesOf(source.doc)).map(p => p.name), ['Table1', 'Contacts', 'Villes', 'Synchro'], 'SOURCE : aucune page technique');
   assert.deepEqual((await pagesOf(target.doc)).map(p => p.name).sort(), ['Communes', 'Contacts', 'Synchro', 'Table1'], 'CIBLE : aucune page technique');
-  const sourceTables = (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId);
-  assert.ok(['Synchro_Contacts', 'Synchro_Villes', 'Contacts_summary_id_sync', 'Villes_summary_id_sync'].every(id => sourceTables.includes(id)), 'tables techniques gardées');
-  const exportCols = (await api('GET', `/docs/${source.doc}/tables/Contacts_summary_id_sync/columns`)).columns.map(c => c.id).sort();
-  assert.deepEqual(exportCols, ['MajLe', 'Supprime', 'Synchro_Donnees', 'group', 'id_sync'], 'vue d\'export sans total ajouté par Grist');
-  const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
-  assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
-  const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
-  assert.deepEqual(await columnsOf('Contacts'), ['Nom', 'Ville', 'id_sync']);
-  assert.deepEqual(await columnsOf('Communes'), ['Commune', 'Note', 'id_sync'], 'table existante complétée de la seule clé');
-  const layout = await waitFor(async () => {
+  assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Synchro', 'Table1', 'Villes']);
+  assert.deepEqual((await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Table1']);
+  const columnsOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
+  assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Nom', 'Ville', 'id_sync']);
+  await waitFor(async () => {
     const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
-    const spec = JSON.parse(views[0].fields.layoutSpec || '{}');
-    return (spec.collapsed || []).length === 2 && spec;
-  }, 'formulaires repliés');
-  step('SOURCE et CIBLE : tables techniques sans page (une page commune aux vues d\'export) ; destination sans colonne technique ; formulaires repliés');
+    return (JSON.parse(views[0].fields.layoutSpec || '{}').collapsed || []).length === 1;
+  }, 'formulaire replié');
+  step('SOURCE et CIBLE : tables techniques sans page, destination sans colonne technique, formulaire replié');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');
   await applyActions(target.doc, [['UpdateRecord', 'Contacts', bob.id, { Ville: 'retouche' }]]);
-  const alice = contacts.find(r => r.Nom === 'Alice');
-  const chloe = contacts.find(r => r.Nom === 'Chloé');
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', chloe.id, { Supprime: true }], ['AddRecord', 'Contacts', null, { Nom: 'Denis' }]]);
-  await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
+  const byName = name => contacts.find(r => r.Nom === name);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', byName('Chloé').id, { Supprime: true }],
+    ['AddRecord', 'Contacts', null, { Nom: 'Denis' }], ['RemoveRecord', 'Contacts', byName('Dora').id]]);
   const after = await waitFor(async () => {
     const rows = await records(target.doc, 'Contacts');
-    return rows.some(r => r.Nom === 'Denis') && !rows.some(r => r.Nom === 'Chloé') && rows.some(r => r.Ville === 'Marseille') && rows;
-  }, 'ajout, modification et suppression consolidés sans clic');
-  assert.equal(after.length, 3);
+    return rows.length === 3 && rows.some(r => r.Nom === 'Denis') && rows.some(r => r.Ville === 'Marseille') && rows;
+  }, 'ajout, modification et suppressions consolidés sans clic');
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
-  await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression consolidée');
-  // Historique : par table, chaque ligne avec son état (classe) et son nom (colonne choisie).
   const historyHas = (label, state) => waitFor(async () => (await widget().locator('.chg-row').evaluateAll(rows =>
     rows.map(r => `${r.querySelector('.chg-label').textContent}|${r.className}`))).some(r => r.startsWith(`${label}|`) && r.includes(`chg-${state}`)), `historique : ${label} ${state}`);
   await historyHas('Denis', 'ajout');
   await historyHas('Alice', 'modif');
   await historyHas('Chloé', 'suppression');
-  await historyHas('Paris', 'suppression');
-  assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Communes', 'Contacts'], 'historique groupé par table');
+  await historyHas('Dora', 'suppression');
   await shot('14-cible-historique');
-  step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');
+  await waitFor(async () => {
+    const rows = await records(target.doc, 'Journal_Annuaire');
+    return !rows.some(r => r.Synchro_Type) && rows.filter(r => r.id_sync).length === 5;
+  }, 'journal déplié et nettoyé : une version par ligne');
+  step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée ; journal nettoyé');
 
-  // --- Journal nettoyé à chaque passage : une version par ligne et la dernière liste
-  await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).filter(r => r.id_sync).length === 4, 'journal nettoyé');
-  step('CIBLE : journal nettoyé');
+  // --- Second destinataire du même export, sans secret, sans refaire l'export
+  await openWidget(source.url);
+  await button('Ajouter un destinataire').click();
+  await dialog().getByRole('checkbox', { name: 'Protéger l’invitation par un secret' }).uncheck();
+  await dialogButton('Créer l’invitation').click();
+  await dialog().getByText('Transmettez ce code').waitFor();
+  const invitation2 = await dialog().locator('textarea.code').first().inputValue();
+  await dialogButton('Plus tard').click();
+  const reply2 = await accept(target2.doc, target2.url, invitation2);
+  await approve(reply2);
+  await widget().locator('.person').nth(1).getByText('Actif').waitFor();
+  await shot('13-source-actif');
+  await openWidget(target2.url);
+  await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'second destinataire servi');
+  await openWidget(target.url);
+  await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
+  assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
+  step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer');
+
+  // --- Révoquer le second seulement : le premier continue
+  await openWidget(source.url);
+  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByRole('button', { name: 'Révoquer' }).click();
+  await dialogButton('Révoquer').click();
+  await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Nancy' }]]);
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Ville === 'Nancy'), 'le premier reçoit toujours');
+  await new Promise(r => setTimeout(r, 2000));
+  assert.ok(!(await records(target2.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Nancy')), 'le second ne reçoit plus');
+  step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours');
+
+  // --- Modifier l'export : une table et une colonne de plus ; la CIBLE range la table (fenêtre)
+  await openWidget(source.url);
+  await button('Modifier').click();
+  await dialog().getByRole('checkbox', { name: 'Villes' }).check();
+  await shot('18-source-modifier');
+  await dialogButton('Continuer').click();
+  await dialog().getByRole('checkbox', { name: 'Interne' }).first().check();
+  await dialogButton('Continuer').click();
+  await dialogButton('Enregistrer').click();
+  await dialog().getByText(/Enregistré : \d+ lignes sont parties/).waitFor();
+  await dialogButton('Fermer').click();
+  assert.equal((await records(source.doc, 'Synchro')).length, 4, 'deux lignes Synchro par table');
+  assert.ok(!(await columnsOf(source.doc, 'Villes')).includes('Supprime'), 'le widget n\'ajoute pas Supprime');
+  await openWidget(target.url);
+  await dialog().getByText('Nouvelle table : Villes').waitFor({ timeout: 30000 });
+  await dialog().getByText(/envoie maintenant la table Villes \(2 lignes/).waitFor();
+  await pick('Villes', 'Communes');
+  await shot('17-cible-nouvelle-table');
+  await dialogButton('Recevoir').click();
+  await pick('Ville', 'Commune');
+  await pick('Rattacher les lignes déjà là par la colonne', 'Commune');
+  await shot('08b-cible-colonnes');
+  await dialogButton('Recevoir').click();
+  await dialog().waitFor({ state: 'detached' });
+  const communes = await waitFor(async () => { const rows = await records(target.doc, 'Communes'); return rows.length === 2 && rows.every(r => r.id_sync) && rows; }, 'table ajoutée rangée dans Communes');
+  assert.deepEqual(communes.map(r => `${r.Commune}:${r.Note}`).sort(), ['Lyon:déjà là', 'Paris:'], 'Lyon rattachée, pas doublée');
+  assert.deepEqual(await columnsOf(target.doc, 'Communes'), ['Commune', 'Note', 'id_sync'], 'table existante complétée de la seule clé');
+  await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue et remplie');
+  await historyHas('Paris', 'ajout');
+  assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Contacts', 'Communes'], 'historique groupé par table');
+  await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
+  await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression dans la table ajoutée');
+  step('SOURCE puis CIBLE : table et colonne ajoutées à l\'export, rangées par la CIBLE dans une table existante');
+
+  // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
+  await openWidget(source.url);
+  await button('Mettre en pause').click();
+  await button('Reprendre').waitFor();
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Toulon' }], ['AddRecord', 'Contacts', null, { Nom: 'Emma' }]]);
+  await new Promise(r => setTimeout(r, 3000));
+  assert.ok(!(await records(target.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Toulon')), 'rien envoyé pendant la pause');
+  await button('Reprendre').click();
+  await dialog().getByText('Renvoie 2 lignes ajoutées ou modifiées').waitFor();
+  await shot('13b-source-reprendre');
+  await dialogButton('Reprendre').click();
+  await dialog().waitFor({ state: 'detached' });
+  await button('Mettre en pause').waitFor();
+  await openWidget(target.url);
+  await waitFor(async () => {
+    const rows = await records(target.doc, 'Contacts');
+    return rows.some(r => r.Nom === 'Emma') && rows.some(r => r.Ville === 'Toulon');
+  }, 'modifications de la pause rattrapées');
+  step('SOURCE : pause, puis reprise qui rattrape les deux lignes changées pendant la pause');
 
   // --- Relais : la CIBLE peut renvoyer une table reçue ; ses journaux ne sont pas proposés
   await widget().getByRole('tab', { name: 'Envoyer' }).click();
-  await button('Nouveau destinataire').click();
+  await button('Nouvel export').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).waitFor();
   const offered = await dialog().locator('.check-list label').allTextContents();
   assert.ok(offered.some(l => l.includes('Contacts')) && !offered.some(l => l.includes('Journal_')), 'journaux exclus de l\'envoi');
@@ -357,49 +465,17 @@ try {
   await dialog().getByText('Table reçue d’un autre document').waitFor();
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });
+  assert.ok(!(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'assistant fermé : rien d\'écrit');
   step('CIBLE : une table reçue peut être relayée (avis affiché), journaux exclus');
 
-  // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
-  await openWidget(source.url);
-  await button('Mettre en pause').click();
-  await button('Reprendre').waitFor();
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Toulon' }], ['AddRecord', 'Contacts', null, { Nom: 'Emma' }]]);
-  await new Promise(r => setTimeout(r, 3000));
-  assert.ok(!(await records(target.doc, 'Journal_Contacts')).some(r => (r.Synchro_Donnees || '').includes('Toulon')), 'rien envoyé pendant la pause');
-  await button('Reprendre').click();
-  await dialog().getByText('Renvoie 2 lignes ajoutées ou modifiées').waitFor();
-  await shot('13b-source-reprendre');
-  await dialogButton('Reprendre').click();
-  await dialog().waitFor({ state: 'detached' });
-  await button('Mettre en pause').waitFor(); // rattrapage fini, tableau de bord redessiné
-  await openWidget(target.url);
-  await waitFor(async () => {
-    const rows = await records(target.doc, 'Contacts');
-    return rows.some(r => r.Nom === 'Emma') && rows.some(r => r.Ville === 'Toulon');
-  }, 'modifications de la pause rattrapées');
-  step('SOURCE : pause, puis reprise qui rattrape les deux lignes changées pendant la pause');
-
-  // --- Colonne ajoutée à l'export : la CIBLE la crée et la remplit seule
-  await openWidget(source.url);
-  await button('Colonnes').click();
-  await dialog().getByRole('checkbox', { name: 'Interne' }).first().check();
-  await dialogButton('Enregistrer').click();
-  await dialog().getByText(/Colonnes enregistrées : 5 lignes repartent/).waitFor();
-  await dialogButton('Fermer').click();
-  await dialog().waitFor({ state: 'detached' });
-  await openWidget(target.url);
-  await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue, valeurs existantes comprises');
-  step('SOURCE puis CIBLE : colonne ajoutée à l\'export, créée et remplie dans la destination');
-
-  // --- Arrêts : la CIBLE efface ses journaux, la SOURCE révoque et efface ses tables techniques
+  // --- Arrêts : la CIBLE efface son journal ; la SOURCE révoque, puis supprime l'export
+  await widget().getByRole('tab', { name: 'Recevoir' }).click();
   await button('Arrêter la réception').click();
   await dialogButton('Arrêter la réception').click();
-  await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'journaux effacés');
-  // Formulaires partis aussi : plus de section de formulaire, plus de case dans la page du widget
-  // (repliés compris), plus de partage, donc plus de clé d'écriture.
-  await waitFor(async () => !(await records(target.doc, '_grist_Shares')).length, 'partage des formulaires retiré');
+  await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'journal effacé');
+  await waitFor(async () => !(await records(target.doc, '_grist_Shares')).length, 'partage du formulaire retiré');
   const targetSections = await records(target.doc, '_grist_Views_section');
-  assert.ok(!targetSections.some(sc => sc.parentKey === 'form'), 'formulaires effacés');
+  assert.ok(!targetSections.some(sc => sc.parentKey === 'form'), 'formulaire effacé');
   const synchroPage = (await records(target.doc, '_grist_Views')).find(v => v.name === 'Synchro');
   const leaves = JSON.stringify(JSON.parse(synchroPage.layoutSpec || '{}')).match(/"leaf":\d+/g) || [];
   assert.ok(leaves.every(l => targetSections.some(sc => sc.id === Number(l.slice(7)) && sc.parentId === synchroPage.id)), 'disposition de la page nettoyée');
@@ -407,47 +483,40 @@ try {
   await openWidget(source.url);
   await button('Révoquer').click();
   await dialogButton('Révoquer').click();
-  await widget().getByText('Aucun destinataire').waitFor();
-  const left = (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort();
-  assert.deepEqual(left, ['Contacts', 'Table1', 'Villes'], 'tables techniques effacées');
+  await widget().getByText('Personne ne reçoit encore cet export.').waitFor();
+  await button('Supprimer').click();
+  await dialogButton('Supprimer').click();
+  await widget().getByText('Aucun export.', { exact: false }).waitFor();
+  assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Table1', 'Villes'], 'table Synchro effacée');
   assert.equal((await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 0);
-  step('CIBLE puis SOURCE : réception arrêtée, révocation et tables techniques effacées');
+  step('CIBLE puis SOURCE : réception arrêtée, révocation, export supprimé avec sa table technique');
 
-  // --- Mise en place annulée après « Préparer » : ce que la préparation a ajouté est retiré
-  await button('Nouveau destinataire').click();
-  await dialog().getByRole('checkbox', { name: 'Villes' }).check();
-  await dialogButton('Continuer').click();
-  await dialogButton('Préparer pour la synchro').click();
-  await dialog().getByText('Prêt à envoyer').waitFor();
-  assert.ok((await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro_Villes'), 'Villes préparée');
-  await dialogButton('Annuler').click();
-  await waitFor(async () => !(await records(source.doc, '_grist_Tables')).some(tb => ['Synchro_Villes', 'Villes_summary_id_sync'].includes(tb.tableId)),
-    'préparation annulée : tables techniques retirées');
-  await widget().getByText('Aucun destinataire').or(widget().locator('.card')).first().waitFor();
-  assert.equal(await widget().getByText('Tables préparées sans envoi').count(), 0, 'rien d\'orphelin');
-  step('SOURCE : mise en place annulée, tables techniques retirées');
-
-  // --- Lien public : un seul code, la CIBLE lit la vue d'export sans identifiant
-  await button('Nouveau destinataire').click();
+  // --- Lien public : un seul code, la CIBLE lit les instantanés de l'export sans identifiant
+  await button('Nouvel export').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
   await dialogButton('Continuer').click();
-  await dialogButton('Préparer pour la synchro').click();
+  await dialogButton('Continuer').click();
+  await dialog().getByLabel('Nom de l’export').fill('Annuaire');
+  await dialogButton('Créer l’export').click();
+  await dialogButton('Ajouter un destinataire').click();
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
   await shot('15-source-public');
   await dialogButton('Créer l’invitation').click();
+  await dialog().getByText('Transmettez ce code').waitFor();
   const publicCode = await dialog().locator('textarea.code').first().inputValue();
   await dialogButton('Fermer').click();
   await widget().getByText('Lien public à activer').waitFor();
   await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
-  const anon = async table => (await fetch(`${TEAM}/api/docs/${source.doc}/tables/${table}/records`)).status;
-  assert.equal(await anon('Contacts'), 403, 'table source cachée au lien public');
-  assert.equal(await anon('Villes'), 403, 'autres tables cachées');
-  assert.equal(await anon('Contacts_summary_id_sync'), 200, 'vue d\'export lisible');
+  const anon = async table => fetch(`${TEAM}/api/docs/${source.doc}/tables/${table}/records`);
+  assert.equal((await anon('Contacts')).status, 403, 'table source cachée au lien public');
+  assert.equal((await anon('Villes')).status, 403, 'autres tables cachées');
+  const visible = (await (await anon('Synchro')).json()).records.map(r => r.fields.Synchro_Type);
+  assert.deepEqual(visible, ['complet'], 'seul l\'instantané de l\'export public est lisible');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
 
   await openWidget(target.url);
-  await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
+  await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
   await button('Accepter une invitation').click();
   await dialog().locator('textarea.code').first().fill(publicCode);
   await dialogButton('Continuer').click();
@@ -455,21 +524,39 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Fermer').click();
-  await waitFor(async () => (await records(target.doc, 'Annuaire')).length === 4, 'lien public : lignes lues');
+  const live = (await records(source.doc, 'Contacts')).filter(r => !r.Supprime).length;
+  await waitFor(async () => (await records(target.doc, 'Annuaire')).length === live, 'lien public : lignes lues');
   await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Émile', Interne: 'i5' }]]);
-  await waitFor(async () => (await records(target.doc, 'Annuaire')).some(r => r.Nom === 'Émile' && r.Interne === 'i5'), 'lien public : ajout lu');
-  step('Lien public : seule la vue d\'export est lisible, la CIBLE la recopie sans échange de réponse');
+  await waitFor(async () => (await records(target.doc, 'Annuaire')).some(r => r.Nom === 'Émile'), 'lien public : ajout lu');
+  step('Lien public : seul l\'instantané de l\'export est lisible, la CIBLE le recopie sans échange de réponse');
 
   await openWidget(source.url);
-  await button('Révoquer').click();
-  await dialogButton('Révoquer').click();
-  // Plus rien d'envoyé : le document se recharge (règles d'accès) et le widget revient à l'accueil.
-  await widget().getByText('Que voulez-vous faire dans ce document ?').waitFor();
-  // Révoquer propose d'effacer les tables techniques (coché) : la vue d'export n'existe plus.
-  assert.ok([403, 404].includes(await anon('Contacts_summary_id_sync')), 'vue d\'export fermée après révocation');
-  assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro_Contacts'), 'tables techniques effacées');
-  assert.equal(await anon('Contacts'), 403, 'reste du document toujours caché tant qu\'il est public');
-  step('Lien public révoqué : plus rien de lisible');
+  await button('Couper le lien public').click();
+  await dialogButton('Couper le lien public').click();
+  await waitFor(async () => (await anon('Synchro')).status === 403, 'instantané fermé');
+  await openWidget(source.url);
+  await button('Supprimer').click();
+  await dialogButton('Supprimer').click();
+  await widget().getByText('Aucun export.', { exact: false }).waitFor();
+  assert.equal((await anon('Contacts')).status, 403, 'reste du document toujours caché tant qu\'il est public');
+  step('Lien public coupé, export supprimé : plus rien de lisible');
+
+  // --- Montages d'avant la version 0.4 : signalés, effacés d'un clic
+  const idSyncRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'id_sync' && c.parentId === contactsRefId).id;
+  await applyActions(source.doc, [['AddTable', 'Synchro_Contacts', [{ id: 'Synchro_Ids', type: 'Text', isFormula: true, formula: '"ids:"' }]],
+    ['CreateViewSection', contactsRefId, 0, 'record', [idSyncRef], null]]);
+  assert.ok((await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Contacts_summary_id_sync'));
+  await openWidget(source.url);
+  await widget().getByText('Montage d’une version précédente').waitFor();
+  await button('Effacer l’ancien montage').click();
+  await dialogButton('Effacer l’ancien montage').click();
+  await waitFor(async () => (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort().join() === 'Contacts,Table1,Villes', 'ancien montage effacé (SOURCE)');
+  await applyActions(target.doc, [['AddTable', 'Journal_Contacts', [{ id: 'id_sync', type: 'Text' }, { id: 'Synchro_Ids', type: 'Text' }]]]);
+  await openWidget(target.url);
+  await widget().getByText('Réception d’une version précédente').waitFor();
+  await button('Effacer les anciens journaux').click();
+  await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Journal_Contacts'), 'ancien journal effacé (CIBLE)');
+  step('Montages d\'avant la version 0.4 : signalés et effacés, côté SOURCE et côté CIBLE');
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

@@ -100,51 +100,69 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.3 (15 octobre 2026)
+## État : V0.4 (15 octobre 2026)
 
-Pas de table de réglages. SOURCE : `id_sync`, `MajLe`, `Supprime` dans la table, une vue d'export
-`<table>_summary_id_sync` (colonnes cochées en un bloc JSON `Synchro_Donnees`) surveillée par le
-webhook, et `Synchro_<table>` (liste des clés, colonnes envoyées). CIBLE : `Journal_<table>` à
-colonnes fixes. Invitations en attente et partages par lien public notés dans la description de
-leur colonne `Synchro_Ids`. Mode lien public : règles d'accès marquées par un mémo, lecture
-anonyme des vues d'export par la CIBLE. Code à la racine, sans build : `index.html`, `css/`, `js/`
-(carte des modules dans `README.md`, analyse de sécurité dans `SECURITY.md`, tutoriel
-`docs/04-tutoriel.md`). Tests : `npm test` (logique pure), `npm run test:e2e` après
-`tests/e2e/start-grist.sh` (parcours complet dans un Grist Docker ; `CAPTURES=1` refait les
-captures de `docs/images` et les images d'aide de `img/`). Les instances autorisées sont à la fois
-dans `js/config.js` et dans la CSP de `index.html`.
+Décisions d'Antoine du 15 octobre : la SOURCE s'organise en **exports** (nom, tables, colonnes ;
+ajouter ou révoquer une personne sans refaire l'export ; la synchro dans les deux sens, « Échange »,
+viendra après) ; côté CIBLE, **un journal et un formulaire par export**, et une **fenêtre** qui
+s'ouvre seule pour ranger une table ajoutée à l'export. **Contrainte forte** : côté SOURCE, au
+plus 3 tables techniques pour tout le widget (1 idéal), quel que soit le nombre d'exports et de
+tables.
 
-V0.3 : aide intégrée au widget (Antoine veut que chaque rôle sache ce qu'il fait et ce que fait
-l'autre, sans sortir du widget) : onglet Tutoriel (`js/tutorial.js`, captures `docs/images`, dont
-l'installation `00*` faite par `installShots`), « Qui fait quoi ? » et « Copier avec les
-consignes » (`js/guide.js`), aide en images repliée à chaque étape des assistants, logo Grist
-Factory. « Reprendre » propose de rattraper les changements de la pause : l'heure de pause
-(plus grande `MajLe` de la table, heure du serveur) est notée dans la note `Synchro_Ids`
-(entrée `mode: 'pause'`).
+Montage (une seule table technique SOURCE, `Synchro`) : par table d'un export, une ligne `cles`
+(formule `Synchro_Ids` : liste des clés) et une ligne `lot` (formule `Synchro_Lot` : lignes à
+`MajLe` de moins de 5 s, ou listées dans `Synchro_Renvoi`, en JSON, plafonné à 250 ko), plus une
+ligne `complet` (toutes les lignes) pour un export public. Les formules choisissent la table par
+un dictionnaire `{"Contacts": Contacts}` réécrit quand les tables changent (`syncFormulas`). Un
+webhook par destinataire sur `Synchro`, avec la **condition** Grist
+`rec.Synchro_Export == "<id>" and rec.Synchro_Type in ("cles", "lot")` (Grist ≥ 1.7.11 ;
+`createWebhook` relit la condition enregistrée dans `_grist_Triggers` et supprime le webhook si
+elle manque : erreur `gristTooOld`). L'export d'un webhook se relit dans sa condition
+(`conditionExport`) ; un webhook sur `Synchro` sans condition reconnue est signalé « sans filtre ».
+Un renvoi écrit `marque:numéros` dans `Synchro_Renvoi` (jamais `MajLe`), par tranches de 200 en
+attendant que la file soit vide, puis efface `Synchro_Renvoi`. Notes : SOURCE dans la description
+de `Synchro_Export` (`exports`, `invitations` avec empreinte du secret, `pauses`) ; CIBLE dans
+celle de `Synchro_Ids` du journal (`export`, `tables` : destination, colonnes, correspondance,
+rattachement, colonne affichée ; `refused` ; `missing`). Codes `GRISTSYNC2.` (`GRISTSYNC1.` :
+erreur `codeOld`), réponse à une seule adresse. `Supprime` n'est plus ajoutée (prise en compte si
+présente).
 
-Pièges vus en V0.2 : toute écriture REST depuis le widget doit porter `X-Requested-With` (sinon
-401, vu comme une erreur CORS) ; changer une règle d'accès recharge le document, donc le widget ;
-une table de résumé n'est lisible par une règle que si une ressource la nomme explicitement.
-Désactiver un webhook remet à zéro son état d'envoi (`lastSuccessTime` perdu) et Grist ne met rien
-en file pendant la pause. Dans les tests, `getByText` de Playwright est insensible à la casse et
-cherche une sous-chaîne (« En pause » trouve « Mettre en pause »).
+CIBLE : le journal a les colonnes de `Synchro` (le webhook envoie la ligne entière) plus celles
+des versions. Le widget déplie les lignes brutes (`planUnpack`, dans l'ordre d'arrivée, effacées
+dans le même lot), puis consolide par table (`rowsByTable`, `planConsolidation`), puis purge
+(`planPurge`, qui garde tout d'une table proposée et rien d'une table refusée). Une version sans
+changement depuis la dernière recopiée, ou égale à la destination, est sans effet (`sameValue`) :
+un renvoi vers un nouveau destinataire ne défait pas les retouches des autres.
 
-Relais (A → B → C) : possible, la table reçue garde les `id_sync` de A ; le prepare ne remplit pas
-les clés vides (une ligne locale à clé serait effacée par la prochaine liste de A). Les boucles
-(retour vers le document d'origine, table vers elle-même) sont refusées à « Vérifier » par
-`loopingTables`. Le second saut dépend de la page du widget ouverte dans B.
+Limites : un envoi Grist est limité à 1 Mo (corps JSON) et regroupe jusqu'à 100 événements, d'où
+le plafond du lot ; une grosse modification d'un coup part en partie (la CIBLE le compte dans
+`missing`, « Tout renvoyer » rattrape) ; une valeur de Référence part à la prochaine modification
+de sa ligne. Les montages d'avant la V0.4 sont signalés « à refaire » avec un bouton de nettoyage
+(`legacyTables`, `legacyJournals`).
+
+Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
+analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests : `npm test`
+(logique pure), `npm run test:e2e` après `tests/e2e/start-grist.sh` (parcours complet dans un
+Grist Docker, trois documents ; `CAPTURES=1` refait les captures de `docs/images` et les images
+d'aide de `img/`). Les instances autorisées sont à la fois dans `js/config.js` et dans la CSP de
+`index.html`. Aide intégrée (V0.3) : onglet Tutoriel (`js/tutorial.js`), « Qui fait quoi ? » et
+« Copier avec les consignes » (`js/guide.js`), aide en images à chaque étape des assistants.
+
+Pièges : toute écriture REST depuis le widget doit porter `X-Requested-With` (sinon 401, vu comme
+une erreur CORS) ; changer une règle d'accès recharge le document, donc le widget. Désactiver un
+webhook remet à zéro son état d'envoi (`lastSuccessTime` perdu) et Grist ne met rien en file
+pendant la pause : l'heure de pause (plus grande `MajLe`) est notée dans la note. Dans les tests,
+`getByText` de Playwright est insensible à la casse et cherche une sous-chaîne (« En pause »
+trouve « Mettre en pause ») ; le mémo d'un webhook porte l'identifiant court du document (urlId).
+
+Relais (A → B → C) : possible, la table reçue garde les `id_sync` de A ; l'export ne remplit pas
+les clés vides d'une table reçue (une ligne locale à clé serait effacée par la prochaine liste de
+A). Les boucles (retour vers le document d'origine, table vers elle-même dans le même document)
+sont refusées (`loopingTables` à « Vérifier », `checkDests` côté CIBLE). Le second saut dépend de
+la page du widget ouverte dans B.
 
 Effacer une table efface ses sections, mais pas leurs cases dans `layoutSpec` (repliés compris ;
 les numéros de sections sont réutilisés ensuite) ni le partage de la page (`_grist_Pages.shareRef`
 et `_grist_Shares`, donc la clé d'écriture). `tidyPages` nettoie les deux après
-`removeTechnicalTables`.
-
-Pages : les tables techniques n'ont pas de page (`dropPages`, « Données source » seulement), sauf
-la page commune `Synchro_Exports` des vues d'export : Grist efface une table de résumé dont la
-dernière section disparaît (vérifié). Créer une section sur une autre page que celle du widget ne
-recharge pas le widget.
-
-Une table de résumé reçoit de Grist `count` et un total `SUM($group.x)` par colonne numérique de
-la table : à retirer de la vue d'export (`exportCleanupActions`), sinon le webhook les envoie, 400
-« Invalid column » et file bloquée (bug d'Antoine du 15/10, colonne `delta`). Réparé aussi à
-l'affichage pour les vues d'export déjà créées.
+`removeTechnicalTables`. Les tables techniques n'ont pas de page (`dropPages`). Créer une section
+sur une autre page que celle du widget ne recharge pas le widget.
