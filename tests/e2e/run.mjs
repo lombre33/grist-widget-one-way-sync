@@ -547,6 +547,12 @@ try {
   const bob = dest.find(r => r.Nom === 'Bob');
   await applyActions(target.doc, [['UpdateRecord', 'Contacts', bob.id, { Ville: 'retouche' }]]);
   const byName = name => contacts.find(r => r.Nom === name);
+  // Alice change de ville dans la SOURCE ; rend la main quand la CIBLE l'a recopiée.
+  const moveAlice = async (ville, what) => {
+    await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: ville }]]);
+    await openWidget(target.url);
+    await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Ville === ville), what);
+  };
   await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Marseille' }], ['UpdateRecord', 'Contacts', byName('Chloé').id, { Supprime: true }],
     ['AddRecord', 'Contacts', null, { Nom: 'Denis' }], ['RemoveRecord', 'Contacts', byName('Dora').id]]);
   const after = await waitFor(async () => {
@@ -591,9 +597,7 @@ try {
   await openWidget(source.url);
   await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Nancy' }]]);
-  await openWidget(target.url);
-  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Ville === 'Nancy'), 'le premier reçoit toujours');
+  await moveAlice('Nancy', 'le premier reçoit toujours');
   await new Promise(r => setTimeout(r, 2000));
   assert.ok(!(await records(target2.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Nancy')), 'le second ne reçoit plus');
   step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours');
@@ -909,9 +913,7 @@ try {
   const oldPage = await pageOf(target.doc, journalForm.parentId);
   await applyActions(target.doc, [['RemoveView', journalForm.parentId], ['RemoveRecord', '_grist_Shares', oldPage.shareRef]]);
   assert.equal((await records(target.doc, '_grist_Tables')).filter(tb => tb.tableId.startsWith('Journal_')).length, 1, 'même journal');
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Brest' }]]);
-  await openWidget(target.url);
-  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Ville === 'Brest'), 'la réception reprend');
+  await moveAlice('Brest', 'la réception reprend');
   step('CIBLE : lignes forgées par le lien du formulaire rejetées et signalées ; lien coupé, la même réception reprend avec une nouvelle invitation');
 
   // --- Arrêts : la CIBLE efface son journal ; la SOURCE révoque, puis supprime l'export
