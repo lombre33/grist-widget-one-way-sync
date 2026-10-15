@@ -519,7 +519,7 @@ try {
   const synchroRef = await tableRef(source.doc, 'Synchro');
   const tracks = (await records(source.doc, 'Synchro')).filter(r => r.Synchro_Type === 'suivi').map(r => r.id);
   const lotRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Lot' && c.parentId === synchroRef).id;
-  const syncIds = (await records(source.doc, 'Synchro')).map(r => r.id);
+  const syncIds = (await records(source.doc, 'Synchro')).map(r => r.id).filter(id => !tracks.includes(id));
   await applyActions(source.doc, [['BulkRemoveRecord', 'Synchro', tracks], ['ModifyColumn', 'Synchro', 'Sync_Etat', { type: 'Numeric' }],
     ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }],
     ['AddColumn', 'Synchro', 'manualSort', { type: 'ManualSortPos', isFormula: false }], ['BulkUpdateRecord', 'Synchro', syncIds, { manualSort: syncIds }]]);
