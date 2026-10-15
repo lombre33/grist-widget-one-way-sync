@@ -60,7 +60,7 @@ function showHome() {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', 'false');
   const tile = (tab, title, desc) => el('button', { class: 'tile', type: 'button', onclick: () => select(tab) },
     el('span', { class: 'tile-title' }, title), el('span', { class: 'tile-desc' }, desc));
-  showScreen(el('h1', { class: 'home-title' }, t('home.title')),
+  showScreen(el('h2', { class: 'home-title' }, t('home.title')),
     el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc'))),
     roleGuide({ open: true }));
 }

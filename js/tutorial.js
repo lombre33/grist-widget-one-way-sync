@@ -216,7 +216,7 @@ export function tutorialView(address) {
   const buttons = [['all', t('tuto.all')], ['source', t('tuto.source')], ['target', t('tuto.target')]].map(([role, label]) =>
     el('button', { class: 'btn btn-small', type: 'button', 'data-role': role, 'aria-pressed': String(role === 'all'), onclick: () => filter(role) }, label));
   return el('div', { class: 'tuto' },
-    el('h1', { class: 'home-title' }, t('tuto.title')),
+    el('h2', { class: 'home-title' }, t('tuto.title')),
     el('p', { class: 'muted' }, t('tuto.intro')),
     el('div', { class: 'tuto-filter', role: 'group', 'aria-label': t('tuto.filter') }, buttons),
     sections,

@@ -23,7 +23,7 @@ const TEAM = `${env.grist}/o/${env.team}`;
 // --- Widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées
 // (config.js) et à la politique de sécurité (index.html), comme le ferait une instance qui
 // héberge sa propre copie.
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   try {
@@ -175,10 +175,9 @@ page.on('console', (m) => {
   if (process.env.DEBUG && m.type() === 'warning') console.log(`  [widget] ${m.text()}`);
   if (m.type() !== 'error') return;
   const where = m.location().url || '';
-  // Erreurs du widget seulement. La feuille de thème que grist-plugin-api.js insère en ligne est
-  // bloquée exprès par la politique de sécurité du widget (style-src 'self') : attendu.
+  // Erreurs du widget seulement, grist-plugin-api.js compris (son thème ne doit plus heurter la
+  // politique de sécurité du widget).
   if (!where.startsWith(`http://localhost:${WIDGET_PORT}`) && !where.endsWith('grist-plugin-api.js')) return;
-  if (/Refused to apply inline style/.test(m.text())) return;
   errors.push(`${m.text()} (${where})`);
 });
 await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
@@ -816,7 +815,8 @@ try {
   await button('Couper le lien').click();
   await dialogButton('Couper le lien').click();
   await widget().getByText('Lien coupé').waitFor();
-  assert.ok(!(await forge([{ id_sync: '' }])).ok, 'l\'ancien lien n\'écrit plus');
+  // Grist remplace la clé juste après l'enregistrement du nouveau partage.
+  await waitFor(async () => !(await forge([{ id_sync: '' }])).ok, 'l\'ancien lien n\'écrit plus', 10000);
   await openWidget(source.url);
   await button('Révoquer').click();
   await dialogButton('Révoquer').click();
