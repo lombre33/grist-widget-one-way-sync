@@ -954,8 +954,11 @@ try {
   const visible = (await (await anon('Synchro')).json()).records;
   assert.deepEqual(visible.map(r => r.fields.Synchro_Type).sort(), ['complet', 'empreinte'], 'seuls l\'instantané de l\'export public et son empreinte sont lisibles');
   assert.match(visible.find(r => r.fields.Synchro_Type === 'empreinte').fields.Synchro_Ids, /^\d+:[0-9a-f]{8}$/);
-  const anonColumns = await (await fetch(`${TEAM}/api/docs/${source.doc}/tables/Synchro/columns`)).text();
-  assert.ok(anonColumns.includes('Synchro_Lot') && !anonColumns.includes('Synchro_Export') && !anonColumns.includes('invitations'), 'note de la SOURCE cachée au lien public');
+  // La note (exports, invitations) est la description de Synchro_Export ; les formules des autres
+  // colonnes citent ce nom, lisible, lui.
+  const anonColumns = (await (await fetch(`${TEAM}/api/docs/${source.doc}/tables/Synchro/columns`)).json()).columns;
+  assert.ok(anonColumns.some(c => c.id === 'Synchro_Lot') && !anonColumns.some(c => c.id === 'Synchro_Export'), 'colonne de la note cachée au lien public');
+  assert.ok(!anonColumns.some(c => /invitations|exports/.test(c.fields.description || '')), 'note de la SOURCE cachée au lien public');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
 
