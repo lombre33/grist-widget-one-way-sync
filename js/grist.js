@@ -28,7 +28,7 @@ export async function readSchema() {
       if (!table) return null;
       return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
         id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, label: c.label, description: c.description,
-        displayCol: c.displayCol, rules: Array.isArray(c.rules) ? c.rules.slice(1) : [],
+        displayCol: c.displayCol, rules: Array.isArray(c.rules) ? c.rules.slice(1) : [], recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps,
         visible: (colById.get(c.visibleCol) || {}).colId || '',
       }));
     },

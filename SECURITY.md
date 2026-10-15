@@ -76,7 +76,8 @@ les droits de la personne connectée.
   existants, `Synchro_Ids`) et une ligne `lot` (les lignes modifiées depuis 5 secondes, ou celles
   que le widget demande de renvoyer), plus une ligne `complet` (toutes les lignes) pour un export
   public ; s'y ajoutent l'identifiant de l'export, le nom de la table, la description des
-  colonnes envoyées et l'e-mail de la personne qui a créé l'export.
+  colonnes envoyées, l'e-mail de la personne qui a créé l'export et, dans `Sync_Etat`, la date
+  depuis laquelle des lignes n'ont pas pu partir (lot trop gros pour un envoi).
 - **Isolation entre exports** : `Synchro` porte les lignes de tous les exports du document. Chaque
   webhook a une **condition** Grist (Grist 1.7.11 et plus) qui ne laisse passer que les lignes
   `cles` et `lot` de son export : `rec.Synchro_Export == "<export>" and rec.Synchro_Type in
@@ -119,8 +120,9 @@ les droits de la personne connectée.
   secret, l'approbation repose sur la seule fiche, et le widget le signale.
 - **Rien d'autre n'est stocké** : pas de table de réglages. Les destinataires branchés sont les
   webhooks eux-mêmes (le mémo garde la fiche), visibles par les propriétaires dans les paramètres
-  du document. Le widget n'écrit rien dans `Synchro` à part ses lignes et `Synchro_Renvoi` (numéros
-  des lignes à renvoyer) : un renvoi ne modifie jamais les tables de la personne.
+  du document. Le widget n'écrit rien dans `Synchro` à part ses lignes, `Synchro_Renvoi` (numéros
+  des lignes à renvoyer) et l'effacement de `Sync_Etat` : un renvoi ne modifie jamais les tables de
+  la personne. Dans ces tables, il ne touche qu'aux réglages de `MajLe` (colonnes qu'elle suit).
 
 ## La clé du formulaire de réception
 

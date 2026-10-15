@@ -8,7 +8,7 @@ import { SYNC_TABLE, legacyJournals, legacyTables, receivedJournals } from './ta
 import { copyField, el, message, openModal } from './ui.js';
 import { roleGuide, widgetAddress } from './guide.js';
 import { tutorialView } from './tutorial.js';
-import { renderSource } from './source.js';
+import { renderSource, startAutoCatchUp } from './source.js';
 import { consolidateAll, renderTarget, startAutoConsolidation } from './target.js';
 
 const $ = id => document.getElementById(id);
@@ -91,6 +91,7 @@ async function start() {
   }
 
   startAutoConsolidation();
+  startAutoCatchUp();
   const schema = await readSchema();
   if (receivedJournals(schema).length || legacyJournals(schema).length) {
     await select('receive');

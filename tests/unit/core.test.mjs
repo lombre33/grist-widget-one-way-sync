@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
-  sentColumns, compareVersion, copyColumns, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
+  sentColumns, compareVersion, copyColumns, majleAction, missingFormula, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
   parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
@@ -150,15 +150,40 @@ test('colonnes envoyables : Référence en texte, pièces jointes bloquées, col
 
 test('table Synchro : ses colonnes, et des formules qui nomment les tables des exports', () => {
   assert.deepEqual(syncColumns([]).map(c => c.id),
-    ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Par']);
+    ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Etat', 'Sync_Par']);
   const { keys, lot } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
   assert.match(keys, /T = \{"Contacts": Contacts, "Villes": Villes\}\.get\(\$Synchro_Table\)/);
   assert.match(keys, /^if \$Synchro_Type != "cles": return ""/);
   assert.match(keys, /return "ids:" \+ " "\.join\(k for k in T\.all\.id_sync if k\)/);
   assert.match(lot, /T = \{"Contacts": Contacts, "Villes": Villes\}/);
   assert.match(lot, /timedelta\(seconds=5\)/);
-  assert.match(lot, /size > 250000: break/);
+  assert.match(lot, /budget = max\(20000, min\(250000, 950000 - 40 \* len\(T\.all\)\)\)/, 'le lot laisse la place à la liste des clés');
+  assert.match(lot, /size > budget: break/);
+  assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(syncFormulas([]).keys, /T = \{\}\.get/);
+});
+
+test('envoi coupé : une marque de déclenchement sur le lot, nommée comme une colonne des journaux', () => {
+  const mark = syncColumns([]).find(c => c.id === 'Sync_Etat');
+  assert.deepEqual(mark, { id: 'Sync_Etat', type: 'Numeric', isFormula: false, formula: missingFormula, recalcWhen: 0 });
+  assert.match(missingFormula, /json\.loads\(\$Synchro_Lot or "\{\}"\) if \$Synchro_Type == "lot"/);
+  assert.match(missingFormula, /if lot\.get\("depuis"\) and not lot\.get\("renvoi"\):/, 'un renvoi coupé ne pose pas de marque');
+  assert.match(missingFormula, /return min\(value, lot\["depuis"\]\) if value else lot\["depuis"\]/, 'la plus ancienne date reste');
+  assert.match(missingFormula, /\nreturn value$/);
+});
+
+test('MajLe suit les colonnes envoyées, leur texte affiché et Supprime', () => {
+  const cols = [
+    { id: 1, colId: 'id_sync' }, { id: 2, colId: 'MajLe', recalcWhen: 2, recalcDeps: null }, { id: 3, colId: 'Nom' },
+    { id: 4, colId: 'Lieu', displayCol: 9 }, { id: 5, colId: 'Supprime' }, { id: 6, colId: 'Interne' }, { id: 9, colId: 'gristHelper_Display' },
+  ];
+  const action = ['UpdateRecord', '_grist_Tables_column', 2, { recalcWhen: 0, recalcDeps: ['L', 3, 4, 5, 9] }];
+  assert.deepEqual(majleAction(cols, ['Lieu', 'Nom']), action);
+  cols[1] = { ...cols[1], recalcWhen: 0, recalcDeps: ['L', 3, 4, 5, 9] };
+  assert.equal(majleAction(cols, ['Nom', 'Lieu']), null, 'déjà à jour');
+  assert.deepEqual(majleAction(cols, ['Nom'])[3].recalcDeps, ['L', 3, 5], 'une colonne retirée de l\'export');
+  assert.equal(majleAction(cols.filter(c => c.colId !== 'MajLe'), ['Nom']), null);
+  assert.equal(majleAction(cols.filter(c => c.colId !== 'Supprime'), ['Absente']), null);
 });
 
 test('table Synchro : lignes d\'un export (liste, lot, instantané public), tables ajoutées, changées ou retirées', () => {
@@ -215,7 +240,7 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
     raw(6, 'lot', { Synchro_Table: 'mauvais nom', Synchro_Lot: '{"lignes": [], "total": 0}' }),
   ];
   const { actions, missing, resent } = planUnpack(rows, 'J');
-  assert.deepEqual(missing, { Contacts: 2 });
+  assert.deepEqual(missing, { Contacts: 2, Villes: 0 }, 'un renvoi remet le compte à zéro');
   assert.deepEqual(resent, ['Villes']);
   assert.equal(actions.length, 2);
   const [, , ids, values] = actions[0];
@@ -228,6 +253,10 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
   assert.deepEqual(values.Synchro_Donnees.slice(0, 3), ['{"Nom":"A"}', '{"Nom":"C"}', '{"Nom":"B"}']);
   assert.deepEqual(actions[1], ['BulkRemoveRecord', 'J', [2, 3, 4, 5, 6]]);
   assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { actions: [], missing: {}, resent: [] });
+  const cut = raw(7, 'lot', { Synchro_Lot: JSON.stringify({ lignes: [], total: 4 }) });
+  const again = raw(8, 'lot', { Synchro_Renvoi: 'm:1', Synchro_Lot: JSON.stringify({ lignes: [], total: 1 }) });
+  assert.deepEqual(planUnpack([cut, again], 'J').missing, { Contacts: 0 }, 'coupé puis renvoyé');
+  assert.deepEqual(planUnpack([again, { ...cut, id: 9 }], 'J').missing, { Contacts: 4 }, 'renvoyé puis coupé');
 });
 
 test('CIBLE : lignes dépliées rangées par table d\'origine, lignes brutes à part', () => {

@@ -76,7 +76,7 @@ async function consolidate(schema, { journal, note }) {
     await apply(unpack.actions);
     const missing = { ...note.missing };
     for (const table of unpack.resent) delete missing[table];
-    for (const [table, n] of Object.entries(unpack.missing)) missing[table] = (missing[table] || 0) + n;
+    for (const [table, n] of Object.entries(unpack.missing)) if (n > 0) missing[table] = (missing[table] || 0) + n;
     if (JSON.stringify(missing) !== JSON.stringify(note.missing || {})) {
       note = { ...note, missing };
       await writeNote(schema, journal, note);

@@ -154,6 +154,16 @@ const target = await newDocWithWidget('Cible', [
   ['AddTable', 'Communes', [{ id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }]],
   ['AddRecord', 'Communes', null, { Commune: 'Lyon', Note: 'déjà là' }],
 ]);
+// Lieu : Référence vers Villes, affichée par le nom de la ville (Alice à Lyon, Bob à Paris).
+{
+  const colRef = async (table, colId) => {
+    const parentId = await tableRef(source.doc, table);
+    return (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === parentId).id;
+  };
+  await applyActions(source.doc, [['AddColumn', 'Contacts', 'Lieu', { type: 'Ref:Villes' }]]);
+  await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', await colRef('Contacts', 'Lieu'), { visibleCol: await colRef('Villes', 'Ville') }],
+    ['SetDisplayFormula', 'Contacts', null, await colRef('Contacts', 'Lieu'), '$Lieu.Ville'], ['BulkUpdateRecord', 'Contacts', [1, 2], { Lieu: [1, 2] }]]);
+}
 const target2 = await newDocWithWidget('Cible 2');
 step('documents SOURCE et CIBLE créés');
 
@@ -269,7 +279,11 @@ try {
   assert.deepEqual(synchro.map(r => `${r.Synchro_Table}:${r.Synchro_Type}`), ['Contacts:cles', 'Contacts:lot']);
   assert.match(synchro[0].Synchro_Export, /^[0-9a-f]{16}$/);
   assert.match(synchro[0].Synchro_Ids, /^ids:/);
-  assert.deepEqual(JSON.parse(synchro[0].Synchro_Colonnes).map(c => c.id), ['Nom', 'Ville']);
+  assert.deepEqual(JSON.parse(synchro[0].Synchro_Colonnes).map(c => c.id), ['Nom', 'Ville', 'Lieu']);
+  const majle = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'MajLe' && c.parentId === contactsRefId);
+  const helper = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Lieu' && c.parentId === contactsRefId).displayCol;
+  assert.equal(majle.recalcWhen, 0, 'MajLe : formule de déclenchement sur les colonnes envoyées');
+  assert.ok(helper && majle.recalcDeps.includes(helper), 'MajLe suit le texte affiché par la Référence');
   await dialogButton('Ajouter un destinataire').click();
   await dialog().getByText('Tables de l’export : Contacts.').waitFor();
   await shot('04-source-options');
@@ -326,7 +340,7 @@ try {
   // --- CIBLE : dépliage et consolidation à l'ouverture
   await openWidget(target.url);
   const dest = await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return rows.length === 4 && rows; }, 'consolidation');
-  assert.deepEqual(dest.map(r => `${r.Nom}:${r.Ville}`).sort(), ['Alice:Lyon', 'Bob:Paris', 'Chloé:Nantes', 'Dora:Brest']);
+  assert.deepEqual(dest.map(r => `${r.Nom}:${r.Ville}:${r.Lieu}`).sort(), ['Alice:Lyon:Lyon', 'Bob:Paris:Paris', 'Chloé:Nantes:', 'Dora:Brest:']);
   await widget().getByText(`Données de ${env.email}`).waitFor();
   step('CIBLE : Contacts consolidée, propriétaire affiché');
 
@@ -338,7 +352,7 @@ try {
   assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Synchro', 'Table1', 'Villes']);
   assert.deepEqual((await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Table1']);
   const columnsOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
-  assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Nom', 'Ville', 'id_sync']);
+  assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Lieu', 'Nom', 'Ville', 'id_sync']);
   await waitFor(async () => {
     const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
     return (JSON.parse(views[0].fields.layoutSpec || '{}').collapsed || []).length === 1;
@@ -380,6 +394,7 @@ try {
   const reply2 = await accept(target2.doc, target2.url, invitation2);
   await approve(reply2);
   await widget().locator('.person').nth(1).getByText('Actif').waitFor();
+  await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'file vide');
   await shot('13-source-actif');
   await openWidget(target2.url);
   await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'second destinataire servi');
@@ -433,6 +448,44 @@ try {
   await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression dans la table ajoutée');
   step('SOURCE puis CIBLE : table et colonne ajoutées à l\'export, rangées par la CIBLE dans une table existante');
+
+  // --- Une ville renommée : le texte affiché par la Référence repart seul, sans toucher Contacts
+  await applyActions(source.doc, [['UpdateRecord', 'Villes', 1, { Ville: 'Villeurbanne' }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Lieu === 'Villeurbanne', 'ville renommée reçue');
+  step('SOURCE : une ville renommée repart seule dans les lignes qui la citent');
+
+  // --- Document monté en version 0.4 : la marque d'envoi coupé et les dépendances de MajLe sont
+  // posées à l'ouverture du widget SOURCE
+  const synchroRef = await tableRef(source.doc, 'Synchro');
+  await applyActions(source.doc, [['RemoveColumn', 'Synchro', 'Sync_Etat'], ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }]]);
+  await openWidget(source.url);
+  await waitFor(async () => {
+    const cols = await records(source.doc, '_grist_Tables_column');
+    const mark = cols.find(c => c.colId === 'Sync_Etat' && c.parentId === synchroRef);
+    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark && (mark.recalcDeps || []).length === 2;
+  }, 'montage 0.4 mis à niveau');
+  await openWidget(target.url);
+  step('SOURCE : un montage 0.4 reçoit la marque d\'envoi coupé et les dépendances de MajLe');
+
+  // --- Gros import (4 000 lignes d'un coup) : le lot ne part qu'en partie, la CIBLE le signale ;
+  // le widget SOURCE, une fois sa page ouverte, envoie le reste seul
+  const before = (await records(target.doc, 'Contacts')).length;
+  const big = Array.from({ length: 4000 }, (_, i) => `Import ${i} ${'x'.repeat(80)}`);
+  const imported = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', big.map(() => null), { Nom: big }]])).retValues[0];
+  const lotRow = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Table === 'Contacts' && r.Synchro_Type === 'lot');
+  assert.ok((await lotRow()).Sync_Etat > 0, 'envoi coupé noté dans Synchro');
+  await widget().getByText(/Contacts : \d+ lignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
+  await shot('19-cible-envoi-coupe');
+  await openWidget(source.url);
+  await widget().getByText('Un gros changement n’a pas pu partir d’un seul coup').waitFor();
+  await widget().getByText('Un gros changement n’a pas pu partir d’un seul coup').waitFor({ state: 'detached', timeout: 240000 });
+  assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + big.length, 'gros import reçu en entier', 120000);
+  await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'avis de la CIBLE retiré', 30000);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', imported]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
+  step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
 
   // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
   await openWidget(source.url);

@@ -132,12 +132,20 @@ const SECTIONS = [
     title: ['Une table ajoutée à l’export', 'A table added to the export'],
     text: [[
       'Quand la SOURCE ajoute une table à l’export, une fenêtre demande où la ranger : Recevoir (nouvelle table, ou table existante avec la correspondance des colonnes), Refuser (ses lignes sont effacées à l’arrivée), ou Plus tard (elle reste proposée sur la carte).',
-      'Une modification de plus de 2 000 lignes environ, faite d’un coup, ne part qu’en partie : la carte le signale, et « Tout renvoyer » côté SOURCE rattrape.',
     ], [
       'When the SOURCE adds a table to the export, a dialog asks where it goes: Receive (new table, or existing table with column mapping), Refuse (its rows are deleted on arrival), or Later (it stays offered on the card).',
-      'A change of more than about 2,000 rows made at once is only partly sent: the card says so, and “Resend all” on the SOURCE side catches up.',
     ]],
     images: ['17-cible-nouvelle-table', '08b-cible-colonnes'] },
+  { id: 'big', role: 'both',
+    title: ['Gros changements, valeurs venues d’une autre table', 'Big changes, values from another table'],
+    text: [[
+      'Un changement de plus de 2 000 lignes environ, fait d’un coup (import, remplacement), ne part qu’en partie. Grist le note dans la table Synchro, et le widget SOURCE envoie le reste par tranches, seul, dès qu’un propriétaire ouvre sa page (même repliée). En attendant, la CIBLE affiche combien de lignes manquent.',
+      'Une valeur qui change à cause d’une autre table (le nom d’une ville renommée, affiché par une Référence, ou une formule) repart seule, sans toucher la ligne.',
+    ], [
+      'A change of more than about 2,000 rows made at once (import, replace) is only partly sent. Grist notes it in the Synchro table, and the SOURCE widget sends the rest in batches, on its own, as soon as an owner opens its page (even collapsed). Meanwhile, the TARGET shows how many rows are missing.',
+      'A value that changes because of another table (the name of a renamed city, shown by a Reference, or a formula) leaves on its own, without touching the row.',
+    ]],
+    images: ['19-cible-envoi-coupe'] },
   { id: 'public', role: 'both',
     title: ['Variante : lien public', 'Variant: public link'],
     text: [[
@@ -166,13 +174,13 @@ const SECTIONS = [
       'Rien n’arrive dans la table de la CIBLE : ouvrir la page du widget dans la CIBLE, les versions attendaient dans le journal.',
       'Ligne d’un destinataire en rouge : la CIBLE a arrêté la réception ou dépublié son formulaire. Révoquer cette personne, puis l’inviter de nouveau.',
       'Tous les envois du document SOURCE sont en retard : un envoi en échec bloque la file. Débloquer la file.',
-      'Des lignes ne sont pas arrivées (lignes existantes, gros import) : Tout renvoyer.',
+      'Des lignes ne sont pas arrivées : ouvrir la page du widget dans la SOURCE (un gros changement y finit de partir seul), sinon Tout renvoyer.',
       'Au branchement, « Grist 1.7.11 ou plus récent » : l’instance ne sait pas filtrer un webhook par export.',
     ], [
       'Nothing reaches the TARGET table: open the widget page in the TARGET, versions were waiting in the journal.',
       'Red recipient line: the TARGET stopped receiving or unpublished its form. Revoke this person, then invite them again.',
       'All deliveries of the SOURCE document are late: a failed delivery blocks the queue. Unblock the queue.',
-      'Rows did not arrive (existing rows, big import): Resend all.',
+      'Rows did not arrive: open the widget page in the SOURCE (a big change finishes leaving there on its own), otherwise Resend all.',
       'On connecting, “Grist 1.7.11 or later”: the instance cannot filter a webhook by export.',
     ]],
     images: [] },

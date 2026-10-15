@@ -100,7 +100,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.4 (15 octobre 2026)
+## État : V0.4.1 (15 octobre 2026)
 
 Décisions d'Antoine du 15 octobre : la SOURCE s'organise en **exports** (nom, tables, colonnes ;
 ajouter ou révoquer une personne sans refaire l'export ; la synchro dans les deux sens, « Échange »,
@@ -134,11 +134,33 @@ dans le même lot), puis consolide par table (`rowsByTable`, `planConsolidation`
 changement depuis la dernière recopiée, ou égale à la destination, est sans effet (`sameValue`) :
 un renvoi vers un nouveau destinataire ne défait pas les retouches des autres.
 
-Limites : un envoi Grist est limité à 1 Mo (corps JSON) et regroupe jusqu'à 100 événements, d'où
-le plafond du lot ; une grosse modification d'un coup part en partie (la CIBLE le compte dans
-`missing`, « Tout renvoyer » rattrape) ; une valeur de Référence part à la prochaine modification
-de sa ligne. Les montages d'avant la V0.4 sont signalés « à refaire » avec un bouton de nettoyage
-(`legacyTables`, `legacyJournals`).
+Limites : un envoi Grist est limité à 1 Mo (corps JSON, `express.json`) et regroupe jusqu'à 100
+événements consécutifs d'un même webhook ; la liste des clés et le lot qui changent ensemble partent
+donc dans le même envoi, d'où le budget du lot `max(20 ko, min(250 ko, 950 ko - 40 o × lignes))`.
+Une liste des clés de plus de 25 000 lignes environ, ou plusieurs listes en attente regroupées,
+dépassent 1 Mo et bloquent la file (piste : liste en morceaux, `docs/05-pistes.md`). Les montages
+d'avant la V0.4 sont signalés « à refaire » avec un bouton de nettoyage (`legacyTables`,
+`legacyJournals`).
+
+V0.4.1 (demande d'Antoine : « on anticipe et on fait partir en auto ») :
+- `MajLe` est une formule de déclenchement (`recalcWhen` 0) dont `recalcDeps` liste les colonnes
+  envoyées par les exports, leur `displayCol` (texte d'une Référence) et `Supprime`
+  (`majleAction`, appliqué par `refreshMajLe` à chaque affichage de l'onglet Envoyer). Vérifié :
+  une formule ou un `gristHelper_Display` qui change à cause d'une autre table déclenche la
+  formule, donc une ville renommée repart seule.
+- Un lot coupé (non renvoi) dit `depuis` ; la colonne `Sync_Etat` de `Synchro` (formule de
+  déclenchement sur `Synchro_Lot`, `missingFormula`) garde la plus ancienne. Le widget SOURCE
+  (`catchUp`, à l'affichage puis toutes les 10 s, propriétaire seulement, verrou
+  `navigator.locks`) l'efface puis renvoie les lignes à `MajLe` >= cette date. Rien ne peut le
+  faire sans page ouverte (une formule ne programme rien).
+- **Toute colonne de `Synchro` doit déjà exister dans les journaux des CIBLES** (le webhook envoie
+  la ligne entière, une colonne inconnue donne 400 et bloque la file) : la marque porte donc le nom
+  `Sync_Etat`, déjà dans tous les journaux. Ne jamais ajouter à `Synchro` une colonne d'un nom
+  nouveau.
+- `recalcDeps` se pose par `UpdateRecord` sur `_grist_Tables_column` après `AddColumn` (dans
+  `AddColumn`, Grist échoue : « 'AltText' object is not iterable »). Dans une formule de
+  déclenchement, `value` est la valeur précédente de la cellule (`$Col` sur elle-même rend
+  `None`).
 
 Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
 analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests : `npm test`

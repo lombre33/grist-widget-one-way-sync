@@ -66,8 +66,9 @@ Le widget dit ce qu'il ajoutera, et ne l'ajoute qu'à la dernière étape :
 
 - `id_sync` dans chaque table : identifiant stable de chaque ligne (les `id` de Grist sont
   réutilisés) ;
-- `MajLe` dans chaque table : date de dernière modification, pour remettre les versions dans
-  l'ordre ;
+- `MajLe` dans chaque table : date du dernier changement d'une valeur envoyée (y compris le texte
+  affiché par une Référence), pour remettre les versions dans l'ordre et repérer ce qui doit
+  partir ;
 - la table technique `Synchro`, une seule pour tout le document, quel que soit le nombre d'exports
   et de tables : pour chaque table d'un export, une ligne liste les `id_sync` existants (les vraies
   suppressions partent ainsi), une autre porte les lignes qui viennent d'être modifiées.
@@ -218,14 +219,18 @@ demande où la ranger, dans une fenêtre qui s'ouvre seule :
 
 ![Colonnes de la table existante](images/08b-cible-colonnes.png)
 
-### Gros imports
+### Gros changements, valeurs venues d'une autre table
 
-Un envoi de Grist est limité en taille : une modification de plus de 2 000 lignes environ, faite
-d'un seul coup (un import), ne part qu'en partie. La carte de la CIBLE dit combien de lignes ne sont
-pas arrivées ; **Tout renvoyer** côté SOURCE les rattrape, par tranches.
+Un envoi de Grist est limité en taille : un changement de plus de 2 000 lignes environ, fait d'un
+seul coup (un import, un remplacement), ne part qu'en partie. Grist note dans la table `Synchro`
+depuis quand des lignes manquent, et le widget SOURCE envoie le reste par tranches, **seul**, dès
+qu'un propriétaire ouvre sa page (même repliée). En attendant, la carte de la CIBLE dit combien de
+lignes ne sont pas encore arrivées :
 
-Une valeur affichée par une Référence (le nom d'une ville renommée dans une autre table) part à la
-prochaine modification de sa ligne, pas tout de suite.
+![Envoi coupé, signalé par la CIBLE](images/19-cible-envoi-coupe.png)
+
+Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
+Référence, ou une formule) repart seule, sans toucher la ligne.
 
 ## Mode lien public
 
@@ -269,7 +274,7 @@ une table vers elle-même. Ce serait une synchro dans les deux sens.
 | La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau |
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
-| La CIBLE signale des lignes non arrivées | Modification trop grosse pour un seul envoi | **Tout renvoyer** |
+| La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 | Carte « Montage d'une version précédente » | Envois créés avant la version 0.4 | Recréer les envois en exports, puis effacer l'ancien montage |

@@ -9,8 +9,8 @@
 //    colonne Synchro_Ids, que la clé du formulaire ne peut pas écrire.
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
-  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECEIVED_COL,
-  RESEND_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, exportRowsActions, syncColumns, syncFormulas,
+  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
+  RESEND_COL, SCHEMA_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, exportRowsActions, majleAction, syncColumns, syncFormulas,
 } from './core.js';
 import { apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages } from './grist.js';
 
@@ -46,6 +46,39 @@ async function refreshFormulas(schema, rows) {
   await apply(actions);
 }
 
+// Table Synchro complète : une colonne ajoutée par une version suivante du widget est créée, et
+// la marque d'envoi coupé surveille le lot (dépendance posée après coup : Grist la refuse à la
+// création).
+export async function ensureSyncTable() {
+  let schema = await readSchema();
+  if (!schema.has(SYNC_TABLE)) return;
+  const have = new Set(schema.columns(SYNC_TABLE).map(c => c.colId));
+  const missing = syncColumns([]).filter(c => !have.has(c.id));
+  if (missing.length) {
+    await apply(missing.map(({ id, ...info }) => ['AddColumn', SYNC_TABLE, id, info]));
+    schema = await readSchema();
+  }
+  const cols = schema.columns(SYNC_TABLE);
+  const lot = cols.find(c => c.colId === LOT_COL);
+  const watch = cols.find(c => c.colId === MISSING_COL);
+  const deps = ['L', lot.id];
+  if (JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps)) {
+    await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
+  }
+}
+
+// MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction).
+export async function refreshMajLe(rows = null) {
+  const schema = await readSchema();
+  const sent = new Map();
+  for (const row of rows || await syncRows()) {
+    let cols = [];
+    try { cols = JSON.parse(row[SCHEMA_COL] || '[]') || []; } catch (e) { /* colonnes illisibles */ }
+    sent.set(row[TABLE_COL], new Set([...(sent.get(row[TABLE_COL]) || []), ...cols.map(c => c.id)]));
+  }
+  await apply([...sent].filter(([table]) => schema.has(table)).map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean));
+}
+
 // Enregistre les tables et colonnes d'un export (`tables` : [{ table, columns }]). Crée la table
 // Synchro au premier export. Rend les tables dont les lignes sont à envoyer (nouvelles ou aux
 // colonnes changées).
@@ -56,6 +89,7 @@ export async function saveExport(exportId, tables, { isPublic = false } = {}) {
     await dropPages([SYNC_TABLE]);
     schema = await readSchema();
   }
+  await ensureSyncTable();
   const before = await fetchRows(SYNC_TABLE);
   const { actions, changed } = exportRowsActions(before, exportId, tables, { isPublic });
   // Les formules d'abord quand une table s'ajoute (elles doivent pouvoir la lire), après quand une
@@ -64,6 +98,7 @@ export async function saveExport(exportId, tables, { isPublic = false } = {}) {
   await refreshFormulas(schema, [...before, ...all]);
   await apply(actions);
   await refreshFormulas(await readSchema(), all);
+  await refreshMajLe();
   return changed;
 }
 
@@ -106,7 +141,7 @@ export async function removeLegacy(schema) {
 // les colonnes des lignes dépliées et leurs marques (clé, date, suppression, bloc des colonnes ;
 // recopiée, effet, auteur, date d'arrivée).
 const JOURNAL_COLUMNS = [
-  ...syncColumns([]).map(({ id, type }) => ({ id, type, isFormula: false })).filter(c => c.id !== AUTHOR_COL),
+  ...syncColumns([]).map(({ id, type }) => ({ id, type, isFormula: false })).filter(c => ![AUTHOR_COL, MISSING_COL].includes(c.id)),
   { id: KEY_COL, type: 'Text', isFormula: false },
   { id: ORDER_COL, type: 'DateTime:UTC', isFormula: false },
   { id: DELETE_COL, type: 'Bool', isFormula: false },

@@ -3,7 +3,7 @@
 // destinataire, filtré par Grist sur les lignes de son export. Les exports, les invitations en
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
-  AUTHOR_COL, EXPORT_COL, KIND, LOT_COL, ORDER_COL, PUBLIC_MEMO, RESEND_CHUNK, SYNC_TABLE, TABLE_COL, TYPE_COL,
+  AUTHOR_COL, EXPORT_COL, KIND, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_CHUNK, SYNC_TABLE, TABLE_COL, TYPE_COL,
   buildInvitation, chunk, conditionExport, exportCondition, exportTables, exportableColumns, fillKeyActions, hookName, isPublicRule, loopingTables,
   maskKey, missingSyncColumns, parseLot, parseReply, prepareSourceActions, publicAclActions, publicAclRules, resendValue,
 } from './core.js';
@@ -12,7 +12,8 @@ import {
   webhookConditions,
 } from './grist.js';
 import {
-  JOURNAL_PREFIX, legacyTables, readSourceNote, receivedDests, removeExport, removeLegacy, saveExport, syncRows, writeResend, writeSourceNote,
+  JOURNAL_PREFIX, ensureSyncTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
+  writeResend, writeSourceNote,
 } from './tables.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
@@ -49,9 +50,11 @@ async function loadState() {
   const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])];
   const exports = ids.map((id) => {
     const meta = note.exports.find(e => e.id === id) || { id, name: id };
+    const recipients = syncHooks.filter(h => exportOf(h) === id);
     return {
-      ...meta, tables: exportTables(rows, id), recipients: syncHooks.filter(h => exportOf(h) === id), invitations: note.invitations.filter(i => i.export === id),
+      ...meta, tables: exportTables(rows, id), recipients, invitations: note.invitations.filter(i => i.export === id),
       email: (rows.find(r => r[EXPORT_COL] === id) || {})[AUTHOR_COL] || '',
+      partial: recipients.some(h => h.fields.enabled) && rows.some(r => r[EXPORT_COL] === id && r[MISSING_COL] > 0),
     };
   });
   const legacy = { tables: legacyTables(schema), hooks: hooks.filter(h => h.fields.tableId !== SYNC_TABLE) };
@@ -85,7 +88,15 @@ async function syncPublicRules(exportIds, open) {
 
 export async function renderSource(root = container) {
   container = root;
-  const state = await loadState();
+  let state = await loadState();
+  // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
+  // rattrapage d'un envoi coupé.
+  if (!state.ownerOnly && state.schema.has(SYNC_TABLE)) {
+    await ensureSyncTable();
+    await refreshMajLe();
+    state = await loadState();
+    catchUp();
+  }
   // Document lisible par lien public ? Vérifié à chaque affichage : tant qu'il l'est, le refus
   // général posé par le widget reste en place, même sans export public.
   const open = await isPublic((await grist.docApi.getAccessToken({ readOnly: true })).baseUrl);
@@ -133,6 +144,7 @@ function exportCard(exp, state, open, out) {
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, exp.tables.map(tb => t('send.export.table', { table: tb.table, n: tb.columns.length })).join(' · ') || '—'),
+    exp.partial && n ? message('info', t('send.export.partial')) : null,
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => recipientWizard(exp) }, icon('plus'), t('send.action.addPerson')),
@@ -317,7 +329,11 @@ async function stopPublic(exp) {
 // Synchro_Renvoi et Grist recalcule le lot. La tranche suivante attend que les destinataires aient
 // tout reçu (un envoi reste sous la limite de taille de Grist) ; une tranche trop grosse pour un
 // lot est coupée en deux. Rend le nombre de lignes renvoyées.
-async function resendTables(exportId, tables, out, idsByTable = {}) {
+// Un renvoi à la fois, tous onglets confondus (« Tout renvoyer », rattrapage automatique).
+const withResendLock = fn => (navigator.locks ? navigator.locks.request('gristsync-resend', fn) : fn());
+const resendTables = (...args) => withResendLock(() => resendLocked(...args));
+
+async function resendLocked(exportId, tables, out, idsByTable = {}) {
   const hookIds = await exportHookIds(exportId);
   if (!hookIds.length) return 0;
   const plans = [];
@@ -345,6 +361,45 @@ async function resendTables(exportId, tables, out, idsByTable = {}) {
   }
   if (out) out.replaceChildren();
   return total;
+}
+
+// Rattrapage d'un envoi coupé (gros import, référence très utilisée renommée) : la marque du lot
+// (MISSING_COL) dit depuis quand des lignes n'ont pas pu partir. Le widget l'efface, puis renvoie
+// les lignes modifiées depuis ; un nouvel envoi coupé entre-temps pose une nouvelle marque. Tourne
+// tant qu'un propriétaire a la page du widget ouverte : à l'affichage, puis toutes les 10 secondes.
+// Export sans destinataire : marque effacée (un destinataire ajouté reçoit tout). Destinataires
+// tous en pause : marque gardée pour après la reprise.
+let catching = false;
+export async function catchUp() {
+  if (catching) return;
+  catching = true;
+  try {
+    const done = await withResendLock(async () => {
+      if (!(await readSchema()).has(SYNC_TABLE)) return 0;
+      const late = (await syncRows()).filter(r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0);
+      if (!late.length) return 0;
+      const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
+      for (const row of late) {
+        const table = row[TABLE_COL];
+        const mine = hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === row[EXPORT_COL]);
+        if (mine.length && !mine.some(h => h.fields.enabled)) continue;
+        await apply([['UpdateRecord', SYNC_TABLE, row.id, { [MISSING_COL]: 0 }]]);
+        if (!mine.length) continue;
+        const ids = (await fetchRows(table)).filter(r => r[ORDER_COL] >= row[MISSING_COL]).map(r => r.id);
+        await resendLocked(row[EXPORT_COL], [table], null, { [table]: ids });
+      }
+      return late.length;
+    });
+    if (done && container && container.isConnected && !document.querySelector('.scrim')) await renderSource();
+  } catch (e) {
+    if (e.message !== 'ownerOnly') console.warn(e);
+  } finally {
+    catching = false;
+  }
+}
+
+export function startAutoCatchUp() {
+  setInterval(catchUp, 10000);
 }
 
 async function exportHookIds(exportId) {

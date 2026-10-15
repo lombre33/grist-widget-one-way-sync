@@ -23,9 +23,18 @@ export const TABLE_COL = 'Synchro_Table'; // table SOURCE (et, dans le journal, 
 export const TYPE_COL = 'Synchro_Type'; // 'cles', 'lot', ou 'complet' (lien public)
 export const RESEND_COL = 'Synchro_Renvoi'; // lignes à renvoyer, écrites par le widget
 export const LOT_COL = 'Synchro_Lot'; // lot : lignes récentes avec leurs colonnes, en JSON
+// Lot coupé : depuis quand des lignes restent à envoyer (0 : rien). Le webhook envoie chaque ligne
+// de Synchro entière, et un journal refuse une colonne qu'il n'a pas : la marque reprend donc le nom
+// d'une colonne que tous les journaux ont déjà, pour que les CIBLES existantes l'acceptent.
+export const MISSING_COL = STATE_COL;
 export const KIND = { keys: 'cles', lot: 'lot', full: 'complet' };
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
-const LOT_MAX = 250000; // octets d'un lot, sous la limite de 1 Mo d'un envoi de Grist
+// Octets d'un lot. Grist refuse un envoi de plus de 1 Mo, et un même envoi regroupe la liste des
+// clés et le lot quand les deux changent ensemble : le lot prend ce que la liste laisse.
+const LOT_MAX = 250000;
+const POST_MAX = 950000;
+const LOT_MIN = 20000;
+const KEY_BYTES = 40; // une clé dans la liste : UUID et séparateur
 export const RESEND_CHUNK = 200; // lignes par renvoi
 
 const LIST_PREFIX = 'ids:';
@@ -90,7 +99,8 @@ export function freeTableId(base, taken) {
 //    demandées dans Synchro_Renvoi, avec les colonnes de l'export, plafonné à LOT_MAX octets
 //    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes.
 // Une valeur est lue à part : une cellule en erreur part vide sans bloquer les autres. Dates en
-// secondes (format de Grist), Référence par son texte affiché.
+// secondes (format de Grist), Référence par son texte affiché. Un lot coupé dit depuis quand
+// (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste.
 export function syncFormulas(tables) {
   const ids = [...new Set(tables)].filter(id => COL_ID.test(id)).sort();
   const pick = `T = {${ids.map(id => `"${id}": ${id}`).join(', ')}}.get($${TABLE_COL})`;
@@ -120,19 +130,33 @@ export function syncFormulas(tables) {
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     `  rows = [r for r in rows if r.id in again or (r.${ORDER_COL} and r.${ORDER_COL} >= cut)]`,
+    `budget = max(${LOT_MIN}, min(${LOT_MAX}, ${POST_MAX} - ${KEY_BYTES} * len(T.all)))`,
     'out, size = [], 0',
     `for r in sorted(rows, key=lambda r: v(r.${ORDER_COL}) or 0, reverse=True):`,
     `  line = [r.${KEY_COL}, v(r.${ORDER_COL}), bool(getattr(r, "${DELETE_COL}", False)), {c["id"]: g(r, c) for c in cols}]`,
     '  size += len(json.dumps(line, ensure_ascii=False))',
-    `  if $${TYPE_COL} == "${KIND.lot}" and size > ${LOT_MAX}: break`,
+    `  if $${TYPE_COL} == "${KIND.lot}" and size > budget: break`,
     '  out.append(line)',
-    'return json.dumps({"lignes": out, "total": len(rows)}, ensure_ascii=False)',
+    'lot = {"lignes": out, "total": len(rows)}',
+    `if $${TYPE_COL} == "${KIND.lot}" and len(out) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
+    'return json.dumps(lot, ensure_ascii=False)',
   ].join('\n');
   return { keys, lot };
 }
 
-// Colonnes de la table Synchro. Elles sont aussi celles du journal de la CIBLE (le webhook envoie
-// chaque ligne entière) : cette liste ne doit plus changer.
+// Marque d'envoi coupé (formule de déclenchement, recalculée quand le lot change) : la plus ancienne
+// date d'un lot coupé, gardée jusqu'à ce que le widget SOURCE envoie le reste et l'efface. Un lot
+// de renvoi coupé ne compte pas : le widget le recoupe lui-même.
+export const missingFormula = [
+  'import json',
+  `lot = json.loads($${LOT_COL} or "{}") if $${TYPE_COL} == "${KIND.lot}" else {}`,
+  'if lot.get("depuis") and not lot.get("renvoi"):',
+  '  return min(value, lot["depuis"]) if value else lot["depuis"]',
+  'return value',
+].join('\n');
+
+// Colonnes de la table Synchro. Le journal de la CIBLE doit toutes les avoir (le webhook envoie
+// chaque ligne entière) : une colonne ajoutée ici doit déjà exister dans les journaux.
 export function syncColumns(tables) {
   const { keys, lot } = syncFormulas(tables);
   return [
@@ -143,6 +167,7 @@ export function syncColumns(tables) {
     { id: RESEND_COL, type: 'Text', isFormula: false },
     { id: LIST_COL, type: 'Text', isFormula: true, formula: keys },
     { id: LOT_COL, type: 'Text', isFormula: true, formula: lot },
+    { id: MISSING_COL, type: 'Numeric', isFormula: false, formula: missingFormula, recalcWhen: 0 },
     // E-mail de la personne qui crée l'export : présenté à la CIBLE comme propriétaire.
     { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 },
   ];
@@ -245,6 +270,20 @@ export function prepareSourceActions(tableId, missing) {
   return missing.map(colId => ['AddColumn', tableId, colId, specs[colId]]);
 }
 
+// MajLe change quand une valeur envoyée change, et seulement alors : formule de déclenchement sur
+// les colonnes envoyées par les exports (`colIds`), leurs colonnes d'affichage (texte d'une
+// Référence) et Supprime. Une valeur qui change à cause d'une autre table (ville renommée, formule)
+// la fait donc changer aussi (vérifié). Rend l'action qui la met à jour, ou null.
+export function majleAction(cols, colIds) {
+  const majle = cols.find(c => c.colId === ORDER_COL);
+  if (!majle) return null;
+  const sent = cols.filter(c => colIds.includes(c.colId) || c.colId === DELETE_COL);
+  const refs = [...new Set(sent.flatMap(c => [c.id, c.displayCol]).filter(Boolean))].sort((a, b) => a - b);
+  const deps = ['L', ...refs];
+  const same = majle.recalcWhen === 0 && JSON.stringify(majle.recalcDeps || null) === JSON.stringify(deps);
+  return same || !refs.length ? null : ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 0, recalcDeps: deps }];
+}
+
 // Une formule de déclenchement ajoutée après coup laisse les lignes existantes vides (vérifié).
 export function fillKeyActions(tableId, rows, newId) {
   const empty = rows.filter(r => isBlank(r[KEY_COL])).map(r => r.id);
@@ -327,7 +366,8 @@ const isRaw = row => !isBlank(row[TYPE_COL]);
 // suppression, bloc des colonnes, table d'origine), chaque liste des clés une ligne de liste ; les
 // lignes reçues sont effacées dans le même lot. Les nouvelles lignes gardent l'ordre d'arrivée
 // (numéros croissants) et la date d'arrivée. Rend aussi, par table, les lignes qu'un lot trop gros
-// n'a pas portées (`missing`) et les tables reçues par un renvoi (`resent`).
+// n'a pas portées depuis le dernier renvoi (`missing`) et les tables reçues par un renvoi
+// (`resent`), dont le compte précédent ne vaut plus.
 export function planUnpack(journalRows, journalTable) {
   const raw = journalRows.filter(isRaw).sort((a, b) => a.id - b.id);
   const added = [];
@@ -347,9 +387,12 @@ export function planUnpack(journalRows, journalTable) {
       ...base, [KEY_COL]: l.key, [ORDER_COL]: l.order, [DELETE_COL]: l.deleted, [DATA_COL]: JSON.stringify(l.data),
       ...(i === 0 ? { [SCHEMA_COL]: row[SCHEMA_COL] || '' } : {}),
     }));
-    // Un lot de renvoi trop gros est recoupé par la SOURCE elle-même : seuls comptent les autres.
-    if (!isBlank(row[RESEND_COL])) resent.add(table);
-    else if (lot.total > lot.lines.length) missing[table] = (missing[table] || 0) + lot.total - lot.lines.length;
+    // Un renvoi remet le compte à zéro (la SOURCE recoupe elle-même un lot de renvoi trop gros) ;
+    // un lot coupé ajoute ce qui manque.
+    if (!isBlank(row[RESEND_COL])) {
+      resent.add(table);
+      missing[table] = 0;
+    } else if (lot.total > lot.lines.length) missing[table] = (missing[table] || 0) + lot.total - lot.lines.length;
   }
   const cols = [...new Set(added.flatMap(Object.keys))];
   const actions = chunk(added).map(part => ['BulkAddRecord', journalTable, part.map(() => null),
