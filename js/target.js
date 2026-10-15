@@ -85,7 +85,7 @@ async function consolidate(schema, { journal, dest }) {
   await apply(writes);
   const after = writes.length ? expandRows(await fetchRows(journal)) : journalRows;
   const labelCol = copyCols.some(([from]) => from === note.label) ? note.label : (copyCols[0] || [])[0];
-  return { ...stats, rows: after.length, labelCol, labelCols: copyCols.map(([c]) => c), recent: recentChanges(after, labelCol, lastVisit, HISTORY_MAX) };
+  return { ...stats, rows: after.length, labelCol, labelCols: copyCols.map(([c]) => c), recent: recentChanges(after, labelCol, lastVisit, Infinity) };
 }
 
 function summary(s) {
@@ -190,7 +190,8 @@ function syncCard(group) {
   const [status, tone] = group.waiting ? ['waiting', 'pending'] : failed ? ['error', 'err'] : ['ok', 'ok'];
   const line = (pair) => {
     const result = results.get(pair.journal);
-    const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString()} · ${result.text}` : '';
+    // Le détail des changements est dans l'historique : la ligne ne garde que l'heure, ou l'erreur.
+    const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString()}${result.error ? ` · ${result.text}` : ''}` : '';
     return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${pair.table} → ${pair.dest}${when}`);
   };
   const from = group.from.email;
@@ -220,18 +221,42 @@ async function stopReceiving(group) {
   await renderTarget();
 }
 
-// Dernières lignes reçues depuis la visite précédente (toutes les tables de l'envoi), au plus 20,
-// nommées par la colonne choisie pour chaque table.
+// Lignes changées depuis la visite précédente, par table de destination : compteurs par état
+// (ajoutées, modifiées, supprimées), puis les plus récentes (HISTORY_MAX par table), nommées par
+// la colonne choisie pour chaque table.
+const STATES = ['ajout', 'modif', 'suppression'];
+const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus' };
+
+function stateCounts(items) {
+  return el('span', { class: 'history-counts' }, STATES.map(state => {
+    const n = items.filter(c => c.state === state).length;
+    return n ? el('span', { class: `chg chg-${state}` }, icon(STATE_ICON[state]), t(`recv.history.n.${state}`, { n })) : null;
+  }));
+}
+
+function when(at) {
+  const date = new Date(at * 1000);
+  const today = date.toDateString() === new Date().toDateString();
+  return today ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
 function history(group) {
-  const items = group.pairs.flatMap(p => ((results.get(p.journal) || {}).recent || []).map(c => ({ ...c, dest: p.dest })))
-    .sort((a, b) => b.at - a.at).slice(0, HISTORY_MAX);
-  const choose = el('button', { class: 'btn btn-small', type: 'button', disabled: readOnly, onclick: () => labelDialog(group) }, t('recv.label.change'));
-  if (!items.length) return el('p', { class: 'muted small' }, t('recv.history.none'));
-  const title = t(lastVisit ? 'recv.history.since' : 'recv.history.last', { n: items.length });
-  return el('details', { class: 'history' }, el('summary', { class: 'small' }, title),
-    el('ul', { class: 'small' }, items.map(c => el('li', {},
-      `${new Date(c.at * 1000).toLocaleString()} · ${c.dest} · ${c.label || '—'} · ${t(`recv.history.${c.state}`)}`))),
-    choose);
+  const tables = group.pairs.map(p => ({ dest: p.dest, items: (results.get(p.journal) || {}).recent || [] }));
+  const all = tables.flatMap(tb => tb.items);
+  if (!all.length) return el('p', { class: 'muted small' }, t('recv.history.none'));
+  const block = ({ dest, items }) => items.length ? el('section', { class: 'history-table' },
+    el('div', { class: 'history-head' }, el('strong', {}, dest), stateCounts(items)),
+    el('ul', { class: 'history-rows' }, items.slice(0, HISTORY_MAX).map(c => el('li', { class: `chg-row chg-${c.state}` },
+      el('span', { class: 'chg-dot', title: t(`recv.history.${c.state}`) }, icon(STATE_ICON[c.state])),
+      el('span', { class: 'chg-label' }, c.label || '—'),
+      el('span', { class: 'chg-state' }, t(`recv.history.${c.state}`)),
+      el('time', { class: 'chg-time', datetime: new Date(c.at * 1000).toISOString() }, when(c.at))))),
+    items.length > HISTORY_MAX ? el('p', { class: 'muted small' }, t('recv.history.more', { n: items.length - HISTORY_MAX })) : null) : null;
+  return el('details', { class: 'history', open: true },
+    el('summary', {}, el('span', { class: 'history-title' }, t(lastVisit ? 'recv.history.since' : 'recv.history.last')), stateCounts(all)),
+    tables.map(block),
+    el('button', { class: 'btn btn-small btn-link', type: 'button', disabled: readOnly, onclick: () => labelDialog(group) }, t('recv.label.change')));
 }
 
 // Colonne qui nomme les lignes dans l'historique, par table reçue (notée dans le journal).

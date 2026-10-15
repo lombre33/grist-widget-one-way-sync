@@ -328,12 +328,14 @@ try {
   assert.equal(after.length, 3);
   assert.equal(after.find(r => r.Nom === 'Bob').Ville, 'retouche', 'retouche manuelle préservée');
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression consolidée');
-  const historyHas = text => waitFor(async () => (await widget().locator('.history li').allTextContents()).some(li => li.includes(text)), `historique : ${text}`);
-  await historyHas('Denis · ajoutée');
-  await historyHas('Alice · modifiée');
-  await historyHas('Chloé · supprimée');
-  await historyHas('Paris · supprimée');
-  await widget().locator('.history summary').first().click();
+  // Historique : par table, chaque ligne avec son état (classe) et son nom (colonne choisie).
+  const historyHas = (label, state) => waitFor(async () => (await widget().locator('.chg-row').evaluateAll(rows =>
+    rows.map(r => `${r.querySelector('.chg-label').textContent}|${r.className}`))).some(r => r.startsWith(`${label}|`) && r.includes(`chg-${state}`)), `historique : ${label} ${state}`);
+  await historyHas('Denis', 'ajout');
+  await historyHas('Alice', 'modif');
+  await historyHas('Chloé', 'suppression');
+  await historyHas('Paris', 'suppression');
+  assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Communes', 'Contacts'], 'historique groupé par table');
   await shot('14-cible-historique');
   step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée');
 

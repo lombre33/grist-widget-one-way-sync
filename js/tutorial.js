@@ -112,9 +112,11 @@ const SECTIONS = [
     title: ['Au quotidien, côté CIBLE', 'Day to day, TARGET side'],
     text: [[
       'Chaque changement de la SOURCE arrive dans le journal en une seconde environ, même page fermée. La recopie dans vos tables se fait quand un éditeur ouvre la page du widget (même replié), puis toutes les 10 secondes.',
+      'L’historique montre, par table, les lignes ajoutées, modifiées et supprimées depuis votre dernière visite, nommées par la colonne de votre choix.',
       'Une retouche faite à la main reste en place jusqu’à la prochaine modification de la même ligne dans la SOURCE. Arrêter la réception efface les journaux et garde vos tables.',
     ], [
       'Each SOURCE change reaches the journal in about a second, even with the page closed. Copying into your tables happens when an editor opens the widget page (even collapsed), then every 10 seconds.',
+      'The history shows, per table, the rows added, changed and deleted since your last visit, named by the column of your choice.',
       'A manual edit stays until the same row changes again in the SOURCE. Stop receiving deletes the journals and keeps your tables.',
     ]],
     images: ['14-cible-historique'] },

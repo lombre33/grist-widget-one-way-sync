@@ -171,9 +171,9 @@ reste ouverte. Une fois les données arrivées, les formulaires se replient en h
 
 ![Synchro à jour et historique](images/14-cible-historique.png)
 
-La carte montre le propriétaire des données, le dernier passage par table, et les lignes
-ajoutées, modifiées ou supprimées depuis votre dernière visite (20 au plus), nommées par la
-colonne de votre choix. Une retouche faite à la main dans la CIBLE reste en place jusqu'à la
+La carte montre le propriétaire des données, le dernier passage par table, et l'historique :
+depuis votre dernière visite, par table, le nombre de lignes ajoutées, modifiées et supprimées,
+puis les lignes elles-mêmes (20 au plus par table), nommées par la colonne de votre choix. Une retouche faite à la main dans la CIBLE reste en place jusqu'à la
 prochaine modification de la même ligne dans la SOURCE. **Arrêter la réception** efface les
 journaux et garde les tables de destination.
 
