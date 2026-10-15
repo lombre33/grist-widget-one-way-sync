@@ -281,7 +281,9 @@ try {
   assert.deepEqual(synchro.map(r => `${r.Synchro_Table}:${r.Synchro_Type}`), ['Contacts:cles', 'Contacts:lot', 'Contacts:suivi']);
   assert.match(synchro[0].Synchro_Export, /^[0-9a-f]{16}$/);
   assert.equal(synchro[0].Synchro_Ids, '', 'aucune clé partie : la liste n\'envoie rien');
-  assert.equal(JSON.parse(synchro[2].Sync_Etat).cles.length, contacts.length, 'le suivi connaît les clés');
+  const track = JSON.parse(synchro[2].Sync_Etat);
+  assert.ok(track.s.length === 256 && track.top === Math.max(...contacts.map(r => r.id)), 'le suivi tient en 256 sommes, quelle que soit la table');
+  assert.equal(synchro[2].Synchro_Ids.split(':')[0], String(contacts.length), 'le suivi compte les clés');
   assert.deepEqual(JSON.parse(synchro[0].Synchro_Colonnes).map(c => c.id), ['Nom', 'Ville', 'Lieu']);
   const majle = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'MajLe' && c.parentId === contactsRefId);
   const helper = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Lieu' && c.parentId === contactsRefId).displayCol;
@@ -597,9 +599,9 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
   step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');
 
-  // --- Grande table (21 000 lignes) : envoyée en plusieurs fois. Ses suppressions suivent par la
-  // liste des clés parties ; plus de 5 000 d'un coup, le widget SOURCE renvoie la liste complète,
-  // en morceaux, et la CIBLE n'efface qu'une fois tous les morceaux arrivés.
+  // --- Grande table (21 000 lignes) : envoyée en plusieurs fois. Ses suppressions suivent par les
+  // seaux qui ont perdu une clé ; plus de 5 000 clés à envoyer d'un coup, le widget SOURCE renvoie
+  // la liste complète, en morceaux, et la CIBLE n'efface qu'une fois tous les morceaux arrivés.
   const N = 21000;
   await applyActions(source.doc, [['AddTable', 'Grande', [{ id: 'N', type: 'Int' }]],
     ['BulkAddRecord', 'Grande', Array(N).fill(null), { N: Array.from({ length: N }, (_, i) => i) }]]);
@@ -628,7 +630,7 @@ try {
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(0, 5500)]]);
   await waitFor(async () => await grande() === N - 5500, 'suppression de 5 500 lignes suivie (liste complète)', 300000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(5500, 5502)]]);
-  await waitFor(async () => await grande() === N - 5502, 'suppression de 2 lignes suivie (clés parties)', 120000);
+  await waitFor(async () => await grande() === N - 5502, 'suppression de 2 lignes suivie (seaux)', 120000);
   await sourceTab.close();
   await editTables('Grande', false);
   await applyActions(source.doc, [['RemoveTable', 'Grande']]);

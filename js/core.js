@@ -8,6 +8,11 @@ export const ORDER_COL = 'MajLe';
 // Heure du dernier recalcul de MajLe (formule ordinaire). Une annulation (Ctrl+Z) remet MajLe à sa
 // valeur d'avant, mais Grist recalcule cette colonne : c'est ainsi que le lot repère une annulation.
 export const RECALC_COL = 'RecalculLe';
+// Échange : heure (NOW()) où la consolidation a écrit la ligne (formule de déclenchement sur
+// MajLe). La consolidation y écrit MajLe à l'heure de la version reçue : la ligne ressemble alors à
+// une annulation (MajLe ancienne, RecalculLe recalculée à l'instant), mais RecuLe, recalculée dans le
+// même lot, la désigne comme reçue. Elle ne repart pas vers l'autre document (pas d'écho).
+export const ECHO_COL = 'RecuLe';
 export const DELETE_COL = 'Supprime'; // facultative : prise en compte si la table SOURCE l'a
 export const LIST_COL = 'Synchro_Ids'; // liste des clés existantes, envoyée par la SOURCE
 export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
@@ -32,12 +37,12 @@ export const LOT_COL = 'Synchro_Lot'; // lot : lignes récentes avec leurs colon
 // de Synchro entière, et un journal refuse une colonne qu'il n'a pas : la marque reprend donc le nom
 // d'une colonne que tous les journaux ont déjà, pour que les CIBLES existantes l'acceptent.
 export const MISSING_COL = STATE_COL;
-// Même colonne, ligne 'suivi' : les clés de la table, triées, et celles parties au dernier
-// changement (JSON, voir syncFormulas).
+// Même colonne, ligne 'suivi' : le suivi des clés de la table, par seaux (JSON, voir syncFormulas).
 export const TRACK_COL = STATE_COL;
 // Types de ligne. Les webhooks n'envoient que les listes et les lots ('cles', 'lot') ; le suivi des
-// clés et le filtre de lignes restent dans la SOURCE ; 'complet' n'est lu que par le lien public.
-export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', filter: 'filtre', track: 'suivi' };
+// clés, le filtre de lignes et la marque d'un export en Échange ('echange') restent dans la SOURCE ;
+// 'complet' n'est lu que par le lien public.
+export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', filter: 'filtre', track: 'suivi', swap: 'echange' };
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
 // Au chargement du document, Grist recalcule RECALC_COL pour toutes les lignes : ce n'est pas une
 // annulation, sauf dans une petite table, renvoyée alors en entier (quelques lignes).
@@ -48,10 +53,14 @@ const SMALL_TABLE = 20;
 const LOT_MAX = 250000;
 const POST_MAX = 950000;
 const LOT_MIN = 20000;
-// La liste des clés ne porte que les clés parties (au plus GONE_MAX d'un coup : au-delà, le widget
-// SOURCE renvoie la liste complète) ; la liste complète ne part qu'au renvoi, par morceaux de
-// PART_KEYS clés. Une clé (UUID) fait une quarantaine d'octets : de quoi laisser la place aux lots.
-const GONE_MAX = 5000;
+// Les clés d'une table sont réparties en BUCKETS seaux (selon le CRC-32 de la clé) ; le suivi ne
+// garde qu'une somme par seau, de taille fixe quelle que soit la table (la liste de toutes les
+// clés, réécrite à chaque ajout, faisait grossir l'historique du document de 1,5 Mo par ligne
+// ajoutée sur 20 000 lignes ; les sommes, de quelques Ko, mesuré). Un seau qui perd une clé part
+// en entier (ses clés restantes) ; au-delà de PART_KEYS clés à envoyer d'un coup, le widget SOURCE
+// renvoie la liste complète, par morceaux de PART_KEYS clés. Une clé (UUID) fait une quarantaine
+// d'octets : de quoi laisser la place aux lots.
+const BUCKETS = 256;
 const PART_KEYS = 5000;
 export const RESEND_CHUNK = 200; // lignes par renvoi
 export const RESEND_ALL = 1; // marque de renvoi : toute la table, lignes sans MajLe comprises
@@ -118,21 +127,28 @@ export function freeTableId(base, taken) {
 // qui doivent exister : une table inconnue mettrait toutes les lignes en erreur) : le widget les
 // réécrit quand un export gagne ou perd une table. Leurs variables sont en minuscules, comme aucun
 // nom de table Grist.
-//  - TRACK_COL (lignes 'suivi', formule de déclenchement) : les clés de la table, triées, et celles
-//    parties depuis le changement précédent (`moins`, avec l'heure `t`). Au-delà de GONE_MAX clés
-//    parties d'un coup, `trop` (l'heure) reste posé jusqu'à ce que le widget SOURCE ait renvoyé la
-//    liste complète (il recopie alors `trop` dans Synchro_Renvoi du suivi). Sur les lignes 'lot',
+//  - TRACK_COL (lignes 'suivi', formule de déclenchement) : l'heure du dernier changement des clés
+//    (`t`), le plus grand numéro de ligne vu (`top`), la somme des CRC-32 des clés de chaque seau
+//    (`s`), et les clés des seaux qui en ont perdu une (`seaux`). Une ligne de numéro supérieur à
+//    `top` est nouvelle : un seau dont la somme a bougé d'autre chose que ses nouvelles clés a perdu
+//    une clé (ou changé une clé). Au-delà de PART_KEYS clés à envoyer, `trop` (l'heure) reste posé
+//    jusqu'à ce que le widget SOURCE ait renvoyé la liste complète (il recopie alors `trop` dans
+//    Synchro_Renvoi du suivi). Sur les lignes 'lot',
 //    la même colonne est la marque d'envoi coupé : la plus ancienne date d'un lot coupé, gardée
 //    jusqu'à ce que le widget envoie le reste (un lot de renvoi coupé ne compte pas : le widget le
 //    recoupe lui-même).
-//  - Synchro_Ids : lignes 'cles', ce qu'il faut envoyer de la liste, en JSON : les clés parties, et
-//    pendant un renvoi le morceau demandé dans Synchro_Renvoi ({ marque, n, apres }) ; lignes
-//    'suivi', le nombre de clés : recalculé à chaque ajout ou retrait de clé, il déclenche le suivi.
+//  - Synchro_Ids : lignes 'cles', ce qu'il faut envoyer de la liste, en JSON : les seaux qui ont
+//    perdu une clé, et pendant un renvoi le morceau de la liste complète demandé dans
+//    Synchro_Renvoi ({ marque, n, apres }), à l'heure `t` du suivi ; lignes 'suivi', le nombre de
+//    clés et la somme de leurs CRC-32 : recalculés à chaque changement des clés, ils déclenchent le
+//    suivi.
 //  - Synchro_Lot (lignes 'lot') : les lignes modifiées depuis WINDOW_S secondes et celles
 //    demandées dans Synchro_Renvoi, avec les colonnes de l'export, plafonné à LOT_MAX octets
 //    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes.
 // Une ligne annulée (Ctrl+Z : MajLe revenue en arrière, RECALC_COL recalculée à l'instant) part avec
-// l'heure de l'annulation, pour l'emporter sur la version qu'elle annule.
+// l'heure de l'annulation, pour l'emporter sur la version qu'elle annule. Une ligne écrite par la
+// consolidation d'un Échange (ECHO_COL recalculée en même temps que RECALC_COL) part avec l'heure
+// de sa version vers les autres exports, et pas vers l'autre document de l'Échange.
 // Une valeur est lue à part : une cellule en erreur part vide sans bloquer les autres. Dates en
 // secondes (format de Grist), Référence par son texte affiché. Un lot coupé dit depuis quand
 // (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste. `Supprime`
@@ -167,19 +183,22 @@ export function syncFormulas(tables) {
     'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
   ];
   const keys = [
-    `if $${TYPE_COL} == "${KIND.keys}":`,
-    '  import json, bisect',
-    `  s = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
-    `  state = json.loads(s.${TRACK_COL}) if s.id and isinstance(s.${TRACK_COL}, str) and s.${TRACK_COL}.startswith("{") else {}`,
-    '  out = {"t": state["t"], "moins": state["moins"]} if state.get("moins") else {}',
-    `  ask = json.loads($${RESEND_COL}) if ($${RESEND_COL} or "").startswith("{") else None`,
-    '  if ask and "cles" in state:',
-    '    have = state["cles"]',
-    '    i = bisect.bisect_right(have, str(ask.get("apres") or ""))',
-    `    out["liste"] = {"marque": ask.get("marque"), "n": ask.get("n"), "t": NOW().timestamp(), "cles": have[i:i + ${PART_KEYS}], "fin": i + ${PART_KEYS} >= len(have)}`,
-    '  return json.dumps(out) if out else ""',
-    `if $${TYPE_COL} != "${KIND.track}": return ""`, pick, 'if src is None: return ""', ...read,
-    `return str(sum(1 for r in src.all if r.${KEY_COL} and keep(r)))`,
+    `if $${TYPE_COL} not in ("${KIND.keys}", "${KIND.track}"): return ""`, pick, 'if src is None: return ""', ...read,
+    `if $${TYPE_COL} == "${KIND.track}":`,
+    '  import zlib',
+    `  sums = [zlib.crc32(str(r.${KEY_COL}).encode()) for r in src.all if r.${KEY_COL} and keep(r)]`,
+    '  return "%d:%08x" % (len(sums), sum(sums) & 0xffffffff)',
+    'import bisect',
+    `s = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
+    `state = json.loads(s.${TRACK_COL}) if s.id and isinstance(s.${TRACK_COL}, str) and s.${TRACK_COL}.startswith("{") else {}`,
+    'out = {"t": state["t"], "seaux": state["seaux"]} if state.get("seaux") else {}',
+    `ask = json.loads($${RESEND_COL}) if ($${RESEND_COL} or "").startswith("{") else None`,
+    // Le morceau porte l'heure du suivi : les clés n'ont pas changé depuis (sinon le suivi aussi).
+    'if ask and state.get("t"):',
+    `  have = sorted(set(str(r.${KEY_COL}) for r in src.all if r.${KEY_COL} and keep(r)))`,
+    '  i = bisect.bisect_right(have, str(ask.get("apres") or ""))',
+    `  out["liste"] = {"marque": ask.get("marque"), "n": ask.get("n"), "t": state["t"], "cles": have[i:i + ${PART_KEYS}], "fin": i + ${PART_KEYS} >= len(have)}`,
+    'return json.dumps(out) if out else ""',
   ].join('\n');
   const lot = [
     `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}"): return ""`, pick, 'if src is None: return ""', ...read,
@@ -188,11 +207,18 @@ export function syncFormulas(tables) {
     `rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
     'undone = set()',
     `if $${TYPE_COL} == "${KIND.lot}":`,
+    `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     `  recent = set(r.id for r in rows if r.${ORDER_COL} and r.${ORDER_COL} >= cut)`,
-    `  undone = set(r.id for r in rows if r.id not in recent and (getattr(r, "${RECALC_COL}", None) or cut) > cut)`,
-    `  if len(recent) + len(undone) == len(rows) > ${SMALL_TABLE}: undone = set()`,
-    '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone]',
+    '  def echo(r):',
+    `    x, y = getattr(r, "${ECHO_COL}", None), getattr(r, "${RECALC_COL}", None)`,
+    '    return bool(x and y and y > cut and abs((y - x).total_seconds()) < 1)',
+    '  fresh = set() if swap else set(r.id for r in rows if r.id not in recent and echo(r))',
+    `  undone = set(r.id for r in rows if r.id not in recent and not echo(r) and (getattr(r, "${RECALC_COL}", None) or cut) > cut)`,
+    // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
+    // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
+    `  if len(recent) + len(undone) == len(rows) > (0 if swap else ${SMALL_TABLE}): undone = set()`,
+    '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
     `def when(r): return v(getattr(r, "${RECALC_COL}") if r.id in undone else r.${ORDER_COL})`,
     // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.
     `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
@@ -224,16 +250,30 @@ export function syncFormulas(tables) {
     '    return min(value, lot["depuis"]) if value else lot["depuis"]',
     '  return value',
     `if $${TYPE_COL} != "${KIND.track}": return value`, pick, 'if src is None: return value', ...read,
-    `have = sorted(set(str(r.${KEY_COL}) for r in src.all if r.${KEY_COL} and keep(r)))`,
+    'import zlib',
     'old = json.loads(value) if isinstance(value, str) and value.startswith("{") else {}',
-    'if old.get("cles") == have: return value',
+    'top = old.get("top", 0)',
+    `sums, fresh, keys = [0] * ${BUCKETS}, [0] * ${BUCKETS}, []`,
+    'for r in src.all:',
+    `  if not r.${KEY_COL} or not keep(r): continue`,
+    `  k = str(r.${KEY_COL})`,
+    '  h = zlib.crc32(k.encode())',
+    `  b = h * ${BUCKETS} >> 32`,
+    '  sums[b] = (sums[b] + h) & 0xffffffff',
+    '  if r.id > top: fresh[b] = (fresh[b] + h) & 0xffffffff',
+    '  keys.append((b, k))',
+    'was = old.get("s")',
+    'if was == sums: return value',
     't = v(NOW())',
-    'state = {"t": t, "cles": have}',
-    'gone = sorted(set(old.get("cles", [])).difference(have))',
-    `if len(gone) > ${GONE_MAX}: state["trop"] = str(t)`,
-    'else:',
-    '  if gone: state["moins"] = gone',
-    `  if old.get("trop") and old["trop"] != $${RESEND_COL}: state["trop"] = old["trop"]`,
+    'state = {"t": t, "top": max([top] + [r.id for r in src.all]), "s": sums}',
+    `if isinstance(was, list) and len(was) == ${BUCKETS}:`,
+    `  moved = set(b for b in range(${BUCKETS}) if (was[b] + fresh[b]) & 0xffffffff != sums[b])`,
+    '  left = {str(b): [] for b in moved}',
+    '  for b, k in keys:',
+    '    if b in moved: left[str(b)].append(k)',
+    `  if sum(len(x) for x in left.values()) > ${PART_KEYS}: state["trop"] = str(t)`,
+    '  elif left: state["seaux"] = {b: sorted(x) for b, x in left.items()}',
+    `if old.get("trop") and old["trop"] != $${RESEND_COL} and "trop" not in state: state["trop"] = old["trop"]`,
     'return json.dumps(state)',
   ].join('\n');
   return { keys, lot, state };
@@ -353,17 +393,31 @@ export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
 // 'cles'). `mark` distingue un renvoi des autres.
 export const listRequest = (mark, n, after) => JSON.stringify({ marque: mark, n, apres: after });
 
-// Suivi des clés d'une table (ligne 'suivi') : { t, cles, moins, trop } ; {} s'il n'y en a pas.
+// Suivi des clés d'une table (ligne 'suivi') : { t, top, s, seaux, trop } ; {} s'il n'y en a pas.
 export const trackState = row => (row && row[TYPE_COL] === KIND.track ? parseJson(row[TRACK_COL], null) || {} : {});
 
-// Plus de GONE_MAX clés parties d'un coup, et la liste complète pas encore renvoyée depuis.
+// Trop de clés à envoyer d'un coup, et la liste complète pas encore renvoyée depuis.
 export const listOverdue = (row) => {
   const { trop } = trackState(row);
   return Boolean(trop) && trop !== row[RESEND_COL];
 };
 
-// Liste reçue (Synchro_Ids d'une ligne 'cles') : { gone: { t, keys } } pour les clés parties,
-// { part: { mark, n, t, keys, last } } pour un morceau de liste complète, les deux à la fois, ou
+// Seau d'une clé (voir BUCKETS) : les premiers bits de son CRC-32, comme zlib.crc32 en Python.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+export function crc32(text) {
+  let c = 0xffffffff;
+  for (const byte of new TextEncoder().encode(text)) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+export const bucketOf = key => Math.floor(crc32(String(key)) * BUCKETS / 2 ** 32);
+
+// Liste reçue (Synchro_Ids d'une ligne 'cles') : { buckets: { t, keys: Map(seau -> Set(clés)) } }
+// pour les seaux qui ont perdu une clé, { part: { mark, n, t, keys, last } } pour un morceau de
+// liste complète, les deux à la fois, ou
 // { full: [clés] } pour une liste complète d'un seul tenant (« ids:… » : montage 0.4, lien public).
 // null si elle est vide ou illisible.
 export function parseList(text) {
@@ -373,12 +427,13 @@ export function parseList(text) {
   if (!list || typeof list !== 'object') return null;
   const strings = a => (Array.isArray(a) ? a.filter(k => !isBlank(k)).map(String) : []);
   const out = {};
-  if (Array.isArray(list.moins) && typeof list.t === 'number') out.gone = { t: list.t, keys: strings(list.moins) };
+  const seaux = list.seaux && typeof list.seaux === 'object' ? Object.entries(list.seaux).filter(([b]) => /^\d+$/.test(b) && Number(b) < BUCKETS) : [];
+  if (seaux.length && typeof list.t === 'number') out.buckets = { t: list.t, keys: new Map(seaux.map(([b, keys]) => [Number(b), new Set(strings(keys))])) };
   const p = list.liste;
   if (p && typeof p === 'object' && typeof p.marque === 'string' && p.marque && Number.isInteger(p.n) && p.n > 0 && typeof p.t === 'number') {
     out.part = { mark: p.marque, n: p.n, t: p.t, keys: strings(p.cles), last: p.fin === true };
   }
-  return out.gone || out.part ? out : null;
+  return out.buckets || out.part ? out : null;
 }
 
 // Lot reçu : { lines: [{ key, order, deleted, data }], total } ; null s'il est illisible.
@@ -395,7 +450,7 @@ export function parseLot(text) {
 // colonnes de la synchro et colonnes internes de Grist. Les pièces jointes ne peuvent pas partir
 // (`blocked`). Une Référence part comme le texte qu'elle affiche.
 export function exportableColumns(cols) {
-  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
+  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, ECHO_COL, DELETE_COL]);
   return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map(c => ({
     id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type,
     visible: c.visible || '', blocked: c.type === 'Attachments',
@@ -414,6 +469,7 @@ export function prepareSourceActions(tableId, missing) {
     [KEY_COL]: { type: 'Text', isFormula: false, formula: 'UUID()', recalcWhen: 0 },
     [ORDER_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 2 },
     [RECALC_COL]: { type: 'DateTime:UTC', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW()` },
+    [ECHO_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 0 },
   };
   return missing.map(colId => ['AddColumn', tableId, colId, specs[colId]]);
 }
@@ -597,7 +653,7 @@ export function rowsByTable(journalRows) {
 // Colonnes recopiées, en couples [colonne du Journal, colonne de la destination] : colonnes
 // envoyées présentes des deux côtés (sous le nom choisi dans `map`, sinon le même), hors colonnes
 // techniques de la synchro et formules de la destination. La destination ne garde que `id_sync`.
-const TECHNICAL = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL,
+const TECHNICAL = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, RECALC_COL, ECHO_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL,
   DATA_COL, SCHEMA_COL, EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, LOT_COL]);
 export function copyColumns(journalCols, destCols, map = {}) {
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
@@ -721,8 +777,8 @@ function completeLists(pending) {
 //  - la dernière version de chaque clé, si elle n'a pas encore été recopiée ; une clé inconnue
 //    de la destination peut y reprendre une ligne existante sans clé de même valeur dans la
 //    colonne `matchCol` (rattachement d'un référentiel déjà rempli) ;
-//  - la suppression des lignes cochées `Supprime`, des clés parties de la SOURCE (liste des clés
-//    parties, ou absentes d'une liste complète arrivée en entier), sauf si une version plus récente
+//  - la suppression des lignes cochées `Supprime`, des clés parties de la SOURCE (absentes d'un
+//    seau qui a perdu une clé, ou d'une liste complète arrivée en entier), sauf si une version plus récente
 //    que la liste est arrivée (clé recréée, annulation) : « plus récente » se lit à l'heure de la
 //    SOURCE, ou à l'ordre d'arrivée pour une liste « ids:… » qui n'a pas d'heure ;
 //  - le marquage des versions et des listes traitées (`Sync_Applique`) et de leur effet
@@ -758,10 +814,25 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
     if (version && destByKey.has(key)) listGone.push([version.id, listRow[RECEIVED_COL] ?? null]);
   };
   const known = () => new Set([...destByKey.keys(), ...latest.keys()]);
+  let byBucket = null; // seau -> clés connues, calculé une fois
+  const bucketed = () => {
+    if (!byBucket) {
+      byBucket = new Map();
+      for (const key of known()) {
+        const b = bucketOf(key);
+        if (!byBucket.has(b)) byBucket.set(b, []);
+        byBucket.get(b).push(key);
+      }
+    }
+    return byBucket;
+  };
   const pending = pendingLists(journalRows);
   const mark = lastMark(pending);
   for (const { row, list } of pending) {
-    if (list.gone) list.gone.keys.forEach(key => drop(key, list.gone.t, row));
+    if (list.buckets) {
+      const { t, keys } = list.buckets;
+      for (const [b, left] of keys) for (const key of bucketed().get(b) || []) if (!left.has(key)) drop(key, t, row);
+    }
     // Un morceau de liste complète attend les autres ; celui d'un renvoi remplacé par un autre
     // (interrompu, repris sous une autre marque) ne servira plus.
     if (!list.part || list.part.mark !== mark) marks.set(row.id, '');
@@ -838,7 +909,7 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
 
 // Nettoyage du Journal, dans le même lot. Restent, par table : la dernière version de chaque clé,
 // la dernière liste « ids:… » et la dernière description des colonnes (avec leur marque
-// `Sync_Applique`) ; les clés parties pas encore traitées et les morceaux du dernier renvoi pas
+// `Sync_Applique`) ; les seaux pas encore traités et les morceaux du dernier renvoi pas
 // encore arrivé en entier ;
 // toutes les lignes des tables `keep` (proposées par la SOURCE, pas encore rangées) ; les lignes
 // reçues pas encore dépliées ; et la ligne la plus récente, pour que Grist ne réutilise pas son
@@ -855,7 +926,7 @@ export function planPurge(journalRows, journalTable, { keep = [], drop = [] } = 
     for (const row of [latestList(rows), latestSchemaRow(rows)]) if (row) kept.add(row.id);
     const pending = pendingLists(rows);
     const mark = lastMark(pending);
-    for (const { row, list } of pending) if (list.gone || (list.part && list.part.mark === mark)) kept.add(row.id);
+    for (const { row, list } of pending) if (list.buckets || (list.part && list.part.mark === mark)) kept.add(row.id);
   }
   kept.add(journalRows.reduce((max, r) => Math.max(max, r.id), 0));
   const ids = journalRows.filter(r => !kept.has(r.id)).map(r => r.id);

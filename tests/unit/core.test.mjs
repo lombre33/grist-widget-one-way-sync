@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
-  sentColumns, compareVersion, copyColumns, chunkMark, majleAction, rowsSince, addTrackRowsAction, listOverdue, listRequest, parseList, trackState, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
+  sentColumns, compareVersion, copyColumns, chunkMark, majleAction, rowsSince, addTrackRowsAction, bucketOf, crc32, listOverdue, listRequest, parseList, trackState, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
   newColumnsMap, nextGaps, docLabel, followRenames, destRefs, rowFilter, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
@@ -109,11 +109,20 @@ test('consolidation : un renvoi des mêmes valeurs ne défait pas une retouche m
   assert.deepEqual(plan([...journalRows.slice(0, 1), j(2, 'a', 11, { Nom: 'Lille' })], destRows).stats.updated, 1, 'une vraie modification passe');
 });
 
-const gone = (id, t, keys, extra = {}) => ({ id, id_sync: '', Synchro_Ids: JSON.stringify({ t, moins: keys }), ...extra });
+// Seaux qui ont perdu les clés `keys` : chacun part avec ses clés restantes (parmi `left`).
+const gone = (id, t, keys, extra = {}, left = []) => ({ id, id_sync: '', ...extra, Synchro_Ids: JSON.stringify({ t,
+  seaux: Object.fromEntries(keys.map(k => [bucketOf(k), left.filter(x => bucketOf(x) === bucketOf(k))])) }) });
 const part = (id, n, t, keys, last, mark = 'm1') => ({ id, id_sync: '', Synchro_Ids: JSON.stringify({ liste: { marque: mark, n, t, cles: keys, fin: last } }) });
 
-test('consolidation : clés parties effacées, sauf version plus récente à l\'heure de la SOURCE', () => {
-  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), j(3, 'c', 30), j(4, 'e', 5), gone(5, 20, ['b', 'c', 'e', 'x'], { Sync_Recu: 60 })];
+test('seau d\'une clé : CRC-32 comme zlib.crc32 en Python, 256 seaux', () => {
+  assert.equal(crc32('123456789'), 0xcbf43926, 'valeur de contrôle du CRC-32');
+  assert.equal(crc32('été'), 0x44d16cd4, 'UTF-8, comme str.encode() en Python');
+  assert.equal(bucketOf('123456789'), 0xcb);
+  assert.ok([...Array(2000).keys()].every(i => bucketOf(`k${i}`) >= 0 && bucketOf(`k${i}`) < 256));
+});
+
+test('consolidation : clés parties d\'un seau effacées, sauf version plus récente à l\'heure de la SOURCE', () => {
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, done), j(3, 'c', 30), j(4, 'e', 5), gone(5, 20, ['b', 'c', 'e', 'x'], { Sync_Recu: 60 }, ['a'])];
   const destRows = [{ id: 1, id_sync: 'a' }, { id: 2, id_sync: 'b' }];
   const { actions, stats } = plan(journalRows, destRows);
   assert.deepEqual(stats, { added: 1, updated: 0, removed: 1 }, 'c recréée après coup reste ; e, partie avant d\'être recopiée, n\'arrive pas');
@@ -186,13 +195,13 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.deepEqual(syncColumns([]).map(c => c.id),
     ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Etat', 'Sync_Par']);
   const { keys, lot, state } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
-  assert.match(keys, /^if \$Synchro_Type == "cles":/);
+  assert.match(keys, /^if \$Synchro_Type not in \("cles", "suivi"\): return ""\ntables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
+  assert.match(keys, /  sums = \[zlib\.crc32\(str\(r\.id_sync\)\.encode\(\)\) for r in src\.all if r\.id_sync and keep\(r\)\]\n  return "%d:%08x" % \(len\(sums\), sum\(sums\) & 0xffffffff\)/,
+    'suivi : nombre de clés et somme de leurs CRC-32, recalculés à chaque changement des clés');
   assert.match(keys, /s = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="suivi"\)/);
-  assert.match(keys, /out = \{"t": state\["t"\], "moins": state\["moins"\]\} if state\.get\("moins"\) else \{\}/, 'seules les clés parties partent');
+  assert.match(keys, /out = \{"t": state\["t"\], "seaux": state\["seaux"\]\} if state\.get\("seaux"\) else \{\}/, 'seuls les seaux qui ont perdu une clé partent');
   assert.match(keys, /i = bisect\.bisect_right\(have, str\(ask\.get\("apres"\) or ""\)\)/, 'un morceau reprend après la dernière clé du précédent');
-  assert.match(keys, /"cles": have\[i:i \+ 5000\], "fin": i \+ 5000 >= len\(have\)\}/, 'liste complète en morceaux, au renvoi seulement');
-  assert.match(keys, /if \$Synchro_Type != "suivi": return ""\ntables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
-  assert.match(keys, /return str\(sum\(1 for r in src\.all if r\.id_sync and keep\(r\)\)\)$/, 'suivi : le nombre de clés, recalculé à chaque ajout ou retrait');
+  assert.match(keys, /"t": state\["t"\], "cles": have\[i:i \+ 5000\], "fin": i \+ 5000 >= len\(have\)\}/, 'liste complète en morceaux, au renvoi seulement, à l\'heure du suivi');
   for (const formula of [keys, lot, state]) {
     assert.match(formula, /f = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="filtre"\)/, 'filtre de la table lu dans sa ligne');
     assert.match(formula, /def keep\(r\): return not spec or txt\(g\(r, spec\)\) == spec\["value"\]/);
@@ -208,9 +217,14 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
     'les lots d\'un export se partagent ce que leurs listes des clés laissent');
   assert.match(lot, /if capped and n > max\(budget, room\):\n    big\.append\(r\.id_sync\)\n    continue/, 'une ligne plus grosse qu\'un envoi est signalée');
   assert.match(lot, /if capped and out and size \+ n > budget: break/, 'la première ligne part seule, même au-delà du plafond');
-  assert.match(lot, /undone = set\(r\.id for r in rows if r\.id not in recent and \(getattr\(r, "RecalculLe", None\) or cut\) > cut\)/,
+  assert.match(lot, /undone = set\(r\.id for r in rows if r\.id not in recent and not echo\(r\) and \(getattr\(r, "RecalculLe", None\) or cut\) > cut\)/,
     'une ligne annulée (RecalculLe récent, MajLe ancienne) repart');
-  assert.match(lot, /if len\(recent\) \+ len\(undone\) == len\(rows\) > 20: undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
+  assert.match(lot, /    x, y = getattr\(r, "RecuLe", None\), getattr\(r, "RecalculLe", None\)\n    return bool\(x and y and y > cut and abs\(\(y - x\)\.total_seconds\(\)\) < 1\)/,
+    'une ligne écrite par la consolidation d\'un Échange : RecuLe et RecalculLe recalculées ensemble');
+  assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\.id/);
+  assert.match(lot, /  fresh = set\(\) if swap else set\(r\.id for r in rows if r\.id not in recent and echo\(r\)\)/,
+    'une ligne reçue par l\'Échange part vers les autres exports, pas vers l\'autre document');
+  assert.match(lot, /if len\(recent\) \+ len\(undone\) == len\(rows\) > \(0 if swap else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
   assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
@@ -231,11 +245,14 @@ test('suivi des clés et envoi coupé : une colonne de déclenchement, nommée c
   assert.match(state, /^import json\nif \$Synchro_Type == "lot":\n  lot = json\.loads\(\$Synchro_Lot or "\{\}"\)\n  if lot\.get\("depuis"\) and not lot\.get\("renvoi"\):\n/,
     'lot : un renvoi coupé ne pose pas de marque');
   assert.match(state, /    return min\(value, lot\["depuis"\]\) if value else lot\["depuis"\]\n  return value\nif \$Synchro_Type != "suivi": return value\n/, 'la plus ancienne date reste');
-  assert.match(state, /have = sorted\(set\(str\(r\.id_sync\) for r in src\.all if r\.id_sync and keep\(r\)\)\)/);
-  assert.match(state, /if old\.get\("cles"\) == have: return value/, 'clés inchangées : la cellule ne bouge pas');
-  assert.match(state, /gone = sorted\(set\(old\.get\("cles", \[\]\)\)\.difference\(have\)\)\nif len\(gone\) > 5000: state\["trop"\] = str\(t\)/,
-    'trop de clés parties : la liste complète sera renvoyée');
-  assert.match(state, /  if old\.get\("trop"\) and old\["trop"\] != \$Synchro_Renvoi: state\["trop"\] = old\["trop"\]\nreturn json\.dumps\(state\)$/,
+  assert.match(state, /  b = h \* 256 >> 32\n  sums\[b\] = \(sums\[b\] \+ h\) & 0xffffffff\n  if r\.id > top: fresh\[b\] = \(fresh\[b\] \+ h\) & 0xffffffff/,
+    'une somme par seau, et celle des lignes nouvelles (numéro au-delà de top)');
+  assert.match(state, /if was == sums: return value/, 'clés inchangées : la cellule ne bouge pas');
+  assert.match(state, /moved = set\(b for b in range\(256\) if \(was\[b\] \+ fresh\[b\]\) & 0xffffffff != sums\[b\]\)/,
+    'un seau qui n\'a fait que gagner des lignes nouvelles ne part pas');
+  assert.match(state, /if sum\(len\(x\) for x in left\.values\(\)\) > 5000: state\["trop"\] = str\(t\)\n  elif left: state\["seaux"\] = /,
+    'trop de clés à envoyer : la liste complète sera renvoyée');
+  assert.match(state, /if old\.get\("trop"\) and old\["trop"\] != \$Synchro_Renvoi and "trop" not in state: state\["trop"\] = old\["trop"\]\nreturn json\.dumps\(state\)$/,
     'la demande reste jusqu\'à ce que le widget ait renvoyé la liste');
 });
 
@@ -319,17 +336,17 @@ test('renvoi reprenable : lignes depuis la marque, dans l\'ordre de MajLe ; la m
   assert.equal(chunkMark([{ id: 4, MajLe: 20 }], 15), 20);
 });
 
-test('liste des clés : clés parties, morceau de liste complète, ancienne liste d\'un seul tenant', () => {
+test('liste des clés : seaux, morceau de liste complète, ancienne liste d\'un seul tenant', () => {
   assert.deepEqual(parseList('ids:a b  c'), { full: ['a', 'b', 'c'] });
-  for (const bad of ['', null, '{}', 'x', '{"moins": ["a"]}']) assert.equal(parseList(bad), null);
-  assert.deepEqual(parseList('{"t": 5, "moins": ["a", "", 3]}'), { gone: { t: 5, keys: ['a', '3'] } });
+  for (const bad of ['', null, '{}', 'x', '{"seaux": {"3": ["a"]}}', '{"t": 5, "seaux": {"300": ["a"], "x": []}}']) assert.equal(parseList(bad), null);
+  assert.deepEqual(parseList('{"t": 5, "seaux": {"3": ["a", "", 3], "7": []}}'), { buckets: { t: 5, keys: new Map([[3, new Set(['a', '3'])], [7, new Set()]]) } });
   assert.equal(listRequest('abcd1234', 2, 'k9'), '{"marque":"abcd1234","n":2,"apres":"k9"}');
   const part = { liste: { marque: 'abcd1234', n: 2, t: 7, cles: ['a'], fin: true } };
-  assert.deepEqual(parseList(JSON.stringify({ t: 6, moins: ['z'], ...part })),
-    { gone: { t: 6, keys: ['z'] }, part: { mark: 'abcd1234', n: 2, t: 7, keys: ['a'], last: true } });
+  assert.deepEqual(parseList(JSON.stringify({ t: 6, seaux: { 1: ['z'] }, ...part })),
+    { buckets: { t: 6, keys: new Map([[1, new Set(['z'])]]) }, part: { mark: 'abcd1234', n: 2, t: 7, keys: ['a'], last: true } });
   assert.equal(parseList(JSON.stringify({ liste: { ...part.liste, n: 0 } })), null, 'morceau mal formé');
-  const track = { Synchro_Type: 'suivi', Sync_Etat: '{"t": 1, "cles": ["a"], "trop": "1.5"}', Synchro_Renvoi: '' };
-  assert.deepEqual(trackState(track), { t: 1, cles: ['a'], trop: '1.5' });
+  const track = { Synchro_Type: 'suivi', Sync_Etat: '{"t": 1, "top": 4, "s": [], "trop": "1.5"}', Synchro_Renvoi: '' };
+  assert.deepEqual(trackState(track), { t: 1, top: 4, s: [], trop: '1.5' });
   assert.equal(listOverdue(track), true, 'trop de clés parties : liste complète à renvoyer');
   assert.equal(listOverdue({ ...track, Synchro_Renvoi: '1.5' }), false, 'renvoyée depuis');
   assert.deepEqual(trackState({ Synchro_Type: 'lot', Sync_Etat: 12 }), {});
