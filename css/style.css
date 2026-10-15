@@ -119,6 +119,8 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .msg-ok { background: var(--good-soft); border-color: var(--good); color: var(--good); }
 .msg-warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .msg-err { background: var(--danger-soft); border-color: var(--danger); color: var(--danger-ink); }
+.suspect p { margin: 4px 0 0; }
+.suspect .card-actions { margin-top: 8px; }
 
 /* Formulaires */
 .form { display: grid; gap: 6px; }

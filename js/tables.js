@@ -11,7 +11,7 @@
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
-  RECALC_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, addTrackRowsAction, exportRowsActions, exportTables, majleAction, prepareSourceActions,
+  RECALC_COL, RECALC_SPEC, STATE_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, addTrackRowsAction, exportRowsActions, exportTables, majleAction, prepareSourceActions,
   syncColumns, syncFormulas,
 } from './core.js';
 import { apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages } from './grist.js';
@@ -99,9 +99,13 @@ export async function refreshMajLe() {
     }
   }
   const tables = [...sent].filter(([table]) => schema.has(table));
-  // RecalculLe (repère des annulations) manque aux tables exportées avant la version 0.5.
+  // RecalculLe (repère des annulations) manque aux tables exportées avant la version 0.4.3, et
+  // était une date avant la version 0.5.
+  const recalc = table => schema.columns(table).find(c => c.colId === RECALC_COL);
   const actions = [
-    ...tables.flatMap(([table]) => (schema.columns(table).some(c => c.colId === RECALC_COL) ? [] : prepareSourceActions(table, [RECALC_COL]))),
+    ...tables.flatMap(([table]) => (recalc(table) ? [] : prepareSourceActions(table, [RECALC_COL]))),
+    ...tables.filter(([table]) => recalc(table) && (recalc(table).type !== RECALC_SPEC.type || recalc(table).formula !== RECALC_SPEC.formula))
+      .map(([table]) => ['ModifyColumn', table, RECALC_COL, RECALC_SPEC]),
     ...tables.map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean),
   ];
   await apply(actions);

@@ -26,7 +26,7 @@ export const JOURNAL_PREFIX = 'Journal_'; // CIBLE : un journal par export reçu
 // SOURCE : la seule table technique du widget, quel que soit le nombre d'exports et de tables.
 // Chaque table d'un export y a ses lignes : sa liste des clés et son lot de lignes modifiées
 // (envoyés), son suivi des clés (jamais envoyé), son filtre de lignes s'il y en a un, et son
-// instantané complet pour un export partagé par lien public.
+// instantané complet avec son empreinte pour un export partagé par lien public.
 export const SYNC_TABLE = 'Synchro';
 export const EXPORT_COL = 'Synchro_Export'; // identifiant de l'export
 export const TABLE_COL = 'Synchro_Table'; // table SOURCE (et, dans le journal, table d'origine d'une ligne)
@@ -41,8 +41,9 @@ export const MISSING_COL = STATE_COL;
 export const TRACK_COL = STATE_COL;
 // Types de ligne. Les webhooks n'envoient que les listes et les lots ('cles', 'lot') ; le suivi des
 // clés, le filtre de lignes et la marque d'un export en Échange ('echange') restent dans la SOURCE ;
-// 'complet' n'est lu que par le lien public.
-export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', filter: 'filtre', track: 'suivi', swap: 'echange' };
+// 'complet' et son empreinte ('empreinte') ne sont lus que par le lien public. Une seule ligne
+// 'charge', d'aucun export, suit les renvois du document (voir parseCharge).
+export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge' };
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
 // Au chargement du document, Grist recalcule RECALC_COL pour toutes les lignes : ce n'est pas une
 // annulation, sauf dans une petite table, renvoyée alors en entier (quelques lignes).
@@ -53,6 +54,9 @@ const SMALL_TABLE = 20;
 const LOT_MAX = 250000;
 const POST_MAX = 950000;
 const LOT_MIN = 20000;
+// Instantané d'un export public, relu par chaque page CIBLE ouverte quand il change : au-delà, il
+// reste vide et la CIBLE dit que la table est trop grosse pour le lien public.
+const PUBLIC_MAX = 2000000;
 // Les clés d'une table sont réparties en BUCKETS seaux (selon le CRC-32 de la clé) ; le suivi ne
 // garde qu'une somme par seau, de taille fixe quelle que soit la table (la liste de toutes les
 // clés, réécrite à chaque ajout, faisait grossir l'historique du document de 1,5 Mo par ligne
@@ -141,10 +145,11 @@ export function freeTableId(base, taken) {
 //    perdu une clé, et pendant un renvoi le morceau de la liste complète demandé dans
 //    Synchro_Renvoi ({ marque, n, apres }), à l'heure `t` du suivi ; lignes 'suivi', le nombre de
 //    clés et la somme de leurs CRC-32 : recalculés à chaque changement des clés, ils déclenchent le
-//    suivi.
+//    suivi ; lignes 'empreinte', la taille et le CRC-32 de l'instantané public.
 //  - Synchro_Lot (lignes 'lot') : les lignes modifiées depuis WINDOW_S secondes et celles
 //    demandées dans Synchro_Renvoi, avec les colonnes de l'export, plafonné à LOT_MAX octets
-//    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes.
+//    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes, au
+//    plus PUBLIC_MAX octets (au-delà, aucune : `trop`).
 // Une ligne annulée (Ctrl+Z : MajLe revenue en arrière, RECALC_COL recalculée à l'instant) part avec
 // l'heure de l'annulation, pour l'emporter sur la version qu'elle annule. Une ligne écrite par la
 // consolidation d'un Échange (ECHO_COL recalculée en même temps que RECALC_COL) part avec l'heure
@@ -183,6 +188,11 @@ export function syncFormulas(tables) {
     'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
   ];
   const keys = [
+    // Empreinte de l'instantané public : la CIBLE ne relit l'instantané que si elle change.
+    `if $${TYPE_COL} == "${KIND.mark}":`,
+    '  import zlib',
+    `  c = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.full}").${LOT_COL} or ""`,
+    '  return "%d:%08x" % (len(c), zlib.crc32(c.encode()))',
     `if $${TYPE_COL} not in ("${KIND.keys}", "${KIND.track}"): return ""`, pick, 'if src is None: return ""', ...read,
     `if $${TYPE_COL} == "${KIND.track}":`,
     '  import zlib',
@@ -209,15 +219,18 @@ export function syncFormulas(tables) {
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
-    `  recent = set(r.id for r in rows if r.${ORDER_COL} and r.${ORDER_COL} >= cut)`,
+    // Seule RECALC_COL (un nombre : lu vite) est lue sur toutes les lignes ; les dates, bien plus
+    // lentes à lire, seulement sur les lignes recalculées depuis moins de WINDOW_S secondes.
+    `  touched = [r for r in rows if (v(getattr(r, "${RECALC_COL}", None)) or 0) > v(cut)]`,
+    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut)`,
     '  def echo(r):',
-    `    x, y = getattr(r, "${ECHO_COL}", None), getattr(r, "${RECALC_COL}", None)`,
-    '    return bool(x and y and y > cut and abs((y - x).total_seconds()) < 1)',
-    '  fresh = set() if swap else set(r.id for r in rows if r.id not in recent and echo(r))',
-    `  undone = set(r.id for r in rows if r.id not in recent and not echo(r) and (getattr(r, "${RECALC_COL}", None) or cut) > cut)`,
+    `    x = getattr(r, "${ECHO_COL}", None)`,
+    `    return bool(x and abs(v(x) - v(getattr(r, "${RECALC_COL}"))) < 1)`,
+    '  fresh = set() if swap else set(r.id for r in touched if r.id not in recent and echo(r))',
+    '  undone = set(r.id for r in touched if r.id not in recent and not echo(r))',
     // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
     // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
-    `  if len(recent) + len(undone) == len(rows) > (0 if swap else ${SMALL_TABLE}): undone = set()`,
+    `  if len(touched) == len(rows) > (0 if swap else ${SMALL_TABLE}): undone = set()`,
     '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
     `def when(r): return v(getattr(r, "${RECALC_COL}") if r.id in undone else r.${ORDER_COL})`,
     // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.
@@ -236,6 +249,7 @@ export function syncFormulas(tables) {
     // Le premier venu part même s'il dépasse le plafond du lot : seul, il tient dans un envoi.
     '  if capped and out and size + n > budget: break',
     '  size += n',
+    `  if not capped and size > ${PUBLIC_MAX}: return json.dumps({"lignes": [], "total": len(rows), "trop": True})`,
     '  out.append(line)',
     'lot = {"lignes": out, "total": len(rows)}',
     'if big: lot["tropGros"] = big',
@@ -305,7 +319,7 @@ export function syncColumns(tables) {
 // ou aux colonnes changées, dont les lignes sont à renvoyer.
 export function exportRowsActions(rows, exportId, tables, { isPublic = false } = {}) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId);
-  const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full] : [])];
+  const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full, KIND.mark] : [])];
   const add = [];
   const update = [];
   const changed = [];
@@ -389,6 +403,52 @@ export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
 // pour que la valeur change même si les lignes sont les mêmes.
 export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
 
+// Renvois ménagés (ligne 'charge' de Synchro, colonne Synchro_Renvoi, en JSON) : un renvoi à la
+// fois par document, toutes pages et personnes confondues (`par` : la page qui renvoie, `le` : son
+// dernier signe de vie, en secondes ; au-delà de LEASE_S sans signe, une autre page reprend), et au
+// plus RESEND_BUDGET octets envoyés par fenêtre de BUDGET_WINDOW secondes, tous destinataires
+// comptés (`envoye` : [[minute, octets]]) ; au-delà, le renvoi attend jusqu'à `reprise`. Les
+// modifications ordinaires ne passent pas par là : elles partent toujours.
+export const RESEND_BUDGET = 20000000;
+export const BUDGET_WINDOW = 600;
+export const LEASE_S = 300;
+
+export function parseCharge(text) {
+  const c = parseJson(text, null) || {};
+  const pairs = Array.isArray(c.envoye) ? c.envoye.filter(e => Array.isArray(e) && e.length === 2) : [];
+  return {
+    par: typeof c.par === 'string' ? c.par : '', le: Number(c.le) || 0, reprise: Number(c.reprise) || 0,
+    envoye: pairs.map(([at, n]) => [Number(at) || 0, Number(n) || 0]),
+  };
+}
+
+// Un autre que `tag` renvoie, et a donné signe de vie depuis moins de LEASE_S secondes.
+export const chargeBusy = (charge, tag, now) => Boolean(charge.par) && charge.par !== tag && now - charge.le < LEASE_S;
+
+// Ajoute `bytes` octets envoyés à l'instant `now` ; oublie ce qui est sorti de la fenêtre.
+export function addSpent(charge, now, bytes) {
+  const minute = Math.floor(now / 60) * 60;
+  const envoye = charge.envoye.filter(([at]) => at > now - BUDGET_WINDOW).map(([at, n]) => [at, n]);
+  const last = envoye[envoye.length - 1];
+  if (last && last[0] === minute) last[1] += bytes;
+  else envoye.push([minute, bytes]);
+  return { ...charge, envoye };
+}
+
+// Secondes à attendre avant d'envoyer encore : 0 tant que la fenêtre n'a pas atteint le budget,
+// sinon le temps que les plus anciens envois en sortent.
+export function budgetWait(charge, now) {
+  const recent = charge.envoye.filter(([at]) => at > now - BUDGET_WINDOW).sort((a, b) => a[0] - b[0]);
+  let spent = recent.reduce((sum, [, n]) => sum + n, 0);
+  let wait = 0;
+  for (const [at, n] of recent) {
+    if (spent < RESEND_BUDGET) break;
+    spent -= n;
+    wait = at + BUDGET_WINDOW - now;
+  }
+  return Math.max(0, wait);
+}
+
 // Morceau `n` de la liste complète d'un renvoi, après la clé `after` (Synchro_Renvoi de la ligne
 // 'cles'). `mark` distingue un renvoi des autres.
 export const listRequest = (mark, n, after) => JSON.stringify({ marque: mark, n, apres: after });
@@ -436,14 +496,15 @@ export function parseList(text) {
   return out.buckets || out.part ? out : null;
 }
 
-// Lot reçu : { lines: [{ key, order, deleted, data }], total } ; null s'il est illisible.
+// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, tooBig } ; null s'il est
+// illisible. `tooBig` : instantané public plus gros que PUBLIC_MAX, laissé vide.
 export function parseLot(text) {
   const lot = parseJson(text);
   if (!lot || !Array.isArray(lot.lignes)) return null;
   const lines = lot.lignes.filter(l => Array.isArray(l) && !isBlank(l[0]) && l[3] && typeof l[3] === 'object')
     .map(([key, order, deleted, data]) => ({ key: String(key), order: order ?? null, deleted: isTrue(deleted), data }));
   const big = Array.isArray(lot.tropGros) ? lot.tropGros.map(String) : [];
-  return { lines, total: Number(lot.total) || lines.length, big };
+  return { lines, total: Number(lot.total) || lines.length, big, ...(lot.trop === true ? { tooBig: true } : {}) };
 }
 
 // Colonnes qu'une table SOURCE peut envoyer : toutes ses colonnes de données et formules, hors
@@ -463,12 +524,17 @@ const exportSchema = columns => columns.map(({ id, type, label }) => ({ id, type
 // Colonnes de la synchro qui manquent à la table SOURCE.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, RECALC_COL].filter(id => !cols.some(c => c.colId === id));
 
+// RecalculLe : heure (en secondes) du dernier recalcul de MajLe. Un nombre, et non une date : la
+// formule du lot la lit sur toutes les lignes à chaque modification, et Grist lit une date environ
+// cinq fois plus lentement (mesuré : 190 ms contre 38 ms sur 12 000 lignes).
+export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW().timestamp()` };
+
 // id_sync : UUID posé à la création. MajLe : NOW() à toute modification de la ligne.
 export function prepareSourceActions(tableId, missing) {
   const specs = {
     [KEY_COL]: { type: 'Text', isFormula: false, formula: 'UUID()', recalcWhen: 0 },
     [ORDER_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 2 },
-    [RECALC_COL]: { type: 'DateTime:UTC', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW()` },
+    [RECALC_COL]: RECALC_SPEC,
     [ECHO_COL]: { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 0 },
   };
   return missing.map(colId => ['AddColumn', tableId, colId, specs[colId]]);
@@ -516,7 +582,7 @@ export function publicAclRules(exportIds, { keepDeny = false } = {}) {
   if (!ids.length && !keepDeny) return [];
   return [
     ...(ids.length ? [{ tableId: SYNC_TABLE, permissionsText: '+R',
-      aclFormula: `${VIEWER_ONLY} and rec.${EXPORT_COL} in [${ids.map(id => `"${id}"`).join(', ')}] and rec.${TYPE_COL} == "${KIND.full}"` }] : []),
+      aclFormula: `${VIEWER_ONLY} and rec.${EXPORT_COL} in [${ids.map(id => `"${id}"`).join(', ')}] and rec.${TYPE_COL} in ["${KIND.full}", "${KIND.mark}"]` }] : []),
     { tableId: '*', aclFormula: VIEWER_ONLY, permissionsText: '-R' },
   ];
 }
@@ -572,33 +638,43 @@ export function latestByKey(journalRows) {
 // CIBLE : journal d'un export
 
 // Lignes telles que déposées par le webhook (ou le lien public) : une liste des clés ou un lot.
-const isRaw = row => !isBlank(row[TYPE_COL]);
+export const isRaw = row => !isBlank(row[TYPE_COL]);
 
 // Dépliage, dans l'ordre d'arrivée : chaque lot devient une ligne par version (clé, date,
 // suppression, bloc des colonnes, table d'origine), chaque liste des clés une ligne de liste (qui
-// porte aussi la description des colonnes) ; les
-// lignes reçues sont effacées dans le même lot. Les nouvelles lignes gardent l'ordre d'arrivée
-// (numéros croissants) et la date d'arrivée. Rend aussi, par table, les lignes qu'un lot trop gros
-// n'a pas portées depuis le dernier renvoi (`missing`) et les tables reçues par un renvoi
-// (`resent`), dont le compte précédent ne vaut plus.
-export function planUnpack(journalRows, journalTable) {
-  const raw = journalRows.filter(isRaw).sort((a, b) => a.id - b.id);
+// porte aussi la description des colonnes) ; les lignes reçues sont effacées dans le même lot. Les
+// nouvelles lignes gardent l'ordre d'arrivée (numéros croissants) et la date d'arrivée. Rend aussi,
+// par table, les lignes qu'un lot trop gros n'a pas portées depuis le dernier renvoi (`missing`)
+// et les tables reçues par un renvoi (`resent`), dont le compte précédent ne vaut plus.
+// Le lien du formulaire permet d'écrire n'importe quoi dans le journal : une ligne qui ne peut pas
+// venir du webhook de cet export (`exportId`) est effacée sans effet et comptée (`rejected`) :
+// autre export, type inconnu, table au nom invalide, liste, lot ou colonnes illisibles. Au plus
+// `max` lignes reçues par passage, les plus anciennes : les suivantes attendent le passage d'après.
+export function planUnpack(journalRows, journalTable, { exportId = null, max = Infinity } = {}) {
+  const all = journalRows.filter(isRaw).sort((a, b) => a.id - b.id);
+  const raw = all.slice(0, max);
   const added = [];
   const missing = {};
   const big = {}; // table -> clés des lignes trop grosses pour un envoi, et clés arrivées
   const arrived = {};
   const resent = new Set();
+  let rejected = 0;
+  const columnsOk = text => isBlank(text) || Array.isArray(parseJson(text));
   for (const row of raw) {
     const table = String(row[TABLE_COL] || '');
-    if (!COL_ID.test(table)) continue;
+    const kind = row[TYPE_COL];
+    const list = String(row[LIST_COL] || '');
+    const lot = kind === KIND.lot ? parseLot(row[LOT_COL]) : null;
+    if ((exportId && row[EXPORT_COL] !== exportId) || !COL_ID.test(table) || !columnsOk(row[SCHEMA_COL])
+      || (kind === KIND.keys ? list && !parseList(list) : !lot)) {
+      rejected++;
+      continue;
+    }
     const base = { [TABLE_COL]: table, [RECEIVED_COL]: row[RECEIVED_COL] ?? null };
-    if (row[TYPE_COL] === KIND.keys) {
-      const list = String(row[LIST_COL] || '');
+    if (kind === KIND.keys) {
       if (list || row[SCHEMA_COL]) added.push({ ...base, [LIST_COL]: list, [SCHEMA_COL]: row[SCHEMA_COL] || '' });
       continue;
     }
-    const lot = parseLot(row[LOT_COL]);
-    if (!lot) continue;
     lot.lines.forEach((l, i) => added.push({
       ...base, [KEY_COL]: l.key, [ORDER_COL]: l.order, [DELETE_COL]: l.deleted, [DATA_COL]: JSON.stringify(l.data),
       ...(i === 0 ? { [SCHEMA_COL]: row[SCHEMA_COL] || '' } : {}),
@@ -616,7 +692,7 @@ export function planUnpack(journalRows, journalTable) {
   const actions = chunk(added).map(part => ['BulkAddRecord', journalTable, part.map(() => null),
     Object.fromEntries(cols.map(c => [c, part.map(r => r[c] ?? (c === DELETE_COL ? false : c === ORDER_COL || c === RECEIVED_COL ? null : ''))]))]);
   for (const part of chunk(raw.map(r => r.id))) actions.push(['BulkRemoveRecord', journalTable, part]);
-  return { actions, missing, big, arrived, resent: [...resent] };
+  return { actions, missing, big, arrived, resent: [...resent], rejected, left: all.length - raw.length };
 }
 
 // Ce qui manque encore dans la CIBLE, mis à jour d'après un dépliage : le nombre de lignes pas
@@ -946,15 +1022,21 @@ export function recentChanges(journalRows, labelCol, since, max) {
 // Lien public, côté CIBLE : lignes à ajouter au Journal pour qu'il reflète les instantanés lus
 // (`records` : lignes 'complet' de la table Synchro, lues par l'API REST), comme l'aurait fait un
 // webhook. Par table, une version n'est ajoutée que si elle diffère de la dernière reçue ; une
-// liste des clés, que si l'ensemble des clés ou les colonnes ont changé.
+// liste des clés, que si l'ensemble des clés ou les colonnes ont changé. Un instantané trop gros
+// (vide) ne change rien : sa table est rendue dans `tooBig`.
 export function planPull({ records, journalRows, journalTable }) {
   const byTable = rowsByTable(journalRows);
   const versions = [];
   const lists = [];
+  const tooBig = [];
   for (const { fields } of records) {
     const table = String(fields[TABLE_COL] || '');
     const lot = fields[TYPE_COL] === KIND.full && COL_ID.test(table) && parseLot(fields[LOT_COL]);
     if (!lot) continue;
+    if (lot.tooBig) {
+      tooBig.push(table);
+      continue;
+    }
     const rows = byTable.get(table) || [];
     const latest = latestByKey(rows);
     for (const l of lot.lines) {
@@ -975,7 +1057,7 @@ export function planPull({ records, journalRows, journalTable }) {
   const actions = chunk(versions).map(part => ['BulkAddRecord', journalTable, part.map(() => null),
     Object.fromEntries(cols.map(col => [col, part.map(v => v[col])]))]);
   for (const l of lists) actions.push(['AddRecord', journalTable, null, l]);
-  return actions;
+  return { actions, tooBig: tooBig.sort() };
 }
 
 // ---------------------------------------------------------------------------------------------

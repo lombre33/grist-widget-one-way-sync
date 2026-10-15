@@ -54,6 +54,8 @@ async function loadState() {
       ...meta, tables, recipients, invitations: note.invitations.filter(i => i.export === id),
       email: (rows.find(r => r[EXPORT_COL] === id) || {})[AUTHOR_COL] || '',
       partial: recipients.some(h => h.fields.enabled) && rows.some(r => r[EXPORT_COL] === id && ((r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0) || listDue(r))),
+      // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
+      tooBig: rows.filter(r => r[EXPORT_COL] === id && r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
       ...drift(schema, tables),
     };
   });
@@ -232,6 +234,7 @@ function publicRow(exp, open, ownerOnly, out) {
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, t('send.public.label')), pill(open ? 'public' : 'publicOff', open ? 'ok' : 'pending')),
     open ? null : el('p', { class: 'small' }, t('send.public.turnOn')),
+    exp.tooBig.length ? message('warn', t('send.public.tooBig', { tables: exp.tooBig.join(', ') })) : null,
     el('div', { class: 'person-actions' },
       actionButton(t('send.public.code'), 'key', () => showPublicCode(exp), ownerOnly, out),
       actionButton(t('send.public.stop'), 'unlink', () => stopPublic(exp), ownerOnly, out, { kind: 'btn-danger-text' })));

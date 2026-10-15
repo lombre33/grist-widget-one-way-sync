@@ -6,9 +6,9 @@
 import {
   APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl, docLabel,
   copyColumns, destRefs, expandRows, followRenames, freeTableId, newColumnsMap, nextGaps, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack,
-  recentChanges, rowsByTable, sentColumns, toTableId,
+  isRaw, recentChanges, rowsByTable, sentColumns, toTableId,
 } from './core.js';
-import { apply, collapseForms, docIdentity, docInfo, dropPages, ensureForm, fetchRows, formPages, readSchema, withLock } from './grist.js';
+import { apply, collapseForms, docIdentity, docInfo, dropPages, ensureForm, fetchRows, formPages, readSchema, renewFormLink, withLock } from './grist.js';
 import {
   addDestColumnsActions, createJournal, destColumns, isUserTable, legacyJournals, prepareDest, readNote, receivedDests, receivedJournals,
   removeTechnicalTables, syncRows, upgradeJournal, writeNote,
@@ -19,8 +19,14 @@ import { stepHelp } from './tutorial.js';
 import { LANG, t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
 
+// Un passage toutes les 10 secondes, toutes les minutes quand rien n'est arrivé depuis une minute.
 const POLL_MS = 10000;
+const IDLE_MS = 60000;
 const HISTORY_MAX = 20;
+// Lignes reçues dépliées par passage, au plus ; au-delà de FLOOD_PER_MIN lignes reçues par minute,
+// l'arrivée est anormale (le webhook n'en dépose que quelques-unes) : la carte le signale.
+const RAW_BATCH = 500;
+const FLOOD_PER_MIN = 600;
 // Dernier passage : par journal ({ at, rows, missing } ; { at, error, text } en cas d'erreur) et
 // par table reçue (clé `journal|table` : { at, text, table, stats, recent, labelCol, labelCols },
 // ou { at, error, text }) ; tables proposées par journal ([{ table, columns, n }]).
@@ -33,13 +39,26 @@ let viewer = false; // lecteur du document, lu à l'ouverture : boutons grisés 
 let lastVisit = null; // date de la visite précédente sur ce document (secondes), ou 0
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
+let lastArrival = Date.now(); // dernière arrivée dans un journal (ou retour sur la page)
+const inflow = new Map(); // journal -> { ids, at } : lignes reçues vues au passage précédent
+const settled = new Map(); // `journal|table` -> lignes du journal déjà recopiées sans effet
+const pulled = new Map(); // journal -> empreintes des instantanés publics déjà lus
 
 const tableKey = (journal, table) => `${journal}|${table}`;
 // Refus de Grist faute de droits (lecteur) : le widget passe en lecture seule.
 const isAccessError = e => /access|denied|blocked|permission/i.test(e.message);
 
 export function startAutoConsolidation() {
-  setInterval(() => { if (document.visibilityState === 'visible') consolidateAll(); }, POLL_MS);
+  const tick = async () => {
+    if (document.visibilityState === 'visible') await consolidateAll();
+    setTimeout(tick, Date.now() - lastArrival > IDLE_MS ? IDLE_MS : POLL_MS);
+  };
+  setTimeout(tick, POLL_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    lastArrival = Date.now();
+    consolidateAll();
+  });
 }
 
 // Date de la visite précédente, retenue par navigateur et par document : la seule chose que le
@@ -55,31 +74,65 @@ async function readLastVisit() {
 // Consolidation
 
 // Lien public : lit les instantanés de l'export dans la table Synchro de la SOURCE, sans
-// identifiant, et ajoute au journal ce qui a changé, comme l'aurait fait un webhook.
+// identifiant, et ajoute au journal ce qui a changé, comme l'aurait fait un webhook. Les
+// instantanés ne sont relus que si leur empreinte (taille et CRC-32, une petite ligne à part) a
+// changé depuis la dernière lecture de cette page. Rend vrai si quelque chose est arrivé.
 async function pull(note, journal) {
-  const filter = encodeURIComponent(JSON.stringify({ [EXPORT_COL]: [note.export], [TYPE_COL]: [KIND.full] }));
-  let response;
-  try {
-    response = await fetch(`${note.base}/tables/${SYNC_TABLE}/records?filter=${filter}`, { credentials: 'omit' });
-  } catch (e) {
-    throw new Error('publicClosed');
-  }
-  if (!response.ok) throw new Error('publicClosed');
-  const records = (await response.json()).records || [];
-  await apply(planPull({ records, journalRows: await fetchRows(journal), journalTable: journal }));
+  const read = async (kind) => {
+    const filter = encodeURIComponent(JSON.stringify({ [EXPORT_COL]: [note.export], [TYPE_COL]: [kind] }));
+    let response;
+    try {
+      response = await fetch(`${note.base}/tables/${SYNC_TABLE}/records?filter=${filter}`, { credentials: 'omit' });
+    } catch (e) {
+      throw new Error('publicClosed');
+    }
+    if (!response.ok) throw new Error('publicClosed');
+    return (await response.json()).records || [];
+  };
+  // Une SOURCE d'avant la version 0.5 n'a pas d'empreinte : l'instantané est relu à chaque fois.
+  const marks = await read(KIND.mark);
+  const seen = JSON.stringify(marks.map(r => [r.fields[TABLE_COL], r.fields[LIST_COL]]).sort());
+  if (marks.length && pulled.get(journal) === seen) return false;
+  const records = await read(KIND.full);
+  const { actions, tooBig } = planPull({ records, journalRows: await fetchRows(journal), journalTable: journal });
+  await apply(actions);
+  if (JSON.stringify(tooBig) !== JSON.stringify(note.tooBig || [])) await updateJournalNote(journal, n => ({ ...n, tooBig }));
+  pulled.set(journal, seen);
+  return actions.length > 0;
+}
+
+function nextSuspect(was = {}, rejected, flood) {
+  const at = Math.floor(Date.now() / 1000);
+  return { n: (was.n || 0) + rejected, at, ...(flood ? { flood: at } : was.flood ? { flood: was.flood } : {}) };
+}
+
+// Arrivée anormale : plus de FLOOD_PER_MIN lignes reçues par minute depuis le passage précédent.
+// Le premier passage d'un chargement ne peut pas le dire (on ne sait pas depuis quand elles sont là).
+function flooded(journal, raw) {
+  const at = Date.now() / 1000;
+  const was = inflow.get(journal);
+  inflow.set(journal, { ids: new Set(raw.map(r => r.id)), at });
+  if (!was) return false;
+  const fresh = raw.filter(r => !was.ids.has(r.id)).length;
+  return fresh > FLOOD_PER_MIN * Math.max(1, (at - was.at) / 60);
 }
 
 // Un passage sur un journal : déplier ce qui est arrivé, recopier chaque table rangée dans sa
 // destination (une colonne nouvelle y est d'abord ajoutée), noter les tables proposées, nettoyer.
 // Chaque étape est un seul lot d'écritures, donc tout ou rien.
 async function consolidate(schema, { journal, note }) {
-  if (note.mode === 'public') await pull(note, journal);
+  if (note.mode === 'public' && await pull(note, journal)) lastArrival = Date.now();
   let rows = await fetchRows(journal);
-  const unpack = planUnpack(rows, journal);
+  const raw = rows.filter(isRaw);
+  const flood = flooded(journal, raw);
+  const unpack = planUnpack(rows, journal, { exportId: note.mode === 'public' ? null : note.export, max: RAW_BATCH });
   if (unpack.actions.length) {
+    lastArrival = Date.now();
     await apply(unpack.actions);
     const gaps = nextGaps(note, unpack);
-    if (JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
+    // Lignes rejetées et arrivées anormales : comptées dans la note, montrées sur la carte.
+    if (unpack.rejected || flood) gaps.suspect = nextSuspect(note.suspect, unpack.rejected, flood);
+    if (gaps.suspect || JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
       note = { ...note, ...gaps };
       await updateJournalNote(journal, n => ({ ...n, ...gaps }));
     }
@@ -115,10 +168,20 @@ async function consolidate(schema, { journal, note }) {
     entry = { ...entry, refs: destRefs(schema, entry.dest) };
     if (JSON.stringify(entry) !== JSON.stringify(noted)) updates.set(entry.table, entry);
     const copyCols = copyColumns(sent.map(c => ({ colId: c.id })), schema.columns(entry.dest), entry.map);
+    // La destination n'est relue que si le journal de cette table a changé depuis le dernier
+    // passage resté sans effet (une retouche dans la destination n'appelle rien).
+    const key = tableKey(journal, entry.table);
+    const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest]);
+    if (settled.get(key) === signature) {
+      tables.push({ entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols });
+      continue;
+    }
     const { actions, stats } = planConsolidation({
       journalRows: tableRows, destRows: await fetchRows(entry.dest), copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '',
     });
     await apply(actions);
+    if (actions.length) settled.delete(key);
+    else settled.set(key, signature);
     tables.push({ entry, stats, copyCols });
   }
   if (updates.size) {
@@ -127,6 +190,8 @@ async function consolidate(schema, { journal, note }) {
   }
   const after = await fetchRows(journal);
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
+  // Lignes reçues laissées pour le passage suivant : il vient sans attendre la minute.
+  if (unpack.left) lastArrival = Date.now();
   const afterGroups = rowsByTable(expandRows(after));
   return {
     rows: after.length, note,
@@ -276,6 +341,8 @@ function syncCard(group) {
     note.tables.map(line),
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
+    (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
+    note.suspect ? suspectBlock(group) : null,
     pending.map(o => el('div', { class: 'offer' }, el('span', { class: 'small' }, t('recv.offer.line', { table: o.table, n: o.n })),
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: readOnly, onclick: () => offerDialog(group, o) }, t('recv.offer.place')))),
     note.refused.length ? el('p', { class: 'muted small' }, t('recv.offer.refusedList', { tables: note.refused.join(', ') })) : null,
@@ -285,6 +352,37 @@ function syncCard(group) {
         icon('link'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
       el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => stopReceiving(group) },
         icon('stop'), t('recv.action.stop'))));
+}
+
+// Arrivées suspectes : lignes rejetées (elles ne pouvaient pas venir du webhook de cet export) et
+// arrivée anormale. Le lien du formulaire est peut-être connu d'un autre : on peut le couper.
+function suspectBlock(group) {
+  const { n = 0, at, flood } = group.note.suspect;
+  const date = sec => new Date(sec * 1000).toLocaleString(LANG);
+  return el('div', { class: 'msg msg-warn suspect', role: 'status' },
+    el('strong', {}, t('recv.suspect.title')),
+    n ? el('p', { class: 'small' }, t('recv.suspect.rejected', { n, at: date(at) })) : null,
+    flood ? el('p', { class: 'small' }, t('recv.suspect.flood', { at: date(flood) })) : null,
+    el('p', { class: 'small' }, t('recv.suspect.help')),
+    el('div', { class: 'card-actions' },
+      el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => cutLink(group) }, icon('unlink'), t('recv.suspect.cut')),
+      el('button', { class: 'btn btn-small', type: 'button', disabled: readOnly, onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        await updateJournalNote(group.journal, ({ suspect, ...note }) => note);
+        await renderTarget();
+      } }, t('recv.suspect.dismiss'))));
+}
+
+// Couper le lien : nouvelle clé pour les formulaires de la page. Chaque SOURCE concernée révoque
+// l'ancien destinataire et envoie une nouvelle invitation, acceptée ici sur la même réception.
+async function cutLink(group) {
+  const names = receivedJournals(await readSchema()).filter(r => r.note.mode !== 'public').map(r => `« ${r.note.name} »`).join(', ');
+  const ok = await confirmDialog({ title: t('recv.cut.title'), body: t('recv.cut.body', { names }), confirmLabel: t('recv.suspect.cut') });
+  if (!ok) return;
+  await renewFormLink(group.journal);
+  await updateJournalNote(group.journal, ({ suspect, ...note }) => note);
+  await renderTarget();
+  container.querySelector('.out').replaceChildren(message('ok', t('recv.cut.done')));
 }
 
 // Réceptions d'avant la version 0.4 (un journal par table) : à refaire avec la SOURCE.
@@ -511,9 +609,22 @@ function receiveWizard(group = null) {
       [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
         const invitation = parseInvitation(area.value);
         if (invitation.mode === 'public' && new URL(invitation.base).origin !== (await docIdentity()).origin) throw new Error('otherInstance');
-        if (receivedJournals(await readSchema()).some(r => r.note.export === invitation.export)) throw new Error('alreadyReceived');
+        const known = receivedJournals(await readSchema()).find(r => r.note.export === invitation.export);
+        if (known) return relink(known, invitation);
         return showDest(invitation);
       }) }]);
+  }
+
+  // Nouvelle invitation pour un export déjà reçu (lien coupé, destinataire révoqué) : la même
+  // réception reprend, avec son journal et ses tables, si l'invitation vient du même document.
+  async function relink(known, invitation) {
+    const same = invitation.mode !== 'public' && known.note.mode !== 'public' && (known.note.from || {}).docId === invitation.from.docId;
+    if (!same) throw new Error('alreadyReceived');
+    const { id, secret, name, from } = invitation;
+    await updateJournalNote(known.journal, n => ({ ...n, id, secret, name, from }));
+    const note = receivedJournals(await readSchema()).find(r => r.journal === known.journal).note;
+    await ensureForm(known.journal);
+    return showLink({ journal: known.journal, note }, message('info', t('recv.relink')));
   }
 
   // 2. Destinations : une par table reçue.
@@ -576,13 +687,13 @@ function receiveWizard(group = null) {
   }
 
   // 3. Lien du formulaire de réception.
-  async function showLink(g) {
+  async function showLink(g, intro = null) {
     const page = (await formPages()).get(g.journal);
     const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('recv.link.title') });
     const report = el('div', { class: 'report' });
     const where = page && !page.samePage ? t('recv.link.where.other', { page: page.name }) : t('recv.link.where');
     const figure = (text, src) => el('figure', { class: 'help-figure' }, el('figcaption', {}, text), el('img', { src, alt: '' }));
-    wizard.show(STEP.link, [el('p', {}, t('recv.link.help', { where, n: g.note.tables.length })),
+    wizard.show(STEP.link, [intro, el('p', {}, t('recv.link.help', { where, n: g.note.tables.length })),
       figure(t('recv.link.step1'), 'img/aide-partager.png'), figure(t('recv.link.step2'), 'img/aide-copier.png'), input, report, roleGuide({ you: 'target', current: 2 })],
     [{ label: t('common.later') }, { label: t('recv.link.check'), kind: 'btn-primary', onClick: () => run(null, report, () => check(g, input.value)) }]);
   }

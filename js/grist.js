@@ -28,7 +28,7 @@ export async function readSchema() {
       const table = byId.get(tableId);
       if (!table) return null;
       return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
-        id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, label: c.label, description: c.description,
+        id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, formula: c.formula, label: c.label, description: c.description,
         displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps,
         visible: (colById.get(c.visibleCol) || {}).colId || '',
       }));
@@ -146,6 +146,17 @@ export async function ensureForm(tableId) {
   if (!JSON.parse(section.shareOptions || '{}').publish) {
     await apply([['UpdateRecord', '_grist_Views_section', section.id, { shareOptions: JSON.stringify({ form: true, publish: true }) }]]);
   }
+}
+
+// Couper le lien du formulaire de cette table : le partage de sa page change d'identifiant, et
+// Grist remplace alors sa clé (il efface celle d'un identifiant disparu, vérifié dans
+// HomeDBManager.syncShares). La clé est celle de la page : tous ses formulaires en changent.
+export async function renewFormLink(tableId) {
+  await ensureForm(tableId);
+  const table = (await readSchema()).table(tableId);
+  const section = (await fetchRows('_grist_Views_section')).find(s => s.parentKey === 'form' && s.tableRef === table.id);
+  const page = (await fetchRows('_grist_Pages')).find(p => p.viewRef === section.parentId);
+  await apply([['UpdateRecord', '_grist_Shares', page.shareRef, { linkId: randomHex(12) }]]);
 }
 
 // Page de chaque formulaire publié, par table : { samePage, name }, pour dire où cliquer.

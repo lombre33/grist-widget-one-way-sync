@@ -675,6 +675,56 @@ try {
   assert.ok(!(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'assistant fermé : rien d\'écrit');
   step('CIBLE : une table reçue peut être relayée (avis affiché), journaux exclus');
 
+  // --- Lignes forgées avec le lien du formulaire : rejetées et signalées ; lien coupé, puis la
+  // même réception reprend avec une nouvelle invitation
+  const hookUrl = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks[0].fields.url;
+  const exportId = (await records(source.doc, 'Synchro'))[0].Synchro_Export;
+  const forge = rows => fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
+  const pirate = JSON.stringify({ lignes: [['pirate', 9e9, false, { Nom: 'Pirate' }]], total: 1 });
+  assert.ok((await forge([
+    { Synchro_Export: 'ffffffffffffffff', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: pirate },
+    { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: 'pas du JSON' },
+    { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
+  ])).ok, 'le lien du formulaire accepte n\'importe quelle ligne');
+  await widget().getByRole('tab', { name: 'Recevoir' }).click();
+  await widget().getByText('Arrivées suspectes').waitFor();
+  await widget().getByText(/3\s+lignes rejetées/).waitFor();
+  assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Pirate'), 'rien de recopié');
+  assert.equal((await rawRows(target.doc, 'Journal_Annuaire')).length, 0, 'lignes rejetées effacées');
+  await shot('17-cible-suspect');
+  await button('Couper le lien').click();
+  await dialogButton('Couper le lien').click();
+  await widget().getByText('Lien coupé').waitFor();
+  assert.ok(!(await forge([{ id_sync: '' }])).ok, 'l\'ancien lien n\'écrit plus');
+  await openWidget(source.url);
+  await button('Révoquer').click();
+  await dialogButton('Révoquer').click();
+  await waitFor(async () => !(await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 'ancien destinataire révoqué');
+  await button('Ajouter un destinataire').click();
+  await dialogButton('Créer l’invitation').click();
+  await dialog().getByText('Transmettez ce code').waitFor();
+  const invitation3 = await dialog().locator('textarea.code').first().inputValue();
+  await dialogButton('Plus tard').click();
+  await openWidget(target.url);
+  await widget().getByRole('tab', { name: 'Recevoir' }).click();
+  await button('Accepter une invitation').click();
+  await dialog().locator('textarea.code').first().fill(invitation3);
+  await dialogButton('Continuer').click();
+  await dialog().getByText('la même réception reprend').waitFor();
+  const forms3 = await publishedForms(target.doc);
+  assert.equal(forms3.length, 1, 'toujours un seul formulaire');
+  await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${await formKey(target.doc)}/${forms3[0].id}`);
+  await dialogButton('Tester le lien').click();
+  await dialog().getByText('Le lien fonctionne').waitFor();
+  const reply3 = await dialog().locator('textarea.code').first().inputValue();
+  await dialogButton('Fermer').click();
+  await approve(reply3);
+  assert.equal((await records(target.doc, '_grist_Tables')).filter(tb => tb.tableId.startsWith('Journal_')).length, 1, 'même journal');
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Brest' }]]);
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Ville === 'Brest'), 'la réception reprend');
+  step('CIBLE : lignes forgées par le lien du formulaire rejetées et signalées ; lien coupé, la même réception reprend avec une nouvelle invitation');
+
   // --- Arrêts : la CIBLE efface son journal ; la SOURCE révoque, puis supprime l'export
   await widget().getByRole('tab', { name: 'Recevoir' }).click();
   await button('Arrêter la réception').click();
@@ -717,8 +767,9 @@ try {
   const anon = async table => fetch(`${TEAM}/api/docs/${source.doc}/tables/${table}/records`);
   assert.equal((await anon('Contacts')).status, 403, 'table source cachée au lien public');
   assert.equal((await anon('Villes')).status, 403, 'autres tables cachées');
-  const visible = (await (await anon('Synchro')).json()).records.map(r => r.fields.Synchro_Type);
-  assert.deepEqual(visible, ['complet'], 'seul l\'instantané de l\'export public est lisible');
+  const visible = (await (await anon('Synchro')).json()).records;
+  assert.deepEqual(visible.map(r => r.fields.Synchro_Type).sort(), ['complet', 'empreinte'], 'seuls l\'instantané de l\'export public et son empreinte sont lisibles');
+  assert.match(visible.find(r => r.fields.Synchro_Type === 'empreinte').fields.Synchro_Ids, /^\d+:[0-9a-f]{8}$/);
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
 
