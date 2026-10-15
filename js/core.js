@@ -13,6 +13,7 @@ export const RECEIVED_COL = 'Sync_Recu'; // date d'arrivée de la ligne dans le 
 export const STATE_COL = 'Sync_Etat'; // effet de la version recopiée : ajout, modif, suppression
 export const DATA_COL = 'Synchro_Donnees'; // colonnes envoyées, en un bloc JSON (vue d'export)
 export const SCHEMA_COL = 'Synchro_Colonnes'; // colonnes envoyées : [{ id, type, label }] en JSON
+export const JOURNAL_PREFIX = 'Journal_'; // CIBLE : Journal_<destination>
 export const GROUP_COL = 'group'; // colonne propre aux tables de résumé, envoyée par le webhook
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC1.';
@@ -487,6 +488,18 @@ export function parseWebhookUrl(text) {
   const m = url.pathname.match(/^((?:\/o\/[^/]+)?)\/api\/s\/([A-Za-z0-9]+)\/tables\/([A-Za-z_][A-Za-z0-9_]*)\/records$/);
   if (!m || !/^https?:$/.test(url.protocol) || url.username || url.password) return null;
   return { origin: url.origin, prefix: m[1], key: m[2], table: m[3], flat: url.search === '?flat=1' };
+}
+
+// Boucles refusées à l'approbation : renvoyer une table reçue vers le document d'où elle vient
+// (relais retour), ou une table vers elle-même dans le même document. `received` : tables reçues
+// ici, avec le document qui les envoie ({ dest, fromDocId }). Rend les tables en cause.
+export function loopingTables(links, recipientDocId, ownDocId, received) {
+  return links.filter(({ table, url }) => {
+    if (!recipientDocId) return false;
+    const journal = (parseWebhookUrl(url) || {}).table;
+    if (recipientDocId === ownDocId && journal === JOURNAL_PREFIX + table) return true;
+    return received.some(r => r.dest === table && r.fromDocId === recipientDocId);
+  }).map(l => l.table);
 }
 
 // La clé de partage est un droit d'écriture : on ne l'affiche jamais en entier.

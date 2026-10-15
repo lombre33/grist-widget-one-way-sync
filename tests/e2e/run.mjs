@@ -343,6 +343,18 @@ try {
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).filter(r => r.id_sync).length === 4, 'journal nettoyé');
   step('CIBLE : journal nettoyé');
 
+  // --- Relais : la CIBLE peut renvoyer une table reçue ; ses journaux ne sont pas proposés
+  await widget().getByRole('tab', { name: 'Envoyer' }).click();
+  await button('Nouveau destinataire').click();
+  const offered = await dialog().locator('.check-list label').allTextContents();
+  assert.ok(offered.some(l => l.includes('Contacts')) && !offered.some(l => l.includes('Journal_')), 'journaux exclus de l\'envoi');
+  await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
+  await dialogButton('Continuer').click();
+  await dialog().getByText('Table reçue d’un autre document').waitFor();
+  await page.keyboard.press('Escape');
+  await dialog().waitFor({ state: 'detached' });
+  step('CIBLE : une table reçue peut être relayée (avis affiché), journaux exclus');
+
   // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
   await openWidget(source.url);
   await button('Mettre en pause').click();

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, exportFormula, exportableColumns, expandRows, sentColumns, compareVersion, copyColumns,
   decodeCode, fillKeyActions, latestByKey, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation,
-  parseReply, parseWebhookUrl, planConsolidation, planPull, planPurge, publicAclActions, recentChanges, prepareSourceActions, toRows, toTableId,
+  parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, publicAclActions, recentChanges, prepareSourceActions, toRows, toTableId,
 } from '../../js/core.js';
 
 const SECRET = '0123456789abcdef0123456789abcdef';
@@ -236,4 +236,15 @@ test('invitation par lien public : adresse du document réécrite, sinon refusé
   const bad = buildInvitation({ id, name: 'x', origin: '', base: 'https://g.fr/api/docs/abc?x=1', tables: [{ table: 'Contacts', columns }] });
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
   assert.equal(parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).mode, 'reponse');
+});
+
+test('boucles : retour vers le document d’origine et table vers elle-même refusés, relais permis', () => {
+  const url = journal => `https://g.example/o/t/api/s/KEY123/tables/${journal}/records?flat=1`;
+  const received = [{ dest: 'Contacts', fromDocId: 'docX' }];
+  const links = [{ table: 'Contacts', url: url('Journal_Contacts') }, { table: 'Villes', url: url('Journal_Villes') }];
+  assert.deepEqual(loopingTables(links, 'docX', 'docY', received), ['Contacts'], 'retour vers X');
+  assert.deepEqual(loopingTables(links, 'docZ', 'docY', received), [], 'relais vers Z');
+  assert.deepEqual(loopingTables(links, 'docY', 'docY', []), ['Contacts', 'Villes'], 'vers elle-même');
+  assert.deepEqual(loopingTables([{ table: 'Contacts', url: url('Journal_Copie') }], 'docY', 'docY', []), [], 'copie dans le même document');
+  assert.deepEqual(loopingTables(links, '', 'docY', received), [], 'document inconnu');
 });

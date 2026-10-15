@@ -194,6 +194,23 @@ d'export.
 **Révoquer** retire l'accès aux vues d'export. Tant que le lien public reste actif, le widget
 garde la règle qui cache le reste du document : désactivez-le dans **Partager**.
 
+## Envoyer et recevoir dans le même document, relais
+
+Un même document peut envoyer certaines tables et en recevoir d'autres : le widget a les deux
+onglets, et les deux rôles ne se gênent pas.
+
+Une table reçue peut aussi être **relayée** vers un troisième document (A → B → C) : dans B,
+**Envoyer** la propose comme une autre table. Ses lignes gardent la clé de leur document
+d'origine. Deux limites :
+
+- le second saut part quand le widget recopie les lignes dans B, donc quand un éditeur ouvre la
+  page du widget de B ;
+- une ligne ajoutée à la main dans la table relayée reste dans B : elle n'a pas de clé et ne part
+  pas (avec une clé, la prochaine liste de A, qui ne la connaît pas, l'effacerait).
+
+Le widget refuse les **boucles** : renvoyer une table reçue vers le document d'où elle vient, ou
+une table vers elle-même. Ce serait une synchro dans les deux sens.
+
 ## Si quelque chose coince
 
 | Symptôme | Cause probable | Que faire |

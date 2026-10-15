@@ -2,14 +2,16 @@
 // sa réponse en créant les webhooks, suivre et piloter les envois. Rien n'est stocké hors des
 // webhooks eux-mêmes et de la note de la table liste (invitations en attente).
 import {
-  AUTHOR_COL, CHUNK, ORDER_COL, SCHEMA_COL, buildInvitation, chunk, exportTableId, exportableColumns, fillKeyActions, listTableId,
+  AUTHOR_COL, CHUNK, ORDER_COL, SCHEMA_COL, buildInvitation, chunk, exportTableId, exportableColumns, fillKeyActions, listTableId, loopingTables,
   PUBLIC_MEMO, maskKey, masterTableId, missingSyncColumns, parseReply, parseWebhookUrl, prepareSourceActions, publicAclActions,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema,
   setWebhookEnabled,
 } from './grist.js';
-import { createListTable, readExport, readNote, removeSyncTables, sentTables, setExport, writeNote } from './tables.js';
+import {
+  JOURNAL_PREFIX, createListTable, readExport, readNote, receivedTables, removeSyncTables, sentTables, setExport, writeNote,
+} from './tables.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
@@ -343,7 +345,7 @@ async function invitationWizard(pending = null) {
 
   // 1. Tables à envoyer.
   async function showTables() {
-    const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_'));
+    const tables = (await readSchema()).tableIds.filter(id => !id.startsWith('Synchro_') && !id.startsWith(JOURNAL_PREFIX));
     const next = { label: t('common.next'), kind: 'btn-primary', disabled: !chosen.length, onClick: () => run(null, null, showColumns) };
     const body = [el('p', {}, t('send.tables.help')), checkList({
       items: tables.map(id => ({ value: id, label: id })), checked: chosen,
@@ -371,6 +373,7 @@ async function invitationWizard(pending = null) {
       if (!schema.has(exportTableId(table))) adds.push(t('send.check.export', { table }));
       blocks.push(el('div', { class: 'form' }, el('h3', {}, table),
         current.length ? message('warn', t('send.columns.shared')) : null,
+        schema.has(JOURNAL_PREFIX + table) ? message('info', t('send.columns.relay')) : null,
         checkList({ items: usable.map(c => ({ value: c.id, label: c.label === c.id ? c.id : `${c.label} (${c.id})` })), checked: start,
           onChange: (values) => { selected.set(table, usable.filter(c => values.includes(c.id))); } }),
         blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null));
@@ -379,7 +382,10 @@ async function invitationWizard(pending = null) {
       if (chosen.some(table => !selected.get(table).length)) throw new Error('noColumn');
       for (const table of chosen) {
         await apply(prepareSourceActions(table, missingSyncColumns((await readSchema()).columns(table))));
-        await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
+        // Table reçue (relais) : ses lignes gardent la clé de leur document d'origine. Une ligne
+        // ajoutée ici à la main reste sans clé, donc locale : avec une clé, la prochaine liste
+        // de l'origine, qui ne la connaît pas, l'effacerait.
+        if (!schema.has(JOURNAL_PREFIX + table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
         await createListTable(table);
         await setExport(table, selected.get(table));
       }
@@ -448,6 +454,9 @@ async function invitationWizard(pending = null) {
       const reply = parseReply(area.value, origin);
       if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
       if (!reply.links.every(l => inv.tables.includes(l.table))) throw new Error('codeInvalid');
+      const schema = await readSchema();
+      const received = receivedTables(schema).map(p => ({ dest: p.dest, fromDocId: ((readNote(schema, p.journal) || {}).from || {}).docId }));
+      if (loopingTables(reply.links, reply.recipient.docId, (await docIdentity()).docId, received).length) throw new Error('loop');
       const r = reply.recipient;
       const fiche = [[t('send.reply.tables'), reply.links.map(l => l.table).join(', ')], [t('send.reply.email'), r.email],
         [t('send.reply.doc'), r.docId], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];

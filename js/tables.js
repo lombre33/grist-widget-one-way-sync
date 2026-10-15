@@ -6,12 +6,12 @@
 // description de la colonne Synchro_Ids de ces tables : des métadonnées, que le webhook n'envoie
 // pas et que la clé du formulaire ne peut pas écrire.
 import {
-  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, GROUP_COL, KEY_COL, LIST_COL, ORDER_COL, RECEIVED_COL, SCHEMA_COL, STATE_COL,
-  exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
+  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, GROUP_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, ORDER_COL, RECEIVED_COL, SCHEMA_COL,
+  STATE_COL, exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
 } from './core.js';
 import { apply, fetchRows, hideColumn, readSchema, tuckUnderWidgetPage } from './grist.js';
 
-export const JOURNAL_PREFIX = 'Journal_';
+export { JOURNAL_PREFIX };
 
 // SOURCE : tables prêtes à l'envoi (elles ont leur table liste).
 export const sentTables = schema => schema.tableIds.filter(id => schema.has(listTableId(id)));

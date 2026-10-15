@@ -130,6 +130,18 @@ const SECTIONS = [
       'TARGET: paste the code, pick the destinations, that is all. The widget reads the SOURCE every 10 seconds while its page is open. Avoid for data that must not be public.',
     ]],
     images: ['15-source-public'] },
+  { id: 'relay', role: 'both',
+    title: ['Envoyer et recevoir dans le même document, relais', 'Send and receive in the same document, relay'],
+    text: [[
+      'Un document peut envoyer certaines tables et en recevoir d’autres : les deux onglets fonctionnent ensemble.',
+      'Une table reçue peut être relayée vers un troisième document (A vers B vers C). Le second saut part quand un éditeur ouvre la page du widget de B. Une ligne ajoutée à la main dans la table relayée reste dans B.',
+      'Le widget refuse les boucles : renvoyer une table reçue au document d’où elle vient, ou une table vers elle-même.',
+    ], [
+      'A document can send some tables and receive others: both tabs work together.',
+      'A received table can be relayed to a third document (A to B to C). The second hop leaves when an editor opens the widget page of B. A row added by hand in the relayed table stays in B.',
+      'The widget refuses loops: sending a received table back to the document it comes from, or a table to itself.',
+    ]],
+    images: [] },
   { id: 'trouble', role: 'both',
     title: ['Si quelque chose coince', 'If something gets stuck'],
     text: [[

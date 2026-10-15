@@ -128,3 +128,8 @@ une table de résumé n'est lisible par une règle que si une ressource la nomme
 Désactiver un webhook remet à zéro son état d'envoi (`lastSuccessTime` perdu) et Grist ne met rien
 en file pendant la pause. Dans les tests, `getByText` de Playwright est insensible à la casse et
 cherche une sous-chaîne (« En pause » trouve « Mettre en pause »).
+
+Relais (A → B → C) : possible, la table reçue garde les `id_sync` de A ; le prepare ne remplit pas
+les clés vides (une ligne locale à clé serait effacée par la prochaine liste de A). Les boucles
+(retour vers le document d'origine, table vers elle-même) sont refusées à « Vérifier » par
+`loopingTables`. Le second saut dépend de la page du widget ouverte dans B.
