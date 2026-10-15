@@ -123,6 +123,10 @@ V0.4, encore valable sauf là où la V0.5 le remplace (la liste `cles` d'un seul
 que pour le lien public et les montages 0.4 ; le garde-fou `MAX_ROWS` a disparu). Code découpé
 en `js/logic/` (pur, testé par `tests/unit/*.test.mjs`, un fichier par module), `js/source/`,
 `js/target/`, plus `pages.js`, `form-link.js`, `exchange.js` (carte dans `README.md`).
+Plusieurs listes des clés d'une même table peuvent attendre le même passage de la CIBLE (une
+ligne brute arrivée entre le dépliage et la recopie attend le passage suivant) : seule la plus
+récente qui couvre un seau décide (`droppedKeys`), sinon une ligne revenue dans un filtre était
+effacée par la liste d'avant (vu par le test d'intégration).
 `el()` met à plat les enfants à toute profondeur (`flat(Infinity)`) : une liste de listes
 affichait « [object HTMLParagraphElement] ». `ui.run` n'écrit dans la console que les erreurs
 sans texte `error.<code>` (le test vérifie une console sans erreur).
