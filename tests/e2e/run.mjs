@@ -355,6 +355,8 @@ try {
   assert.deepEqual((await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Table1']);
   const columnsOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();
   assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Lieu', 'Nom', 'Ville', 'id_sync']);
+  const hiddenOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns?hidden=true`)).columns.map(c => c.id);
+  assert.ok(!(await hiddenOf(source.doc, 'Synchro')).includes('manualSort'), 'Synchro sans manualSort (le webhook l\'enverrait)');
   await waitFor(async () => {
     const views = (await api('POST', `/docs/${target.doc}/sql`, { sql: "select layoutSpec from _grist_Views where name = 'Synchro'" })).records;
     return (JSON.parse(views[0].fields.layoutSpec || '{}').collapsed || []).length === 1;
@@ -512,15 +514,29 @@ try {
   // --- Document monté en version 0.4 : la marque d'envoi coupé et les dépendances de MajLe sont
   // posées à l'ouverture du widget SOURCE
   const synchroRef = await tableRef(source.doc, 'Synchro');
-  await applyActions(source.doc, [['RemoveColumn', 'Synchro', 'Sync_Etat'], ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }]]);
+  const syncIds = (await records(source.doc, 'Synchro')).map(r => r.id);
+  await applyActions(source.doc, [['RemoveColumn', 'Synchro', 'Sync_Etat'], ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }],
+    ['AddColumn', 'Synchro', 'manualSort', { type: 'ManualSortPos', isFormula: false }], ['BulkUpdateRecord', 'Synchro', syncIds, { manualSort: syncIds }]]);
   await openWidget(source.url);
   await waitFor(async () => {
     const cols = await records(source.doc, '_grist_Tables_column');
     const mark = cols.find(c => c.colId === 'Sync_Etat' && c.parentId === synchroRef);
-    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark && (mark.recalcDeps || []).length === 2;
+    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark && (mark.recalcDeps || []).length === 2 &&
+      !cols.some(c => c.colId === 'manualSort' && c.parentId === synchroRef);
   }, 'montage 0.4 mis à niveau');
+  // Page de la CIBLE fermée : 70 envois du même lot attendent dans son journal. Avec manualSort,
+  // ils se plaçaient tous au même rang et Grist finissait par renuméroter (403, file bloquée).
+  const city = (await records(source.doc, 'Contacts')).find(r => r.id === alice).Ville;
+  for (let i = 0; i < 70; i++) await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice, { Ville: `Ville ${i}` }]]);
+  await waitFor(async () => {
+    const [hook] = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
+    assert.notEqual(hook.usage.lastHttpStatus, 403, 'aucun envoi refusé par la CIBLE');
+    return !hook.usage.numWaiting;
+  }, '70 envois partis, page de la CIBLE fermée', 120000);
   await openWidget(target.url);
-  step('SOURCE : un montage 0.4 reçoit la marque d\'envoi coupé et les dépendances de MajLe');
+  await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Ville === 'Ville 69', 'dernière valeur recopiée', 60000);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice, { Ville: city }]]);
+  step('SOURCE : un montage 0.4 reçoit la marque d\'envoi coupé, les dépendances de MajLe et perd manualSort ; 70 envois page CIBLE fermée passent');
 
   // --- Gros import (4 000 lignes d'un coup) : le lot ne part qu'en partie, la CIBLE le signale ;
   // le widget SOURCE, une fois sa page ouverte, envoie le reste seul
