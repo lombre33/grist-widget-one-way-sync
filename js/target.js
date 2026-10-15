@@ -4,11 +4,11 @@
 // Une table que la SOURCE ajoute à l'export arrive dans le même journal : une fenêtre demande où
 // la ranger.
 import {
-  APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl,
-  copyColumns, expandRows, freeTableId, newColumnsMap, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack,
+  APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl, docLabel,
+  copyColumns, destRefs, expandRows, followRenames, freeTableId, newColumnsMap, nextGaps, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack,
   recentChanges, rowsByTable, sentColumns, toTableId,
 } from './core.js';
-import { apply, collapseForms, docIdentity, dropPages, ensureForm, fetchRows, formPages, readSchema, withLock } from './grist.js';
+import { apply, collapseForms, docIdentity, docInfo, dropPages, ensureForm, fetchRows, formPages, readSchema, withLock } from './grist.js';
 import {
   addDestColumnsActions, createJournal, destColumns, isUserTable, legacyJournals, prepareDest, readNote, receivedDests, receivedJournals,
   removeTechnicalTables, syncRows, upgradeJournal, writeNote,
@@ -29,6 +29,7 @@ const offers = new Map();
 let container;
 let busy = false;
 let readOnly = false;
+let viewer = false; // lecteur du document, lu à l'ouverture : boutons grisés d'emblée
 let lastVisit = null; // date de la visite précédente sur ce document (secondes), ou 0
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
@@ -77,12 +78,10 @@ async function consolidate(schema, { journal, note }) {
   const unpack = planUnpack(rows, journal);
   if (unpack.actions.length) {
     await apply(unpack.actions);
-    const missing = { ...note.missing };
-    for (const table of unpack.resent) delete missing[table];
-    for (const [table, n] of Object.entries(unpack.missing)) if (n > 0) missing[table] = (missing[table] || 0) + n;
-    if (JSON.stringify(missing) !== JSON.stringify(note.missing || {})) {
-      note = { ...note, missing };
-      await updateJournalNote(journal, n => ({ ...n, missing }));
+    const gaps = nextGaps(note, unpack);
+    if (JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
+      note = { ...note, ...gaps };
+      await updateJournalNote(journal, n => ({ ...n, ...gaps }));
     }
     rows = await fetchRows(journal);
   }
@@ -95,8 +94,9 @@ async function consolidate(schema, { journal, note }) {
   }).filter(o => o.columns.length));
 
   const tables = [];
-  const maps = new Map(); // table -> correspondance complétée de colonnes arrivées après coup
-  for (let entry of note.tables) {
+  const updates = new Map(); // table -> entrée à noter : destination renommée, colonnes arrivées après coup
+  for (const noted of note.tables) {
+    let entry = followRenames(noted, schema);
     const tableRows = groups.get(entry.table) || [];
     if (!schema.has(entry.dest)) {
       tables.push({ entry, error: t('error.destMissing', { dest: entry.dest }) });
@@ -106,15 +106,14 @@ async function consolidate(schema, { journal, note }) {
     // Colonne ajoutée à l'export après coup : elle ne remplace jamais une colonne de la
     // destination qui porte déjà son nom (elle prend un nom libre, noté dans la correspondance).
     const map = newColumnsMap(entry, destColumns(sent), schema.columns(entry.dest).map(c => c.colId));
-    if (map) {
-      entry = { ...entry, map };
-      maps.set(entry.table, map);
-    }
+    if (map) entry = { ...entry, map };
     const added = addDestColumnsActions(schema, entry.dest, sent, entry.map);
     if (added.length) {
       await apply(added);
       schema = await readSchema();
     }
+    entry = { ...entry, refs: destRefs(schema, entry.dest) };
+    if (JSON.stringify(entry) !== JSON.stringify(noted)) updates.set(entry.table, entry);
     const copyCols = copyColumns(sent.map(c => ({ colId: c.id })), schema.columns(entry.dest), entry.map);
     const { actions, stats } = planConsolidation({
       journalRows: tableRows, destRows: await fetchRows(entry.dest), copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '',
@@ -122,7 +121,10 @@ async function consolidate(schema, { journal, note }) {
     await apply(actions);
     tables.push({ entry, stats, copyCols });
   }
-  if (maps.size) await updateJournalNote(journal, n => ({ ...n, tables: n.tables.map(tb => (maps.has(tb.table) ? { ...tb, map: maps.get(tb.table) } : tb)) }));
+  if (updates.size) {
+    const noted = ({ dest, map, match, refs }) => JSON.parse(JSON.stringify({ dest, map, match, refs }));
+    await updateJournalNote(journal, n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, ...noted(updates.get(tb.table)) } : tb)) }));
+  }
   const after = await fetchRows(journal);
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
   const afterGroups = rowsByTable(expandRows(after));
@@ -162,19 +164,19 @@ export async function consolidateAll() {
         const at = Date.now() / 1000;
         try {
           const pass = await consolidate(schema, received);
-          results.set(journal, { at, rows: pass.rows, missing: pass.note.missing });
+          results.set(journal, { at, rows: pass.rows, gaps: JSON.stringify([pass.note.missing, pass.note.big]) });
           for (const tb of pass.tables) {
             const key = tableKey(journal, tb.table);
             const was = results.get(key);
             results.set(key, tb.error ? { at, error: true, text: tb.error } : { at, text: summary(tb.stats), ...tb });
             changed ||= Boolean(tb.error) !== Boolean(was && was.error) || Boolean(tb.stats && tb.stats.added + tb.stats.updated + tb.stats.removed);
           }
-          changed ||= !before || Boolean(before.error) || !before.rows !== !pass.rows || JSON.stringify(before.missing) !== JSON.stringify(pass.note.missing)
+          changed ||= !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== JSON.stringify([pass.note.missing, pass.note.big])
             || offersBefore !== JSON.stringify(offers.get(journal) || []);
-          readOnly = false;
+          readOnly = viewer;
           schema = await readSchema();
         } catch (e) {
-          readOnly = isAccessError(e);
+          readOnly = viewer || isAccessError(e);
           results.set(journal, { ...before, at, text: errorText(e), error: true });
           changed ||= !(before && before.error);
         }
@@ -205,7 +207,9 @@ async function receivedGroups(schema) {
 }
 
 export async function renderTarget(root = container) {
+  if (!container) viewer = (await docInfo()).access === 'viewers';
   container = root;
+  readOnly ||= viewer;
   const schema = await readSchema();
   const groups = await receivedGroups(schema);
   // Formulaire des exports en attente, publié sur la page du widget (une seule clé de partage).
@@ -254,7 +258,7 @@ function syncCard(group) {
   const { journal, note } = group;
   const journalResult = results.get(journal) || {};
   const failed = journalResult.error || note.tables.some(tb => (results.get(tableKey(journal, tb.table)) || {}).error);
-  const incomplete = Object.keys(note.missing || {}).length > 0;
+  const incomplete = Object.keys({ ...note.missing, ...note.big }).length > 0;
   const [status, tone] = group.waiting ? ['waiting', 'pending'] : failed ? ['error', 'err'] : incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
   const line = (entry) => {
     const result = results.get(tableKey(journal, entry.table)) || (journalResult.error ? journalResult : null);
@@ -263,13 +267,15 @@ function syncCard(group) {
     return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${entry.table} → ${entry.dest}${when}`);
   };
   const from = (note.from || {}).email;
+  const fromDoc = docLabel((note.from || {}).docName, (note.from || {}).docId);
   const pending = offers.get(journal) || [];
   return el('article', { class: 'card', 'data-journal': journal },
     el('div', { class: 'card-head' }, el('strong', {}, note.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
-    from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
+    from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
     group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
     note.tables.map(line),
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
+    Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     pending.map(o => el('div', { class: 'offer' }, el('span', { class: 'small' }, t('recv.offer.line', { table: o.table, n: o.n })),
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: readOnly, onclick: () => offerDialog(group, o) }, t('recv.offer.place')))),
     note.refused.length ? el('p', { class: 'muted small' }, t('recv.offer.refusedList', { tables: note.refused.join(', ') })) : null,
@@ -516,6 +522,7 @@ function receiveWizard(group = null) {
     const rows = invitation.tables.map(tb => ({ tb, pick: destField(schema, tb.table) }));
     const report = el('div', { class: 'report' });
     const from = invitation.from.email;
+    const fromDoc = docLabel(invitation.from.docName, invitation.from.docId);
     const next = async () => {
       const now = await readSchema();
       const plans = rows.map(({ tb, pick }) => ({ tb, dest: pick.dest() }));
@@ -525,7 +532,7 @@ function receiveWizard(group = null) {
     };
     wizard.show(STEP.dest, [
       message('info', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
-      from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
+      from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
       el('p', { class: 'field-title' }, t('recv.dest')),
       ...rows.map(r => el('div', { class: 'dest-row' }, el('span', {}, `${r.tb.table} →`), r.pick.node)),
       message('info', t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
@@ -584,10 +591,13 @@ function receiveWizard(group = null) {
     if (!parseFormLink(link)) throw new Error('formLink');
     const url = buildWebhookUrl(link, g.journal);
     await testUrl(url);
-    const identity = await docIdentity();
+    const [identity, info] = await Promise.all([docIdentity(), docInfo()]);
     const code = buildReply({
       id: g.note.id, secret: g.note.secret, url,
-      recipient: { email: await myEmail(g.journal), docId: identity.docId, team: identity.team, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
+      recipient: {
+        email: await myEmail(g.journal), docId: identity.docId, docName: info.name, team: identity.team,
+        at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      },
     });
     // 4. Réponse à renvoyer.
     wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), copyField(code),

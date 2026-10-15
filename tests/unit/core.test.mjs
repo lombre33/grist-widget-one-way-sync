@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
   sentColumns, compareVersion, copyColumns, chunkMark, keysCount, majleAction, missingFormula, rowsSince, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
-  newColumnsMap, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
+  newColumnsMap, nextGaps, docLabel, followRenames, destRefs, rowFilter, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
 
@@ -154,16 +154,26 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   const { keys, lot } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
   assert.match(keys, /tables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
   assert.match(keys, /^if \$Synchro_Type != "cles": return ""/);
-  assert.match(keys, /return "ids:" \+ " "\.join\(k for k in src\.all\.id_sync if k\)/);
+  assert.match(keys, /return "ids:" \+ " "\.join\(r\.id_sync for r in src\.all if r\.id_sync and keep\(r\)\)/);
+  for (const formula of [keys, lot]) {
+    assert.match(formula, /f = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="filtre"\)/, 'filtre de la table lu dans sa ligne');
+    assert.match(formula, /def keep\(r\): return not spec or txt\(g\(r, spec\)\) == spec\["value"\]/);
+  }
+  assert.match(lot, /rows = \[r for r in src\.all if r\.id_sync and keep\(r\)\]/, 'seules les lignes du filtre partent');
   assert.match(lot, /tables = \{"Contacts": Contacts, "Villes": Villes\}/);
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);
   assert.match(lot, /timedelta\(seconds=5\)/);
   assert.match(lot, /mine = \[r\.Synchro_Table for r in Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\) if r\.Synchro_Table in tables\]/);
-  assert.match(lot, /budget = max\(20000, min\(250000, \(950000 - 40 \* sum\(len\(tables\[t\]\.all\) for t in mine\)\) \/\/ max\(1, len\(mine\)\)\)\)/,
+  assert.match(lot, /room = 950000 - 40 \* sum\(len\(tables\[t\]\.all\) for t in mine\)\nbudget = max\(20000, min\(250000, room \/\/ max\(1, len\(mine\)\)\)\)/,
     'les lots d\'un export se partagent ce que leurs listes des clés laissent');
-  assert.match(lot, /size > budget: break/);
+  assert.match(lot, /if capped and n > max\(budget, room\):\n    big\.append\(r\.id_sync\)\n    continue/, 'une ligne plus grosse qu\'un envoi est signalée');
+  assert.match(lot, /if capped and out and size \+ n > budget: break/, 'la première ligne part seule, même au-delà du plafond');
+  assert.match(lot, /undone = set\(r\.id for r in rows if r\.id not in recent and \(getattr\(r, "RecalculLe", None\) or cut\) > cut\)/,
+    'une ligne annulée (RecalculLe récent, MajLe ancienne) repart');
+  assert.match(lot, /if len\(recent\) \+ len\(undone\) == len\(rows\) > 20: undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
+  assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
   assert.match(syncFormulas([]).keys, /tables = \{\}\nsrc = tables\.get/);
@@ -212,7 +222,7 @@ test('table Synchro : lignes d\'un export (liste, lot, instantané public), tabl
   assert.deepEqual(values.Synchro_Colonnes[0], '[{"id":"Nom","type":"Text","label":"Nom","source":"Text","visible":""}]');
   const rows = ids.map((_, i) => ({ id: i + 1, ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v[i]])) }));
   rows.push({ id: 9, Synchro_Export: 'fedcba9876543210', Synchro_Table: 'Contacts', Synchro_Type: 'cles', Synchro_Colonnes: '[]' });
-  assert.deepEqual(exportTables(rows, E), [{ table: 'Contacts', columns: JSON.parse(values.Synchro_Colonnes[0]) }, { table: 'Villes', columns: JSON.parse(values.Synchro_Colonnes[2]) }]);
+  assert.deepEqual(exportTables(rows, E), [{ table: 'Contacts', columns: JSON.parse(values.Synchro_Colonnes[0]), filter: null }, { table: 'Villes', columns: JSON.parse(values.Synchro_Colonnes[2]), filter: null }]);
   assert.deepEqual(exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom')] }, { table: 'Villes', columns: [col('Ville')] }]), { actions: [], changed: [] });
   const edit = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom'), col('Age')] }]);
   assert.deepEqual(edit.changed, ['Contacts']);
@@ -220,6 +230,20 @@ test('table Synchro : lignes d\'un export (liste, lot, instantané public), tabl
   const pub = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom')] }, { table: 'Villes', columns: [col('Ville')] }], { isPublic: true });
   assert.deepEqual(pub.actions[0][3].Synchro_Type, ['complet', 'complet']);
   assert.deepEqual(pub.changed, []);
+  // Filtre de lignes : une ligne 'filtre' par table filtrée ; poser, changer ou retirer un filtre
+  // renvoie la table.
+  const filter = { id: 'Statut', source: 'Choice', visible: '', value: ' Actif ' };
+  const filtered = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom')], filter }, { table: 'Villes', columns: [col('Ville')] }]);
+  assert.deepEqual(filtered.changed, ['Contacts']);
+  assert.deepEqual(filtered.actions[0][3].Synchro_Type, ['filtre']);
+  assert.equal(filtered.actions[0][3].Synchro_Colonnes[0], '{"id":"Statut","source":"Choice","visible":"","value":"actif"}');
+  const withFilter = [...rows, { id: 10, Synchro_Export: E, Synchro_Table: 'Contacts', Synchro_Type: 'filtre', Synchro_Colonnes: filtered.actions[0][3].Synchro_Colonnes[0] }];
+  assert.deepEqual(exportTables(withFilter, E)[0].filter, { id: 'Statut', source: 'Choice', visible: '', value: 'actif' });
+  const unfiltered = exportRowsActions(withFilter, E, [{ table: 'Contacts', columns: [col('Nom')] }, { table: 'Villes', columns: [col('Ville')] }]);
+  assert.deepEqual(unfiltered, { actions: [['BulkRemoveRecord', 'Synchro', [10]]], changed: ['Contacts'] });
+  assert.equal(rowFilter({ id: 'a;b', value: 'x' }), null);
+  assert.equal(rowFilter({ id: 'Actif', source: 'Bool', value: 'Yes' }).value, 'oui', 'case à cocher : oui ou non, en français comme en anglais');
+  assert.equal(rowFilter({ id: 'Actif', source: 'Bool', value: 'faux' }).value, 'non');
 });
 
 test('webhook d\'un destinataire : condition sur son export, relue à l\'identique seulement', () => {
@@ -255,7 +279,8 @@ test('liste des clés : nombre de clés', () => {
 
 test('lot : lignes reçues, lignes illisibles écartées', () => {
   const lot = parseLot(JSON.stringify({ lignes: [['k1', 10, false, { Nom: 'A' }], ['', 1, false, {}], ['k2', null, 1, { Nom: 'B' }], 'x'], total: 7 }));
-  assert.deepEqual(lot, { lines: [{ key: 'k1', order: 10, deleted: false, data: { Nom: 'A' } }, { key: 'k2', order: null, deleted: true, data: { Nom: 'B' } }], total: 7 });
+  assert.deepEqual(lot, { lines: [{ key: 'k1', order: 10, deleted: false, data: { Nom: 'A' } }, { key: 'k2', order: null, deleted: true, data: { Nom: 'B' } }], total: 7, big: [] });
+  assert.deepEqual(parseLot(JSON.stringify({ lignes: [], total: 1, tropGros: ['k3'] })).big, ['k3']);
   assert.equal(parseLot(''), null);
   assert.equal(parseLot('{"x": 1}'), null);
 });
@@ -284,11 +309,40 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
   assert.deepEqual(values.Sync_Recu, [102, 102, 103, 104]);
   assert.deepEqual(values.Synchro_Donnees.slice(0, 3), ['{"Nom":"A"}', '{"Nom":"C"}', '{"Nom":"B"}']);
   assert.deepEqual(actions[1], ['BulkRemoveRecord', 'J', [2, 3, 4, 5, 6]]);
-  assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { actions: [], missing: {}, resent: [] });
+  assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { actions: [], missing: {}, big: {}, arrived: {}, resent: [] });
   const cut = raw(7, 'lot', { Synchro_Lot: JSON.stringify({ lignes: [], total: 4 }) });
   const again = raw(8, 'lot', { Synchro_Renvoi: 'm:1', Synchro_Lot: JSON.stringify({ lignes: [], total: 1 }) });
   assert.deepEqual(planUnpack([cut, again], 'J').missing, { Contacts: 0 }, 'coupé puis renvoyé');
   assert.deepEqual(planUnpack([again, { ...cut, id: 9 }], 'J').missing, { Contacts: 4 }, 'renvoyé puis coupé');
+});
+
+test('CIBLE : lignes manquantes et lignes trop grosses suivies d\'un dépliage à l\'autre', () => {
+  const unpack = { missing: { A: 2 }, big: { A: ['k1'], B: ['k2'] }, arrived: { A: ['k9'] }, resent: [] };
+  let gaps = nextGaps({}, unpack);
+  assert.deepEqual(gaps, { missing: { A: 2 }, big: { A: ['k1'], B: ['k2'] } });
+  gaps = nextGaps(gaps, { missing: {}, big: {}, arrived: { B: ['k2'] }, resent: [] });
+  assert.deepEqual(gaps.big, { A: ['k1'] }, 'une ligne arrivée n\'est plus signalée');
+  assert.deepEqual(nextGaps(gaps, { missing: { A: 0 }, big: {}, arrived: {}, resent: ['A'] }), { missing: {}, big: {} }, 'un renvoi remet à zéro');
+});
+
+test('CIBLE : destination renommée suivie par ses numéros Grist', () => {
+  const schemaOf = (tableId, cols) => ({
+    tableIdOf: ref => (ref === 7 ? tableId : null),
+    table: id => (id === tableId ? { id: 7, tableId } : undefined),
+    columns: id => (id === tableId ? cols : null),
+  });
+  const before = schemaOf('Contacts', [{ id: 70, colId: 'Nom' }, { id: 71, colId: 'Ville' }, { id: 72, colId: 'Code' }]);
+  const entry = { table: 'Contacts', dest: 'Contacts', columns: [{ id: 'Nom' }, { id: 'Ville' }], map: { Cp: 'Code' }, match: 'Code' };
+  const noted = { ...entry, refs: destRefs(before, 'Contacts') };
+  assert.deepEqual(noted.refs, { table: 7, cols: { Nom: 70, Ville: 71, Code: 72 } });
+  assert.equal(followRenames(noted, before), noted, 'rien de renommé : même entrée');
+  const after = schemaOf('Personnes', [{ id: 70, colId: 'Nom' }, { id: 71, colId: 'Commune' }, { id: 72, colId: 'CodePostal' }]);
+  const next = followRenames(noted, after);
+  assert.equal(next.dest, 'Personnes');
+  assert.deepEqual(next.map, { Cp: 'CodePostal', Ville: 'Commune' });
+  assert.equal(next.match, 'CodePostal');
+  assert.equal(followRenames({ ...entry, refs: { table: 9, cols: {} } }, before).dest, 'Contacts', 'table disparue : son nom noté');
+  assert.equal(destRefs(before, 'Absente'), undefined);
 });
 
 test('CIBLE : lignes dépliées rangées par table d\'origine, lignes brutes à part', () => {
@@ -345,9 +399,11 @@ test('invitation : aller-retour, plusieurs tables, refus des codes invalides', (
 test('réponse : même instance, une adresse par clé de formulaire seulement', () => {
   const url = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Annuaire/records?flat=1';
   const id = '0123456789abcdef';
-  const recipient = { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14', extra: 'x' };
+  const recipient = { email: 'a@b.fr', docId: 'doc1', docName: 'Annuaire', team: 'eq', at: '2026-10-14', extra: 'x' };
   const reply = parseReply(buildReply({ id, secret: SECRET, recipient, url }), 'https://g.fr');
   assert.equal(reply.url, url);
+  assert.equal(docLabel(reply.recipient.docName, reply.recipient.docId), 'Annuaire (doc1)', 'le document par son nom et son identifiant');
+  assert.equal(docLabel('', 'doc1'), 'doc1');
   assert.equal(reply.secret, SECRET);
   assert.equal(reply.recipient.extra, undefined);
   assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').secret, '');

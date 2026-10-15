@@ -20,6 +20,8 @@ export async function readSchema() {
     tableIds: tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => tb.tableId).sort(),
     has: tableId => byId.has(tableId),
     table: tableId => byId.get(tableId),
+    // Nom actuel de la table de numéro `ref` (il change si on la renomme), ou null.
+    tableIdOf: ref => (tables.find(tb => tb.id === ref) || {}).tableId || null,
     // Colonnes d'une table, dans l'ordre de leur création ; null si la table n'existe pas.
     // `visible` : colonne affichée d'une Référence, dans la table visée.
     columns(tableId) {
@@ -39,6 +41,19 @@ export async function readSchema() {
 export async function docIdentity() {
   const { baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
   return { ...parseDocBaseUrl(baseUrl), baseUrl };
+}
+
+// Nom du document et niveau d'accès de la personne (`owners`, `editors` ou `viewers`), lus par
+// l'API REST avec un jeton en lecture seule. Vide si Grist ne répond pas : rien n'en dépend.
+export async function docInfo() {
+  try {
+    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+    const response = await fetch(`${baseUrl}?auth=${encodeURIComponent(token)}`);
+    const info = response.ok ? await response.json() : {};
+    return { name: String(info.name || ''), access: String(info.access || '') };
+  } catch (e) {
+    return { name: '', access: '' };
+  }
 }
 
 // Une seule exécution à la fois de `fn` sous ce nom, tous onglets du navigateur confondus.

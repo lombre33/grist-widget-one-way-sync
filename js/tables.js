@@ -10,7 +10,7 @@
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
-  STATE_COL, SYNC_TABLE, TABLE_COL, exportRowsActions, exportTables, majleAction, syncColumns, syncFormulas,
+  RECALC_COL, STATE_COL, SYNC_TABLE, TABLE_COL, exportRowsActions, exportTables, majleAction, prepareSourceActions, syncColumns, syncFormulas,
 } from './core.js';
 import { apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages } from './grist.js';
 
@@ -74,16 +74,24 @@ export async function ensureSyncTable(rows = null) {
   return missing.length > 0 || depsChanged || formulasChanged;
 }
 
-// MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction).
-// Rend vrai si quelque chose a changé.
+// MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction), et
+// la table a sa colonne RecalculLe. Rend vrai si quelque chose a changé.
 export async function refreshMajLe() {
   const schema = await readSchema();
   const rows = await syncRows(schema);
   const sent = new Map(); // table -> colonnes envoyées par l'un de ses exports
   for (const id of new Set(rows.map(r => r[EXPORT_COL]))) {
-    for (const { table, columns } of exportTables(rows, id)) sent.set(table, new Set([...(sent.get(table) || []), ...columns.map(c => c.id)]));
+    // Une colonne de filtre compte aussi : une ligne qui entre dans le filtre doit partir.
+    for (const { table, columns, filter } of exportTables(rows, id)) {
+      sent.set(table, new Set([...(sent.get(table) || []), ...columns.map(c => c.id), ...(filter ? [filter.id] : [])]));
+    }
   }
-  const actions = [...sent].filter(([table]) => schema.has(table)).map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean);
+  const tables = [...sent].filter(([table]) => schema.has(table));
+  // RecalculLe (repère des annulations) manque aux tables exportées avant la version 0.5.
+  const actions = [
+    ...tables.flatMap(([table]) => (schema.columns(table).some(c => c.colId === RECALC_COL) ? [] : prepareSourceActions(table, [RECALC_COL]))),
+    ...tables.map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean),
+  ];
   await apply(actions);
   return actions.length > 0;
 }

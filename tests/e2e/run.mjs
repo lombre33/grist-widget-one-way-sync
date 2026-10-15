@@ -456,6 +456,59 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Lieu === 'Villeurbanne', 'ville renommée reçue');
   step('SOURCE : une ville renommée repart seule dans les lignes qui la citent');
 
+  // --- Annulation (Ctrl+Z) dans la SOURCE : Grist remet MajLe à sa valeur d'avant, mais recalcule
+  // RecalculLe, qui fait repartir la ligne avec l'heure de l'annulation
+  const sourcePage = await context.newPage();
+  const contactsView = (await records(source.doc, '_grist_Views')).find(v => v.name === 'Contacts').id;
+  await sourcePage.goto(`${TEAM}/doc/${source.doc}/p/${contactsView}`);
+  await sourcePage.locator('.field_clip', { hasText: /^Alice$/ }).first().click();
+  await sourcePage.keyboard.press('Enter');
+  await sourcePage.keyboard.press('Control+a');
+  await sourcePage.keyboard.type('Alicia');
+  await sourcePage.keyboard.press('Enter');
+  await page.bringToFront();
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Alicia'), 'modification reçue');
+  await sourcePage.bringToFront();
+  await sourcePage.keyboard.press('Control+z');
+  await page.bringToFront();
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Alice'), 'annulation reçue');
+  await sourcePage.close();
+  step('SOURCE : une modification annulée (Ctrl+Z) repart, la CIBLE revient à la valeur d\'avant');
+
+  // --- Destination renommée dans la CIBLE (table et colonne) : la recopie suit, sans recréer
+  // l'ancienne colonne ; puis les noms d'origine reviennent
+  const alice = byName('Alice').id;
+  await applyActions(target.doc, [['RenameTable', 'Contacts', 'Personnes'], ['RenameColumn', 'Personnes', 'Ville', 'Commune']]);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice, { Ville: 'Lille' }]]);
+  await waitFor(async () => (await records(target.doc, 'Personnes')).find(r => r.Nom === 'Alice').Commune === 'Lille', 'destination renommée suivie');
+  assert.ok(!(await columnsOf(target.doc, 'Personnes')).includes('Ville'), 'la colonne renommée n\'est pas recréée');
+  await applyActions(target.doc, [['RenameColumn', 'Personnes', 'Commune', 'Ville'], ['RenameTable', 'Personnes', 'Contacts']]);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice, { Ville: 'Marseille' }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Ville === 'Marseille', 'noms d\'origine suivis');
+  step('CIBLE : table et colonne de destination renommées, la recopie suit');
+
+  // --- Filtre de lignes : seule Alice part, les autres lignes sont effacées chez la CIBLE ; le
+  // filtre retiré, elles reviennent
+  const names = async () => (await records(target.doc, 'Contacts')).map(r => r.Nom).sort().join();
+  const everyone = await names();
+  const setFilter = async (column, value) => {
+    await openWidget(source.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    await pick('Lignes de Contacts à envoyer', column);
+    if (value) await dialog().getByRole('textbox', { name: 'Valeur des lignes de Contacts à envoyer' }).fill(value);
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/^Enregistré/).waitFor();
+    await dialogButton('Fermer').click();
+    await openWidget(target.url);
+  };
+  await setFilter('Nom', 'alice');
+  await waitFor(async () => (await names()) === 'Alice', 'seule la ligne du filtre reste');
+  await setFilter('Toutes les lignes');
+  await waitFor(async () => (await names()) === everyone, 'lignes revenues sans le filtre');
+  step('SOURCE : filtre de lignes posé puis retiré, la CIBLE suit');
+
   // --- Document monté en version 0.4 : la marque d'envoi coupé et les dépendances de MajLe sont
   // posées à l'ouverture du widget SOURCE
   const synchroRef = await tableRef(source.doc, 'Synchro');

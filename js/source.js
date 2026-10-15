@@ -4,19 +4,19 @@
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
   AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MAX_ROWS, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL,
-  SYNC_TABLE, TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, exportCondition, exportTables, exportableColumns,
+  SYNC_TABLE, TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, docLabel, exportCondition, exportTables, exportableColumns,
   fillKeyActions, hookName, isPublicRule, keysCount, loopingTables, maskKey, missingSyncColumns, parseLot, parseReply, prepareSourceActions,
   publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex,
 } from './core.js';
 import {
-  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema, renameWebhook, setWebhookEnabled,
+  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, docInfo, fetchRows, listWebhooks, readSchema, renameWebhook, setWebhookEnabled,
   webhookConditions, withLock,
 } from './grist.js';
 import {
   ensureSyncTable, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
   writeSourceNote, writeSync,
 } from './tables.js';
-import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
+import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
 import { LANG, t, typeName } from './i18n.js';
@@ -186,7 +186,8 @@ function exportCard(exp, state, open, out) {
   };
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
-    el('p', { class: 'muted small' }, exp.tables.map(tb => t('send.export.table', { table: tb.table, n: tb.columns.length })).join(' · ') || '—'),
+    el('p', { class: 'muted small' }, exp.tables.map(tb => t(tb.filter ? 'send.export.tableFiltered' : 'send.export.table',
+      { table: tb.table, n: tb.columns.length, ...(tb.filter ? { col: tb.filter.id, value: tb.filter.value } : {}) })).join(' · ') || '—'),
     exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
     exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
     exp.tooBig.length ? message('warn', t('send.export.tooBig', { tables: exp.tooBig.join(', '), max: MAX_ROWS })) : null,
@@ -353,8 +354,8 @@ async function deleteExport(exp) {
 // Lien public
 
 async function publicCode(exp) {
-  const { origin, docId, baseUrl } = await docIdentity();
-  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables });
+  const [{ origin, docId, baseUrl }, { name: docName }] = await Promise.all([docIdentity(), docInfo()]);
+  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId, docName }, tables: exp.tables });
 }
 
 // Bouton « copier avec les consignes » : le code et les étapes de la CIBLE, prêts pour un courriel.
@@ -513,6 +514,7 @@ function exportWizard(exp = null) {
   const cancel = { label: t('common.cancel') };
   let chosen = exp ? exp.tables.map(tb => tb.table) : [];
   const selected = new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []); // table -> colonnes cochées
+  const filters = new Map(exp ? exp.tables.map(tb => [tb.table, tb.filter]) : []); // table -> filtre de lignes, ou null
   showTables();
 
   // 1. Tables de l'export. Une table introuvable (renommée, effacée) en sort.
@@ -553,9 +555,10 @@ function exportWizard(exp = null) {
       adds.push(...missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
       return el('div', { class: 'form' }, el('h3', {}, table),
         relays.includes(table) ? message('info', t('send.columns.relay')) : null,
-        checkList({ items: usable.map(c => ({ value: c.id, label: c.label === c.id ? c.id : `${c.label} (${c.id})`, hint: typeName(c.source) })),
+        checkList({ items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source) })),
           checked: selected.get(table), label: table, onChange: (values) => { selected.set(table, values); } }),
-        blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null);
+        blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null,
+        filterField(table, usable, filters.get(table), (filter) => { filters.set(table, filter); }));
     });
     if (!schema.has(SYNC_TABLE)) adds.push(t('send.check.sync'));
     const removed = exp ? exp.tables.map(tb => tb.table).filter(table => !chosen.includes(table)) : [];
@@ -591,7 +594,9 @@ function exportWizard(exp = null) {
       // ajoutée ici à la main reste sans clé, donc locale : avec une clé, la prochaine liste
       // de l'origine, qui ne la connaît pas, l'effacerait.
       if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
-      tables.push({ table, columns: exportableColumns(schema.columns(table)).filter(c => !c.blocked && selected.get(table).includes(c.id)) });
+      tables.push({
+        table, columns: exportableColumns(schema.columns(table)).filter(c => !c.blocked && selected.get(table).includes(c.id)), filter: filters.get(table) || null,
+      });
     }
     const id = exp ? exp.id : randomHex(8);
     const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public) });
@@ -610,6 +615,32 @@ function exportWizard(exp = null) {
     const n = changed.length ? await resendTables(id, changed, report) : 0;
     wizard.show(3, message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone')), [{ label: t('common.close'), kind: 'btn-primary' }]);
   }
+}
+
+const columnLabel = c => (c.label === c.id ? c.id : `${c.label} (${c.id})`);
+
+// Filtre de lignes d'une table, facultatif : une colonne et la valeur qu'ont les lignes envoyées.
+// `onChange` reçoit le filtre ({ id, source, visible, value }), ou null pour toutes les lignes.
+function filterField(table, columns, current, onChange) {
+  const input = el('input', { type: 'text', class: 'input', value: current ? current.value : '', 'aria-label': t('send.filter.value', { table }) });
+  const hint = el('p', { class: 'muted small' });
+  const filter = () => {
+    const c = columns.find(col => col.id === pick.value());
+    return c ? { id: c.id, source: c.source, visible: c.visible, value: input.value } : null;
+  };
+  const show = (id) => {
+    const c = columns.find(col => col.id === id);
+    input.hidden = !c;
+    hint.textContent = c ? t(c.source === 'Bool' ? 'send.filter.bool' : 'send.filter.help') : '';
+    onChange(filter());
+  };
+  const pick = pickField({
+    items: [{ value: '', label: t('send.filter.all') }, ...columns.map(c => ({ value: c.id, label: columnLabel(c) }))],
+    value: current ? current.id : '', label: t('send.filter.title', { table }), onChange: show,
+  });
+  input.addEventListener('input', () => onChange(filter()));
+  show(current ? current.id : '');
+  return el('div', { class: 'filter-field' }, el('p', { class: 'field-title' }, t('send.filter.title', { table })), pick, input, hint);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -663,9 +694,9 @@ function recipientWizard(exp, pending = null) {
     const secret = withSecret ? randomHex(16) : '';
     const entry = { id: randomHex(8), export: exp.id, hash: secret ? await sha256(secret) : '', at: now() };
     await updateNote((note) => { note.invitations = [...note.invitations, entry]; });
-    const [{ origin, docId }, rows] = await Promise.all([docIdentity(), syncRows()]);
+    const [{ origin, docId }, { name: docName }, rows] = await Promise.all([docIdentity(), docInfo(), syncRows()]);
     const email = (rows.find(r => r[EXPORT_COL] === exp.id) || {})[AUTHOR_COL] || '';
-    const code = buildInvitation({ id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId }, tables: exp.tables });
+    const code = buildInvitation({ id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId, docName }, tables: exp.tables });
     wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code), handoff('reponse', code),
       roleGuide({ you: 'source', current: 1, open: true }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
     [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
@@ -683,7 +714,7 @@ function recipientWizard(exp, pending = null) {
       if (loopingTables(exp.tables.map(tb => tb.table), reply.recipient.docId, receivedDests(await readSchema())).length) throw new Error('loop');
       const r = reply.recipient;
       const fiche = [[t('send.reply.tables'), exp.tables.map(tb => tb.table).join(', ')], [t('send.reply.email'), r.email],
-        [t('send.reply.doc'), r.docId === docId ? `${r.docId} (${t('send.reply.sameDoc')})` : r.docId], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
+        [t('send.reply.doc'), r.docId === docId ? `${docLabel(r.docName, r.docId)} · ${t('send.reply.sameDoc')}` : docLabel(r.docName, r.docId)], [t('send.reply.team'), r.team], [t('send.reply.at'), r.at]];
       report.replaceChildren(...[el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
         reply.secret ? null : message('warn', t('send.reply.nosecret')),
         el('p', { class: 'muted small' }, maskKey(reply.url))].filter(Boolean));
@@ -698,7 +729,7 @@ function recipientWizard(exp, pending = null) {
   async function approve(inv, reply) {
     const r = reply.recipient;
     await createWebhook({
-      name: hookName(exp.name, exp.id), memo: [r.email, r.docId, r.team].filter(Boolean).join(' · '), url: reply.url,
+      name: hookName(exp.name, exp.id), memo: [r.email, docLabel(r.docName, r.docId), r.team].filter(Boolean).join(' · '), url: reply.url,
       tableId: SYNC_TABLE, condition: exportCondition(exp.id),
     });
     await updateNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
