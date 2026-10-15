@@ -4,7 +4,7 @@ Widget Grist qui recopie une table d'un document **SOURCE** dans un document **C
 instance, et la tient à jour, **sans serveur à héberger**. Pensé pour `grist.numerique.gouv.fr`,
 compatible avec toute instance Grist récente.
 
-Version 0.4 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
+Version 0.4.3 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
 Il faut Grist 1.7.11 ou plus récent (filtre des webhooks).
 
 ## Comment ça marche
@@ -107,7 +107,18 @@ table) sont signalés « à refaire », avec un bouton qui efface l'ancien monta
   sans fin. Le widget SOURCE le voit, vide la file et renvoie tout, seul, dès qu'un propriétaire
   ouvre sa page.
 - Un envoi en échec bloque la file de **tous** les webhooks du document SOURCE pendant environ
-  15 minutes (comportement de Grist). Le bouton **Débloquer la file** la vide.
+  15 minutes (comportement de Grist). Le bouton **Débloquer la file** la vide, puis renvoie seul
+  les exports dont la personne reçoit encore (page ouverte).
+- Une table ou une colonne **renommée, supprimée ou changée de type dans la SOURCE** ne part plus
+  correctement : la carte de l'export le signale, et **Modifier** permet de cocher de nouveau les
+  bonnes colonnes. Les autres tables de l'export continuent de partir.
+- Une **destination renommée dans la CIBLE** n'est pas suivie : une table renommée n'est plus
+  trouvée (la carte le dit, les versions attendent dans le journal jusqu'à ce qu'on lui rende son
+  nom) ; une colonne renommée est recréée sous son ancien nom, qui reçoit seul la suite.
+- Une seule ligne plus grosse que la taille d'un envoi (texte de plusieurs centaines de ko) ne
+  peut pas partir.
+- Les noms `Synchro`, `Synchro_…` et `Journal_…` sont réservés aux tables du widget : une table de
+  ce nom n'est proposée ni à l'envoi ni comme destination.
 - Le paramètre `?flat=1` n'est pas documenté par Grist ; il est couvert par ses tests depuis 2023.
 
 Détails et preuves : `docs/01-etude-faisabilite.md`, `docs/02-procedure-test-dinum.md`,

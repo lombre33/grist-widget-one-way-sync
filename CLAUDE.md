@@ -100,7 +100,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.4.2 (15 octobre 2026)
+## État : V0.4.3 (15 octobre 2026)
 
 Décisions d'Antoine du 15 octobre : la SOURCE s'organise en **exports** (nom, tables, colonnes ;
 ajouter ou révoquer une personne sans refaire l'export ; la synchro dans les deux sens, « Échange »,
@@ -171,8 +171,10 @@ signalée sur la carte (liste des clés trop grosse pour un envoi) ; les lots d'
 partagent le budget (formule du lot : `lookupRecords` des lignes `cles` de l'export) ; un envoi
 refusé pour sa taille (413 : Grist retente 20 fois, environ 15 minutes, puis remet le lot en fin de
 file, sans fin ; à la fermeture du document, il abandonne après 5 essais) est vu par `catchUp`, qui vide
-la file et marque tous les lots servis `RESEND_ALL`. Tout renvoi est reprenable : chaque tranche
-part avec la marque `chunkMark` (lignes dans l'ordre de `MajLe`), effacée à part à la fin.
+la file et marque tous les lots servis `RESEND_ALL` (`clearAndMark`, aussi derrière « Débloquer la
+file »). Tout renvoi est reprenable : la marque de chaque lot est écrite avant le premier envoi,
+puis réécrite à chaque tranche (`chunkMark`, lignes dans l'ordre de `MajLe`), et effacée à part à
+la fin.
 
 Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
 analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests : `npm test`
@@ -183,7 +185,7 @@ d'aide de `img/`). Les instances autorisées sont à la fois dans `js/config.js`
 « Copier avec les consignes » (`js/guide.js`), aide en images à chaque étape des assistants.
 
 Pièges : toute écriture REST depuis le widget doit porter `X-Requested-With` (sinon 401, vu comme
-une erreur CORS) ; changer une règle d'accès recharge le document, donc le widget. Désactiver un
+une erreur CORS ; un `POST` anonyme en JSON passe sans) ; changer une règle d'accès recharge le document, donc le widget. Désactiver un
 webhook remet à zéro son état d'envoi (`lastSuccessTime` perdu) et Grist ne met rien en file
 pendant la pause : l'heure de pause (plus grande `MajLe`) est notée dans la note. Dans les tests,
 `getByText` de Playwright est insensible à la casse et cherche une sous-chaîne (« En pause »
@@ -194,6 +196,26 @@ les clés vides d'une table reçue (une ligne locale à clé serait effacée par
 A). Les boucles (retour vers le document d'origine, table vers elle-même dans le même document)
 sont refusées (`loopingTables` à « Vérifier », `checkDests` côté CIBLE). Le second saut dépend de
 la page du widget ouverte dans B.
+
+V0.4.3 (audit du 15 octobre) :
+- Les formules de `Synchro` ne nomment que des tables existantes (`refreshFormulas`), sinon une
+  table renommée ou supprimée met toutes les lignes en erreur ; leurs variables sont en minuscules
+  (`tables`, `src`) car un identifiant de table Grist commence par une majuscule. La carte de
+  l'export signale table perdue et colonnes changées (`drift`). `Supprime` part telle quelle,
+  lue par `isTrue` côté CIBLE.
+- Une colonne ajoutée plus tard à l'export prend un nom libre dans une destination existante
+  (`newColumnsMap`). Une table envoyée par ce document ne peut pas être destination
+  (`destExported`) ; `isUserTable` écarte `Synchro`, `Synchro_*` et `Journal_*`.
+- Lien public : `isPublic` vaut vrai, faux ou inconnu (inconnu : rien ne change) ; le refus
+  général n'est posé que si le widget a déjà ses propres règles. L'ancien montage n'efface que
+  les webhooks des anciennes tables ou d'adresse `…/records?flat=1`.
+- Un lot vide part pour une table vide lors d'un renvoi (la CIBLE remet son compte de lignes
+  manquantes à zéro). Les boutons d'une fenêtre sont grisés pendant l'action (pas de doublon sur
+  double clic).
+- Textes : `t()` met une espace insécable avant `: ; ? ! »` et après `«` (modèle seulement, pas
+  les valeurs) et écrit les nombres à la française (séparateur U+202F). Dans les tests, une
+  expression régulière de `getByText` lit le texte brut : `\s` autour de ces signes, `[\d\s]+`
+  pour les nombres ; une chaîne simple normalise les espaces.
 
 Effacer une table efface ses sections, mais pas leurs cases dans `layoutSpec` (repliés compris ;
 les numéros de sections sont réutilisés ensuite) ni le partage de la page (`_grist_Pages.shareRef`

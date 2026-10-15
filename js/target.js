@@ -4,25 +4,26 @@
 // Une table que la SOURCE ajoute à l'export arrive dans le même journal : une fenêtre demande où
 // la ranger.
 import {
-  APPLIED_COL, AUTHOR_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TYPE_COL, buildReply, buildWebhookUrl, copyColumns, expandRows,
-  freeTableId, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, toTableId,
+  APPLIED_COL, AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, buildReply, buildWebhookUrl,
+  copyColumns, expandRows, freeTableId, newColumnsMap, parseFormLink, parseInvitation, planConsolidation, planPull, planPurge, planUnpack,
+  recentChanges, rowsByTable, sentColumns, toTableId,
 } from './core.js';
-import { apply, collapseForms, docIdentity, dropPages, ensureForm, fetchRows, formPages, readSchema } from './grist.js';
+import { apply, collapseForms, docIdentity, dropPages, ensureForm, fetchRows, formPages, readSchema, withLock } from './grist.js';
 import {
-  JOURNAL_PREFIX, addDestColumnsActions, createJournal, destColumns, legacyJournals, prepareDest, readNote, receivedDests, receivedJournals,
-  removeTechnicalTables, upgradeJournal, writeNote,
+  addDestColumnsActions, createJournal, destColumns, isUserTable, legacyJournals, prepareDest, readNote, receivedDests, receivedJournals,
+  removeTechnicalTables, syncRows, upgradeJournal, writeNote,
 } from './tables.js';
-import { confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
+import { confirmDialog, copyButton, copyField, el, errorText, icon, message, openModal, openWizard, pickField, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
-import { t } from './i18n.js';
+import { LANG, t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
 
 const POLL_MS = 10000;
 const HISTORY_MAX = 20;
-// Dernier passage : par journal ({ at, error, text, rows }) et par table reçue (clé
-// `journal|table` : { at, text, error, recent, labelCol, labelCols }) ; tables proposées par
-// journal ([{ table, columns, n }]).
+// Dernier passage : par journal ({ at, rows, missing } ; { at, error, text } en cas d'erreur) et
+// par table reçue (clé `journal|table` : { at, text, table, stats, recent, labelCol, labelCols },
+// ou { at, error, text }) ; tables proposées par journal ([{ table, columns, n }]).
 const results = new Map();
 const offers = new Map();
 let container;
@@ -33,6 +34,8 @@ let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par charg
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
 
 const tableKey = (journal, table) => `${journal}|${table}`;
+// Refus de Grist faute de droits (lecteur) : le widget passe en lecture seule.
+const isAccessError = e => /access|denied|blocked|permission/i.test(e.message);
 
 export function startAutoConsolidation() {
   setInterval(() => { if (document.visibilityState === 'visible') consolidateAll(); }, POLL_MS);
@@ -79,7 +82,7 @@ async function consolidate(schema, { journal, note }) {
     for (const [table, n] of Object.entries(unpack.missing)) if (n > 0) missing[table] = (missing[table] || 0) + n;
     if (JSON.stringify(missing) !== JSON.stringify(note.missing || {})) {
       note = { ...note, missing };
-      await writeNote(schema, journal, note);
+      await updateJournalNote(journal, n => ({ ...n, missing }));
     }
     rows = await fetchRows(journal);
   }
@@ -92,13 +95,21 @@ async function consolidate(schema, { journal, note }) {
   }).filter(o => o.columns.length));
 
   const tables = [];
-  for (const entry of note.tables) {
+  const maps = new Map(); // table -> correspondance complétée de colonnes arrivées après coup
+  for (let entry of note.tables) {
     const tableRows = groups.get(entry.table) || [];
     if (!schema.has(entry.dest)) {
       tables.push({ entry, error: t('error.destMissing', { dest: entry.dest }) });
       continue;
     }
     const sent = sentColumns(tableRows, entry.columns || []);
+    // Colonne ajoutée à l'export après coup : elle ne remplace jamais une colonne de la
+    // destination qui porte déjà son nom (elle prend un nom libre, noté dans la correspondance).
+    const map = newColumnsMap(entry, destColumns(sent), schema.columns(entry.dest).map(c => c.colId));
+    if (map) {
+      entry = { ...entry, map };
+      maps.set(entry.table, map);
+    }
     const added = addDestColumnsActions(schema, entry.dest, sent, entry.map);
     if (added.length) {
       await apply(added);
@@ -111,6 +122,7 @@ async function consolidate(schema, { journal, note }) {
     await apply(actions);
     tables.push({ entry, stats, copyCols });
   }
+  if (maps.size) await updateJournalNote(journal, n => ({ ...n, tables: n.tables.map(tb => (maps.has(tb.table) ? { ...tb, map: maps.get(tb.table) } : tb)) }));
   const after = await fetchRows(journal);
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
   const afterGroups = rowsByTable(expandRows(after));
@@ -128,20 +140,17 @@ function summary(s) {
   return s.added || s.updated || s.removed ? t('recv.result', s) : t('recv.result.none');
 }
 
-// Deux onglets du même navigateur ne consolident pas en même temps (verrou du navigateur) ;
-// entre deux navigateurs, les écritures sont idempotentes.
-async function withLock(fn) {
-  return navigator.locks ? navigator.locks.request('gristsync-consolidation', fn) : fn();
-}
-
-// L'écran n'est redessiné que si un passage a changé quelque chose.
+// Un passage sur tous les journaux. Deux onglets du même navigateur ne consolident pas en même
+// temps (verrou du navigateur) ; entre deux navigateurs, les écritures sont idempotentes.
+// L'écran n'est redessiné que si un passage a changé quelque chose. Rend vrai si c'est le cas,
+// null si un passage était déjà en cours.
 export async function consolidateAll() {
-  if (busy) return;
+  if (busy) return null;
   busy = true;
   let changed = false;
   try {
     await readLastVisit();
-    await withLock(async () => {
+    await withLock('gristsync-consolidation', async () => {
       let schema = await readSchema();
       let upgraded = false;
       for (const { journal } of receivedJournals(schema)) upgraded = (await upgradeJournal(schema, journal)) || upgraded;
@@ -165,17 +174,21 @@ export async function consolidateAll() {
           readOnly = false;
           schema = await readSchema();
         } catch (e) {
-          readOnly = /access|denied|blocked|permission/i.test(e.message);
-          const key = `error.${e.message}`;
-          results.set(journal, { ...before, at, text: t(key) === key ? e.message : t(key), error: true });
+          readOnly = isAccessError(e);
+          results.set(journal, { ...before, at, text: errorText(e), error: true });
           changed ||= !(before && before.error);
         }
       }
     });
+  } catch (e) {
+    // Document illisible (droits, réseau) : la boucle continue, le prochain passage réessaie.
+    if (isAccessError(e)) readOnly = true;
+    console.warn(e);
   } finally {
     busy = false;
   }
   if (changed && container && container.isConnected) await renderTarget();
+  return changed;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -197,16 +210,18 @@ export async function renderTarget(root = container) {
   const groups = await receivedGroups(schema);
   // Formulaire des exports en attente, publié sur la page du widget (une seule clé de partage).
   // Grist recrée alors le cadre du widget : l'assistant se rouvre à l'étape Lien au chargement.
+  const out = el('div', { class: 'out' });
   try {
     for (const group of groups.filter(g => g.waiting)) await ensureForm(group.journal);
   } catch (e) {
-    readOnly = true; // un lecteur ne peut pas publier le formulaire
+    if (isAccessError(e)) readOnly = true; // un lecteur ne peut pas publier le formulaire
+    else out.append(message('err', errorText(e)));
   }
   const legacy = legacyJournals(schema);
-  const out = el('div', { class: 'out' });
+  const sync = async () => { if ((await consolidateAll()) === false) out.replaceChildren(message('ok', t('recv.sync.none'))); };
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: readOnly, onclick: () => receiveWizard() }, icon('plus'), t('recv.new')),
-    el('button', { class: 'btn', type: 'button', disabled: readOnly || !groups.length, onclick: e => run(e.currentTarget, out, () => consolidateAll()) }, icon('refresh'), t('recv.action.sync')));
+    el('button', { class: 'btn', type: 'button', disabled: readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
   const cards = groups.map(syncCard);
   if (legacy.length) cards.push(legacyCard(legacy, out));
   container.replaceChildren(...[toolbar,
@@ -239,11 +254,12 @@ function syncCard(group) {
   const { journal, note } = group;
   const journalResult = results.get(journal) || {};
   const failed = journalResult.error || note.tables.some(tb => (results.get(tableKey(journal, tb.table)) || {}).error);
-  const [status, tone] = group.waiting ? ['waiting', 'pending'] : failed ? ['error', 'err'] : ['ok', 'ok'];
+  const incomplete = Object.keys(note.missing || {}).length > 0;
+  const [status, tone] = group.waiting ? ['waiting', 'pending'] : failed ? ['error', 'err'] : incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
   const line = (entry) => {
     const result = results.get(tableKey(journal, entry.table)) || (journalResult.error ? journalResult : null);
     // Le détail des changements est dans l'historique : la ligne ne garde que l'heure, ou l'erreur.
-    const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString()}${result.error ? ` · ${result.text}` : ''}` : '';
+    const when = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString(LANG)}${result.error ? ` · ${result.text}` : ''}` : '';
     return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${entry.table} → ${entry.dest}${when}`);
   };
   const from = (note.from || {}).email;
@@ -260,9 +276,9 @@ function syncCard(group) {
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
       group.public ? null : el('button', { class: `btn btn-small ${group.waiting ? 'btn-primary' : ''}`, type: 'button', disabled: readOnly, onclick: () => receiveWizard(group) },
-        icon('paste'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
+        icon('link'), t(group.waiting ? 'recv.action.continue' : 'recv.action.link')),
       el('button', { class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly, onclick: () => stopReceiving(group) },
-        icon('trash'), t('recv.action.stop'))));
+        icon('stop'), t('recv.action.stop'))));
 }
 
 // Réceptions d'avant la version 0.4 (un journal par table) : à refaire avec la SOURCE.
@@ -272,7 +288,11 @@ function legacyCard(journals, out) {
     el('p', { class: 'small' }, t('recv.legacy.body', { tables: journals.join(', ') })),
     el('div', { class: 'card-actions' }, el('button', {
       class: 'btn btn-small btn-danger-text', type: 'button', disabled: readOnly,
-      onclick: e => run(e.currentTarget, out, async () => { await removeTechnicalTables(journals); await renderTarget(); }),
+      onclick: e => run(e.currentTarget, out, async () => {
+        if (!(await confirmDialog({ title: t('recv.legacy.title'), body: t('recv.legacy.confirm'), confirmLabel: t('recv.legacy.clean') }))) return;
+        await removeTechnicalTables(journals);
+        await renderTarget();
+      }),
     }, icon('trash'), t('recv.legacy.clean'))));
 }
 
@@ -280,8 +300,7 @@ function legacyCard(journals, out) {
 // de destination et leurs lignes restent.
 async function stopReceiving(group) {
   const ok = await confirmDialog({
-    title: t('recv.stop.title', { name: group.note.name }), body: t('recv.stop.body', { tables: group.journal }),
-    confirmLabel: t('recv.action.stop'), danger: true,
+    title: t('recv.stop.title', { name: group.note.name }), body: t('recv.stop.body', { journal: group.journal }), confirmLabel: t('recv.action.stop'),
   });
   if (!ok) return;
   await removeTechnicalTables([group.journal]);
@@ -306,8 +325,8 @@ function stateCounts(items) {
 function when(at) {
   const date = new Date(at * 1000);
   const today = date.toDateString() === new Date().toDateString();
-  return today ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return today ? date.toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleString(LANG, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function history(group) {
@@ -335,19 +354,20 @@ async function labelDialog(group) {
     const cols = result.labelCols || [];
     return { entry, field: pickField({ items: cols.map(c => ({ value: c, label: c })), value: result.labelCol || cols[0], label: entry.dest }) };
   });
+  const report = el('div', { class: 'report' });
   openModal({
     title: t('recv.label.title'), width: 400,
     body: [el('p', { class: 'small' }, t('recv.label.help')),
-      ...pickers.map(p => el('div', { class: 'dest-row' }, el('span', {}, p.entry.dest), p.field))],
+      ...pickers.map(p => el('div', { class: 'dest-row' }, el('span', {}, p.entry.dest), p.field)), report],
     buttons: [{ label: t('common.cancel') }, {
-      label: t('common.save'), kind: 'btn-primary', onClick: async (m) => {
+      label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, async () => {
         await updateJournalNote(group.journal, note => ({
           ...note, tables: note.tables.map(tb => ({ ...tb, label: (pickers.find(p => p.entry.table === tb.table) || {}).field.value() })),
         }));
         m.close();
         results.clear();
         await consolidateAll();
-      },
+      }),
     }],
   });
 }
@@ -362,7 +382,7 @@ async function updateJournalNote(journal, change) {
 // existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
 
 function destField(schema, table) {
-  const tables = schema.tableIds.filter(id => !id.startsWith(JOURNAL_PREFIX) && id !== SYNC_TABLE && !id.startsWith('Synchro_'));
+  const tables = schema.tableIds.filter(isUserTable);
   const name = el('input', { type: 'text', class: 'input', value: toTableId(table), 'aria-label': t('recv.dest.name', { table }) });
   const field = pickField({
     label: table, value: '',
@@ -376,7 +396,7 @@ function destField(schema, table) {
 // commune qui rattache les lignes déjà là au lieu de les doubler. `read()` rend { map, match }.
 function mappingBlock(schema, table, dest, columns) {
   const destCols = schema.columns(dest).filter(c => !c.isFormula && c.colId !== KEY_COL).map(c => c.colId);
-  const maps = destColumns(columns).filter(c => c.id !== KEY_COL).map(c => ({
+  const maps = destColumns(columns).map(c => ({
     id: c.id,
     field: pickField({
       label: c.id, value: destCols.includes(c.id) ? c.id : '',
@@ -402,12 +422,16 @@ function mappingBlock(schema, table, dest, columns) {
   return { node, read };
 }
 
-// Une destination ne reçoit qu'une table, d'un seul export. Copie dans le même document : une
-// table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]).
+// Une destination ne reçoit qu'une table, d'un seul export, et n'est ni une table du widget, ni
+// une table que ce document envoie lui-même (ses lignes, absentes des listes de la SOURCE, y
+// seraient effacées ; le relais, lui, reçoit d'abord puis envoie). Copie dans le même document :
+// une table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]).
 async function checkDests(schema, plans, fromDocId) {
   const taken = receivedDests(schema).map(d => d.dest);
   const dests = plans.map(p => p.dest);
-  if (new Set(dests).size !== dests.length || dests.some(d => taken.includes(d) || d.startsWith(JOURNAL_PREFIX))) throw new Error('destTaken');
+  if (new Set(dests).size !== dests.length || dests.some(d => taken.includes(d) || !isUserTable(d))) throw new Error('destTaken');
+  const sent = new Set((await syncRows(schema)).map(r => r[TABLE_COL]));
+  if (dests.some(d => sent.has(d))) throw new Error('destExported');
   if (fromDocId && fromDocId === (await docIdentity()).docId && plans.some(p => p.dest === p.table)) throw new Error('loop');
 }
 
@@ -422,7 +446,8 @@ async function offerDialog(group, offer) {
   const step = el('div', { class: 'form' });
   const accept = async (entry, m) => {
     await prepareDest({ dest: entry.dest, columns: offer.columns, map: entry.map });
-    await updateJournalNote(group.journal, note => ({ ...note, tables: [...note.tables, entry] }));
+    // Deux éditeurs qui rangent la même table : la première réponse compte.
+    await updateJournalNote(group.journal, note => (note.tables.some(tb => tb.table === entry.table) ? note : { ...note, tables: [...note.tables, entry] }));
     m.close();
     await consolidateAll();
     await renderTarget();
@@ -448,6 +473,7 @@ async function offerDialog(group, offer) {
   const buttons = [
     { label: t('common.later') },
     { label: t('recv.offer.refuse'), kind: 'btn-danger-text', onClick: m => run(null, report, async () => {
+      if (!(await confirmDialog({ title: t('recv.offer.refuseTitle', { table: offer.table }), body: t('recv.offer.refuseBody'), confirmLabel: t('recv.offer.refuse') }))) return;
       await updateJournalNote(group.journal, note => ({ ...note, refused: [...(note.refused || []), offer.table] }));
       m.close();
       await consolidateAll();
@@ -465,11 +491,8 @@ async function offerDialog(group, offer) {
 const STEP = { code: 0, dest: 1, link: 2, reply: 3 };
 
 function receiveWizard(group = null) {
-  const wizard = openWizard({
-    title: group ? group.note.name : t('recv.new'),
-    steps: ['recv.step.code', 'recv.step.dest', 'recv.step.link', 'recv.step.reply'].map(k => t(k)),
-    onClose: () => renderTarget(),
-  });
+  const steps = ['recv.step.code', 'recv.step.dest', 'recv.step.link', 'recv.step.reply'].map(k => t(k));
+  const wizard = openWizard({ title: group ? group.note.name : t('recv.new'), steps, onClose: () => renderTarget() });
   const cancel = { label: t('common.cancel') };
   if (group) return showLink(group);
   return showCode();
@@ -501,10 +524,11 @@ function receiveWizard(group = null) {
       return create(invitation, plans);
     };
     wizard.show(STEP.dest, [
-      message('ok', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
+      message('info', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
       from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
-      el('label', {}, t('recv.dest')),
+      el('p', { class: 'field-title' }, t('recv.dest')),
       ...rows.map(r => el('div', { class: 'dest-row' }, el('span', {}, `${r.tb.table} →`), r.pick.node)),
+      message('info', t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
       report, stepHelp(['t-dest']), roleGuide({ you: 'target', current: 1 }),
     ], [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
   }
@@ -535,7 +559,8 @@ function receiveWizard(group = null) {
     for (const p of plans) await prepareDest({ dest: p.dest, columns: p.tb.columns, map: p.map });
     await createJournal(journal, note);
     if (invitation.mode === 'public') {
-      wizard.show(STEP.reply, [message('ok', t('recv.public.done')), roleGuide({ you: 'target', mode: 'public', current: 1 })], [{ label: t('common.close'), kind: 'btn-primary' }]);
+      wizard.setSteps(steps.slice(0, 2));
+      wizard.show(STEP.link, [message('ok', t('recv.public.done')), roleGuide({ you: 'target', mode: 'public', current: 1 })], [{ label: t('common.close'), kind: 'btn-primary' }]);
       consolidateAll();
       return;
     }
@@ -574,7 +599,8 @@ function receiveWizard(group = null) {
 }
 
 // Envoie une ligne vide par la clé, comme le fera le webhook (le nettoyage du journal l'efface) :
-// valide d'un coup la clé, la publication, le nom de la table et `?flat=1`.
+// valide d'un coup la clé, la publication, le nom de la table et `?flat=1`. Écriture anonyme
+// en JSON : l'en-tête Content-Type suffit à Grist (pas besoin de X-Requested-With).
 async function testUrl(url) {
   let response;
   try {

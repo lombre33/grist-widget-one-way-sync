@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
   sentColumns, compareVersion, copyColumns, chunkMark, keysCount, majleAction, missingFormula, rowsSince, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
-  parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
+  newColumnsMap, parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
 
@@ -152,17 +152,28 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.deepEqual(syncColumns([]).map(c => c.id),
     ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Etat', 'Sync_Par']);
   const { keys, lot } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
-  assert.match(keys, /D = \{"Contacts": Contacts, "Villes": Villes\}\nT = D\.get\(\$Synchro_Table\)/);
+  assert.match(keys, /tables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
   assert.match(keys, /^if \$Synchro_Type != "cles": return ""/);
-  assert.match(keys, /return "ids:" \+ " "\.join\(k for k in T\.all\.id_sync if k\)/);
-  assert.match(lot, /D = \{"Contacts": Contacts, "Villes": Villes\}/);
+  assert.match(keys, /return "ids:" \+ " "\.join\(k for k in src\.all\.id_sync if k\)/);
+  assert.match(lot, /tables = \{"Contacts": Contacts, "Villes": Villes\}/);
+  // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
+  // les masque pas.
+  assert.doesNotMatch(lot, /\b[A-Z] = /);
   assert.match(lot, /timedelta\(seconds=5\)/);
-  assert.match(lot, /mine = \[r\.Synchro_Table for r in Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\) if r\.Synchro_Table in D\]/);
-  assert.match(lot, /budget = max\(20000, min\(250000, \(950000 - 40 \* sum\(len\(D\[t\]\.all\) for t in mine\)\) \/\/ max\(1, len\(mine\)\)\)\)/,
+  assert.match(lot, /mine = \[r\.Synchro_Table for r in Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\) if r\.Synchro_Table in tables\]/);
+  assert.match(lot, /budget = max\(20000, min\(250000, \(950000 - 40 \* sum\(len\(tables\[t\]\.all\) for t in mine\)\) \/\/ max\(1, len\(mine\)\)\)\)/,
     'les lots d\'un export se partagent ce que leurs listes des clés laissent');
   assert.match(lot, /size > budget: break/);
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
-  assert.match(syncFormulas([]).keys, /D = \{\}\nT = D\.get/);
+  assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
+  assert.match(syncFormulas([]).keys, /tables = \{\}\nsrc = tables\.get/);
+});
+
+test('colonne ajoutée à l\'export après coup : jamais sur une colonne de la destination', () => {
+  const entry = { columns: [{ id: 'Nom' }], map: { Ville: 'Commune' } };
+  assert.equal(newColumnsMap(entry, [{ id: 'Nom' }, { id: 'Ville' }], ['Nom', 'Commune']), null);
+  assert.deepEqual(newColumnsMap(entry, [{ id: 'Nom' }, { id: 'Note' }, { id: 'Tel' }], ['Nom', 'Commune', 'Note', 'Note_2']),
+    { Ville: 'Commune', Note: 'Note_3', Tel: 'Tel' });
 });
 
 test('envoi coupé : une marque de déclenchement sur le lot, nommée comme une colonne des journaux', () => {
@@ -310,7 +321,7 @@ test('préparation de la SOURCE : colonnes manquantes et clés des lignes exista
 });
 
 test('invitation : aller-retour, plusieurs tables, refus des codes invalides', () => {
-  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville é' }];
+  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville é' }, { id: 'Vu', type: 'DateTime:Europe/Paris', label: 'Vu' }];
   const id = '0123456789abcdef';
   const exportId = 'fedcba9876543210';
   const code = buildInvitation({ id, exportId, name: 'Annuaire', secret: SECRET, origin: 'https://g.fr', tables: [{ table: 'Contacts', columns }, { table: 'Villes', columns }] });
@@ -319,6 +330,7 @@ test('invitation : aller-retour, plusieurs tables, refus des codes invalides', (
   assert.equal(inv.export, exportId);
   assert.deepEqual(inv.tables.map(tb => tb.table), ['Contacts', 'Villes']);
   assert.deepEqual(inv.tables[0].columns[1], { id: 'Ville', type: 'Text', label: 'Ville é' });
+  assert.equal(inv.tables[0].columns[2].type, 'DateTime:Europe/Paris', 'une date à fuseau passe');
   assert.equal(parseInvitation(buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).secret, '');
   assert.throws(() => parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, 'sans export');
   assert.throws(() => parseInvitation('bonjour'), /codeFormat/);

@@ -3,6 +3,10 @@
 // copier, liste avec recherche.
 import { t } from './i18n.js';
 
+// Recherche sans accents ni majuscules : chaque mot tapé doit se trouver dans le libellé.
+const fold = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const matches = (label, query) => fold(query).split(/\s+/).filter(Boolean).every(w => fold(label).includes(w));
+
 // el('button', {class: 'btn', onclick: fn}, 'Texte') ; les enfants texte passent par textContent.
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -48,13 +52,26 @@ export function openModal({ title, body, buttons = [], width = 480, onClose }) {
       if (opener && opener.focus) opener.focus();
       if (onClose) onClose(result);
     },
+    // Un clic à la fois : les boutons restent grisés tant que l'action tourne (un double clic
+    // brancherait deux fois le même destinataire).
     setButtons(list) {
       footer.replaceChildren(...list.map(b => el('button', {
         class: `btn ${b.kind || ''}`, type: 'button', disabled: b.disabled,
-        onclick: () => (b.onClick ? b.onClick(modal) : modal.close()),
+        onclick: e => (b.onClick ? busy(e.currentTarget, () => b.onClick(modal)) : modal.close()),
       }, b.label)));
     },
   };
+  async function busy(clicked, fn) {
+    const all = [...footer.children];
+    const before = all.map(b => b.disabled);
+    for (const b of all) b.disabled = true;
+    try {
+      await fn();
+    } finally {
+      all.forEach((b, i) => { b.disabled = before[i]; });
+      if (clicked.isConnected && !frame.contains(document.activeElement)) clicked.focus();
+    }
+  }
   modal.setButtons(buttons.length ? buttons : [{ label: t('common.close') }]);
   stack.push(modal);
   document.body.append(scrim);
@@ -67,7 +84,8 @@ document.addEventListener('keydown', (event) => {
   if (!modal) return;
   if (event.key === 'Escape') { event.preventDefault(); modal.close(false); return; }
   if (event.key !== 'Tab') return;
-  const focusable = [...modal.frame.querySelectorAll('button, input, textarea, select, [tabindex="0"]')].filter(n => !n.disabled);
+  const focusable = [...modal.frame.querySelectorAll('button, input, textarea, select, summary, [tabindex="0"]')]
+    .filter(n => !n.disabled && n.getClientRects().length);
   if (!focusable.length) return;
   const first = focusable[0], last = focusable[focusable.length - 1];
   const inside = modal.frame.contains(document.activeElement);
@@ -77,6 +95,7 @@ document.addEventListener('keydown', (event) => {
 
 // Assistant : une seule fenêtre, des étapes numérotées qui se débloquent l'une après l'autre.
 // `show(index, body, buttons)` affiche une étape ; les précédentes sont marquées faites.
+// `buttons(list)` change les boutons seuls ; `setSteps(labels)` raccourcit le parcours (lien public).
 export function openWizard({ title, steps, onClose }) {
   const bar = el('ol', { class: 'steps' });
   const content = el('div', { class: 'form' });
@@ -84,10 +103,12 @@ export function openWizard({ title, steps, onClose }) {
   let shown = -1;
   return {
     close: () => modal.close(),
+    buttons: list => modal.setButtons(list),
+    setSteps(labels) { steps = labels; },
     show(index, body, buttons) {
       bar.replaceChildren(...steps.map((label, i) => el('li', {
         class: i < index ? 'done' : i === index ? 'current' : 'locked', 'aria-current': i === index ? 'step' : null,
-      }, el('span', { class: 'step-num', 'aria-hidden': 'true' }, i < index ? '✓' : String(i + 1)), label)));
+      }, el('span', { class: 'step-num', 'aria-hidden': 'true' }, i < index ? icon('check') : String(i + 1)), label)));
       content.replaceChildren(...[body].flat().filter(Boolean));
       modal.setButtons(buttons);
       if (index === shown) return; // même étape redessinée : le focus reste où il est
@@ -98,25 +119,25 @@ export function openWizard({ title, steps, onClose }) {
   };
 }
 
-// Confirmation : promesse d'un booléen. Une action destructrice met le focus sur Annuler.
-export function confirmDialog({ title, body, confirmLabel, cancelLabel = t('common.cancel'), danger = false }) {
+// Confirmation d'une action destructrice : promesse d'un booléen, focus sur Annuler.
+export function confirmDialog({ title, body, confirmLabel }) {
   return new Promise((resolve) => {
     let answered = false;
     const modal = openModal({
       title, body: el('p', {}, body), width: 400,
       onClose: () => { if (!answered) resolve(false); },
       buttons: [
-        { label: cancelLabel, onClick: m => { answered = true; resolve(false); m.close(); } },
-        { label: confirmLabel, kind: danger ? 'btn-danger' : 'btn-primary', onClick: m => { answered = true; resolve(true); m.close(); } },
+        { label: t('common.cancel'), onClick: m => { answered = true; resolve(false); m.close(); } },
+        { label: confirmLabel, kind: 'btn-danger', onClick: m => { answered = true; resolve(true); m.close(); } },
       ],
     });
-    if (danger) modal.footer.querySelector('button').focus();
+    modal.footer.querySelector('button').focus();
   });
 }
 
 // Code en lecture seule avec bouton « Copier ».
-export function copyField(value) {
-  const area = el('textarea', { class: 'code', readonly: true, rows: 3, spellcheck: 'false' });
+export function copyField(value, label = t('common.code')) {
+  const area = el('textarea', { class: 'code', readonly: true, rows: 3, spellcheck: 'false', 'aria-label': label });
   area.value = value;
   return el('div', { class: 'copy-field' }, area, copyButton(() => value, t('common.copy'), () => area.select()));
 }
@@ -132,21 +153,21 @@ export function copyButton(text, label, onFail = () => {}) {
   return button;
 }
 
-// Liste à cocher, filtrable au clavier (tables, colonnes). `checked` : valeurs cochées au départ.
-// `onChange` reçoit les valeurs cochées, dans l'ordre de la liste.
-export function checkList({ items, checked = [], placeholder = t('common.filter'), onChange }) {
-  const filter = el('input', { class: 'search-input', type: 'search', placeholder, 'aria-label': placeholder, autocomplete: 'off' });
-  const list = el('div', { class: 'check-list', role: 'group' });
+// Liste à cocher, filtrable au clavier (tables, colonnes). `items` : [{ value, label, hint }]
+// (`hint` : type de la colonne, en discret). `checked` : valeurs cochées au départ. `onChange`
+// reçoit les valeurs cochées, dans l'ordre de la liste. `label` nomme la liste.
+export function checkList({ items, checked = [], label = '', onChange }) {
+  const name = label ? t('common.filterIn', { name: label }) : t('common.filter');
+  const filter = el('input', { class: 'search-input', type: 'search', placeholder: t('common.filter'), 'aria-label': name, autocomplete: 'off' });
+  const list = el('div', { class: 'check-list', role: 'group', 'aria-label': label || null });
   const chosen = new Set(checked);
-  const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const render = () => {
-    const words = fold(filter.value).split(/\s+/).filter(Boolean);
-    const found = items.filter(it => words.every(w => fold(it.label).includes(w)));
+    const found = items.filter(it => matches(it.label, filter.value));
     list.replaceChildren(...(found.length ? found.map(it => el('label', {},
       el('input', {
         type: 'checkbox', checked: chosen.has(it.value),
         onchange: (e) => { if (e.target.checked) chosen.add(it.value); else chosen.delete(it.value); onChange(items.map(i => i.value).filter(v => chosen.has(v))); },
-      }), it.label)) : [el('p', { class: 'muted small' }, t('common.none'))]));
+      }), it.label, it.hint ? el('span', { class: 'hint' }, it.hint) : null)) : [el('p', { class: 'muted small' }, t('common.none'))]));
   };
   filter.addEventListener('input', render);
   render();
@@ -157,27 +178,27 @@ export function checkList({ items, checked = [], placeholder = t('common.filter'
 // et ouvre la liste sous lui. `items` : [{ value, label }]. Échap referme la liste seule.
 export function pickField({ items, value, label, onChange = () => {} }) {
   let current = value;
-  const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  const button = el('button', { class: 'btn pick-button', type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-label': label });
+  const button = el('button', { class: 'btn pick-button', type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' });
   const filter = el('input', { class: 'search-input', type: 'search', placeholder: t('common.filter'), 'aria-label': t('common.filter'), autocomplete: 'off' });
   const list = el('div', { class: 'check-list', role: 'listbox', 'aria-label': label });
   const panel = el('div', { class: 'pick-panel hidden' }, filter, list);
   const field = el('div', { class: 'pick-field' }, button, panel);
-  const shown = () => (items.find(it => it.value === current) || items[0]).label;
+  const shown = () => (items.find(it => it.value === current) || items[0] || { label: t('common.choose') }).label;
+  // Le bouton dit le choix ; son nom accessible dit aussi le champ.
+  const showChoice = () => { button.textContent = shown(); button.setAttribute('aria-label', `${label} : ${shown()}`); };
   const toggle = (open) => {
     panel.classList.toggle('hidden', !open);
     button.setAttribute('aria-expanded', String(open));
     if (open) { filter.value = ''; render(); filter.focus(); } else button.focus();
   };
-  const choose = (v) => { current = v; button.textContent = shown(); toggle(false); onChange(v); };
+  const choose = (v) => { current = v; showChoice(); toggle(false); onChange(v); };
   function render() {
-    const words = fold(filter.value).split(/\s+/).filter(Boolean);
-    const found = items.filter(it => words.every(w => fold(it.label).includes(w)));
+    const found = items.filter(it => matches(it.label, filter.value));
     list.replaceChildren(...(found.length ? found.map(it => el('button', {
       class: 'pick-option', type: 'button', role: 'option', 'aria-selected': String(it.value === current), onclick: () => choose(it.value),
     }, it.label)) : [el('p', { class: 'muted small' }, t('common.none'))]));
   }
-  button.textContent = shown();
+  showChoice();
   button.addEventListener('click', () => toggle(panel.classList.contains('hidden')));
   filter.addEventListener('input', render);
   field.addEventListener('keydown', (e) => {
@@ -188,6 +209,13 @@ export function pickField({ items, value, label, onChange = () => {} }) {
   return field;
 }
 
+// Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`), sinon une phrase
+// générique avec le détail technique.
+export function errorText(e) {
+  const key = `error.${e.message}`;
+  return t(key) === key ? t('error.generic', { detail: e.message || String(e) }) : t(key);
+}
+
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
 export async function run(button, out, fn) {
@@ -196,10 +224,8 @@ export async function run(button, out, fn) {
   try {
     return await fn();
   } catch (e) {
-    const key = `error.${e.message}`;
-    const text = t(key) === key ? e.message || String(e) : t(key);
     console.error(e);
-    if (out) out.replaceChildren(message('err', text));
+    if (out) out.replaceChildren(message('err', errorText(e)));
     return undefined;
   } finally {
     if (button) button.disabled = false;

@@ -3,9 +3,10 @@
 import { GRIST_ORIGINS, VERSION } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
+import { SYNC_TABLE } from './core.js';
 import { readSchema } from './grist.js';
-import { SYNC_TABLE, legacyJournals, legacyTables, receivedJournals } from './tables.js';
-import { copyField, el, message, openModal } from './ui.js';
+import { legacyJournals, legacyTables, receivedJournals } from './tables.js';
+import { copyField, el, errorText, message, openModal } from './ui.js';
 import { roleGuide, widgetAddress } from './guide.js';
 import { tutorialView } from './tutorial.js';
 import { renderSource, startAutoCatchUp } from './source.js';
@@ -24,7 +25,7 @@ function loadPluginApi() {
   return new Promise((resolve, reject) => {
     const script = el('script', { src: `${origin}/grist-plugin-api.js` });
     script.onload = resolve;
-    script.onerror = () => reject(new Error(`${origin}/grist-plugin-api.js`));
+    script.onerror = () => reject(new Error(origin));
     document.head.append(script);
   });
 }
@@ -33,9 +34,12 @@ function showScreen(...nodes) {
   $('main').replaceChildren(...nodes.filter(Boolean));
 }
 
-function showStartProblem(text, withAddress) {
-  $('tabs').classList.add('hidden');
-  showScreen(message('warn', text), withAddress ? copyField(widgetAddress()) : null);
+// Démarrage impossible : ce qu'il faut faire, l'adresse du widget (hors de Grist) ou un bouton
+// pour recharger. Les onglets restent visibles, grisés.
+function showStartProblem(text, { withAddress = false, reload = false } = {}) {
+  for (const button of document.querySelectorAll('[data-tab]')) button.disabled = true;
+  showScreen(message('warn', text), withAddress ? copyField(widgetAddress()) : null,
+    reload ? el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, t('start.reload')) : null);
 }
 
 async function select(tab) {
@@ -43,7 +47,13 @@ async function select(tab) {
   const view = el('div', { class: 'view' });
   showScreen(view);
   if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(widgetAddress()))));
-  await (tab === 'send' ? renderSource(view) : renderTarget(view));
+  try {
+    await (tab === 'send' ? renderSource(view) : renderTarget(view));
+  } catch (e) {
+    console.error(e);
+    view.replaceChildren(message('err', errorText(e)));
+  }
+  return undefined;
 }
 
 function showHome() {
@@ -56,18 +66,29 @@ function showHome() {
 }
 
 function openSettings() {
-  const radios = (name, values, current, onPick) => el('div', { class: 'radios', role: 'radiogroup' }, values.map(([value, label]) =>
-    el('label', {}, el('input', { type: 'radio', name, value, checked: value === current, onchange: () => onPick(value) }), label)));
+  const radios = (name, title, values, current, onPick) => el('div', { class: 'radios', role: 'radiogroup', 'aria-label': title }, values.map(([value, label]) =>
+    el('label', {}, el('input', { type: 'radio', name, value, checked: value === current, onchange: e => onPick(value, e.target) }), label)));
+  const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
+  const credits = [
+    [t('settings.credits.author'), 'Grist Factory'],
+    [t('settings.credits.site'), link('https://grist-factory.fr', 'grist-factory.fr')],
+    [t('settings.credits.license'), link('https://www.gnu.org/licenses/gpl-3.0.html', 'GNU GPL v3.0')],
+    [t('settings.credits.version'), VERSION],
+  ];
   openModal({
     title: t('settings.title'), width: 400,
     body: el('div', { class: 'form' },
       el('h3', {}, t('settings.lang')),
-      radios('lang', [['fr', 'Français'], ['en', 'English']], LANG, (lang) => { if (writePref('lang', lang)) location.reload(); }),
+      // Langue non retenue (stockage refusé) : le choix revient à la langue en cours.
+      radios('lang', t('settings.lang'), [['fr', 'Français'], ['en', 'English']], LANG, (lang, input) => {
+        if (writePref('lang', lang)) location.reload();
+        else { input.checked = false; document.querySelector(`input[name="lang"][value="${LANG}"]`).checked = true; }
+      }),
       el('h3', {}, t('settings.theme')),
-      radios('theme', [['system', t('settings.theme.system')], ['light', t('settings.theme.light')], ['dark', t('settings.theme.dark')]],
+      radios('theme', t('settings.theme'), [['system', t('settings.theme.system')], ['light', t('settings.theme.light')], ['dark', t('settings.theme.dark')]],
         readPref('theme') || 'system', (theme) => { writePref('theme', theme); applyTheme(); }),
       el('h3', {}, t('settings.credits')),
-      el('p', { class: 'small' }, t('settings.credits.text', { version: VERSION }))),
+      el('dl', { class: 'fiche small' }, credits.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]))),
   });
 }
 
@@ -77,17 +98,18 @@ async function start() {
   $('settings').addEventListener('click', openSettings);
   for (const button of document.querySelectorAll('[data-tab]')) button.addEventListener('click', () => select(button.dataset.tab));
 
-  if (window.parent === window) return showStartProblem(t('start.outside'), true);
+  if (window.parent === window) return showStartProblem(t('start.outside'), { withAddress: true });
   try {
     await loadPluginApi();
   } catch (e) {
-    return showStartProblem(t('error.generic', { detail: e.message }), false);
+    return showStartProblem(t('start.network', { origin: e.message }), { reload: true });
   }
   grist.ready({ requiredAccess: 'full' });
+  // Sans accès complet, Grist refuse la lecture ; sans réponse du tout, Grist est injoignable.
   try {
     await Promise.race([grist.docApi.fetchTable('_grist_Tables'), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000))]);
   } catch (e) {
-    return showStartProblem(t('start.access'), false);
+    return e.message === 'timeout' ? showStartProblem(t('start.slow'), { reload: true }) : showStartProblem(t('start.access'));
   }
 
   startAutoConsolidation();

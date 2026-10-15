@@ -10,19 +10,21 @@
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
-  RESEND_COL, SCHEMA_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, exportRowsActions, majleAction, syncColumns, syncFormulas,
+  STATE_COL, SYNC_TABLE, TABLE_COL, exportRowsActions, exportTables, majleAction, syncColumns, syncFormulas,
 } from './core.js';
 import { apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages } from './grist.js';
 
-export { JOURNAL_PREFIX, SYNC_TABLE };
+// Tables de la personne, que l'on peut envoyer ou choisir comme destination : pas celles du widget.
+export const isUserTable = id => id !== SYNC_TABLE && !id.startsWith('Synchro_') && !id.startsWith(JOURNAL_PREFIX);
 
 // ---------------------------------------------------------------------------------------------
 // SOURCE
 
-export const syncRows = async () => ((await readSchema()).has(SYNC_TABLE) ? fetchRows(SYNC_TABLE) : []);
+// Lignes de Synchro ([] sans la table). `schema` : instantané déjà lu, s'il y en a un.
+export const syncRows = async (schema = null) => ((schema || await readSchema()).has(SYNC_TABLE) ? fetchRows(SYNC_TABLE) : []);
 
 // Note de la table Synchro : { exports: [{ id, name, at, public }], invitations: [{ id, export,
-// hash, at }], pauses: [{ hook, at }] }.
+// hash, at }], pauses: [{ hook, export, at, columns }] }.
 const exportColumn = schema => (schema.columns(SYNC_TABLE) || []).find(c => c.colId === EXPORT_COL);
 
 export function readSourceNote(schema) {
@@ -37,21 +39,25 @@ export async function writeSourceNote(note) {
 }
 
 // Les formules de Synchro nomment les tables qu'elles lisent : réécrites quand l'ensemble change.
+// Une table renommée ou effacée dans la SOURCE n'y figure plus (la carte de l'export le signale) :
+// son nom inconnu mettrait en erreur les lignes de tous les exports.
 async function refreshFormulas(schema, rows) {
-  const { keys, lot } = syncFormulas(rows.map(r => r[TABLE_COL]));
+  const { keys, lot } = syncFormulas(rows.map(r => r[TABLE_COL]).filter(table => schema.has(table)));
   const cols = schema.columns(SYNC_TABLE);
   const actions = [[LIST_COL, keys], [LOT_COL, lot]]
     .filter(([colId, formula]) => (cols.find(c => c.colId === colId) || {}).formula !== formula)
     .map(([colId, formula]) => ['ModifyColumn', SYNC_TABLE, colId, { formula }]);
   await apply(actions);
+  return actions.length > 0;
 }
 
 // Table Synchro à jour : une colonne ajoutée par une version suivante du widget est créée, la
 // marque d'envoi coupé surveille le lot (dépendance posée après coup : Grist la refuse à la
-// création), et les formules sont celles de cette version.
-export async function ensureSyncTable() {
+// création), et les formules sont celles de cette version, pour les tables de `rows` (lignes de
+// Synchro, ou à venir). Rend vrai si quelque chose a changé.
+export async function ensureSyncTable(rows = null) {
   let schema = await readSchema();
-  if (!schema.has(SYNC_TABLE)) return;
+  if (!schema.has(SYNC_TABLE)) return false;
   const have = new Set(schema.columns(SYNC_TABLE).map(c => c.colId));
   const missing = syncColumns([]).filter(c => !have.has(c.id));
   if (missing.length) {
@@ -62,41 +68,40 @@ export async function ensureSyncTable() {
   const lot = cols.find(c => c.colId === LOT_COL);
   const watch = cols.find(c => c.colId === MISSING_COL);
   const deps = ['L', lot.id];
-  if (JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps)) {
-    await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
-  }
-  await refreshFormulas(schema, await syncRows());
+  const depsChanged = JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps);
+  if (depsChanged) await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
+  const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
+  return missing.length > 0 || depsChanged || formulasChanged;
 }
 
 // MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction).
-export async function refreshMajLe(rows = null) {
+// Rend vrai si quelque chose a changé.
+export async function refreshMajLe() {
   const schema = await readSchema();
-  const sent = new Map();
-  for (const row of rows || await syncRows()) {
-    let cols = [];
-    try { cols = JSON.parse(row[SCHEMA_COL] || '[]') || []; } catch (e) { /* colonnes illisibles */ }
-    sent.set(row[TABLE_COL], new Set([...(sent.get(row[TABLE_COL]) || []), ...cols.map(c => c.id)]));
+  const rows = await syncRows(schema);
+  const sent = new Map(); // table -> colonnes envoyées par l'un de ses exports
+  for (const id of new Set(rows.map(r => r[EXPORT_COL]))) {
+    for (const { table, columns } of exportTables(rows, id)) sent.set(table, new Set([...(sent.get(table) || []), ...columns.map(c => c.id)]));
   }
-  await apply([...sent].filter(([table]) => schema.has(table)).map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean));
+  const actions = [...sent].filter(([table]) => schema.has(table)).map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean);
+  await apply(actions);
+  return actions.length > 0;
 }
 
 // Enregistre les tables et colonnes d'un export (`tables` : [{ table, columns }]). Crée la table
 // Synchro au premier export. Rend les tables dont les lignes sont à envoyer (nouvelles ou aux
 // colonnes changées).
 export async function saveExport(exportId, tables, { isPublic = false } = {}) {
-  let schema = await readSchema();
-  if (!schema.has(SYNC_TABLE)) {
+  if (!(await readSchema()).has(SYNC_TABLE)) {
     await apply([['AddTable', SYNC_TABLE, syncColumns(tables.map(tb => tb.table))]]);
     await dropPages([SYNC_TABLE]);
-    schema = await readSchema();
   }
-  await ensureSyncTable();
   const before = await fetchRows(SYNC_TABLE);
   const { actions, changed } = exportRowsActions(before, exportId, tables, { isPublic });
   // Les formules d'abord quand une table s'ajoute (elles doivent pouvoir la lire), après quand une
   // table s'en va (elles ne la lisent plus quand ses lignes disparaissent).
   const all = [...before.filter(r => r[EXPORT_COL] !== exportId), ...tables.map(tb => ({ [TABLE_COL]: tb.table }))];
-  await refreshFormulas(schema, [...before, ...all]);
+  await ensureSyncTable([...before, ...all]);
   await apply(actions);
   await refreshFormulas(await readSchema(), all);
   await refreshMajLe();
@@ -115,20 +120,15 @@ export async function removeExport(exportId) {
   await refreshFormulas(await readSchema(), left);
 }
 
-// Renvoi : écrit `values` (texte de Synchro_Renvoi, voir resendValue, ou champs à écrire) dans les
-// lignes de ces types d'un export pour une table.
-export async function writeResend(exportId, table, kinds, values) {
-  const rows = (await syncRows()).filter(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && kinds.includes(r[TYPE_COL]));
-  const fields = typeof values === 'string' ? { [RESEND_COL]: values } : values;
-  await apply(rows.length ? [['BulkUpdateRecord', SYNC_TABLE, rows.map(r => r.id), Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, rows.map(() => v)]))]] : []);
-  return rows;
-}
+// Écrit les mêmes champs dans des lignes de Synchro (renvoi, marque d'envoi coupé).
+export const writeSync = (ids, fields) => apply(ids.length
+  ? [['BulkUpdateRecord', SYNC_TABLE, ids, Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, ids.map(() => v)]))]] : []);
 
 // Montage d'avant la version 0.4 : une vue d'export et une table liste par table envoyée, et la
 // page Synchro_Exports. Ces tables sont reconnues à leur nom et à leur colonne Synchro_Ids.
 export const legacyTables = schema => [
   ...schema.tableIds.filter(id => id.startsWith('Synchro_') && (schema.columns(id) || []).some(c => c.colId === LIST_COL && c.isFormula)),
-  ...schema.tableIds.flatMap(id => [`${id}_summary_${KEY_COL}`]).filter(id => schema.has(id)),
+  ...schema.tableIds.map(id => `${id}_summary_${KEY_COL}`).filter(id => schema.has(id)),
 ];
 
 export async function removeLegacy(schema) {
@@ -166,8 +166,10 @@ export function receivedJournals(schema) {
 }
 
 // Journaux d'avant la version 0.4 (un par table reçue) : à refaire.
-export const legacyJournals = schema => schema.tableIds.filter(id => id.startsWith(JOURNAL_PREFIX) && (schema.columns(id) || []).some(c => c.colId === LIST_COL))
-  .filter(id => !receivedJournals(schema).some(r => r.journal === id));
+export function legacyJournals(schema) {
+  const current = new Set(receivedJournals(schema).map(r => r.journal));
+  return schema.tableIds.filter(id => id.startsWith(JOURNAL_PREFIX) && !current.has(id) && (schema.columns(id) || []).some(c => c.colId === LIST_COL));
+}
 
 // Tables reçues ici, avec le document qui les envoie : pour refuser les boucles et repérer un relais.
 export const receivedDests = schema => receivedJournals(schema)

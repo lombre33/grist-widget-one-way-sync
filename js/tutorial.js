@@ -224,7 +224,7 @@ export function tutorialView(address) {
 }
 
 // Aide en images pour une étape d'assistant : les sections `ids`, repliées.
-export function stepHelp(ids, open = false) {
+export function stepHelp(ids) {
   const chosen = SECTIONS.filter(s => ids.includes(s.id));
-  return el('details', { class: 'guide tuto-step', open }, el('summary', {}, t('tuto.step')), chosen.map(s => section(s)));
+  return el('details', { class: 'guide tuto-step' }, el('summary', {}, t('tuto.step')), chosen.map(s => section(s)));
 }

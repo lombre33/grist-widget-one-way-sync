@@ -59,8 +59,9 @@ code. Pour un usage en production :
 | `GET <document SOURCE>` | onglet Envoyer, à chaque affichage : le document est-il lisible par lien public ? | aucune (requête anonyme) |
 | `GET <document SOURCE>/tables/Synchro/records?filter=…` | onglet Recevoir, mode lien public seulement, toutes les 10 s page ouverte : les lignes `complet` de l'export | aucune (requête anonyme) |
 
-Les écritures REST portent l'en-tête `X-Requested-With`, exigé par Grist contre les requêtes
-forgées.
+Les écritures REST sur les webhooks portent l'en-tête `X-Requested-With`, exigé par Grist contre
+les requêtes forgées. L'essai du lien (« Tester le lien ») est un `POST` anonyme en JSON, que
+Grist accepte sans cet en-tête.
 
 Tout le reste passe par l'API des widgets (`grist.docApi`, messages entre le cadre et Grist), avec
 les droits de la personne connectée.
@@ -107,8 +108,10 @@ les droits de la personne connectée.
   `/api/s/<clé>/tables/<table>/records?flat=1` (écriture par clé de formulaire, rien d'autre),
   sans identifiant dans l'adresse ; le code de réponse doit porter le secret d'une invitation en
   attente de ce document.
-- **Invitation et réponse** : l'invitation contient un identifiant, celui de l'export, son nom, le
-  nom des tables et de leurs colonnes envoyées (en mode lien public, l'adresse REST du document SOURCE, réécrite et contrôlée
+- **Invitation et réponse** : l'invitation contient un identifiant, celui de l'export, son nom,
+  l'adresse de l'instance SOURCE, l'e-mail de la personne qui a créé l'export (calculé par Grist)
+  et l'identifiant du document SOURCE (affichés sur la carte de la CIBLE, et utiles pour refuser une boucle), le nom des tables
+  et de leurs colonnes envoyées (en mode lien public, l'adresse REST du document SOURCE, réécrite et contrôlée
   à la lecture : même instance que la CIBLE), et, si la case est cochée, un secret aléatoire de 128 bits. La SOURCE ne garde que
   l'empreinte SHA-256 du secret, dans la description de la colonne `Synchro_Export` de `Synchro`
   (métadonnée lisible par les personnes qui voient le document) ; la CIBLE garde le secret dans la
@@ -122,7 +125,9 @@ les droits de la personne connectée.
   webhooks eux-mêmes (le mémo garde la fiche), visibles par les propriétaires dans les paramètres
   du document. Le widget n'écrit rien dans `Synchro` à part ses lignes, `Synchro_Renvoi` (numéros
   des lignes à renvoyer) et `Sync_Etat` (avancement d'un renvoi) : un renvoi ne modifie jamais les tables de
-  la personne. Dans ces tables, il ne touche qu'aux réglages de `MajLe` (colonnes qu'elle suit).
+  la personne. Dans ces tables, il ajoute `id_sync` et `MajLe` quand une table entre dans un
+  export, remplit alors les `id_sync` vides, puis ne touche plus qu'aux réglages de `MajLe`
+  (colonnes qu'elle suit).
 
 ## La clé du formulaire de réception
 

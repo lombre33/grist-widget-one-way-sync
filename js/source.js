@@ -3,38 +3,34 @@
 // destinataire, filtré par Grist sur les lignes de son export. Les exports, les invitations en
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
-  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MAX_ROWS, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL, SYNC_TABLE,
-  TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, exportCondition, exportTables, exportableColumns, fillKeyActions, hookName, isPublicRule, keysCount, loopingTables,
-  maskKey, missingSyncColumns, parseLot, parseReply, prepareSourceActions, publicAclActions, publicAclRules, resendValue, rowsSince,
+  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MAX_ROWS, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL,
+  SYNC_TABLE, TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, exportCondition, exportTables, exportableColumns,
+  fillKeyActions, hookName, isPublicRule, keysCount, loopingTables, maskKey, missingSyncColumns, parseLot, parseReply, prepareSourceActions,
+  publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, fetchRows, listWebhooks, readSchema, renameWebhook, setWebhookEnabled,
-  webhookConditions,
+  webhookConditions, withLock,
 } from './grist.js';
 import {
-  JOURNAL_PREFIX, ensureSyncTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
-  writeResend, writeSourceNote,
+  ensureSyncTable, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
+  writeSourceNote, writeSync,
 } from './tables.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
 import { stepHelp } from './tutorial.js';
-import { LANG, t } from './i18n.js';
+import { LANG, t, typeName } from './i18n.js';
 
 const now = () => Date.now() / 1000;
-const count = n => n.toLocaleString(LANG);
+const dateText = ms => new Date(ms).toLocaleString(LANG);
+const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
 // Tables trop grandes pour la synchro (voir MAX_ROWS), d'après leur liste des clés.
 const tooBigTables = rows => rows.filter(r => r[TYPE_COL] === KIND.keys && keysCount(r[LIST_COL]) > MAX_ROWS).map(r => r[TABLE_COL]);
-const randomHex = bytes => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, '0')).join('');
-
-async function sha256(text) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// Tables que l'on peut envoyer : celles de la personne, pas celles du widget.
-const isUserTable = id => id !== SYNC_TABLE && !id.startsWith('Synchro_') && !id.startsWith(JOURNAL_PREFIX);
+// Destinataires d'un export : les webhooks sur Synchro dont la condition nomme cet export.
+const hooksOf = (hooks, conditions, exportId) => hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === exportId);
 
 let container;
+let notice = null; // message à montrer au prochain affichage (fin d'un renvoi)
 
 // ---------------------------------------------------------------------------------------------
 // État du document : exports (note + lignes Synchro), destinataires (webhooks sur Synchro, rangés
@@ -46,23 +42,42 @@ async function loadState() {
   try { hooks = await listWebhooks(); } catch (e) { if (e.message !== 'ownerOnly') throw e; ownerOnly = true; }
   const conditions = ownerOnly ? new Map() : await webhookConditions();
   const schema = await readSchema();
-  const rows = await syncRows();
+  const rows = await syncRows(schema);
   const note = readSourceNote(schema);
-  const exportOf = h => conditionExport(conditions.get(h.id));
-  const syncHooks = hooks.filter(h => h.fields.tableId === SYNC_TABLE);
   const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])];
   const exports = ids.map((id) => {
     const meta = note.exports.find(e => e.id === id) || { id, name: id };
-    const recipients = syncHooks.filter(h => exportOf(h) === id);
+    const recipients = hooksOf(hooks, conditions, id);
+    const tables = exportTables(rows, id);
     return {
-      ...meta, tables: exportTables(rows, id), recipients, invitations: note.invitations.filter(i => i.export === id),
+      ...meta, tables, recipients, invitations: note.invitations.filter(i => i.export === id),
       email: (rows.find(r => r[EXPORT_COL] === id) || {})[AUTHOR_COL] || '',
       partial: recipients.some(h => h.fields.enabled) && rows.some(r => r[EXPORT_COL] === id && r[MISSING_COL] > 0),
-      tooBig: [...new Set(tooBigTables(rows.filter(r => r[EXPORT_COL] === id)))],
+      tooBig: tooBigTables(rows.filter(r => r[EXPORT_COL] === id)),
+      ...drift(schema, tables),
     };
   });
-  const legacy = { tables: legacyTables(schema), hooks: hooks.filter(h => h.fields.tableId !== SYNC_TABLE) };
-  return { ownerOnly, schema, note, exports, unsafe: syncHooks.filter(h => !exportOf(h)), legacy };
+  const legacy = legacyTables(schema);
+  // Webhooks de l'ancien montage : sur ses tables, ou vers un journal par une clé de formulaire.
+  // Les autres webhooks du document (autres outils) ne sont pas à lui.
+  const legacyHooks = hooks.filter(h => h.fields.tableId !== SYNC_TABLE && (legacy.includes(h.fields.tableId) || /\/api\/s\/[^/]+\/tables\/[^/]+\/records\?flat=1$/.test(h.fields.url || '')));
+  const unsafe = hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id)));
+  return { ownerOnly, schema, note, exports, unsafe, legacy: { tables: legacy, hooks: legacyHooks } };
+}
+
+// Ce que la SOURCE a changé depuis l'enregistrement de l'export : tables introuvables (renommées
+// ou effacées : leurs lignes ne partent plus) et colonnes renommées, effacées ou d'un autre type
+// (elles partiraient vides ou fausses). « Modifier » remet l'export d'accord avec les tables.
+function drift(schema, tables) {
+  const lost = tables.filter(tb => !schema.has(tb.table)).map(tb => tb.table);
+  const changed = tables.filter(tb => schema.has(tb.table)).flatMap(({ table, columns }) => {
+    const now = new Map(exportableColumns(schema.columns(table)).map(c => [c.id, c]));
+    return columns.filter((c) => {
+      const cur = now.get(c.id);
+      return !cur || cur.source !== (c.source || c.type) || (cur.visible || '') !== (c.visible || '');
+    }).map(c => `${table}.${c.id}`);
+  });
+  return { lost, changed };
 }
 
 async function updateNote(change) {
@@ -71,20 +86,30 @@ async function updateNote(change) {
   await writeSourceNote(note);
 }
 
-// Lien public : le document est-il lisible sans identifiant ? (requête anonyme)
+// Lien public : le document est-il lisible sans identifiant ? (requête anonyme) Vrai, faux, ou
+// null quand la réponse ne permet pas de le dire (réseau, serveur occupé) : rien ne change alors.
 async function isPublic(base) {
-  try { return (await fetch(base, { credentials: 'omit' })).ok; } catch (e) { return false; }
+  try {
+    const response = await fetch(base, { credentials: 'omit' });
+    if (response.ok) return true;
+    return [401, 403, 404].includes(response.status) ? false : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Règles d'accès du lien public, accordées aux exports partagés : réécrites seulement si elles
 // diffèrent (changer une règle fait recharger le document, et donc le widget). Le refus général
-// reste tant que le document est public.
+// posé par le widget reste tant que le document est public ; le widget n'en pose jamais un sur un
+// document qu'il n'a pas partagé lui-même (un document public sans export public reste lisible).
 async function syncPublicRules(exportIds, open) {
   const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
+  const mine = rules.filter(isPublicRule);
+  const keepDeny = open && mine.length > 0;
   const name = id => (resources.find(r => r.id === id) || {}).tableId;
-  const have = rules.filter(isPublicRule).map(r => `${name(r.resource)}|${r.aclFormula}|${r.permissionsText}|${r.memo}`).sort().join('\n');
-  const want = publicAclRules(exportIds, { keepDeny: open }).map(r => `${r.tableId}|${r.aclFormula}|${r.permissionsText}|${PUBLIC_MEMO}`).sort().join('\n');
-  if (have !== want) await apply(publicAclActions(resources, rules, exportIds, { keepDeny: open }));
+  const have = mine.map(r => `${name(r.resource)}|${r.aclFormula}|${r.permissionsText}|${r.memo}`).sort().join('\n');
+  const want = publicAclRules(exportIds, { keepDeny }).map(r => `${r.tableId}|${r.aclFormula}|${r.permissionsText}|${PUBLIC_MEMO}`).sort().join('\n');
+  if (have !== want) await apply(publicAclActions(resources, rules, exportIds, { keepDeny }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -96,21 +121,22 @@ export async function renderSource(root = container) {
   // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
   // rattrapage d'un envoi coupé.
   if (!state.ownerOnly && state.schema.has(SYNC_TABLE)) {
-    await ensureSyncTable();
-    await refreshMajLe();
-    state = await loadState();
+    const upgraded = await ensureSyncTable();
+    const majle = await refreshMajLe();
+    if (upgraded || majle) state = await loadState();
     catchUp();
   }
   // Document lisible par lien public ? Vérifié à chaque affichage : tant qu'il l'est, le refus
   // général posé par le widget reste en place, même sans export public.
-  const open = await isPublic((await grist.docApi.getAccessToken({ readOnly: true })).baseUrl);
-  if (!state.ownerOnly) await syncPublicRules(state.exports.filter(e => e.public).map(e => e.id), open);
+  const open = await isPublic((await docIdentity()).baseUrl);
+  if (!state.ownerOnly && open !== null) await syncPublicRules(state.exports.filter(e => e.public).map(e => e.id), open);
 
-  const out = el('div', { class: 'out' });
+  const out = el('div', { class: 'out' }, notice);
+  notice = null;
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly, onclick: () => exportWizard() }, icon('plus'), t('send.new')));
   const cards = state.exports.map(exp => exportCard(exp, state, open, out));
-  if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, out));
+  if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
   if (state.legacy.tables.length) cards.push(legacyCard(state, out));
   container.replaceChildren(...[toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
@@ -119,9 +145,10 @@ export async function renderSource(root = container) {
     roleGuide({ you: 'source', open: !cards.length })].filter(Boolean));
 }
 
-function actionButton(label, iconName, fn, ownerOnly, out, kind = '') {
+// Bouton d'une carte : grisé pour qui n'est pas propriétaire, ou avec la raison (`reason`).
+function actionButton(label, iconName, fn, ownerOnly, out, { kind = '', reason = '' } = {}) {
   return el('button', {
-    class: `btn btn-small ${kind}`, type: 'button', disabled: ownerOnly,
+    class: `btn btn-small ${kind}`, type: 'button', disabled: ownerOnly || Boolean(reason), title: reason || null,
     onclick: e => run(e.currentTarget, out, async () => { await fn(); await renderSource(); }),
   }, icon(iconName), label);
 }
@@ -134,9 +161,17 @@ function hookStatus(h) {
   return ['retrying', 'error'].includes(u.status) || u.lastHttpStatus >= 400 ? ['error', 'err'] : ['active', 'ok'];
 }
 
+// Erreur d'envoi d'un destinataire, dite simplement, et ce qu'il faut faire.
+function hookError(u) {
+  const status = u.lastHttpStatus || (u.lastEventBatch || {}).httpStatus;
+  if (status === 413) return t('send.error.size');
+  if (/Invalid column/i.test(u.lastErrorMessage || '')) return t('send.error.column');
+  return t([401, 403, 404].includes(status) ? 'send.error.link' : 'send.error.other');
+}
+
 function exportCard(exp, state, open, out) {
   const { ownerOnly } = state;
-  const action = (label, iconName, fn, kind) => actionButton(label, iconName, fn, ownerOnly, out, kind);
+  const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const n = exp.recipients.length;
   const failing = exp.recipients.some(h => hookStatus(h)[0] === 'error');
   const [status, tone] = failing ? ['error', 'err'] : n || exp.public ? ['people', 'ok'] : exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
@@ -145,44 +180,51 @@ function exportCard(exp, state, open, out) {
     ...exp.invitations.map(inv => inviteRow(exp, inv, ownerOnly, out)),
     exp.public ? publicRow(exp, open, ownerOnly, out) : null,
   ].filter(Boolean);
+  const load = async () => {
+    const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
+    notice = message('ok', t('send.load.done', { n: total }));
+  };
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, exp.tables.map(tb => t('send.export.table', { table: tb.table, n: tb.columns.length })).join(' · ') || '—'),
-    exp.tooBig.length ? message('warn', t('send.export.tooBig', { tables: exp.tooBig.join(', '), max: count(MAX_ROWS) })) : null,
-    exp.partial && n ? message('info', t('send.export.partial')) : null,
+    exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
+    exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
+    exp.tooBig.length ? message('warn', t('send.export.tooBig', { tables: exp.tooBig.join(', '), max: MAX_ROWS })) : null,
+    exp.partial ? message('info', t('send.export.partial')) : null,
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => recipientWizard(exp) }, icon('plus'), t('send.action.addPerson')),
       el('button', { class: 'btn btn-small', type: 'button', disabled: ownerOnly, onclick: () => exportWizard(exp) }, icon('edit'), t('send.action.edit')),
-      n ? action(t('send.action.load'), 'send', () => resendTables(exp.id, exp.tables.map(tb => tb.table), out)) : null,
-      action(t('send.action.delete'), 'trash', () => deleteExport(exp), 'btn-danger-text')));
+      action(t('send.action.load'), 'send', load, { reason: n ? '' : t('send.load.nobody') }),
+      action(t('send.action.delete'), 'trash', () => deleteExport(exp), { kind: 'btn-danger-text' })));
 }
 
 // Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul.
 function personRow(exp, h, ownerOnly, out) {
   const [status, tone] = hookStatus(h);
   const u = h.usage || {};
-  const action = (label, iconName, fn, kind) => actionButton(label, iconName, fn, ownerOnly, out, kind);
+  const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), pill(status, tone)),
-    u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: new Date(u.lastSuccessTime).toLocaleString() })) : null,
+    u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
-    status === 'error' && u.lastErrorMessage ? el('p', { class: 'small text-danger' }, `${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) : null,
+    status === 'error' ? el('p', { class: 'small text-danger' }, hookError(u)) : null,
+    status === 'error' && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: `${u.lastHttpStatus || ''} ${u.lastErrorMessage}` })) : null,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out))
         : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
       status === 'error' ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
-      action(t('send.action.revoke'), 'trash', () => revoke(exp, h), 'btn-danger-text')));
+      action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
 }
 
 function inviteRow(exp, inv, ownerOnly, out) {
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },
-      el('span', { class: 'person-who' }, t('send.invite.pending', { at: new Date(inv.at * 1000).toLocaleString() })), pill('invited', 'pending')),
+      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), pill('invited', 'pending')),
     el('p', { class: 'muted small' }, inv.hash ? t('send.secret.on') : t('send.secret.off')),
     el('div', { class: 'person-actions' },
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => recipientWizard(exp, inv) }, icon('paste'), t('send.reply')),
-      actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
+      actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, { kind: 'btn-danger-text' })));
 }
 
 // Lien public : pas de webhook, la CIBLE lit elle-même les instantanés de l'export.
@@ -191,17 +233,18 @@ function publicRow(exp, open, ownerOnly, out) {
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, t('send.public.label')), pill(open ? 'public' : 'publicOff', open ? 'ok' : 'pending')),
     open ? null : el('p', { class: 'small' }, t('send.public.turnOn')),
     el('div', { class: 'person-actions' },
-      actionButton(t('send.public.code'), 'copy', () => showPublicCode(exp), ownerOnly, out),
-      actionButton(t('send.public.stop'), 'trash', () => stopPublic(exp), ownerOnly, out, 'btn-danger-text')));
+      actionButton(t('send.public.code'), 'key', () => showPublicCode(exp), ownerOnly, out),
+      actionButton(t('send.public.stop'), 'unlink', () => stopPublic(exp), ownerOnly, out, { kind: 'btn-danger-text' })));
 }
 
-function unsafeCard(hooks, out) {
+function unsafeCard(hooks, ownerOnly, out) {
   return el('article', { class: 'card' },
     el('div', { class: 'card-head' }, el('strong', {}, t('send.unsafe.title')), pill('error', 'err')),
     el('p', { class: 'small' }, t('send.unsafe.body', { who: hooks.map(h => h.fields.memo || h.fields.name).join(', ') })),
     el('div', { class: 'card-actions' }, actionButton(t('send.unsafe.delete'), 'trash', async () => {
+      if (!(await confirmDialog({ title: t('send.unsafe.title'), body: t('send.unsafe.confirm'), confirmLabel: t('send.unsafe.delete') }))) return;
       for (const h of hooks) await deleteWebhook(h.id);
-    }, false, out, 'btn-danger-text')));
+    }, ownerOnly, out, { kind: 'btn-danger-text' })));
 }
 
 // Montage d'avant la version 0.4 : à refaire avec un export ; le bouton efface l'ancien.
@@ -210,11 +253,10 @@ function legacyCard(state, out) {
     el('div', { class: 'card-head' }, el('strong', {}, t('send.legacy.title')), pill('legacy', 'pending')),
     el('p', { class: 'small' }, t('send.legacy.body', { tables: state.legacy.tables.join(', ') })),
     el('div', { class: 'card-actions' }, actionButton(t('send.legacy.clean'), 'trash', async () => {
-      const ok = await confirmDialog({ title: t('send.legacy.title'), body: t('send.legacy.confirm'), confirmLabel: t('send.legacy.clean'), danger: true });
-      if (!ok) return;
+      if (!(await confirmDialog({ title: t('send.legacy.title'), body: t('send.legacy.confirm'), confirmLabel: t('send.legacy.clean') }))) return;
       for (const h of state.legacy.hooks) await deleteWebhook(h.id);
       await removeLegacy(await readSchema());
-    }, state.ownerOnly, out, 'btn-danger-text')));
+    }, state.ownerOnly, out, { kind: 'btn-danger-text' })));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -224,7 +266,8 @@ function legacyCard(state, out) {
 // il ne peut donc pas dire depuis quand il ne livre plus. On note la plus récente MajLe des tables
 // de l'export (heure du serveur, sans écart d'horloge avec le navigateur) et leurs colonnes.
 async function pause(exp, h) {
-  const at = Math.max(0, ...(await Promise.all(exp.tables.map(tb => fetchRows(tb.table)))).flat().map(r => r[ORDER_COL] || 0));
+  let at = 0;
+  for (const { table } of exp.tables) for (const r of await fetchRows(table)) at = Math.max(at, r[ORDER_COL] || 0);
   await updateNote((note) => {
     note.pauses = note.pauses.filter(p => p.hook !== h.id).concat([{ hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }]);
   });
@@ -243,14 +286,15 @@ async function resume(exp, h, out) {
   for (const { table } of exp.tables) n += rowsSince(await fetchRows(table), since).length;
   const choice = (value, label, help, checked) => [el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'gristsync-resume', value, checked }), el('strong', {}, label)), el('p', { class: 'muted small choice-help' }, help)];
-  const body = el('div', { class: 'form', role: 'radiogroup' },
+  const title = t('send.resume.title', { name: h.fields.memo || exp.name });
+  const body = el('div', { class: 'form', role: 'radiogroup', 'aria-label': title },
     choice('catchup', t('send.resume.catchup'), [t('send.resume.catchup.help', { n }), all ? t('send.resume.all') : ''].filter(Boolean).join(' '), true),
     choice('as-is', t('send.resume.asIs'), t('send.resume.asIs.help'), false));
   const picked = await new Promise((resolve) => {
     let answered = false;
     const done = (m, value) => { answered = true; resolve(value); m.close(); };
     openModal({
-      title: t('send.resume.title', { name: h.fields.memo || exp.name }), body,
+      title, body,
       onClose: () => { if (!answered) resolve(null); },
       buttons: [{ label: t('common.cancel'), onClick: m => done(m, null) },
         { label: t('send.action.resume'), kind: 'btn-primary', onClick: m => done(m, body.querySelector('input:checked').value) }],
@@ -258,36 +302,43 @@ async function resume(exp, h, out) {
   });
   if (!picked) return;
   await setWebhookEnabled(h.id, true);
-  if (picked === 'catchup') await resendTables(exp.id, exp.tables.map(tb => tb.table), out, since);
   await updateNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
+  // Le renvoi pose sa marque avant tout : s'il s'interrompt, le rattrapage automatique le finit.
+  if (picked === 'catchup') await resendTables(exp.id, exp.tables.map(tb => tb.table), out, since);
 }
 
 // Révoquer une personne : son webhook disparaît, les autres destinataires continuent.
 async function revoke(exp, h) {
-  const ok = await confirmDialog({
-    title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body: t('send.revoke.body'), confirmLabel: t('send.action.revoke'), danger: true,
-  });
+  const ok = await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body: t('send.revoke.body'), confirmLabel: t('send.action.revoke') });
   if (!ok) return;
   await deleteWebhook(h.id);
   await updateNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
 }
 
 async function cancelInvitation(inv) {
-  const ok = await confirmDialog({ title: t('send.cancel.title'), body: t('send.cancel.body'), confirmLabel: t('send.action.cancel'), danger: true });
+  const ok = await confirmDialog({ title: t('send.cancel.title'), body: t('send.cancel.body'), confirmLabel: t('send.action.cancel') });
   if (ok) await updateNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
 }
 
+// Débloquer : la file de Grist est commune au document, la vider abandonne les envois en attente
+// de tous les destinataires. Les lots des exports servis sont marqués à renvoyer en entier : le
+// rattrapage les renvoie ensuite.
 async function unblockQueue() {
-  const ok = await confirmDialog({ title: t('send.unblock.title'), body: t('send.unblock.body'), confirmLabel: t('send.action.unblock'), danger: true });
-  if (ok) await clearWebhookQueue();
+  const ok = await confirmDialog({ title: t('send.unblock.title'), body: t('send.unblock.body'), confirmLabel: t('send.action.unblock') });
+  if (ok) await clearAndMark();
+}
+
+async function clearAndMark() {
+  await clearWebhookQueue();
+  const [rows, hooks, conditions] = await Promise.all([syncRows(), listWebhooks(), webhookConditions()]);
+  const lots = rows.filter(r => r[TYPE_COL] === KIND.lot && hooksOf(hooks, conditions, r[EXPORT_COL]).some(h => h.fields.enabled)).map(r => r.id);
+  await writeSync(lots, { [MISSING_COL]: RESEND_ALL });
 }
 
 // Supprimer un export : ses destinataires sont coupés, ses lignes Synchro effacées (la table
 // disparaît avec le dernier export). Les colonnes id_sync et MajLe restent dans les tables.
 async function deleteExport(exp) {
-  const ok = await confirmDialog({
-    title: t('send.delete.title', { name: exp.name }), body: t('send.delete.body', { n: exp.recipients.length }), confirmLabel: t('send.action.delete'), danger: true,
-  });
+  const ok = await confirmDialog({ title: t('send.delete.title', { name: exp.name }), body: t('send.delete.body', { n: exp.recipients.length }), confirmLabel: t('send.action.delete') });
   if (!ok) return;
   for (const h of exp.recipients) await deleteWebhook(h.id);
   await updateNote((note) => {
@@ -302,7 +353,7 @@ async function deleteExport(exp) {
 // Lien public
 
 async function publicCode(exp) {
-  const [{ origin, docId }, { baseUrl }] = await Promise.all([docIdentity(), grist.docApi.getAccessToken({ readOnly: true })]);
+  const { origin, docId, baseUrl } = await docIdentity();
   return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables });
 }
 
@@ -319,7 +370,7 @@ async function showPublicCode(exp) {
 // Couper le lien public d'un export : ses instantanés disparaissent, les règles d'accès suivent au
 // prochain affichage. Tant que le document reste public, le refus général reste en place.
 async function stopPublic(exp) {
-  const ok = await confirmDialog({ title: t('send.public.stopTitle', { name: exp.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.public.stop'), danger: true });
+  const ok = await confirmDialog({ title: t('send.public.stopTitle', { name: exp.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.public.stop') });
   if (!ok) return;
   await updateNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: false } : e)); });
   await saveExport(exp.id, exp.tables, { isPublic: false });
@@ -330,44 +381,54 @@ async function stopPublic(exp) {
 // tranches, puis de sa liste des clés. Rien n'est modifié dans les tables : le widget écrit les
 // lignes voulues dans Synchro_Renvoi et Grist recalcule le lot. La tranche suivante attend que les
 // destinataires aient tout reçu (un envoi reste sous la limite de taille de Grist) ; une tranche
-// trop grosse pour un lot est coupée en deux. Chaque tranche part avec la marque du lot
-// (MISSING_COL, voir chunkMark) : une page fermée en cours de route, le rattrapage reprend à la
-// prochaine ouverture. Une marque déjà plus ancienne l'emporte. Rend le nombre de lignes renvoyées.
-// Un renvoi à la fois, tous onglets confondus.
-const withResendLock = fn => (navigator.locks ? navigator.locks.request('gristsync-resend', fn) : fn());
-const resendTables = (exportId, tables, out, since = RESEND_ALL) => withResendLock(() => resendLocked(exportId, tables, out, since));
-const lotRow = async (exportId, table) => (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && r[TYPE_COL] === KIND.lot);
+// trop grosse pour un lot est coupée en deux. Le renvoi est reprenable : la marque du lot
+// (MISSING_COL, voir chunkMark) est posée avant la première tranche et avance avec chacune ; une
+// page fermée en cours de route, le rattrapage reprend à la prochaine ouverture. Une marque déjà
+// plus ancienne l'emporte. Rend le nombre de lignes renvoyées. Un renvoi à la fois, tous onglets
+// confondus.
+const resendTables = (exportId, tables, out, since = RESEND_ALL) => withLock('gristsync-resend', () => resendLocked(exportId, tables, out, since));
 
 async function resendLocked(exportId, tables, out, since) {
-  const hookIds = await exportHookIds(exportId);
+  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
+  const hookIds = hooksOf(hooks, conditions, exportId).filter(h => h.fields.enabled).map(h => h.id);
   if (!hookIds.length) return 0;
+  const rowsOf = async (table, kind) => (await fetchRows(SYNC_TABLE)).filter(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && r[TYPE_COL] === kind);
   const plans = [];
   for (const table of tables) {
-    const mark = ((await lotRow(exportId, table)) || {})[MISSING_COL];
-    const start = mark > 0 ? Math.min(mark, since) : since;
-    plans.push({ table, start, rows: rowsSince(await fetchRows(table), start) });
+    const [lot] = await rowsOf(table, KIND.lot);
+    if (!lot || !(await readSchema()).has(table)) continue; // table retirée ou introuvable : la carte le dit
+    const start = lot[MISSING_COL] > 0 ? Math.min(lot[MISSING_COL], since) : since;
+    await writeSync([lot.id], { [MISSING_COL]: start });
+    plans.push({ table, lot: lot.id, start, rows: rowsSince(await fetchRows(table), start) });
   }
   const total = plans.reduce((n, p) => n + p.rows.length, 0);
   let done = 0;
-  for (const { table, start, rows } of plans) {
-    const queue = chunk(rows, RESEND_CHUNK);
+  const progress = () => {
+    if (!out) return;
+    out.replaceChildren(message('info', t('send.load.progress', { done, total })));
+    out.scrollIntoView({ block: 'nearest' });
+  };
+  for (const { table, lot, start, rows } of plans) {
+    // Une table sans ligne à renvoyer part quand même en lot de renvoi (vide) : la CIBLE remet à
+    // zéro son compte de lignes non arrivées.
+    const queue = rows.length ? chunk(rows, RESEND_CHUNK) : [[]];
     while (queue.length) {
       const part = queue.shift();
       await waitForQueue(hookIds);
-      await writeResend(exportId, table, [KIND.lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id)), [MISSING_COL]: chunkMark(part, start) });
-      const lot = parseLot(((await lotRow(exportId, table)) || {})[LOT_COL]);
-      if (lot && lot.total > lot.lines.length && part.length > 1) {
+      await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id)), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
+      const now = parseLot(((await fetchRows(SYNC_TABLE)).find(r => r.id === lot) || {})[LOT_COL]);
+      if (now && now.total > now.lines.length && part.length > 1) {
         queue.unshift(part.slice(0, part.length / 2), part.slice(part.length / 2));
         continue;
       }
       done += part.length;
-      if (out) out.replaceChildren(message('info', t('send.load.progress', { done, total })));
+      progress();
     }
     await waitForQueue(hookIds);
     // Marque effacée à part : écrite avec le lot ordinaire, elle cacherait un nouvel envoi coupé.
-    await writeResend(exportId, table, [KIND.lot], { [MISSING_COL]: 0 });
-    await writeResend(exportId, table, [KIND.lot], '');
-    await writeResend(exportId, table, [KIND.keys], resendValue(randomHex(4), []));
+    await writeSync([lot], { [MISSING_COL]: 0 });
+    await writeSync([lot], { [RESEND_COL]: '' });
+    await writeSync((await rowsOf(table, KIND.keys)).map(r => r.id), { [RESEND_COL]: resendValue(randomHex(4), []) });
   }
   if (out) out.replaceChildren();
   return total;
@@ -382,36 +443,29 @@ async function resendLocked(exportId, tables, out, since) {
 //  - Lot marqué (envoi coupé par un gros changement ou une référence très utilisée renommée,
 //    renvoi interrompu, file vidée) : ses lignes depuis la marque repartent. Export sans
 //    destinataire : marque effacée (un destinataire ajouté reçoit tout). Destinataires tous en
-//    pause : marque gardée pour après la reprise.
-// Lot refusé pour sa taille. L'état d'un webhook est remis à zéro quand la file est vidée, mais un
-// envoi en vol peut encore y écrire son échec : seul compte l'envoi que Grist retente.
-const tooLarge = (h) => {
-  const u = h.usage || {};
-  return ['retrying', 'postponed'].includes(u.status) && (u.lastEventBatch || {}).httpStatus === 413;
-};
+//    pause : marque gardée pour après la reprise. File bloquée par un autre échec (lien de
+//    réception mort) : rien ne part tant que la carte le signale, renvoyer ne ferait qu'attendre.
 let catching = false;
 let notOwner = false;
 let repairedAt = 0;
-export async function catchUp() {
+async function catchUp() {
   if (catching || notOwner) return;
   catching = true;
   try {
-    const done = await withResendLock(async () => {
+    const done = await withLock('gristsync-resend', async () => {
       if (!(await readSchema()).has(SYNC_TABLE)) return 0;
       let rows = await syncRows();
       const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-      const ofExport = id => hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === id);
       if (hooks.some(tooLarge) && Date.now() - repairedAt > 600000 && !tooBigTables(rows).length) {
         repairedAt = Date.now();
-        await clearWebhookQueue();
-        const lots = rows.filter(r => r[TYPE_COL] === KIND.lot && ofExport(r[EXPORT_COL]).some(h => h.fields.enabled)).map(r => r.id);
-        await apply(lots.length ? [['BulkUpdateRecord', SYNC_TABLE, lots, { [MISSING_COL]: lots.map(() => RESEND_ALL) }]] : []);
+        await clearAndMark();
         rows = await syncRows();
       }
+      if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) return 0;
       const late = rows.filter(r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0);
       for (const row of late) {
-        const mine = ofExport(row[EXPORT_COL]);
-        if (!mine.length) await apply([['UpdateRecord', SYNC_TABLE, row.id, { [MISSING_COL]: 0 }]]);
+        const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
+        if (!mine.length) await writeSync([row.id], { [MISSING_COL]: 0 });
         else if (mine.some(h => h.fields.enabled)) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
       }
       return late.length;
@@ -429,9 +483,11 @@ export function startAutoCatchUp() {
   setInterval(catchUp, 10000);
 }
 
-async function exportHookIds(exportId) {
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  return hooks.filter(h => h.fields.tableId === SYNC_TABLE && h.fields.enabled && conditionExport(conditions.get(h.id)) === exportId).map(h => h.id);
+// Lot refusé pour sa taille. L'état d'un webhook est remis à zéro quand la file est vidée, mais un
+// envoi en vol peut encore y écrire son échec : seul compte l'envoi que Grist retente.
+function tooLarge(h) {
+  const u = h.usage || {};
+  return ['retrying', 'postponed'].includes(u.status) && (u.lastEventBatch || {}).httpStatus === 413;
 }
 
 async function waitForQueue(hookIds) {
@@ -459,14 +515,15 @@ function exportWizard(exp = null) {
   const selected = new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []); // table -> colonnes cochées
   showTables();
 
-  // 1. Tables de l'export.
+  // 1. Tables de l'export. Une table introuvable (renommée, effacée) en sort.
   async function showTables() {
     const tables = (await readSchema()).tableIds.filter(isUserTable);
+    chosen = chosen.filter(table => tables.includes(table));
     const report = el('div', { class: 'report' });
     const next = { label: t('common.next'), kind: 'btn-primary', disabled: !chosen.length, onClick: () => run(null, report, () => checkSizes(report)) };
     const body = [el('p', {}, t(exp ? 'send.edit.tables' : 'send.tables.help')), checkList({
-      items: tables.map(id => ({ value: id, label: id })), checked: chosen,
-      onChange: (values) => { chosen = values; next.disabled = !chosen.length; wizard.show(0, body, [cancel, next]); },
+      items: tables.map(id => ({ value: id, label: id })), checked: chosen, label: t('send.step.tables'),
+      onChange: (values) => { chosen = values; next.disabled = !chosen.length; wizard.buttons([cancel, next]); },
     }), report, stepHelp(['s-tables']), exp ? null : roleGuide({ you: 'source', current: 0 })];
     wizard.show(0, body, [cancel, next]);
   }
@@ -476,9 +533,9 @@ function exportWizard(exp = null) {
     const big = [];
     for (const table of chosen) {
       const n = (await fetchRows(table)).length;
-      if (n > MAX_ROWS) big.push(t('send.tables.rows', { table, n: count(n) }));
+      if (n > MAX_ROWS) big.push(t('send.tables.rows', { table, n }));
     }
-    if (big.length) report.replaceChildren(message('err', t('send.tables.tooBig', { tables: big.join(', '), max: count(MAX_ROWS) })));
+    if (big.length) report.replaceChildren(message('err', t('send.tables.tooBig', { tables: big.join(', '), max: MAX_ROWS })));
     else await showColumns();
   }
 
@@ -496,8 +553,8 @@ function exportWizard(exp = null) {
       adds.push(...missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
       return el('div', { class: 'form' }, el('h3', {}, table),
         relays.includes(table) ? message('info', t('send.columns.relay')) : null,
-        checkList({ items: usable.map(c => ({ value: c.id, label: c.label === c.id ? c.id : `${c.label} (${c.id})` })), checked: selected.get(table),
-          onChange: (values) => { selected.set(table, values); } }),
+        checkList({ items: usable.map(c => ({ value: c.id, label: c.label === c.id ? c.id : `${c.label} (${c.id})`, hint: typeName(c.source) })),
+          checked: selected.get(table), label: table, onChange: (values) => { selected.set(table, values); } }),
         blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null);
     });
     if (!schema.has(SYNC_TABLE)) adds.push(t('send.check.sync'));
@@ -505,7 +562,7 @@ function exportWizard(exp = null) {
     wizard.show(1, [el('p', {}, t('send.columns.help')),
       removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
       ...blocks,
-      adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
+      adds.length ? message('info', t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
       { label: t('common.back'), onClick: showTables },
       { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, () => {
         if (chosen.some(table => !(selected.get(table) || []).length)) throw new Error('noColumn');
@@ -515,25 +572,26 @@ function exportWizard(exp = null) {
 
   // 3. Nom, puis création (ou enregistrement) : c'est ici seulement que le widget écrit.
   function showName() {
-    const nameInput = el('input', { type: 'text', class: 'input', value: exp ? exp.name : chosen.join(' + '), 'aria-label': t('send.name') });
+    const nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-export-name', value: exp ? exp.name : chosen.join(' + ') });
     const report = el('div', { class: 'report' });
-    wizard.show(2, [el('label', {}, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')), report], [
+    wizard.show(2, [el('label', { for: 'gristsync-export-name' }, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')), report], [
       { label: t('common.back'), onClick: () => run(null, report, showColumns) },
       { label: exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(nameInput.value.trim() || chosen.join(' + '), report)) }]);
   }
 
   async function save(name, report) {
+    // Un seul instantané suffit : chaque étape ne touche que sa table, et les colonnes que le
+    // widget ajoute (id_sync, MajLe) ne sont pas envoyables.
     const schema = await readSchema();
     const relays = receivedDests(schema).map(d => d.dest);
     const tables = [];
     for (const table of chosen) {
-      await apply(prepareSourceActions(table, missingSyncColumns((await readSchema()).columns(table))));
+      await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
       // Table reçue (relais) : ses lignes gardent la clé de leur document d'origine. Une ligne
       // ajoutée ici à la main reste sans clé, donc locale : avec une clé, la prochaine liste
       // de l'origine, qui ne la connaît pas, l'effacerait.
       if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
-      const columns = exportableColumns((await readSchema()).columns(table)).filter(c => !c.blocked && selected.get(table).includes(c.id));
-      tables.push({ table, columns });
+      tables.push({ table, columns: exportableColumns(schema.columns(table)).filter(c => !c.blocked && selected.get(table).includes(c.id)) });
     }
     const id = exp ? exp.id : randomHex(8);
     const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public) });
@@ -555,37 +613,36 @@ function exportWizard(exp = null) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Assistant d'ajout d'un destinataire : Options, Invitation, Réponse, Envoi. Une invitation en
-// attente le rouvre à l'étape Réponse (`pending`).
+// Assistant d'ajout d'un destinataire : Options, Invitation, Réponse, Envoi (Options et Invitation
+// seulement pour le lien public). Une invitation en attente le rouvre à l'étape Réponse
+// (`pending`).
 
 const STEP = { options: 0, invitation: 1, reply: 2, load: 3 };
 
 function recipientWizard(exp, pending = null) {
-  const wizard = openWizard({
-    title: t('send.person.title', { name: exp.name }),
-    steps: ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k)),
-    onClose: () => renderSource(),
-  });
+  const steps = ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k));
+  const wizard = openWizard({ title: t('send.person.title', { name: exp.name }), steps, onClose: () => renderSource() });
   const cancel = { label: t('common.cancel') };
   if (pending) return showReply(pending);
   return showOptions();
 
-  // 1. Mode (réponse ou lien public) et secret.
+  // 1. Mode (réponse ou lien public) et secret (sans objet pour le lien public : grisé).
   function showOptions() {
     const secretBox = el('input', { type: 'checkbox', checked: true });
     const secretPart = el('div', { class: 'form' }, el('label', { class: 'check' }, secretBox, t('send.secret')), el('p', { class: 'muted small' }, t('send.secret.help')));
     const publicPart = el('div', { class: 'hidden' }, message('warn', t('send.public.warn')));
     const radio = (value, label, checked, disabled) => el('label', { class: 'check' },
       el('input', { type: 'radio', name: 'gristsync-mode', value, checked, disabled, onchange: () => {
-        secretPart.classList.toggle('hidden', value === 'public'); publicPart.classList.toggle('hidden', value !== 'public');
+        secretBox.disabled = value === 'public'; publicPart.classList.toggle('hidden', value !== 'public');
       } }), label);
     const report = el('div', { class: 'report' });
     const mode = () => (document.querySelector('input[name="gristsync-mode"]:checked') || {}).value;
     wizard.show(STEP.options, [
-      message('ok', t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
-      el('label', {}, t('send.mode')),
-      radio('reponse', t('send.mode.reply'), true, false),
-      radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public),
+      message('info', t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
+      el('p', { class: 'field-title', id: 'gristsync-mode-title' }, t('send.mode')),
+      el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-mode-title' },
+        radio('reponse', t('send.mode.reply'), true, false),
+        radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public)),
       secretPart, publicPart, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
     ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(mode() !== 'public' && secretBox.checked, mode() === 'public')) }]);
   }
@@ -597,6 +654,7 @@ function recipientWizard(exp, pending = null) {
       await saveExport(exp.id, exp.tables, { isPublic: true });
       // Les règles d'accès sont posées à la fermeture (le document se recharge alors).
       const code = await publicCode(exp);
+      wizard.setSteps(steps.slice(0, 2));
       wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code),
         message('warn', t('send.public.turnOn')), roleGuide({ you: 'source', mode: 'public', current: 1, open: true }), stepHelp(['public'])],
       [{ label: t('common.close'), kind: 'btn-primary' }]);
@@ -644,22 +702,23 @@ function recipientWizard(exp, pending = null) {
       tableId: SYNC_TABLE, condition: exportCondition(exp.id),
     });
     await updateNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
-    showLoad();
+    await showLoad();
   }
 
   // 4. Envoi : le branchement n'envoie que les modifications à venir ; proposer l'existant.
   async function showLoad() {
-    const count = (await Promise.all(exp.tables.map(tb => fetchRows(tb.table)))).reduce((n, rows) => n + rows.length, 0);
+    let total = 0;
+    for (const { table } of exp.tables) total += (await fetchRows(table)).length;
     const report = el('div', { class: 'report' });
     const send = async () => {
       await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
       wizard.show(STEP.load + 1, message('ok', t('send.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
     };
-    if (!count) {
+    if (!total) {
       wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], [{ label: t('common.close'), kind: 'btn-primary' }]);
       return;
     }
-    wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: count })), report],
+    wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: total })), report],
       [{ label: t('common.later') }, { label: t('send.load.ok'), kind: 'btn-primary', onClick: () => run(null, report, send) }]);
   }
 }

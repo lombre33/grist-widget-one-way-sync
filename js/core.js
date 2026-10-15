@@ -16,7 +16,8 @@ export const SCHEMA_COL = 'Synchro_Colonnes'; // colonnes envoyées : [{ id, typ
 export const JOURNAL_PREFIX = 'Journal_'; // CIBLE : un journal par export reçu
 
 // SOURCE : la seule table technique du widget, quel que soit le nombre d'exports et de tables.
-// Chaque table d'un export y a deux lignes : sa liste des clés et son lot de lignes modifiées.
+// Chaque table d'un export y a deux lignes, sa liste des clés et son lot de lignes modifiées, et
+// une troisième pour un export partagé par lien public (instantané complet).
 export const SYNC_TABLE = 'Synchro';
 export const EXPORT_COL = 'Synchro_Export'; // identifiant de l'export
 export const TABLE_COL = 'Synchro_Table'; // table SOURCE (et, dans le journal, table d'origine d'une ligne)
@@ -44,7 +45,7 @@ export const RESEND_ALL = 1; // marque de renvoi : toute la table, lignes sans M
 
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC2.';
-export const CHUNK = 500; // lignes par action
+const CHUNK = 500; // lignes par action
 
 // ---------------------------------------------------------------------------------------------
 // Utilitaires
@@ -74,6 +75,9 @@ function parseJson(text, fallback = null) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
 
+export const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+export const randomHex = n => toHex(crypto.getRandomValues(new Uint8Array(n)));
+
 const COL_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEX16 = /^[0-9a-f]{16}$/;
 const SECRET = /^[0-9a-f]{32}$/;
@@ -97,25 +101,28 @@ export function freeTableId(base, taken) {
 // ---------------------------------------------------------------------------------------------
 // SOURCE : la table Synchro
 
-// Formules de la table Synchro. Elles nomment en clair les tables qu'elles peuvent lire (`tables`) :
-// le widget les réécrit quand un export gagne ou perd une table.
+// Formules de la table Synchro. Elles nomment en clair les tables qu'elles peuvent lire (`tables`,
+// qui doivent exister : une table inconnue mettrait toutes les lignes en erreur) : le widget les
+// réécrit quand un export gagne ou perd une table. Leurs variables sont en minuscules, comme aucun
+// nom de table Grist.
 //  - Synchro_Ids (lignes 'cles') : la liste des clés, recalculée à chaque ajout ou suppression ;
 //  - Synchro_Lot (lignes 'lot') : les lignes modifiées depuis WINDOW_S secondes et celles
 //    demandées dans Synchro_Renvoi, avec les colonnes de l'export, plafonné à LOT_MAX octets
 //    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes.
 // Une valeur est lue à part : une cellule en erreur part vide sans bloquer les autres. Dates en
 // secondes (format de Grist), Référence par son texte affiché. Un lot coupé dit depuis quand
-// (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste.
+// (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste. `Supprime`
+// part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
 export function syncFormulas(tables) {
   const ids = [...new Set(tables)].filter(id => COL_ID.test(id)).sort();
-  const pick = `D = {${ids.map(id => `"${id}": ${id}`).join(', ')}}\nT = D.get($${TABLE_COL})`;
+  const pick = `tables = {${ids.map(id => `"${id}": ${id}`).join(', ')}}\nsrc = tables.get($${TABLE_COL})`;
   const keys = [
-    `if $${TYPE_COL} != "${KIND.keys}": return ""`, pick, 'if T is None: return ""',
-    `return "${LIST_PREFIX}" + " ".join(k for k in T.all.${KEY_COL} if k)`,
+    `if $${TYPE_COL} != "${KIND.keys}": return ""`, pick, 'if src is None: return ""',
+    `return "${LIST_PREFIX}" + " ".join(k for k in src.all.${KEY_COL} if k)`,
   ].join('\n');
   const lot = [
     'import json, datetime',
-    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}"): return ""`, pick, 'if T is None: return ""',
+    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}"): return ""`, pick, 'if src is None: return ""',
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
     'def v(x):',
     '  if isinstance(x, datetime.datetime): return x.timestamp()',
@@ -131,15 +138,15 @@ export function syncFormulas(tables) {
     '  except Exception:',
     '    return None',
     `again = set(int(i) for i in ($${RESEND_COL} or "").split(":")[-1].split(",") if i.strip().isdigit())`,
-    `rows = [r for r in T.all if r.${KEY_COL}]`,
+    `rows = [r for r in src.all if r.${KEY_COL}]`,
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     `  rows = [r for r in rows if r.id in again or (r.${ORDER_COL} and r.${ORDER_COL} >= cut)]`,
-    `mine = [r.${TABLE_COL} for r in ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}") if r.${TABLE_COL} in D]`,
-    `budget = max(${LOT_MIN}, min(${LOT_MAX}, (${POST_MAX} - ${KEY_BYTES} * sum(len(D[t].all) for t in mine)) // max(1, len(mine))))`,
+    `mine = [r.${TABLE_COL} for r in ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}") if r.${TABLE_COL} in tables]`,
+    `budget = max(${LOT_MIN}, min(${LOT_MAX}, (${POST_MAX} - ${KEY_BYTES} * sum(len(tables[t].all) for t in mine)) // max(1, len(mine))))`,
     'out, size = [], 0',
     `for r in sorted(rows, key=lambda r: v(r.${ORDER_COL}) or 0, reverse=True):`,
-    `  line = [r.${KEY_COL}, v(r.${ORDER_COL}), bool(getattr(r, "${DELETE_COL}", False)), {c["id"]: g(r, c) for c in cols}]`,
+    `  line = [r.${KEY_COL}, v(r.${ORDER_COL}), v(getattr(r, "${DELETE_COL}", False)), {c["id"]: g(r, c) for c in cols}]`,
     '  size += len(json.dumps(line, ensure_ascii=False))',
     `  if $${TYPE_COL} == "${KIND.lot}" and size > budget: break`,
     '  out.append(line)',
@@ -265,7 +272,7 @@ export function exportableColumns(cols) {
 }
 
 // Description des colonnes envoyées, telle que la CIBLE la reçoit.
-export const exportSchema = columns => columns.map(({ id, type, label }) => ({ id, type, label }));
+const exportSchema = columns => columns.map(({ id, type, label }) => ({ id, type, label }));
 
 // Colonnes de la synchro qui manquent à la table SOURCE.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL].filter(id => !cols.some(c => c.colId === id));
@@ -438,6 +445,23 @@ export function copyColumns(journalCols, destCols, map = {}) {
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
   return journalCols.map(c => c.colId).filter(id => !TECHNICAL.has(id) && !id.startsWith('gristHelper_'))
     .map(id => [id, map[id] || id]).filter(([, to]) => writable.has(to) && to !== KEY_COL);
+}
+
+// Colonnes envoyées arrivées après l'invitation (ni dans `columns`, ni dans `map` d'une table
+// reçue) : chacune prend son nom dans la destination, ou un nom libre (`Note_2`) si une colonne de
+// la destination (`destColIds`) le porte déjà, pour ne jamais écraser une colonne à elle. Rend la
+// correspondance complétée, ou null s'il n'y a rien de nouveau.
+export function newColumnsMap({ columns = [], map = {} }, sent, destColIds) {
+  const known = new Set([...columns.map(c => c.id), ...Object.keys(map)]);
+  const fresh = sent.filter(c => !known.has(c.id));
+  if (!fresh.length) return null;
+  const taken = [...destColIds, ...Object.values(map)];
+  const next = { ...map };
+  for (const { id } of fresh) {
+    next[id] = freeTableId(id, taken);
+    taken.push(next[id]);
+  }
+  return next;
 }
 
 // Lignes du Journal avec leurs colonnes envoyées dépliées (bloc JSON). Une liste devient une
@@ -686,7 +710,7 @@ function fromBase64UrlSafe(text) {
 
 function validColumns(cols) {
   return Array.isArray(cols) && cols.length > 0 && new Set(cols.map(c => c && c.id)).size === cols.length &&
-    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z:_0-9]+$/.test(c.type));
+    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z0-9:_/+-]+$/.test(c.type)); // DateTime:Europe/Paris
 }
 
 // Une invitation donne accès à un export (`export`, ses tables et colonnes) pour une personne :
@@ -774,7 +798,6 @@ export function maskKey(url) {
   return String(url || '').replace(/\/api\/s\/([A-Za-z0-9]{4})[A-Za-z0-9]*/, '/api/s/$1…');
 }
 
-// `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>
 // Adresse REST d'un document, réécrite à partir de ses seuls éléments reconnus ; '' sinon.
 function safeDocBaseUrl(text) {
   try {
@@ -787,6 +810,7 @@ function safeDocBaseUrl(text) {
   }
 }
 
+// `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>
 export function parseDocBaseUrl(baseUrl) {
   const url = new URL(baseUrl);
   const m = url.pathname.match(/^(?:\/o\/([^/]+))?\/api\/docs\/([^/]+)\/?$/);

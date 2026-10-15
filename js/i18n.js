@@ -24,7 +24,10 @@ const TEXTS = {
     'settings.theme.light': 'Clair',
     'settings.theme.dark': 'Sombre',
     'settings.credits': 'Crédits',
-    'settings.credits.text': 'Grist Factory · grist-factory.fr · Licence GNU GPL v3.0 · Version {version}',
+    'settings.credits.author': 'Auteur',
+    'settings.credits.site': 'Site',
+    'settings.credits.license': 'Licence',
+    'settings.credits.version': 'Version',
     'common.close': 'Fermer',
     'common.cancel': 'Annuler',
     'common.copy': 'Copier',
@@ -37,6 +40,21 @@ const TEXTS = {
     'common.none': 'Aucun résultat',
     'common.readonly': 'Lecture seule : un éditeur doit ouvrir cette page pour que les actions soient possibles.',
     'common.ownerOnly': 'Réservé aux propriétaires du document.',
+    'common.code': 'Code',
+    'common.filterIn': 'Filtrer : {name}',
+    'common.choose': '— Choisir —',
+    'type.Text': 'Texte',
+    'type.Numeric': 'Numérique',
+    'type.Int': 'Entier',
+    'type.Bool': 'Case à cocher',
+    'type.Date': 'Date',
+    'type.DateTime': 'Date et heure',
+    'type.Choice': 'Choix',
+    'type.ChoiceList': 'Choix multiple',
+    'type.Ref': 'Référence',
+    'type.RefList': 'Liste de références',
+    'type.Attachments': 'Pièces jointes',
+    'type.Any': 'Quelconque',
 
     'home.title': 'Que voulez-vous faire dans ce document ?',
     'guide.title': 'Qui fait quoi ?',
@@ -92,6 +110,8 @@ const TEXTS = {
     'send.edit.savedNone': 'Enregistré.',
     'send.export.table': '{table} ({n} {n|colonne|colonnes})',
     'send.export.partial': 'Un envoi n’est pas terminé (gros changement, renvoi interrompu) : le widget envoie le reste. Gardez cette page ouverte jusqu’à la fin.',
+    'send.export.lost': 'Table introuvable (renommée ou supprimée) : {tables}. Ses lignes ne partent plus. Rendez-lui son nom, ou retirez-la de l’export (Modifier).',
+    'send.export.drift': 'Colonnes changées depuis l’export (renommées, supprimées ou d’un autre type) : {cols}. Elles ne partent plus correctement : cochez de nouveau les bonnes colonnes (Modifier).',
     'send.export.tooBig': '{tables} : plus de {max} lignes. Au-delà, la liste des clés d’une table ne tient plus dans un envoi de Grist (1 Mo) et la file d’envoi se bloque. Retirez cette table de l’export (Modifier).',
     'send.tables.rows': '{table} ({n} lignes)',
     'send.tables.tooBig': 'Trop grande pour la synchro : {tables}. Au-delà de {max} lignes, la liste des clés d’une table ne tient plus dans un envoi de Grist (1 Mo) et la file d’envoi se bloquerait. Retirez-la de l’export.',
@@ -115,7 +135,7 @@ const TEXTS = {
     'send.public.revokeBody': 'Les lecteurs ne verront plus cet export. Désactivez aussi le lien public dans Partager s’il ne sert plus : tant qu’il reste actif, le widget garde la règle qui cache le reste du document.',
     'send.public.stop': 'Couper le lien public',
     'send.public.stopTitle': 'Couper le lien public de « {name} » ?',
-    'send.check.missing': 'Le widget ajoutera : {items}.',
+    'send.check.missing': 'En créant l’export, le widget ajoutera : {items}.',
     'send.check.sync': 'la table technique Synchro (une seule pour tous les exports)',
     'send.secret': 'Protéger l’invitation par un secret',
     'send.secret.on': 'avec secret',
@@ -139,11 +159,13 @@ const TEXTS = {
     'send.load.ok': 'Envoyer',
     'send.load.empty': 'Les tables sont vides pour l’instant : les lignes partiront dès leur ajout.',
     'send.load.progress': 'Envoi : {done} sur {total}…',
+    'send.load.done': 'Renvoi terminé : {n} {n|ligne renvoyée|lignes renvoyées}.',
+    'send.load.nobody': 'Aucun destinataire branché : rien à renvoyer.',
     'send.status.invited': 'En attente de réponse',
     'send.status.people': '{n} {n|destinataire|destinataires}',
     'send.status.alone': 'Sans destinataire',
     'send.status.legacy': 'À refaire',
-    'send.cancel.title': 'Annuler cette invitation ?',
+    'send.cancel.title': 'Retirer cette invitation ?',
     'send.cancel.body': 'Son code ne pourra plus être accepté.',
     'send.status.public': 'Public',
     'send.status.publicOff': 'Lien public à activer',
@@ -162,14 +184,20 @@ const TEXTS = {
     'send.resume.asIs.help': 'Seules les modifications à venir partent. Ce qui a été ajouté, modifié ou supprimé pendant la pause n’arrivera pas à la CIBLE, sauf si la ligne est modifiée de nouveau (ou avec « Tout renvoyer »).',
     'send.action.unblock': 'Débloquer la file',
     'send.action.revoke': 'Révoquer',
-    'send.action.cancel': 'Annuler l’invitation',
+    'send.action.cancel': 'Retirer l’invitation',
     'send.revoke.title': 'Révoquer « {name} » ?',
     'send.revoke.body': 'Les envois s’arrêtent pour cette personne seulement ; les autres destinataires continuent. Ce qu’elle a déjà reçu reste chez elle.',
     'send.unblock.title': 'Débloquer la file d’envoi ?',
-    'send.unblock.body': 'Les envois en attente de tout le document sont abandonnés. Utilisez ensuite « Tout renvoyer » pour rattraper.',
-    'send.unsafe.title': 'Webhook sans filtre',
-    'send.unsafe.body': 'Ces webhooks lisent la table Synchro sans filtre d’export : ils recevraient tous les exports. Supprimez-les : {who}.',
-    'send.unsafe.delete': 'Supprimer ces webhooks',
+    'send.unblock.body': 'La file d’envoi est commune à tout le document : ses envois en attente sont abandonnés, puis le widget renvoie les exports seul (gardez cette page ouverte). Si une personne ne reçoit plus, révoquez-la ou mettez-la en pause d’abord, sinon la file se bloquera de nouveau.',
+    'send.unsafe.title': 'Envoi sans filtre',
+    'send.unsafe.body': 'Ces envois (webhooks de Grist) lisent la table Synchro sans filtre d’export : ils recevraient tous les exports. Supprimez-les : {who}.',
+    'send.unsafe.delete': 'Supprimer ces envois',
+    'send.unsafe.confirm': 'Ces envois sont supprimés de Grist. Leurs destinataires ne reçoivent plus rien.',
+    'send.error.size': 'Envoi trop gros pour Grist (plus de 1 Mo) : le widget vide la file et renvoie tout de lui-même. Gardez cette page ouverte.',
+    'send.error.column': 'Le journal de cette personne refuse une colonne envoyée : demandez-lui d’ouvrir la page de son widget, qui remet son journal à jour. L’envoi reprend ensuite seul.',
+    'send.error.link': 'Le lien de réception de cette personne ne marche plus (réception arrêtée, ou formulaire dépublié) : révoquez-la, puis invitez-la de nouveau.',
+    'send.error.other': 'Cette personne ne reçoit plus : tant que l’envoi échoue, la file d’envoi du document est bloquée pour tous.',
+    'send.error.detail': 'Détail : {detail}',
     'send.legacy.title': 'Montage d’une version précédente',
     'send.legacy.body': 'Ces tables techniques viennent d’une version précédente du widget : {tables}. Recréez vos envois sous forme d’exports, puis effacez l’ancien montage.',
     'send.legacy.clean': 'Effacer l’ancien montage',
@@ -221,18 +249,24 @@ const TEXTS = {
     'recv.status.waiting': 'En attente du lien',
     'recv.status.ok': 'À jour',
     'recv.status.error': 'Erreur',
+    'recv.status.incomplete': 'Incomplet',
+    'recv.sync.none': 'Rien de nouveau : tout est à jour.',
+    'recv.consent': 'En continuant, le widget crée dans ce document les tables de destination nouvelles (ou ajoute aux tables existantes leurs colonnes et une clé id_sync masquée), un journal technique sans page pour cet export, et un formulaire de réception sur cette page.',
+    'recv.consent.public': 'En continuant, le widget crée dans ce document les tables de destination nouvelles (ou ajoute aux tables existantes leurs colonnes et une clé id_sync masquée) et un journal technique sans page pour cet export.',
     'recv.action.sync': 'Synchroniser',
-    'recv.action.link': 'Coller le lien',
+    'recv.action.link': 'Refaire le lien',
     'recv.public': 'Lien public : lu toutes les 10 secondes tant que cette page est ouverte.',
     'recv.public.done': 'Branché : le widget lit la SOURCE tant que cette page est ouverte.',
     'recv.action.stop': 'Arrêter la réception',
     'recv.stop.title': 'Arrêter de recevoir « {name} » ?',
-    'recv.stop.body': 'Le widget efface le journal {tables} et son formulaire de réception, avec son lien d’écriture : les envois de la SOURCE échoueront, elle devra révoquer. Les tables de destination et leurs lignes restent.',
+    'recv.stop.body': 'Le widget efface le journal {journal} et son formulaire de réception, avec son lien d’écriture : les envois de la SOURCE échoueront, elle devra révoquer. Les tables de destination et leurs lignes restent.',
     'recv.result': '{added} {added|ajoutée|ajoutées}, {updated} {updated|mise à jour|mises à jour}, {removed} {removed|supprimée|supprimées}',
     'recv.result.none': 'Rien à faire',
     'recv.auto': 'Mise à jour automatique tant que cette page est ouverte.',
     'recv.missing': '{table} : {n} {n|ligne n’est pas encore arrivée|lignes ne sont pas encore arrivées} (changement trop gros pour un seul envoi). Elles partiront d’elles-mêmes dès qu’un propriétaire de la SOURCE ouvrira la page de son widget.',
-    'recv.offer.title': 'Nouvelle table : {table}',
+    'recv.offer.title': 'Table ajoutée à l’export : {table}',
+    'recv.offer.refuseTitle': 'Refuser la table {table} ?',
+    'recv.offer.refuseBody': 'Ses lignes seront effacées à leur arrivée, maintenant et plus tard. Pour la recevoir ensuite, il faudra arrêter la réception et accepter une nouvelle invitation.',
     'recv.offer.body': '« {name} » envoie maintenant la table {table} ({n} {n|ligne|lignes} ; colonnes {cols}).',
     'recv.offer.where': 'Table qui recevra les lignes (nouvelle ou existante)',
     'recv.offer.accept': 'Recevoir',
@@ -243,6 +277,7 @@ const TEXTS = {
     'recv.legacy.title': 'Réception d’une version précédente',
     'recv.legacy.body': 'Ces journaux viennent d’une version précédente du widget : {tables}. La SOURCE doit vous inviter de nouveau à un export ; effacez ensuite les anciens journaux. Vos tables de destination restent.',
     'recv.legacy.clean': 'Effacer les anciens journaux',
+    'recv.legacy.confirm': 'Le widget efface ces anciens journaux et leurs formulaires de réception. Vos tables de destination et leurs lignes restent.',
 
     'error.codeFormat': 'Ce texte n’est pas un code de synchro. Recopiez tout le code, de « GRISTSYNC2. » jusqu’à la fin.',
     'error.codeOld': 'Ce code vient d’une version précédente du widget. Demandez une nouvelle invitation.',
@@ -257,7 +292,9 @@ const TEXTS = {
     'error.publicClosed': 'Le document SOURCE n’est plus lisible par lien public.',
     'error.noColumn': 'Cochez au moins une colonne par table.',
     'error.loop': 'Boucle refusée : une table reçue ne peut pas être renvoyée au document d’où elle vient, ni une table vers elle-même. Ce serait une synchro dans les deux sens. Le relais vers un autre document, lui, est possible.',
-    'error.destTaken': 'Deux tables reçues ont le même nom de destination, ou cette destination reçoit déjà une synchro : choisissez un autre nom.',
+    'error.destTaken': 'Deux tables reçues ont le même nom de destination, cette destination reçoit déjà une synchro, ou ce nom est réservé au widget : choisissez un autre nom.',
+    'error.destExported': 'Ce document envoie déjà cette table dans un export : elle ne peut pas aussi en recevoir une (ses lignes seraient effacées). Choisissez une autre table.',
+    'error.ownerOnly': 'Seul un propriétaire du document peut faire cela.',
     'error.destMissing': 'La table {dest} n’existe plus.',
     'error.gristTooOld': 'Cette instance Grist ne sait pas filtrer un webhook par export (il faut Grist 1.7.11 ou plus récent). Rien n’a été branché.',
     'error.queueStuck': 'La file d’envoi ne se vide pas : un destinataire ne reçoit plus. Voyez l’erreur sur sa ligne, puis réessayez.',
@@ -267,7 +304,10 @@ const TEXTS = {
     'error.generic': 'Erreur : {detail}',
 
     'start.outside': 'Ce widget s’ouvre dans Grist : ajoutez un widget personnalisé, URL personnalisée, collez l’adresse ci-dessous et choisissez l’accès complet.',
-    'start.access': 'Le widget a besoin de l’accès complet au document : dans le panneau de droite, onglet Widget, choisissez « Accès complet ».',
+    'start.access': 'Le widget a besoin de l’accès complet au document : dans le panneau de droite, cliquez sur « Accepter », ou choisissez « Accès complet au document » dans « Niveau d’accès ».',
+    'start.slow': 'Grist ne répond pas au widget. Vérifiez qu’il a l’accès complet au document (panneau de droite : « Accepter », ou « Accès complet au document » dans « Niveau d’accès »), puis rechargez la page. Si cela dure, vérifiez votre connexion.',
+    'start.network': 'Le widget ne peut pas charger l’API de Grist depuis {origin} : le réseau la bloque, ou cette instance n’est pas dans la liste du widget.',
+    'start.reload': 'Recharger la page',
   },
   en: {
     'app.title': 'Sync',
@@ -289,7 +329,10 @@ const TEXTS = {
     'settings.theme.light': 'Light',
     'settings.theme.dark': 'Dark',
     'settings.credits': 'Credits',
-    'settings.credits.text': 'Grist Factory · grist-factory.fr · GNU GPL v3.0 license · Version {version}',
+    'settings.credits.author': 'Author',
+    'settings.credits.site': 'Website',
+    'settings.credits.license': 'License',
+    'settings.credits.version': 'Version',
     'common.close': 'Close',
     'common.cancel': 'Cancel',
     'common.copy': 'Copy',
@@ -302,6 +345,21 @@ const TEXTS = {
     'common.back': 'Back',
     'common.later': 'Later',
     'common.ownerOnly': 'Document owners only.',
+    'common.code': 'Code',
+    'common.filterIn': 'Filter: {name}',
+    'common.choose': '— Choose —',
+    'type.Text': 'Text',
+    'type.Numeric': 'Numeric',
+    'type.Int': 'Integer',
+    'type.Bool': 'Toggle',
+    'type.Date': 'Date',
+    'type.DateTime': 'Date and time',
+    'type.Choice': 'Choice',
+    'type.ChoiceList': 'Choice list',
+    'type.Ref': 'Reference',
+    'type.RefList': 'Reference list',
+    'type.Attachments': 'Attachments',
+    'type.Any': 'Any',
 
     'home.title': 'What do you want to do in this document?',
     'guide.title': 'Who does what?',
@@ -357,6 +415,8 @@ const TEXTS = {
     'send.edit.savedNone': 'Saved.',
     'send.export.table': '{table} ({n} {n|column|columns})',
     'send.export.partial': 'A delivery is not finished (big change, interrupted resend): the widget is sending the rest. Keep this page open until it is done.',
+    'send.export.lost': 'Table not found (renamed or deleted): {tables}. Its rows are no longer sent. Give it back its name, or remove it from the export (Edit).',
+    'send.export.drift': 'Columns changed since the export (renamed, deleted or of another type): {cols}. They are no longer sent correctly: tick the right columns again (Edit).',
     'send.export.tooBig': '{tables}: more than {max} rows. Beyond that, a table’s key list no longer fits in one Grist delivery (1 MB) and the delivery queue gets stuck. Remove this table from the export (Edit).',
     'send.tables.rows': '{table} ({n} rows)',
     'send.tables.tooBig': 'Too big to sync: {tables}. Beyond {max} rows, a table’s key list no longer fits in one Grist delivery (1 MB) and the delivery queue would get stuck. Remove it from the export.',
@@ -380,7 +440,7 @@ const TEXTS = {
     'send.public.revokeBody': 'Viewers will no longer see this export. Also turn off the public link in Share if it is no longer used: while it stays on, the widget keeps the rule that hides the rest of the document.',
     'send.public.stop': 'Close the public link',
     'send.public.stopTitle': 'Close the public link of “{name}”?',
-    'send.check.missing': 'The widget will add: {items}.',
+    'send.check.missing': 'When creating the export, the widget will add: {items}.',
     'send.check.sync': 'the Synchro technical table (one for all exports)',
     'send.secret': 'Protect the invitation with a secret',
     'send.secret.on': 'with secret',
@@ -404,11 +464,13 @@ const TEXTS = {
     'send.load.ok': 'Send',
     'send.load.empty': 'The tables are empty for now: rows will go out as soon as they are added.',
     'send.load.progress': 'Sending: {done} of {total}…',
+    'send.load.done': 'Resend finished: {n} {n|row|rows} resent.',
+    'send.load.nobody': 'No connected recipient: nothing to resend.',
     'send.status.invited': 'Waiting for reply',
     'send.status.people': '{n} {n|recipient|recipients}',
     'send.status.alone': 'No recipient',
     'send.status.legacy': 'To redo',
-    'send.cancel.title': 'Cancel this invitation?',
+    'send.cancel.title': 'Withdraw this invitation?',
     'send.cancel.body': 'Its code can no longer be accepted.',
     'send.status.public': 'Public',
     'send.status.publicOff': 'Public link to turn on',
@@ -427,14 +489,20 @@ const TEXTS = {
     'send.resume.asIs.help': 'Only future changes are sent. Rows added, changed or deleted during the pause will not reach the TARGET unless they change again (or with “Resend all”).',
     'send.action.unblock': 'Unblock the queue',
     'send.action.revoke': 'Revoke',
-    'send.action.cancel': 'Cancel the invitation',
+    'send.action.cancel': 'Withdraw the invitation',
     'send.revoke.title': 'Revoke “{name}”?',
     'send.revoke.body': 'Deliveries stop for this person only; other recipients go on. What they already received stays with them.',
     'send.unblock.title': 'Unblock the delivery queue?',
-    'send.unblock.body': 'Pending deliveries of the whole document are dropped. Then use “Resend all” to catch up.',
-    'send.unsafe.title': 'Unfiltered webhook',
-    'send.unsafe.body': 'These webhooks read the Synchro table without an export filter: they would receive every export. Delete them: {who}.',
-    'send.unsafe.delete': 'Delete these webhooks',
+    'send.unblock.body': 'The delivery queue is shared by the whole document: its pending deliveries are dropped, then the widget resends the exports on its own (keep this page open). If someone no longer receives, revoke or pause them first, or the queue will get stuck again.',
+    'send.unsafe.title': 'Unfiltered delivery',
+    'send.unsafe.body': 'These deliveries (Grist webhooks) read the Synchro table without an export filter: they would receive every export. Delete them: {who}.',
+    'send.unsafe.delete': 'Delete these deliveries',
+    'send.unsafe.confirm': 'These deliveries are deleted from Grist. Their recipients no longer receive anything.',
+    'send.error.size': 'Delivery too big for Grist (over 1 MB): the widget clears the queue and resends everything on its own. Keep this page open.',
+    'send.error.column': 'This person’s journal refuses a sent column: ask them to open their widget page, which updates their journal. Delivery then resumes on its own.',
+    'send.error.link': 'This person’s receiving link no longer works (reception stopped, or form unpublished): revoke them, then invite them again.',
+    'send.error.other': 'This person no longer receives: while the delivery fails, the document’s delivery queue is blocked for everyone.',
+    'send.error.detail': 'Details: {detail}',
     'send.legacy.title': 'Setup from a previous version',
     'send.legacy.body': 'These technical tables come from a previous version of the widget: {tables}. Recreate your shares as exports, then delete the old setup.',
     'send.legacy.clean': 'Delete the old setup',
@@ -486,18 +554,24 @@ const TEXTS = {
     'recv.status.waiting': 'Waiting for the link',
     'recv.status.ok': 'Up to date',
     'recv.status.error': 'Error',
+    'recv.status.incomplete': 'Incomplete',
+    'recv.sync.none': 'Nothing new: everything is up to date.',
+    'recv.consent': 'If you continue, the widget creates in this document the new destination tables (or adds their columns and a hidden id_sync key to existing tables), a technical journal without a page for this export, and a receiving form on this page.',
+    'recv.consent.public': 'If you continue, the widget creates in this document the new destination tables (or adds their columns and a hidden id_sync key to existing tables) and a technical journal without a page for this export.',
     'recv.action.sync': 'Synchronize',
-    'recv.action.link': 'Paste the link',
+    'recv.action.link': 'Redo the link',
     'recv.public': 'Public link: read every 10 seconds while this page is open.',
     'recv.public.done': 'Connected: the widget reads the SOURCE while this page is open.',
     'recv.action.stop': 'Stop receiving',
     'recv.stop.title': 'Stop receiving “{name}”?',
-    'recv.stop.body': 'The widget deletes the journal {tables} and its receiving form, with its write link: the SOURCE deliveries will fail and it will have to revoke. Destination tables and their rows stay.',
+    'recv.stop.body': 'The widget deletes the journal {journal} and its receiving form, with its write link: the SOURCE deliveries will fail and it will have to revoke. Destination tables and their rows stay.',
     'recv.result': '{added} added, {updated} updated, {removed} removed',
     'recv.result.none': 'Nothing to do',
     'recv.auto': 'Updated automatically while this page is open.',
     'recv.missing': '{table}: {n} {n|row has|rows have} not arrived yet (change too big for one delivery). They will leave on their own as soon as an owner of the SOURCE opens its widget page.',
-    'recv.offer.title': 'New table: {table}',
+    'recv.offer.title': 'Table added to the export: {table}',
+    'recv.offer.refuseTitle': 'Refuse the table {table}?',
+    'recv.offer.refuseBody': 'Its rows will be deleted on arrival, now and later. To receive it afterwards, you will have to stop receiving and accept a new invitation.',
     'recv.offer.body': '“{name}” now sends the table {table} ({n} {n|row|rows}; columns {cols}).',
     'recv.offer.where': 'Table receiving the rows (new or existing)',
     'recv.offer.accept': 'Receive',
@@ -508,6 +582,7 @@ const TEXTS = {
     'recv.legacy.title': 'Receiving from a previous version',
     'recv.legacy.body': 'These journals come from a previous version of the widget: {tables}. The SOURCE must invite you again to an export; then delete the old journals. Your destination tables stay.',
     'recv.legacy.clean': 'Delete the old journals',
+    'recv.legacy.confirm': 'The widget deletes these old journals and their receiving forms. Your destination tables and their rows stay.',
 
     'error.codeFormat': 'This text is not a sync code. Copy the whole code, from “GRISTSYNC2.” to the end.',
     'error.codeOld': 'This code comes from a previous version of the widget. Ask for a new invitation.',
@@ -522,7 +597,9 @@ const TEXTS = {
     'error.publicClosed': 'The SOURCE document can no longer be read by public link.',
     'error.noColumn': 'Tick at least one column per table.',
     'error.loop': 'Loop refused: a received table cannot be sent back to the document it comes from, nor a table to itself. That would be a two-way sync. Relaying to another document is fine.',
-    'error.destTaken': 'Two received tables have the same destination name, or this destination already receives a sync: choose another name.',
+    'error.destTaken': 'Two received tables have the same destination name, this destination already receives a sync, or this name is reserved for the widget: choose another name.',
+    'error.destExported': 'This document already sends this table in an export: it cannot also receive one (its rows would be deleted). Choose another table.',
+    'error.ownerOnly': 'Only a document owner can do this.',
     'error.destMissing': 'The table {dest} no longer exists.',
     'error.gristTooOld': 'This Grist instance cannot filter a webhook by export (Grist 1.7.11 or later is needed). Nothing was connected.',
     'error.queueStuck': 'The delivery queue does not empty: a recipient no longer receives. See the error on its line, then try again.',
@@ -532,7 +609,10 @@ const TEXTS = {
     'error.generic': 'Error: {detail}',
 
     'start.outside': 'This widget opens inside Grist: add a custom widget, custom URL, paste the address below and choose full access.',
-    'start.access': 'The widget needs full access to the document: in the right panel, Widget tab, choose “Full document access”.',
+    'start.access': 'The widget needs full access to the document: in the right panel, click “Accept”, or choose “Full document access” under “Access level”.',
+    'start.slow': 'Grist does not answer the widget. Check that it has full access to the document (right panel: “Accept”, or “Full document access” under “Access level”), then reload the page. If it lasts, check your connection.',
+    'start.network': 'The widget cannot load the Grist API from {origin}: the network blocks it, or this instance is not in the widget’s list.',
+    'start.reload': 'Reload the page',
   },
 };
 
@@ -548,25 +628,40 @@ function initialLang() {
 
 export const LANG = initialLang();
 
-// t('send.waiting', {n: 3}) -> « 3 envois en attente ».
+// Typographie française : espace insécable avant « : ; ? ! » et à l'intérieur des guillemets, pour
+// qu'aucun signe ne commence une ligne.
+const frenchSpaces = text => text.replace(/ ([:;?!»])/g, '\u00a0$1').replace(/« /g, '«\u00a0');
+
+// t('send.waiting', {n: 3}) -> « 3 envois en attente ». Les nombres s'écrivent à la façon de la
+// langue (« 3 000 ») ; les autres valeurs (noms, adresses, détails d'erreur) restent telles quelles.
 export function t(key, vars = {}) {
   const text = TEXTS[LANG][key] ?? TEXTS.fr[key] ?? key;
-  return text
+  const value = (name) => {
+    const v = vars[name];
+    return typeof v === 'number' ? v.toLocaleString(LANG) : v;
+  };
+  return (LANG === 'fr' ? frenchSpaces(text) : text)
     .replace(/\{(\w+)\|([^|}]*)\|([^}]*)\}/g, (_, name, one, many) => {
       const n = Number(vars[name]);
       return (LANG === 'fr' ? n <= 1 : n === 1) ? one : many;
     })
-    .replace(/\{(\w+)\}/g, (_, name) => (vars[name] ?? `{${name}}`));
+    .replace(/\{(\w+)\}/g, (_, name) => (value(name) ?? `{${name}}`));
+}
+
+// Type d'une colonne Grist, en clair : « Référence (Villes) », « Date et heure ».
+export function typeName(type) {
+  const [base, target] = String(type || '').split(':');
+  const name = t(`type.${base}`) === `type.${base}` ? base : t(`type.${base}`);
+  return /^Ref(List)?$/.test(base) && target ? `${name} (${target})` : name;
 }
 
 // Textes statiques de index.html : attributs data-i18n (contenu) et data-i18n-label (aria-label
 // et title).
-export function translatePage(root = document) {
+export function translatePage() {
   document.documentElement.lang = LANG;
-  for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
-  for (const el of root.querySelectorAll('[data-i18n-label]')) {
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of document.querySelectorAll('[data-i18n-label]')) {
     el.setAttribute('aria-label', t(el.dataset.i18nLabel));
     el.title = t(el.dataset.i18nLabel);
   }
-  for (const el of root.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
 }

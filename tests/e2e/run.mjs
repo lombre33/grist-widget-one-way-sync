@@ -194,7 +194,8 @@ try {
   const dialog = () => widget().getByRole('dialog');
   const dialogButton = name => dialog().getByRole('button', { name, exact: true });
   const pick = async (field, option) => {
-    await dialog().getByRole('button', { name: field, exact: true }).click();
+    // Nom accessible du bouton : « Champ : choix en cours ».
+    await dialog().getByRole('button', { name: `${field} : ` }).click();
     await dialog().getByRole('option', { name: option, exact: true }).click();
   };
   const formKey = async (doc) => {
@@ -425,12 +426,12 @@ try {
   await dialog().getByRole('checkbox', { name: 'Interne' }).first().check();
   await dialogButton('Continuer').click();
   await dialogButton('Enregistrer').click();
-  await dialog().getByText(/Enregistré : \d+ lignes sont parties/).waitFor();
+  await dialog().getByText(/Enregistré\s:\s[\d\s]+\slignes sont parties/).waitFor();
   await dialogButton('Fermer').click();
   assert.equal((await records(source.doc, 'Synchro')).length, 4, 'deux lignes Synchro par table');
   assert.ok(!(await columnsOf(source.doc, 'Villes')).includes('Supprime'), 'le widget n\'ajoute pas Supprime');
   await openWidget(target.url);
-  await dialog().getByText('Nouvelle table : Villes').waitFor({ timeout: 30000 });
+  await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });
   await dialog().getByText(/envoie maintenant la table Villes \(2 lignes/).waitFor();
   await pick('Villes', 'Communes');
   await shot('17-cible-nouvelle-table');
@@ -475,7 +476,7 @@ try {
   const imported = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', big.map(() => null), { Nom: big }]])).retValues[0];
   const lotRow = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Table === 'Contacts' && r.Synchro_Type === 'lot');
   assert.ok((await lotRow()).Sync_Etat > 0, 'envoi coupé noté dans Synchro');
-  await widget().getByText(/Contacts : \d+ lignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
+  await widget().getByText(/Contacts\s:\s[\d\s]+\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
   await shot('19-cible-envoi-coupe');
   await openWidget(source.url);
   await widget().getByText('Un envoi n’est pas terminé').waitFor();
@@ -521,7 +522,7 @@ try {
   await button('Nouvel export').click();
   await dialog().getByRole('checkbox', { name: 'Grande' }).check();
   await dialogButton('Continuer').click();
-  await dialog().getByText(/Trop grande pour la synchro : Grande \(20.001 lignes\)/).waitFor();
+  await dialog().getByText(/Trop grande pour la synchro\s:\sGrande \(20\s001 lignes\)/).waitFor();
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });
   await applyActions(source.doc, [['RemoveTable', 'Grande']]);
@@ -648,6 +649,7 @@ try {
   await openWidget(target.url);
   await widget().getByText('Réception d’une version précédente').waitFor();
   await button('Effacer les anciens journaux').click();
+  await dialogButton('Effacer les anciens journaux').click();
   await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Journal_Contacts'), 'ancien journal effacé (CIBLE)');
   step('Montages d\'avant la version 0.4 : signalés et effacés, côté SOURCE et côté CIBLE');
 

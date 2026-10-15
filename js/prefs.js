@@ -1,5 +1,6 @@
-// Préférences d'affichage de la personne (langue, thème), dans le stockage local du navigateur.
-// Rien d'autre n'y est jamais écrit : aucune donnée du document ne sort de Grist.
+// Préférences de la personne dans le stockage local du navigateur : langue, thème, et l'heure de sa
+// dernière visite par document CIBLE (`visit.<docId>`, pour l'historique). Aucune donnée du document
+// n'y est écrite.
 const PREFIX = 'gristsync.';
 
 export function readPref(name) {

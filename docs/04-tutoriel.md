@@ -177,7 +177,8 @@ Pour une personne :
   ajoutées pendant la pause, et la liste des clés pour les suppressions ; ou de reprendre sans
   rattraper ;
 - **Débloquer la file**, quand un envoi échoue (Grist bloque alors toute la file du document
-  environ 15 minutes) ;
+  environ 15 minutes) : le widget vide la file, puis renvoie seul ce qu'elle portait (gardez la
+  page ouverte) ;
 - **Révoquer** : ses envois s'arrêtent, les autres destinataires continuent.
 
 ![Reprendre après une pause](images/13b-source-reprendre.png)
@@ -281,6 +282,8 @@ une table vers elle-même. Ce serait une synchro dans les deux sens.
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
+| La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |
+| « La table … n'existe plus » sur la carte CIBLE, ou une colonne recréée sous son ancien nom | Table ou colonne de destination renommée dans la CIBLE | Lui rendre son nom (les versions attendaient dans le journal) |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 | Carte « Montage d'une version précédente » | Envois créés avant la version 0.4 | Recréer les envois en exports, puis effacer l'ancien montage |
