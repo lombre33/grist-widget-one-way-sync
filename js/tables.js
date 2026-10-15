@@ -1,16 +1,16 @@
 // Tables techniques du widget :
 //  - SOURCE : une seule table, Synchro, quel que soit le nombre d'exports et de tables. Chaque
 //    table d'un export y a sa liste des clés, son lot de lignes modifiées et son suivi des clés
-//    (voir core.js). Les
-//    exports (nom, lien public), les invitations en attente (et l'empreinte de leur secret) et
-//    les pauses sont notés dans la description de sa colonne Synchro_Export : des métadonnées,
-//    que le webhook n'envoie pas.
+//    (voir core.js) ; une ligne 'charge' suit les renvois du document. Les exports (nom, lien
+//    public), les invitations en attente (et l'empreinte de leur secret) et les pauses sont notés
+//    dans la description de sa colonne Synchro_Export : des métadonnées, que le webhook n'envoie pas.
 //  - CIBLE : un journal par export reçu, Journal_<export>, où le webhook dépose les listes et les
 //    lots. Ce que la CIBLE a choisi (destinations, colonnes) est noté dans la description de sa
 //    colonne Synchro_Ids, que la clé du formulaire ne peut pas écrire.
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
-  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
+  APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
+  RESEND_COL, SCHEMA_COL, TYPE_COL,
   RECALC_COL, RECALC_SPEC, STATE_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, addTrackRowsAction, exportRowsActions, exportTables, majleAction, prepareSourceActions,
   syncColumns, syncFormulas,
 } from './core.js';
@@ -24,8 +24,18 @@ export const isUserTable = id => id !== SYNC_TABLE && !id.startsWith('Synchro_')
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
 
-// Lignes de Synchro ([] sans la table). `schema` : instantané déjà lu, s'il y en a un.
-export const syncRows = async (schema = null) => ((schema || await readSchema()).has(SYNC_TABLE) ? fetchRows(SYNC_TABLE) : []);
+// Lignes de Synchro des exports ([] sans la table), sans la ligne 'charge'. `schema` : instantané
+// déjà lu, s'il y en a un.
+export const isCharge = row => row[TYPE_COL] === KIND.load;
+export const syncRows = async (schema = null) => ((schema || await readSchema()).has(SYNC_TABLE) ? (await fetchRows(SYNC_TABLE)).filter(r => !isCharge(r)) : []);
+
+// Ligne 'charge' de Synchro (voir parseCharge), créée au premier renvoi.
+export async function chargeRow() {
+  const row = (await fetchRows(SYNC_TABLE)).find(isCharge);
+  if (row) return row;
+  const fields = { [TYPE_COL]: KIND.load, [EXPORT_COL]: '', [TABLE_COL]: '', [SCHEMA_COL]: '', [RESEND_COL]: '' };
+  return { ...fields, id: (await apply([['AddRecord', SYNC_TABLE, null, fields]])).retValues[0] };
+}
 
 // Note de la table Synchro : { exports: [{ id, name, at, public }], invitations: [{ id, export,
 // hash, at }], pauses: [{ hook, export, at, columns }] }.

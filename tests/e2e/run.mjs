@@ -340,7 +340,24 @@ try {
   const triggers = (await api('POST', `/docs/${source.doc}/sql`, { sql: 'select condition from _grist_Triggers' })).records;
   assert.equal(JSON.parse(triggers[0].fields.condition).text, `rec.Synchro_Export == "${synchro[0].Synchro_Export}" and rec.Synchro_Type in ("cles", "lot")`);
   await waitFor(async () => (await records(target.doc, 'Journal_Annuaire')).length >= 2, 'liste et lot reçus dans le journal');
+  const charge = JSON.parse((await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'charge').Synchro_Renvoi);
+  assert.ok(!charge.par && charge.envoye.length && charge.envoye[0][1] > 0, 'renvoi compté dans la charge du document, la main rendue');
   step('SOURCE : un webhook filtré sur l\'export, lignes existantes envoyées');
+
+  // --- Une autre page renvoie déjà (signe de vie récent) : « Tout renvoyer » ne lance rien et
+  // note le lot ; la main rendue, le rattrapage l'envoie seul
+  const chargeRow = (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'charge');
+  const holdCharge = par => applyActions(source.doc, [['UpdateRecord', 'Synchro', chargeRow.id, { Synchro_Renvoi: JSON.stringify({ ...charge, par, le: Date.now() / 1000 }) }]]);
+  await holdCharge('autre');
+  await openWidget(source.url);
+  await widget().getByText('Un renvoi est en cours depuis une autre page').waitFor();
+  await button('Tout renvoyer').click();
+  await widget().getByText('Un autre renvoi est en cours pour ce document').waitFor();
+  const lotOf = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
+  assert.equal((await lotOf()).Sync_Etat, 1, 'lot noté à renvoyer en entier');
+  await holdCharge('');
+  await waitFor(async () => !(await lotOf()).Sync_Etat, 'renvoi noté parti seul, la main rendue', 60000);
+  step('SOURCE : un renvoi à la fois par document, celui d\'une autre page attend son tour');
 
   // --- CIBLE : dépliage et consolidation à l'ouverture
   await openWidget(target.url);
@@ -433,7 +450,7 @@ try {
   await dialogButton('Enregistrer').click();
   await dialog().getByText(/Enregistré\s:\s[\d\s]+\slignes sont parties/).waitFor();
   await dialogButton('Fermer').click();
-  assert.equal((await records(source.doc, 'Synchro')).length, 6, 'trois lignes Synchro par table');
+  assert.equal((await records(source.doc, 'Synchro')).filter(r => r.Synchro_Type !== 'charge').length, 6, 'trois lignes Synchro par table');
   assert.ok(!(await columnsOf(source.doc, 'Villes')).includes('Supprime'), 'le widget n\'ajoute pas Supprime');
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });

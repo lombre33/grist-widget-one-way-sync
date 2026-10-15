@@ -3,17 +3,17 @@
 // destinataire, filtré par Grist sur les lignes de son export. Les exports, les invitations en
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
-  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL,
-  SYNC_TABLE, TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, docLabel, exportCondition, exportTables, exportableColumns,
+  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL, STATE_COL,
+  SYNC_TABLE, TABLE_COL, TYPE_COL, addSpent, budgetWait, buildInvitation, chargeBusy, parseCharge, chunk, chunkMark, conditionExport, docLabel, exportCondition, exportTables, exportableColumns,
   fillKeyActions, hookName, isPublicRule, listOverdue, listRequest, loopingTables, maskKey, missingSyncColumns, parseList, parseLot, parseReply,
   prepareSourceActions, publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex, trackState,
 } from './core.js';
 import {
-  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, docInfo, fetchRows, listWebhooks, readSchema, renameWebhook, setWebhookEnabled,
-  webhookConditions, withLock,
+  apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, docInfo, fetchRows, listWebhooks, readSchema, renameWebhook, selectRows,
+  setWebhookEnabled, webhookConditions, withLock,
 } from './grist.js';
 import {
-  ensureSyncTable, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
+  chargeRow, ensureSyncTable, isCharge, isUserTable, legacyTables, readSourceNote, receivedDests, refreshMajLe, removeExport, removeLegacy, saveExport, syncRows,
   writeSourceNote, writeSync,
 } from './tables.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
@@ -22,7 +22,9 @@ import { stepHelp } from './tutorial.js';
 import { LANG, t, typeName } from './i18n.js';
 
 const now = () => Date.now() / 1000;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const dateText = ms => new Date(ms).toLocaleString(LANG);
+const timeText = sec => new Date(sec * 1000).toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
 const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
 // Ligne Synchro qui demande d'envoyer la liste complète de sa table : renvoi de la liste interrompu
 // (la demande est restée dans la ligne 'cles'), ou trop de clés parties d'un coup (suivi).
@@ -43,7 +45,8 @@ async function loadState() {
   try { hooks = await listWebhooks(); } catch (e) { if (e.message !== 'ownerOnly') throw e; ownerOnly = true; }
   const conditions = ownerOnly ? new Map() : await webhookConditions();
   const schema = await readSchema();
-  const rows = await syncRows(schema);
+  const all = schema.has(SYNC_TABLE) ? await fetchRows(SYNC_TABLE) : [];
+  const rows = all.filter(r => !isCharge(r));
   const note = readSourceNote(schema);
   const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])];
   const exports = ids.map((id) => {
@@ -64,7 +67,8 @@ async function loadState() {
   // Les autres webhooks du document (autres outils) ne sont pas à lui.
   const legacyHooks = hooks.filter(h => h.fields.tableId !== SYNC_TABLE && (legacy.includes(h.fields.tableId) || /\/api\/s\/[^/]+\/tables\/[^/]+\/records\?flat=1$/.test(h.fields.url || '')));
   const unsafe = hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id)));
-  return { ownerOnly, schema, note, exports, unsafe, legacy: { tables: legacy, hooks: legacyHooks } };
+  const charge = parseCharge((all.find(isCharge) || {})[RESEND_COL]);
+  return { ownerOnly, schema, note, exports, unsafe, charge, legacy: { tables: legacy, hooks: legacyHooks } };
 }
 
 // Ce que la SOURCE a changé depuis l'enregistrement de l'export : tables introuvables (renommées
@@ -142,6 +146,7 @@ export async function renderSource(root = container) {
   if (state.legacy.tables.length) cards.push(legacyCard(state, out));
   container.replaceChildren(...[toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
+    chargeNotice(state.charge),
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t('send.empty')),
     roleGuide({ you: 'source', open: !cards.length })].filter(Boolean));
@@ -184,7 +189,7 @@ function exportCard(exp, state, open, out) {
   ].filter(Boolean);
   const load = async () => {
     const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
-    notice = message('ok', t('send.load.done', { n: total }));
+    notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
   };
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
@@ -388,8 +393,22 @@ async function stopPublic(exp) {
 // (MISSING_COL, voir chunkMark) est posée avant la première tranche et avance avec chacune ; une
 // page fermée en cours de route, le rattrapage reprend à la prochaine ouverture. Une marque déjà
 // plus ancienne l'emporte. Rend le nombre de lignes renvoyées. Un renvoi à la fois, tous onglets
-// confondus.
-const resendTables = (exportId, tables, out, since = RESEND_ALL) => withLock('gristsync-resend', () => resendLocked(exportId, tables, out, since));
+// confondus, et un seul par document (voir withCharge) : si une autre page renvoie déjà, les lots
+// sont seulement marqués, et le rattrapage les enverra ensuite (rend alors null).
+const startOf = (lot, since) => (lot[MISSING_COL] > 0 ? Math.min(lot[MISSING_COL], since) : since);
+
+function resendTables(exportId, tables, out, since = RESEND_ALL) {
+  return withLock('gristsync-resend', async () => {
+    try {
+      return await withCharge(() => resendLocked(exportId, tables, out, since), out);
+    } catch (e) {
+      if (e.message !== 'resendBusy') throw e;
+      const lots = (await syncRows()).filter(r => r[EXPORT_COL] === exportId && tables.includes(r[TABLE_COL]) && r[TYPE_COL] === KIND.lot);
+      for (const lot of lots) await writeSync([lot.id], { [MISSING_COL]: startOf(lot, since) });
+      return null;
+    }
+  });
+}
 
 async function resendLocked(exportId, tables, out, since) {
   const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
@@ -400,7 +419,7 @@ async function resendLocked(exportId, tables, out, since) {
   for (const table of tables) {
     const [lot] = await rowsOf(table, KIND.lot);
     if (!lot || !(await readSchema()).has(table)) continue; // table retirée ou introuvable : la carte le dit
-    const start = lot[MISSING_COL] > 0 ? Math.min(lot[MISSING_COL], since) : since;
+    const start = startOf(lot, since);
     await writeSync([lot.id], { [MISSING_COL]: start });
     plans.push({ table, lot: lot.id, start, rows: rowsSince(await fetchRows(table), start) });
   }
@@ -419,8 +438,10 @@ async function resendLocked(exportId, tables, out, since) {
       const part = queue.shift();
       await waitForQueue(hookIds);
       await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id)), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
-      const now = parseLot(((await fetchRows(SYNC_TABLE)).find(r => r.id === lot) || {})[LOT_COL]);
-      if (now && now.total > now.lines.length && part.length > 1) {
+      const cell = String(((await fetchRows(SYNC_TABLE)).find(r => r.id === lot) || {})[LOT_COL] || '');
+      await spend(cell.length * hookIds.length);
+      const sent = parseLot(cell);
+      if (sent && sent.total > sent.lines.length && part.length > 1) {
         queue.unshift(part.slice(0, part.length / 2), part.slice(part.length / 2));
         continue;
       }
@@ -451,7 +472,9 @@ async function sendList(exportId, table, hookIds) {
   for (let n = 1, after = ''; track; n++) {
     await waitForQueue(hookIds);
     await writeSync([keys.id], { [RESEND_COL]: listRequest(mark, n, after) });
-    const { part } = parseList((await mine(KIND.keys))[LIST_COL]) || {};
+    const cell = String((await mine(KIND.keys))[LIST_COL] || '');
+    await spend(cell.length * hookIds.length);
+    const { part } = parseList(cell) || {};
     if (!part || part.last || !part.keys.length) break;
     after = part.keys[part.keys.length - 1];
   }
@@ -481,37 +504,109 @@ async function catchUp() {
   catching = true;
   try {
     const done = await withLock('gristsync-resend', async () => {
-      if (!(await readSchema()).has(SYNC_TABLE)) return 0;
-      let rows = await syncRows();
+      let rows = await lightRows();
+      if (!rows) return 0;
       const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
       if (hooks.some(tooLarge) && Date.now() - repairedAt > 600000) {
         repairedAt = Date.now();
         await clearAndMark();
-        rows = await syncRows();
+        rows = await lightRows();
       }
       if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) return 0;
       const late = rows.filter(r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0);
-      for (const row of late) {
-        const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
-        if (!mine.length) await writeSync([row.id], { [MISSING_COL]: 0 });
-        else if (mine.some(h => h.fields.enabled)) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
-      }
       const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
       const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)));
-      for (const row of lists) {
-        const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
-        if (!mine.length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
-        else if (mine.some(h => h.fields.enabled)) await sendList(row[EXPORT_COL], row[TABLE_COL], mine.filter(h => h.fields.enabled).map(h => h.id));
-      }
+      if (!late.length && !lists.length) return 0;
+      await withCharge(async () => {
+        for (const row of late) {
+          const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
+          if (!mine.length) await writeSync([row.id], { [MISSING_COL]: 0 });
+          else if (mine.some(h => h.fields.enabled)) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
+        }
+        for (const row of lists) {
+          const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
+          if (!mine.length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
+          else if (mine.some(h => h.fields.enabled)) await sendList(row[EXPORT_COL], row[TABLE_COL], mine.filter(h => h.fields.enabled).map(h => h.id));
+        }
+      });
       return late.length + lists.length;
     });
     if (done && container && container.isConnected && !document.querySelector('.scrim')) await renderSource();
   } catch (e) {
     if (e.message === 'ownerOnly') notOwner = true;
-    else console.warn(e);
+    else if (e.message !== 'resendBusy') console.warn(e);
   } finally {
     catching = false;
   }
+}
+
+// Lignes de Synchro utiles au rattrapage, sans les lots ni les listes (de grosses cellules), car
+// lues toutes les 10 secondes. Null sans la table.
+async function lightRows() {
+  const rows = await selectRows(SYNC_TABLE, [EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, STATE_COL]);
+  if (rows) return rows.filter(r => !isCharge(r));
+  return (await readSchema()).has(SYNC_TABLE) ? syncRows() : null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Renvois ménagés (voir parseCharge) : la ligne 'charge' de Synchro dit quelle page renvoie et ce
+// qui est parti ces dix dernières minutes. Une page qui dépasse le budget attend, en donnant signe
+// de vie ; une autre page (autre personne, autre navigateur) ne lance rien pendant ce temps.
+const PAGE = randomHex(4);
+let charge = null; // { id, state, saved, out } pendant un renvoi de cette page
+
+async function readCharge() {
+  const rows = await selectRows(SYNC_TABLE, [TYPE_COL, RESEND_COL]);
+  return (rows && rows.find(isCharge)) || chargeRow();
+}
+
+async function withCharge(fn, out = null) {
+  const row = await readCharge();
+  const state = parseCharge(row[RESEND_COL]);
+  if (chargeBusy(state, PAGE, now())) throw new Error('resendBusy');
+  charge = { id: row.id, state: { ...state, par: PAGE, reprise: 0 }, saved: 0, out };
+  await saveCharge();
+  try {
+    return await fn();
+  } finally {
+    charge.state = { ...charge.state, par: '', reprise: 0 };
+    await saveCharge().catch(() => {});
+    charge = null;
+  }
+}
+
+// Écrit l'état, avec un signe de vie. Une autre page qui aurait pris la main entre-temps (deux
+// renvois lancés au même instant) la garde : celle-ci s'arrête, ses marques restent pour le
+// rattrapage.
+async function saveCharge() {
+  const current = parseCharge((await readCharge())[RESEND_COL]);
+  if (charge.state.par && chargeBusy(current, PAGE, now())) throw new Error('resendBusy');
+  if (!charge.state.par && current.par && current.par !== PAGE) return;
+  charge.state.le = now();
+  charge.saved = now();
+  await writeSync([charge.id], { [RESEND_COL]: JSON.stringify(charge.state) });
+}
+
+// Octets partis (une copie par destinataire). Au-delà du budget, attendre que la fenêtre se vide.
+async function spend(bytes) {
+  charge.state = addSpent(charge.state, now(), bytes);
+  const wait = budgetWait(charge.state, now());
+  if (wait > 0) {
+    charge.state.reprise = now() + wait;
+    await saveCharge();
+    if (charge.out) charge.out.replaceChildren(message('info', t('send.charge.wait', { at: timeText(charge.state.reprise) })));
+    while (now() < charge.state.reprise) {
+      await sleep(Math.min(30, charge.state.reprise - now()) * 1000);
+      await saveCharge();
+    }
+    charge.state.reprise = 0;
+  }
+  if (now() - charge.saved > 20) await saveCharge();
+}
+
+function chargeNotice(state) {
+  if (state.reprise > now()) return message('info', t('send.charge.wait', { at: timeText(state.reprise) }));
+  return chargeBusy(state, PAGE, now()) ? message('info', t('send.charge.busy')) : null;
 }
 
 export function startAutoCatchUp() {
@@ -530,7 +625,7 @@ async function waitForQueue(hookIds) {
     const hooks = (await listWebhooks()).filter(h => hookIds.includes(h.id));
     if (hooks.some(tooLarge)) throw new Error('tooLarge');
     if (!hooks.some(h => h.usage && h.usage.numWaiting)) return;
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await sleep(1500);
   }
   throw new Error('queueStuck');
 }
@@ -636,7 +731,8 @@ function exportWizard(exp = null) {
     }
     if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, id));
     const n = changed.length ? await resendTables(id, changed, report) : 0;
-    wizard.show(3, message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone')), [{ label: t('common.close'), kind: 'btn-primary' }]);
+    const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
+    wizard.show(3, saved, [{ label: t('common.close'), kind: 'btn-primary' }]);
   }
 }
 
@@ -765,8 +861,8 @@ function recipientWizard(exp, pending = null) {
     for (const { table } of exp.tables) total += (await fetchRows(table)).length;
     const report = el('div', { class: 'report' });
     const send = async () => {
-      await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
-      wizard.show(STEP.load + 1, message('ok', t('send.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
+      const n = await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
+      wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
     };
     if (!total) {
       wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], [{ label: t('common.close'), kind: 'btn-primary' }]);

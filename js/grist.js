@@ -1,8 +1,9 @@
 // Accès au document courant, avec les droits de la personne qui a ouvert la page.
 // Deux canaux seulement :
 //  - l'API des widgets (`grist.docApi`) : lecture des tables, écritures groupées ;
-//  - l'API REST de la même instance pour les webhooks, que l'API des widgets n'expose pas,
-//    avec un jeton d'accès court (`getAccessToken`) passé en paramètre `auth=`.
+//  - l'API REST de la même instance pour les webhooks, que l'API des widgets n'expose pas, et
+//    pour des lectures légères en SQL, avec un jeton d'accès court (`getAccessToken`) passé en
+//    paramètre `auth=`.
 import { parseDocBaseUrl, randomHex, toRows } from './core.js';
 
 export const fetchRows = async tableId => toRows(await grist.docApi.fetchTable(tableId));
@@ -53,6 +54,20 @@ export async function docInfo() {
     return { name: String(info.name || ''), access: String(info.access || '') };
   } catch (e) {
     return { name: '', access: '' };
+  }
+}
+
+// Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
+// léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture
+// répétée. Null si Grist refuse (droits, table absente) : lire alors la table entière.
+export async function selectRows(tableId, colIds) {
+  try {
+    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+    const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"`;
+    const response = await fetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
+    return response.ok ? (await response.json()).records.map(r => r.fields) : null;
+  } catch (e) {
+    return null;
   }
 }
 
