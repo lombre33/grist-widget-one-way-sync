@@ -2,7 +2,7 @@
 // correspondance des colonnes entre les deux.
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
-  STATE_COL, TABLE_COL, TYPE_COL, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue,
+  STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue,
 } from './common.js';
 import { compareOrder, completeLists, lastMark, latestByKey, pendingLists } from './journal.js';
 
@@ -77,10 +77,13 @@ function indexDest(destRows, matchCol) {
   return { byKey: groupBy(keyed, r => r[KEY_COL]), unkeyed: groupBy(unkeyed, r => r[matchCol]) };
 }
 
-// Clés parties de la SOURCE d'après les listes pas encore traitées : absentes d'un seau qui a perdu
-// une clé, d'une liste « ids:… », ou d'une liste complète arrivée en entier ; sauf si une version
-// plus récente que la liste est arrivée (clé recréée, annulation) : « plus récente » se lit à
-// l'heure de la SOURCE, ou à l'ordre d'arrivée pour une liste « ids:… », qui n'a pas d'heure.
+// Clés parties de la SOURCE d'après les listes pas encore traitées : absentes de la liste la plus
+// récente qui couvre leur seau (seau qui a perdu une clé, ou liste complète arrivée en entier), ou
+// d'une liste « ids:… » ; sauf si une version plus récente que la liste est arrivée (clé recréée,
+// annulation) : « plus récente » se lit à l'heure de la SOURCE, ou à l'ordre d'arrivée pour une
+// liste « ids:… », qui n'a pas d'heure. Seule la plus récente compte : une clé sortie d'un filtre
+// puis revenue figure dans la dernière liste, pas dans celle d'avant, et les deux peuvent attendre
+// le même passage, dans un ordre quelconque (file de Grist).
 // Rend les clés (`gone`) et, pour l'historique, [version, date d'arrivée de la liste] de celles que
 // la destination a (`listGone`) ; note dans `marks` les listes traitées.
 function droppedKeys(pending, latest, destByKey, marks) {
@@ -93,26 +96,28 @@ function droppedKeys(pending, latest, destByKey, marks) {
     gone.add(key);
     if (version && destByKey.has(key)) listGone.push([version.id, listRow[RECEIVED_COL] ?? null]);
   };
-  const dropAbsent = (present, t, listRow) => known.filter(key => !present(key)).forEach(key => drop(key, t, listRow));
-  let byBucket = null; // seau -> clés connues, calculé au premier seau
+  const newest = new Map(); // seau -> { t, keys, row } : la liste la plus récente qui le couvre
+  const cover = (bucket, t, keys, row) => {
+    const was = newest.get(bucket);
+    if (!was || compareOrder(t, was.t) >= 0) newest.set(bucket, { t, keys, row });
+  };
   const mark = lastMark(pending);
   for (const { row, list } of pending) {
-    if (list.buckets) {
-      byBucket = byBucket || groupBy(known, bucketOf);
-      for (const [b, left] of list.buckets.keys) (byBucket.get(b) || []).filter(key => !left.has(key)).forEach(key => drop(key, list.buckets.t, row));
-    }
+    if (list.buckets) for (const [bucket, keys] of list.buckets.keys) cover(bucket, list.buckets.t, keys, row);
     // Un morceau de liste complète attend les autres ; celui d'un renvoi remplacé par un autre
     // (interrompu, repris sous une autre marque) ne servira plus.
     if (!list.part || list.part.mark !== mark) marks.set(row.id, '');
   }
+  const byBucket = groupBy(known, bucketOf);
+  for (const { rows, keys, t } of completeLists(pending)) {
+    for (let bucket = 0; bucket < BUCKETS; bucket++) cover(bucket, t, keys, rows[rows.length - 1]);
+    rows.forEach(row => marks.set(row.id, ''));
+  }
+  for (const [bucket, { t, keys, row }] of newest) (byBucket.get(bucket) || []).filter(key => !keys.has(key)).forEach(key => drop(key, t, row));
   const full = pending.filter(l => l.list.full).pop();
   if (full) {
     const present = new Set(full.list.full);
-    dropAbsent(key => present.has(key), null, full.row);
-  }
-  for (const { rows, keys, t } of completeLists(pending)) {
-    dropAbsent(key => keys.has(key), t, rows[rows.length - 1]);
-    rows.forEach(row => marks.set(row.id, ''));
+    known.filter(key => !present.has(key)).forEach(key => drop(key, null, full.row));
   }
   return { gone, listGone };
 }

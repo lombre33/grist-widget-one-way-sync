@@ -108,6 +108,25 @@ test('consolidation : clés parties d\'un seau effacées, sauf version plus réc
   ]);
 });
 
+test('consolidation : seule la liste la plus récente d\'un seau compte (filtre posé puis retiré)', () => {
+  // b est sortie du filtre (liste de l'heure 20 sans elle, déjà appliquée), puis y revient : la
+  // liste de l'heure 30 la cite, sa version (heure 5) est renvoyée. Une liste de l'heure 25 sans
+  // elle, arrivée en retard, attend le même passage, avant ou après celle de l'heure 30.
+  const base = [j(1, 'a', 10, done), j(2, 'b', 5, { ...done, Sync_Etat: 'suppression' }), gone(3, 20, ['b'], done, ['a'])];
+  const old = id => gone(id, 25, ['b'], {}, ['a']);
+  const back = id => gone(id, 30, ['b'], {}, ['a', 'b']);
+  const destRows = [{ id: 1, id_sync: 'a', Nom: 'n1' }];
+  for (const lists of [[old(4), back(5)], [back(4), old(5)]]) {
+    const { actions, stats } = plan([...base, ...lists, j(6, 'b', 5)], destRows);
+    assert.deepEqual(stats, { added: 1, updated: 0, removed: 0 }, 'b revient');
+    assert.deepEqual(actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b'] }, { Nom: ['n6'] }, { on_many: 'all' }]);
+  }
+  const { stats } = plan([...base, old(4), j(6, 'b', 5)], destRows);
+  assert.equal(stats.added, 0, 'sans la liste plus récente, b reste partie');
+  const parts = plan([...base, back(4), part(5, 1, 40, ['a'], true)], [...destRows, { id: 2, id_sync: 'b' }]);
+  assert.equal(parts.stats.removed, 1, 'une liste complète plus récente l\'emporte sur un seau');
+});
+
 test('consolidation : liste complète en morceaux, appliquée une fois tous arrivés', () => {
   const base = [j(1, 'a', 10, done), j(2, 'b', 10, done), j(3, 'd', 50, done)];
   const destRows = [{ id: 1, id_sync: 'a' }, { id: 2, id_sync: 'b' }, { id: 3, id_sync: 'd' }];
