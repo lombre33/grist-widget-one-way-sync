@@ -117,6 +117,18 @@ async function start() {
 
   startAutoConsolidation(refreshTarget);
   startAutoCatchUp(refreshSource);
+  try {
+    await openFirstScreen();
+  } catch (e) {
+    // Document illisible juste après la sonde (rechargé par Grist, réseau) : rien ne s'affiche
+    // sinon. L'erreur est montrée, la console n'en garde que la trace.
+    console.warn(e);
+    showStartProblem(t('start.failed', { detail: errorText(e) }), { reload: true });
+  }
+}
+
+// Premier écran : l'onglet du rôle que le document tient déjà, sinon l'accueil.
+async function openFirstScreen() {
   const schema = await readSchema();
   const journals = receivedJournals(schema);
   // Échange dont le formulaire de retour vient d'être publié : l'assistant reprend dans Envoyer.

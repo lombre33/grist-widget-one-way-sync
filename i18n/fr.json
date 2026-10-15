@@ -338,5 +338,6 @@
   "start.access": "Le widget a besoin de l’accès complet au document : dans le panneau de droite, cliquez sur « Accepter », ou choisissez « Accès complet au document » dans « Niveau d’accès ».",
   "start.slow": "Grist ne répond pas au widget. Vérifiez qu’il a l’accès complet au document (panneau de droite : « Accepter », ou « Accès complet au document » dans « Niveau d’accès »), puis rechargez la page. Si cela dure, vérifiez votre connexion.",
   "start.network": "Le widget ne peut pas charger l’API de Grist depuis {origin} : le réseau la bloque, ou cette instance n’est pas dans la liste du widget.",
+  "start.failed": "Le widget n’a pas pu lire le document. {detail} Rechargez la page.",
   "start.reload": "Recharger la page"
 }

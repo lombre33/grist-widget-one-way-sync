@@ -338,5 +338,6 @@
   "start.access": "The widget needs full access to the document: in the right panel, click “Accept”, or choose “Full document access” under “Access level”.",
   "start.slow": "Grist does not answer the widget. Check that it has full access to the document (right panel: “Accept”, or “Full document access” under “Access level”), then reload the page. If it lasts, check your connection.",
   "start.network": "The widget cannot load the Grist API from {origin}: the network blocks it, or this instance is not in the widget’s list.",
+  "start.failed": "The widget could not read the document. {detail} Reload the page.",
   "start.reload": "Reload the page"
 }
