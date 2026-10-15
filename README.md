@@ -39,7 +39,8 @@ Villes  ──┤ formules ─▶ Synchro ── un webhook par ─────�
   Référence ; formule) repart seule : `MajLe` suit les colonnes envoyées et leur texte affiché.
 - Un **gros changement** (plus de 2 000 lignes environ d'un coup) ne tient pas dans un envoi :
   Grist note dans `Synchro` depuis quand des lignes manquent, et le widget SOURCE envoie le reste
-  par tranches, seul, dès qu'un propriétaire ouvre sa page.
+  par tranches, seul, dès qu'un propriétaire ouvre sa page. Un renvoi interrompu (page fermée)
+  reprend de même là où il s'était arrêté.
 - La CIBLE choisit chaque destination, nouvelle ou existante (correspondance des colonnes,
   rattachement des lignes déjà là par une colonne commune). Une table ajoutée plus tard à
   l'export lui est **proposée dans une fenêtre** : la recevoir, la refuser, ou plus tard.
@@ -81,7 +82,7 @@ table de réglages.
 
 | Document | Ajouts |
 |---|---|
-| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte, jamais ajoutée. La table `Synchro` : par table d'un export, une ligne `cles` (liste des clés) et une ligne `lot` (lignes récentes), plus une ligne `complet` (toutes les lignes) pour un export public ; la colonne `Sync_Etat` y note un envoi coupé, jusqu'à ce que le widget envoie le reste. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
+| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte, jamais ajoutée. La table `Synchro` : par table d'un export, une ligne `cles` (liste des clés) et une ligne `lot` (lignes récentes), plus une ligne `complet` (toutes les lignes) pour un export public ; la colonne `Sync_Etat` y note depuis quand des lignes restent à envoyer (envoi coupé, renvoi en cours), jusqu'à ce que le widget les envoie. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
 | CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, dépliées puis effacées par le widget), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Par`, `Sync_Recu` (marque, effet, auteur, date d'arrivée). Une section Formulaire publiée par journal, sur la page du widget (sauf en mode lien public). Ce que la CIBLE a choisi (destinations, colonnes, tables refusées) est noté dans la description de la colonne `Synchro_Ids` du journal. |
 
 Les envois créés avant la version 0.4 (vues d'export, tables `Synchro_<table>`, un journal par
@@ -98,11 +99,13 @@ table) sont signalés « à refaire », avec un bouton qui efface l'ancien monta
   (sans effet chez ceux qui avaient déjà les mêmes valeurs).
 - Les tables de destination ne sont à jour que lorsqu'un éditeur ouvre la page du widget ;
   entre-temps les versions attendent dans le journal (mode lien public : rien n'est lu).
-- La liste des clés est envoyée entière à chaque ajout ou suppression, et Grist regroupe jusqu'à
-  100 événements d'un même webhook dans un envoi limité à 1 Mo. Au-delà de **25 000 lignes environ
-  par table**, la liste ne tient plus dans un envoi ; pour une table de quelques milliers de lignes,
-  des ajouts très rapprochés (ou en attente pendant une panne de la CIBLE) peuvent aussi dépasser
-  1 Mo ensemble. Dans les deux cas la file se bloque : **Débloquer la file**, puis **Tout renvoyer**.
+- **20 000 lignes au plus par table envoyée** : la liste des clés part entière à chaque ajout ou
+  suppression, en un envoi que Grist limite à 1 Mo. Le widget refuse une table plus grande, et
+  signale sur la carte une table qui a grandi au-delà.
+- Grist regroupe jusqu'à 100 envois en attente d'un même destinataire (CIBLE qui a refusé un
+  moment, ajouts très rapprochés) : ensemble, ils peuvent dépasser 1 Mo, et Grist les retenterait
+  sans fin. Le widget SOURCE le voit, vide la file et renvoie tout, seul, dès qu'un propriétaire
+  ouvre sa page.
 - Un envoi en échec bloque la file de **tous** les webhooks du document SOURCE pendant environ
   15 minutes (comportement de Grist). Le bouton **Débloquer la file** la vide.
 - Le paramètre `?flat=1` n'est pas documenté par Grist ; il est couvert par ses tests depuis 2023.

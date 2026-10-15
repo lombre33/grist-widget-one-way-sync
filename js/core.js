@@ -29,13 +29,18 @@ export const LOT_COL = 'Synchro_Lot'; // lot : lignes récentes avec leurs colon
 export const MISSING_COL = STATE_COL;
 export const KIND = { keys: 'cles', lot: 'lot', full: 'complet' };
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
-// Octets d'un lot. Grist refuse un envoi de plus de 1 Mo, et un même envoi regroupe la liste des
-// clés et le lot quand les deux changent ensemble : le lot prend ce que la liste laisse.
+// Octets d'un lot. Grist refuse un envoi de plus de 1 Mo, et un même envoi regroupe les listes des
+// clés et les lots des tables d'un export qui changent ensemble : chaque lot prend sa part de ce
+// que les listes laissent.
 const LOT_MAX = 250000;
 const POST_MAX = 950000;
 const LOT_MIN = 20000;
 const KEY_BYTES = 40; // une clé dans la liste : UUID et séparateur
+// Une table de plus de MAX_ROWS lignes ne peut pas être envoyée : sa liste des clés part en un seul
+// envoi, que Grist refuse au-delà de 1 Mo (413), et la file d'envoi se bloque.
+export const MAX_ROWS = 20000;
 export const RESEND_CHUNK = 200; // lignes par renvoi
+export const RESEND_ALL = 1; // marque de renvoi : toute la table, lignes sans MajLe comprises
 
 const LIST_PREFIX = 'ids:';
 const CODE_PREFIX = 'GRISTSYNC2.';
@@ -103,7 +108,7 @@ export function freeTableId(base, taken) {
 // (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE envoie le reste.
 export function syncFormulas(tables) {
   const ids = [...new Set(tables)].filter(id => COL_ID.test(id)).sort();
-  const pick = `T = {${ids.map(id => `"${id}": ${id}`).join(', ')}}.get($${TABLE_COL})`;
+  const pick = `D = {${ids.map(id => `"${id}": ${id}`).join(', ')}}\nT = D.get($${TABLE_COL})`;
   const keys = [
     `if $${TYPE_COL} != "${KIND.keys}": return ""`, pick, 'if T is None: return ""',
     `return "${LIST_PREFIX}" + " ".join(k for k in T.all.${KEY_COL} if k)`,
@@ -130,7 +135,8 @@ export function syncFormulas(tables) {
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     `  rows = [r for r in rows if r.id in again or (r.${ORDER_COL} and r.${ORDER_COL} >= cut)]`,
-    `budget = max(${LOT_MIN}, min(${LOT_MAX}, ${POST_MAX} - ${KEY_BYTES} * len(T.all)))`,
+    `mine = [r.${TABLE_COL} for r in ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}") if r.${TABLE_COL} in D]`,
+    `budget = max(${LOT_MIN}, min(${LOT_MAX}, (${POST_MAX} - ${KEY_BYTES} * sum(len(D[t].all) for t in mine)) // max(1, len(mine))))`,
     'out, size = [], 0',
     `for r in sorted(rows, key=lambda r: v(r.${ORDER_COL}) or 0, reverse=True):`,
     `  line = [r.${KEY_COL}, v(r.${ORDER_COL}), bool(getattr(r, "${DELETE_COL}", False)), {c["id"]: g(r, c) for c in cols}]`,
@@ -235,6 +241,9 @@ export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
 // pour que la valeur change même si les lignes sont les mêmes.
 export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
 
+// Nombre de clés d'une liste (Synchro_Ids).
+export const keysCount = list => (String(list || '').startsWith(LIST_PREFIX) ? String(list).slice(LIST_PREFIX.length).split(' ').filter(Boolean).length : 0);
+
 // Lot reçu : { lines: [{ key, order, deleted, data }], total } ; null s'il est illisible.
 export function parseLot(text) {
   const lot = parseJson(text);
@@ -283,6 +292,14 @@ export function majleAction(cols, colIds) {
   const same = majle.recalcWhen === 0 && JSON.stringify(majle.recalcDeps || null) === JSON.stringify(deps);
   return same || !refs.length ? null : ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 0, recalcDeps: deps }];
 }
+
+// Renvoi reprenable : lignes d'une table à renvoyer depuis `since` (RESEND_ALL : toutes), dans
+// l'ordre de MajLe. Chaque tranche part avec la marque `chunkMark` : ses lignes et les suivantes
+// restent à envoyer, de sorte qu'un renvoi interrompu reprend à la dernière tranche.
+const majle = r => r[ORDER_COL] || 0;
+export const rowsSince = (rows, since) => rows.filter(r => since <= RESEND_ALL || majle(r) >= since)
+  .sort((a, b) => majle(a) - majle(b) || a.id - b.id);
+export const chunkMark = (part, since) => Math.max(since, majle(part[0]));
 
 // Une formule de déclenchement ajoutée après coup laisse les lignes existantes vides (vérifié).
 export function fillKeyActions(tableId, rows, newId) {

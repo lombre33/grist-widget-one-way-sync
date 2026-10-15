@@ -46,9 +46,9 @@ async function refreshFormulas(schema, rows) {
   await apply(actions);
 }
 
-// Table Synchro complète : une colonne ajoutée par une version suivante du widget est créée, et
-// la marque d'envoi coupé surveille le lot (dépendance posée après coup : Grist la refuse à la
-// création).
+// Table Synchro à jour : une colonne ajoutée par une version suivante du widget est créée, la
+// marque d'envoi coupé surveille le lot (dépendance posée après coup : Grist la refuse à la
+// création), et les formules sont celles de cette version.
 export async function ensureSyncTable() {
   let schema = await readSchema();
   if (!schema.has(SYNC_TABLE)) return;
@@ -65,6 +65,7 @@ export async function ensureSyncTable() {
   if (JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps)) {
     await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
   }
+  await refreshFormulas(schema, await syncRows());
 }
 
 // MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction).
@@ -114,10 +115,12 @@ export async function removeExport(exportId) {
   await refreshFormulas(await readSchema(), left);
 }
 
-// Renvoi : écrit `value` (voir resendValue) dans les lignes de ces types d'un export pour une table.
-export async function writeResend(exportId, table, kinds, value) {
+// Renvoi : écrit `values` (texte de Synchro_Renvoi, voir resendValue, ou champs à écrire) dans les
+// lignes de ces types d'un export pour une table.
+export async function writeResend(exportId, table, kinds, values) {
   const rows = (await syncRows()).filter(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && kinds.includes(r[TYPE_COL]));
-  await apply(rows.length ? [['BulkUpdateRecord', SYNC_TABLE, rows.map(r => r.id), { [RESEND_COL]: rows.map(() => value) }]] : []);
+  const fields = typeof values === 'string' ? { [RESEND_COL]: values } : values;
+  await apply(rows.length ? [['BulkUpdateRecord', SYNC_TABLE, rows.map(r => r.id), Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, rows.map(() => v)]))]] : []);
   return rows;
 }
 

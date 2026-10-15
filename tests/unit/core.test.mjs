@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, conditionExport, exportCondition, exportRowsActions, exportTables, exportableColumns, expandRows,
-  sentColumns, compareVersion, copyColumns, majleAction, missingFormula, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
+  sentColumns, compareVersion, copyColumns, chunkMark, keysCount, majleAction, missingFormula, rowsSince, RESEND_ALL, decodeCode, fillKeyActions, freeTableId, hookName, latestByKey, maskKey, parseDocBaseUrl,
   parseFormLink, parseInvitation, parseLot, parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, planUnpack,
   publicAclActions, publicAclRules, recentChanges, prepareSourceActions, resendValue, rowsByTable, syncColumns, syncFormulas, toRows, toTableId,
 } from '../../js/core.js';
@@ -152,15 +152,17 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.deepEqual(syncColumns([]).map(c => c.id),
     ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Etat', 'Sync_Par']);
   const { keys, lot } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
-  assert.match(keys, /T = \{"Contacts": Contacts, "Villes": Villes\}\.get\(\$Synchro_Table\)/);
+  assert.match(keys, /D = \{"Contacts": Contacts, "Villes": Villes\}\nT = D\.get\(\$Synchro_Table\)/);
   assert.match(keys, /^if \$Synchro_Type != "cles": return ""/);
   assert.match(keys, /return "ids:" \+ " "\.join\(k for k in T\.all\.id_sync if k\)/);
-  assert.match(lot, /T = \{"Contacts": Contacts, "Villes": Villes\}/);
+  assert.match(lot, /D = \{"Contacts": Contacts, "Villes": Villes\}/);
   assert.match(lot, /timedelta\(seconds=5\)/);
-  assert.match(lot, /budget = max\(20000, min\(250000, 950000 - 40 \* len\(T\.all\)\)\)/, 'le lot laisse la place à la liste des clés');
+  assert.match(lot, /mine = \[r\.Synchro_Table for r in Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\) if r\.Synchro_Table in D\]/);
+  assert.match(lot, /budget = max\(20000, min\(250000, \(950000 - 40 \* sum\(len\(D\[t\]\.all\) for t in mine\)\) \/\/ max\(1, len\(mine\)\)\)\)/,
+    'les lots d\'un export se partagent ce que leurs listes des clés laissent');
   assert.match(lot, /size > budget: break/);
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
-  assert.match(syncFormulas([]).keys, /T = \{\}\.get/);
+  assert.match(syncFormulas([]).keys, /D = \{\}\nT = D\.get/);
 });
 
 test('envoi coupé : une marque de déclenchement sur le lot, nommée comme une colonne des journaux', () => {
@@ -219,6 +221,25 @@ test('webhook d\'un destinataire : condition sur son export, relue à l\'identiq
   assert.equal(conditionExport(exportCondition('0123456789ABCDEF')), '');
   assert.equal(hookName('Annuaire', E), 'Synchro Annuaire #0123456789abcdef');
   assert.equal(resendValue('ab12', [3, 4]), 'ab12:3,4');
+});
+
+test('renvoi reprenable : lignes depuis la marque, dans l\'ordre de MajLe ; la marque avance par tranche', () => {
+  const rows = [{ id: 1, MajLe: 30 }, { id: 2, MajLe: null }, { id: 3, MajLe: 10 }, { id: 4, MajLe: 20 }, { id: 5, MajLe: 10 }];
+  assert.deepEqual(rowsSince(rows, RESEND_ALL).map(r => r.id), [2, 3, 5, 4, 1], 'toute la table, lignes sans MajLe d\'abord');
+  assert.deepEqual(rowsSince(rows, 20).map(r => r.id), [4, 1]);
+  assert.deepEqual(rowsSince(rows, 31), []);
+  const all = rowsSince(rows, RESEND_ALL);
+  assert.equal(chunkMark(all.slice(0, 2), RESEND_ALL), RESEND_ALL, 'lignes sans MajLe : toute la table reste à envoyer');
+  assert.equal(chunkMark(all.slice(2, 4), RESEND_ALL), 10);
+  assert.equal(chunkMark(all.slice(4), RESEND_ALL), 30);
+  assert.equal(chunkMark([{ id: 4, MajLe: 20 }], 15), 20);
+});
+
+test('liste des clés : nombre de clés', () => {
+  assert.equal(keysCount('ids:a b  c'), 3);
+  assert.equal(keysCount('ids:'), 0);
+  assert.equal(keysCount(''), 0);
+  assert.equal(keysCount(null), 0);
 });
 
 test('lot : lignes reçues, lignes illisibles écartées', () => {

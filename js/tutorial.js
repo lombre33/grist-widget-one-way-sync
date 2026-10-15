@@ -141,9 +141,11 @@ const SECTIONS = [
     text: [[
       'Un changement de plus de 2 000 lignes environ, fait d’un coup (import, remplacement), ne part qu’en partie. Grist le note dans la table Synchro, et le widget SOURCE envoie le reste par tranches, seul, dès qu’un propriétaire ouvre sa page (même repliée). En attendant, la CIBLE affiche combien de lignes manquent.',
       'Une valeur qui change à cause d’une autre table (le nom d’une ville renommée, affiché par une Référence, ou une formule) repart seule, sans toucher la ligne.',
+      'Une table de plus de 20 000 lignes ne peut pas être envoyée : le widget la refuse. Si des envois en attente dépassent ensemble la taille permise par Grist, le widget SOURCE vide la file et renvoie tout, seul.',
     ], [
       'A change of more than about 2,000 rows made at once (import, replace) is only partly sent. Grist notes it in the Synchro table, and the SOURCE widget sends the rest in batches, on its own, as soon as an owner opens its page (even collapsed). Meanwhile, the TARGET shows how many rows are missing.',
       'A value that changes because of another table (the name of a renamed city, shown by a Reference, or a formula) leaves on its own, without touching the row.',
+      'A table of more than 20,000 rows cannot be sent: the widget refuses it. If waiting deliveries together exceed the size Grist allows, the SOURCE widget clears the queue and resends everything, on its own.',
     ]],
     images: ['19-cible-envoi-coupe'] },
   { id: 'public', role: 'both',

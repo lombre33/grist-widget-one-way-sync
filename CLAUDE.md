@@ -100,7 +100,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.4.1 (15 octobre 2026)
+## État : V0.4.2 (15 octobre 2026)
 
 Décisions d'Antoine du 15 octobre : la SOURCE s'organise en **exports** (nom, tables, colonnes ;
 ajouter ou révoquer une personne sans refaire l'export ; la synchro dans les deux sens, « Échange »,
@@ -160,7 +160,19 @@ V0.4.1 (demande d'Antoine : « on anticipe et on fait partir en auto ») :
 - `recalcDeps` se pose par `UpdateRecord` sur `_grist_Tables_column` après `AddColumn` (dans
   `AddColumn`, Grist échoue : « 'AltText' object is not iterable »). Dans une formule de
   déclenchement, `value` est la valeur précédente de la cellule (`$Col` sur elle-même rend
-  `None`).
+  `None`). Vérifié le 15 octobre : la formule se recalcule dès qu'une colonne suivie est
+  **recalculée**, même sans changement de valeur ; une action qui écrit la colonne elle-même
+  l'emporte sur la formule dans la même action. Un webhook n'envoie que les lignes dont une valeur
+  a changé.
+
+Garde-fou (choix d'Antoine du 15 octobre, plutôt qu'un nouveau format d'envoi, voir
+`docs/05-pistes.md`) : table de plus de `MAX_ROWS` (20 000) lignes refusée par l'assistant et
+signalée sur la carte (liste des clés trop grosse pour un envoi) ; les lots d'un export se
+partagent le budget (formule du lot : `lookupRecords` des lignes `cles` de l'export) ; un envoi
+refusé pour sa taille (413 : Grist retente 20 fois, environ 15 minutes, puis remet le lot en fin de
+file, sans fin ; à la fermeture du document, il abandonne après 5 essais) est vu par `catchUp`, qui vide
+la file et marque tous les lots servis `RESEND_ALL`. Tout renvoi est reprenable : chaque tranche
+part avec la marque `chunkMark` (lignes dans l'ordre de `MajLe`), effacée à part à la fin.
 
 Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
 analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests : `npm test`

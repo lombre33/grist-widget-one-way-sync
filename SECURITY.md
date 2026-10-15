@@ -54,7 +54,7 @@ code. Pour un usage en production :
 | Requête | Quand | Authentification |
 |---|---|---|
 | `GET <instance>/grist-plugin-api.js` | au démarrage | aucune |
-| `GET/POST/PATCH/DELETE <document>/webhooks…` | onglet Envoyer : lister, créer, renommer, suspendre, supprimer un webhook, vider la file | jeton d'accès court du document (`getAccessToken`), en paramètre `auth=` ; Grist réserve ces appels aux propriétaires |
+| `GET/POST/PATCH/DELETE <document>/webhooks…` | onglet Envoyer : lister, créer, renommer, suspendre, supprimer un webhook, vider la file ; page ouverte par un propriétaire, toutes les 10 s : lire l'état des envois (rattrapage), vider la file si un envoi trop gros la bloque (413) | jeton d'accès court du document (`getAccessToken`), en paramètre `auth=` ; Grist réserve ces appels aux propriétaires |
 | `POST <instance>/api/s/<clé>/tables/<Journal>/records?flat=1` | onglet Recevoir, bouton « Tester le lien » : une ligne vide, effacée au passage suivant | aucune (clé du formulaire) |
 | `GET <document SOURCE>` | onglet Envoyer, à chaque affichage : le document est-il lisible par lien public ? | aucune (requête anonyme) |
 | `GET <document SOURCE>/tables/Synchro/records?filter=…` | onglet Recevoir, mode lien public seulement, toutes les 10 s page ouverte : les lignes `complet` de l'export | aucune (requête anonyme) |
@@ -77,7 +77,7 @@ les droits de la personne connectée.
   que le widget demande de renvoyer), plus une ligne `complet` (toutes les lignes) pour un export
   public ; s'y ajoutent l'identifiant de l'export, le nom de la table, la description des
   colonnes envoyées, l'e-mail de la personne qui a créé l'export et, dans `Sync_Etat`, la date
-  depuis laquelle des lignes n'ont pas pu partir (lot trop gros pour un envoi).
+  depuis laquelle des lignes restent à envoyer (lot trop gros pour un envoi, renvoi en cours).
 - **Isolation entre exports** : `Synchro` porte les lignes de tous les exports du document. Chaque
   webhook a une **condition** Grist (Grist 1.7.11 et plus) qui ne laisse passer que les lignes
   `cles` et `lot` de son export : `rec.Synchro_Export == "<export>" and rec.Synchro_Type in
@@ -121,7 +121,7 @@ les droits de la personne connectée.
 - **Rien d'autre n'est stocké** : pas de table de réglages. Les destinataires branchés sont les
   webhooks eux-mêmes (le mémo garde la fiche), visibles par les propriétaires dans les paramètres
   du document. Le widget n'écrit rien dans `Synchro` à part ses lignes, `Synchro_Renvoi` (numéros
-  des lignes à renvoyer) et l'effacement de `Sync_Etat` : un renvoi ne modifie jamais les tables de
+  des lignes à renvoyer) et `Sync_Etat` (avancement d'un renvoi) : un renvoi ne modifie jamais les tables de
   la personne. Dans ces tables, il ne touche qu'aux réglages de `MajLe` (colonnes qu'elle suit).
 
 ## La clé du formulaire de réception

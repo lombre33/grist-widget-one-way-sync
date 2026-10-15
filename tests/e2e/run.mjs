@@ -172,6 +172,7 @@ const context = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1
 const page = await context.newPage();
 const errors = [];
 page.on('console', (m) => {
+  if (process.env.DEBUG && m.type() === 'warning') console.log(`  [widget] ${m.text()}`);
   if (m.type() !== 'error') return;
   const where = m.location().url || '';
   // Erreurs du widget seulement. La feuille de thème que grist-plugin-api.js insère en ligne est
@@ -477,8 +478,8 @@ try {
   await widget().getByText(/Contacts : \d+ lignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
   await shot('19-cible-envoi-coupe');
   await openWidget(source.url);
-  await widget().getByText('Un gros changement n’a pas pu partir d’un seul coup').waitFor();
-  await widget().getByText('Un gros changement n’a pas pu partir d’un seul coup').waitFor({ state: 'detached', timeout: 240000 });
+  await widget().getByText('Un envoi n’est pas terminé').waitFor();
+  await widget().getByText('Un envoi n’est pas terminé').waitFor({ state: 'detached', timeout: 240000 });
   assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
   await openWidget(target.url);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + big.length, 'gros import reçu en entier', 120000);
@@ -486,6 +487,45 @@ try {
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', imported]]);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
   step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
+
+  // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
+  // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le
+  // widget SOURCE vide la file et renvoie tout, seul.
+  const bloc = Array.from({ length: 1500 }, (_, i) => `Bloc ${i} ${'y'.repeat(80)}`);
+  const blocIds = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', bloc.map(() => null), { Nom: bloc }]])).retValues[0];
+  await openWidget(source.url);
+  const usages = async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.map(h => h.usage || {});
+  await waitFor(async () => (await lotRow()).Sync_Etat === 0 && (await usages()).every(u => !u.numWaiting), 'bloc envoyé', 120000);
+  await applyActions(target.doc, [['RenameColumn', 'Journal_Annuaire', 'Sync_Par', 'Sync_Par_x']]);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Bob').id, { Ville: 'Brest' }]]);
+  await waitFor(async () => (await usages()).some(u => u.lastHttpStatus === 400), 'envoi refusé par la CIBLE');
+  for (const round of [1, 2, 3, 4, 5]) await applyActions(source.doc, [['BulkUpdateRecord', 'Contacts', blocIds, { Interne: blocIds.map(() => `r${round}`) }]]);
+  await applyActions(target.doc, [['RenameColumn', 'Journal_Annuaire', 'Sync_Par_x', 'Sync_Par']]);
+  await waitFor(async () => (await usages()).some(u => u.lastHttpStatus === 413), 'envois regroupés refusés (413)', 120000);
+  // Fini quand plus aucun lot n'est marqué ni en renvoi : la page peut se fermer.
+  const settled = async () => (await records(source.doc, 'Synchro')).every(r => !r.Sync_Etat && !r.Synchro_Renvoi || r.Synchro_Type === 'cles');
+  await waitFor(async () => !(await usages()).some(u => u.lastHttpStatus === 413) && await settled(), 'file débloquée, tout renvoyé', 240000);
+  await openWidget(target.url);
+  await waitFor(async () => {
+    const rows = await records(target.doc, 'Contacts');
+    return rows.filter(r => r.Interne === 'r5').length === bloc.length && rows.find(r => r.Nom === 'Bob').Ville === 'Brest';
+  }, 'tout reçu après le déblocage', 240000);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', blocIds]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
+  step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');
+
+  // --- Une table de plus de 20 000 lignes est refusée à la création de l'export
+  await applyActions(source.doc, [['AddTable', 'Grande', [{ id: 'N', type: 'Int' }]],
+    ['BulkAddRecord', 'Grande', Array(20001).fill(null), { N: Array.from({ length: 20001 }, (_, i) => i) }]]);
+  await openWidget(source.url);
+  await button('Nouvel export').click();
+  await dialog().getByRole('checkbox', { name: 'Grande' }).check();
+  await dialogButton('Continuer').click();
+  await dialog().getByText(/Trop grande pour la synchro : Grande \(20.001 lignes\)/).waitFor();
+  await page.keyboard.press('Escape');
+  await dialog().waitFor({ state: 'detached' });
+  await applyActions(source.doc, [['RemoveTable', 'Grande']]);
+  step('SOURCE : une table de plus de 20 000 lignes est refusée');
 
   // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
   await openWidget(source.url);

@@ -232,6 +232,12 @@ lignes ne sont pas encore arrivées :
 Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
 Référence, ou une formule) repart seule, sans toucher la ligne.
 
+Une table de plus de **20 000 lignes** ne peut pas être envoyée : à chaque ajout ou suppression,
+sa liste des clés part entière, et Grist refuse un envoi de plus de 1 Mo. Le widget la refuse à
+la création de l'export, et la signale sur la carte si elle grandit au-delà. Si des envois en
+attente dépassent ensemble cette taille (la CIBLE a refusé un moment), le widget SOURCE vide la
+file et renvoie tout, seul, dès qu'un propriétaire ouvre sa page.
+
 ## Mode lien public
 
 À l'étape 4, choisir **Lien public**. Le widget pose des règles d'accès : toute personne qui n'est
@@ -272,7 +278,7 @@ une table vers elle-même. Ce serait une synchro dans les deux sens.
 |---|---|---|
 | Rien n'arrive dans la table de destination | Personne n'a ouvert la page du widget dans la CIBLE | Ouvrir la page ; les versions attendaient dans le journal |
 | La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau |
-| Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** |
+| Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |

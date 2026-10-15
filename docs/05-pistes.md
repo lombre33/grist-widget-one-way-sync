@@ -28,7 +28,10 @@
 - Valeurs venues d'une autre table (Référence renommée, formule) envoyées tout de suite : `MajLe`
   suit les colonnes envoyées et leur texte affiché.
 - Gros changements envoyés en entier : Grist note l'envoi coupé, le widget SOURCE envoie le reste
-  seul dès qu'un propriétaire ouvre sa page.
+  seul dès qu'un propriétaire ouvre sa page ; un renvoi interrompu reprend où il s'était arrêté.
+- Garde-fou des grandes tables (choisi par Antoine) : table de plus de 20 000 lignes refusée,
+  lots d'un export qui se partagent la taille d'un envoi, file bloquée par un envoi trop gros
+  vidée et renvoyée seule.
 
 ## Encore possibles, sans alourdir l'outil
 
@@ -38,11 +41,11 @@
 2. **Filtre de lignes par table** : n'envoyer que les lignes qui passent une condition simple
    (colonne = valeur). La formule du lot le permet : une ligne qui sort du filtre part une
    dernière fois marquée supprimée.
-3. **Liste des clés en morceaux** : la liste entière part à chaque ajout ou suppression, ce qui
-   limite une table à 25 000 lignes environ et peut dépasser 1 Mo quand Grist regroupe des envois
-   en attente. La couper en 16 morceaux (par premier caractère de la clé) diviserait la taille par
-   16. Demande un nouveau format de code et la mise à jour des webhooks existants : une CIBLE
-   d'avant prendrait un morceau pour la liste entière et effacerait le reste.
+3. **Tables de plus de 20 000 lignes** : n'envoyer à chaque changement que les clés supprimées
+   (une formule de déclenchement garde la liste précédente dans une ligne de `Synchro` qui ne part
+   pas), et la liste complète seulement lors d'un renvoi, par morceaux. Couper la liste en
+   morceaux ne suffit pas : un import touche tous les morceaux, que Grist regroupe en un envoi
+   (vérifié le 15 octobre). Écarté pour l'instant par Antoine au profit du garde-fou.
 
 ## À éviter, pour rester simple
 
