@@ -4,7 +4,7 @@ Widget Grist qui recopie une table d'un document **SOURCE** dans un document **C
 instance, et la tient à jour, **sans serveur à héberger**. Pensé pour `grist.numerique.gouv.fr`,
 compatible avec toute instance Grist récente.
 
-Version 0.2 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
+Version 0.3 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
 
 ## Comment ça marche
 
@@ -99,6 +99,7 @@ Détails et preuves : `docs/01-etude-faisabilite.md`, `docs/02-procedure-test-di
 | `js/grist.js` | Accès au document (API des widgets) et aux webhooks (API REST, même instance) |
 | `js/source.js` / `js/target.js` | Onglets Envoyer / Recevoir |
 | `js/tables.js` | Tables techniques (vue d'export, liste des clés, journal) et leurs notes |
+| `js/guide.js`, `js/tutorial.js` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images des assistants |
 | `js/ui.js`, `js/i18n.js`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
 | `js/config.js` | Instances Grist autorisées, version |
 

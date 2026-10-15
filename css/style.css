@@ -60,6 +60,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .topbar { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 8px 0 12px;
   background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
 .brand { font-weight: 700; }
+#brand-logo { width: 20px; height: 20px; border-radius: 50%; opacity: .85; flex: none; }
 .tabs { display: flex; gap: 2px; flex: 1; }
 .tabs button { border: 0; background: none; padding: 9px 10px; border-bottom: 2px solid transparent; cursor: pointer; color: var(--text-muted); }
 .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -173,3 +174,32 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 /* Aide en images dans l'assistant */
 .help-figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .help-figure img { max-width: 100%; max-height: 120px; object-fit: contain; align-self: flex-start; border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* Qui fait quoi : étapes des deux documents, étape en cours soulignée. */
+.guide { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-frame); background: var(--surface); padding: 8px 12px; }
+.guide p { margin: 0; }
+.guide summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.guide > * + * { margin-top: 8px; }
+.guide-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.guide-steps li { padding: 2px 4px; border-radius: var(--radius); }
+.guide-steps li.current { background: var(--accent-soft); }
+.role-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; margin-right: 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-muted); white-space: nowrap; }
+.role-badge.role-source { color: var(--accent-ink); border-color: var(--accent); }
+.handoff { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.choice-help { margin: -4px 0 4px 24px; }
+
+/* Tutoriel : sections numérotées, captures cliquables (agrandies dans une fenêtre). */
+.tuto { display: grid; gap: 12px; max-width: 900px; }
+.tuto > h1, .tuto > p { margin: 0; }
+.tuto-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+.tuto-filter button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.tuto-section { border: 1px solid var(--border); border-radius: var(--radius-frame); background: var(--surface); padding: 10px 14px; }
+.tuto-section h2 { font-size: 14px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tuto-section p { margin: 4px 0; }
+.tuto-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.tuto-shot { padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-sunken); cursor: zoom-in; display: block; overflow: hidden; }
+.tuto-shot:hover { border-color: var(--accent); }
+.tuto-shot img { display: block; width: 100%; height: 140px; object-fit: contain; }
+.tuto-step .tuto-section { border: 0; padding: 0; margin-top: 8px; }
+.modal-full { max-width: min(1100px, 96vw); }
+.tuto-full { display: block; max-width: 100%; height: auto; }

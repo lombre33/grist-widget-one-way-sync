@@ -22,7 +22,7 @@ const TEAM = `${env.grist}/o/${env.team}`;
 // --- Widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées
 // (config.js) et à la politique de sécurité (index.html), comme le ferait une instance qui
 // héberge sa propre copie.
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   try {
@@ -79,6 +79,7 @@ const step = text => console.log(`· ${text}`);
 // Images d'aide montrées par l'assistant à l'étape Lien (img/) : la carte du formulaire publié
 // avec son bouton « Partager », puis la fenêtre de partage avec « Copier le lien ».
 async function helpShots() {
+  await clean();
   const pad = async (locator, path, margin = 12) => {
     const box = await locator.boundingBox();
     await page.screenshot({ path: join(ROOT, 'img', path), clip: {
@@ -95,8 +96,44 @@ async function helpShots() {
   await page.mouse.click(1090, 690);
   await copy.waitFor({ state: 'hidden' });
 }
+// Captures de l'installation du widget (docs/images/00-*), dans un document neuf, comme un humain :
+// Ajouter, Ajouter une page, Personnalisée, URL personnalisée, avertissement, accès complet.
+async function installShots() {
+  const ws = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
+  const doc = await api('POST', `/workspaces/${ws}/docs`, { name: 'Installation' });
+  await page.goto(`${TEAM}/doc/${doc}`);
+  const save = shot;
+  await page.getByText('Ajouter', { exact: true }).first().click();
+  await page.getByText('Ajouter une page', { exact: true }).first().waitFor();
+  await save('00a-installer-ajouter');
+  await page.getByText('Ajouter une page', { exact: true }).first().click();
+  await page.getByText('Masquer les astuces').click({ timeout: 3000 }).catch(() => {});
+  await page.getByText('J’ai compris').or(page.getByText("J'ai compris")).first().click({ timeout: 3000 }).catch(() => {});
+  await page.getByText('Personnalisée', { exact: true }).first().click();
+  await page.getByText('Table1', { exact: true }).last().click();
+  await save('00b-installer-page');
+  await page.getByRole('button', { name: 'Ajouter une page' }).click();
+  await page.getByPlaceholder('URL du widget').fill(WIDGET_URL);
+  await page.getByText('URL personnalisée', { exact: true }).click();
+  await save('00c-installer-url');
+  await page.getByRole('button', { name: 'Ajouter un widget' }).click();
+  const warning = page.getByText('J’ai bien lu ces recommandations', { exact: false });
+  if (await warning.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await warning.click();
+    await page.getByRole('button', { name: 'Confirmer' }).click();
+  }
+  await page.locator('.test-right-opener').click();
+  await page.locator('.test-right-tab-pagewidget').click();
+  await page.getByRole('button', { name: 'Accepter' }).waitFor();
+  await save('00d-installer-acces');
+  await page.getByRole('button', { name: 'Accepter' }).click();
+  await widget().locator('.guide-steps').waitFor({ timeout: 30000 });
+  await page.locator('.test-right-opener').click().catch(() => {});
+}
 // CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
-const shot = async name => { if (process.env.CAPTURES) await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) }); };
+// Captures sans le bandeau du serveur de test ni l'erreur de la galerie de widgets (hors ligne).
+const clean = () => page.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
+const shot = async name => { if (process.env.CAPTURES) { await clean(); await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) }); } };
 
 // --- Documents
 const source = await newDocWithWidget('Source', [
@@ -140,9 +177,21 @@ try {
   const dialog = () => widget().getByRole('dialog');
   const dialogButton = name => dialog().getByRole('button', { name, exact: true });
 
+  if (process.env.CAPTURES) await installShots();
+  if (process.env.INSTALL_ONLY) process.exit(0);
   // --- SOURCE : assistant d'envoi, étapes Tables, Préparation, Options, Invitation
   await openWidget(source.url);
+  await widget().locator('.guide-steps').waitFor();
   await shot('01-accueil');
+  // Onglet Tutoriel : tout le parcours, filtrable par rôle, captures chargées.
+  await widget().getByRole('tab', { name: 'Tutoriel' }).click();
+  await widget().locator('.tuto-section').first().waitFor();
+  await widget().getByRole('button', { name: 'Je suis la CIBLE' }).click();
+  assert.ok(await widget().locator('#tuto-t-link').isVisible() && !(await widget().locator('#tuto-s-tables').isVisible()), 'filtre CIBLE');
+  await widget().getByRole('button', { name: 'Tout', exact: true }).click();
+  assert.ok(await widget().locator('.tuto-shot img').first().evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
+  await shot('16-tutoriel');
+  await openWidget(source.url);
   await widget().locator('.tile', { hasText: 'Envoyer une table' }).click();
   await button('Nouveau destinataire').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
@@ -159,8 +208,11 @@ try {
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
   assert.ok((await records(source.doc, 'Synchro_Contacts'))[0].Synchro_Ids.startsWith('ids:'));
   await dialogButton('Créer l’invitation').click();
-  const invitation = await dialog().locator('textarea.code').inputValue();
+  const invitation = await dialog().locator('textarea.code').first().inputValue();
   assert.ok(invitation.startsWith('GRISTSYNC1.'));
+  // Qui fait quoi : l'étape attendue est celle de la CIBLE, avec ses consignes à copier.
+  assert.match(await dialog().locator('.guide-steps li.current').innerText(), /CIBLE[\s\S]*Accepter une invitation/);
+  await dialogButton('Copier avec les consignes').waitFor();
   await shot('05-source-invitation');
   await dialogButton('Plus tard').click();
   await widget().getByText('En attente de réponse').waitFor();
@@ -171,7 +223,7 @@ try {
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
   await button('Accepter une invitation').click();
-  await dialog().locator('textarea.code').fill(invitation);
+  await dialog().locator('textarea.code').first().fill(invitation);
   await shot('07-cible-code');
   await dialogButton('Continuer').click();
   await dialog().getByText('« Contacts + Villes » : tables Contacts, Villes').waitFor();
@@ -199,12 +251,14 @@ try {
     `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
   await openWidget(target.url); // l'assistant se rouvre seul à l'étape Lien
   await dialog().getByLabel('Lien du formulaire').waitFor();
+  await dialog().getByText(/2 formulaires de réception .* Ils ont tous le même lien/).waitFor();
+  await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; })); // le texte, pas le champ
   await shot('09-cible-lien');
   if (process.env.CAPTURES) await helpShots();
   await dialog().getByLabel('Lien du formulaire').fill(`${TEAM}/forms/${key}/${formSections[0].id}`);
   await dialogButton('Tester le lien').click();
   await dialog().getByText('Le lien fonctionne').waitFor();
-  const reply = await dialog().locator('textarea.code').inputValue();
+  const reply = await dialog().locator('textarea.code').first().inputValue();
   await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
   step('CIBLE : tables créées (dont une existante), formulaires publiés, un lien pour les deux, réponse produite');
@@ -212,7 +266,7 @@ try {
   // --- SOURCE : la carte de l'invitation rouvre l'assistant à l'étape Réponse, puis Envoi
   await openWidget(source.url);
   await button('Coller la réponse').click();
-  await dialog().locator('textarea.code').fill(reply);
+  await dialog().locator('textarea.code').first().fill(reply);
   await dialogButton('Vérifier').click();
   await dialog().getByText(env.email).waitFor();
   await shot('11-source-fiche');
@@ -287,6 +341,26 @@ try {
   await waitFor(async () => (await records(target.doc, 'Journal_Contacts')).filter(r => r.id_sync).length === 4, 'journal nettoyé');
   step('CIBLE : journal nettoyé');
 
+  // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
+  await openWidget(source.url);
+  await button('Mettre en pause').click();
+  await button('Reprendre').waitFor();
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice.id, { Ville: 'Toulon' }], ['AddRecord', 'Contacts', null, { Nom: 'Emma' }]]);
+  await new Promise(r => setTimeout(r, 3000));
+  assert.ok(!(await records(target.doc, 'Journal_Contacts')).some(r => (r.Synchro_Donnees || '').includes('Toulon')), 'rien envoyé pendant la pause');
+  await button('Reprendre').click();
+  await dialog().getByText('Renvoie 2 lignes ajoutées ou modifiées').waitFor();
+  await shot('13b-source-reprendre');
+  await dialogButton('Reprendre').click();
+  await dialog().waitFor({ state: 'detached' });
+  await button('Mettre en pause').waitFor(); // rattrapage fini, tableau de bord redessiné
+  await openWidget(target.url);
+  await waitFor(async () => {
+    const rows = await records(target.doc, 'Contacts');
+    return rows.some(r => r.Nom === 'Emma') && rows.some(r => r.Ville === 'Toulon');
+  }, 'modifications de la pause rattrapées');
+  step('SOURCE : pause, puis reprise qui rattrape les deux lignes changées pendant la pause');
+
   // --- Colonne ajoutée à l'export : la CIBLE la crée et la remplit seule
   await openWidget(source.url);
   await button('Colonnes').click();
@@ -301,7 +375,7 @@ try {
   await button('Arrêter la réception').click();
   await dialogButton('Arrêter la réception').click();
   await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'journaux effacés');
-  assert.equal((await records(target.doc, 'Contacts')).length, 3, 'destination gardée');
+  assert.equal((await records(target.doc, 'Contacts')).length, 4, 'destination gardée');
   await openWidget(source.url);
   await button('Révoquer').click();
   await dialogButton('Révoquer').click();
@@ -319,7 +393,7 @@ try {
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
   await shot('15-source-public');
   await dialogButton('Créer l’invitation').click();
-  const publicCode = await dialog().locator('textarea.code').inputValue();
+  const publicCode = await dialog().locator('textarea.code').first().inputValue();
   await dialogButton('Fermer').click();
   await widget().getByText('Lien public à activer').waitFor();
   await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
@@ -333,13 +407,13 @@ try {
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir une table' }).click();
   await button('Accepter une invitation').click();
-  await dialog().locator('textarea.code').fill(publicCode);
+  await dialog().locator('textarea.code').first().fill(publicCode);
   await dialogButton('Continuer').click();
   await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill('Annuaire');
   await dialogButton('Continuer').click();
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Fermer').click();
-  await waitFor(async () => (await records(target.doc, 'Annuaire')).length === 3, 'lien public : lignes lues');
+  await waitFor(async () => (await records(target.doc, 'Annuaire')).length === 4, 'lien public : lignes lues');
   await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Émile', Interne: 'i5' }]]);
   await waitFor(async () => (await records(target.doc, 'Annuaire')).some(r => r.Nom === 'Émile' && r.Interne === 'i5'), 'lien public : ajout lu');
   step('Lien public : seule la vue d\'export est lisible, la CIBLE la recopie sans échange de réponse');

@@ -118,13 +118,18 @@ export function confirmDialog({ title, body, confirmLabel, cancelLabel = t('comm
 export function copyField(value) {
   const area = el('textarea', { class: 'code', readonly: true, rows: 3, spellcheck: 'false' });
   area.value = value;
-  const button = el('button', { class: 'btn', type: 'button' }, icon('copy'), t('common.copy'));
+  return el('div', { class: 'copy-field' }, area, copyButton(() => value, t('common.copy'), () => area.select()));
+}
+
+// Bouton qui copie `text()` dans le presse-papiers ; `onFail` si le navigateur le refuse.
+export function copyButton(text, label, onFail = () => {}) {
+  const button = el('button', { class: 'btn', type: 'button' }, icon('copy'), label);
   button.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(value); } catch (e) { area.select(); return; }
+    try { await navigator.clipboard.writeText(text()); } catch (e) { onFail(); return; }
     button.lastChild.textContent = t('common.copied');
-    setTimeout(() => { button.lastChild.textContent = t('common.copy'); }, 1500);
+    setTimeout(() => { button.lastChild.textContent = label; }, 1500);
   });
-  return el('div', { class: 'copy-field' }, area, button);
+  return button;
 }
 
 // Liste à cocher, filtrable au clavier (tables, colonnes). `checked` : valeurs cochées au départ.

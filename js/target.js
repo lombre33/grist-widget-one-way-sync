@@ -10,7 +10,9 @@ import {
   JOURNAL_PREFIX, addDestColumnsActions, createReceivingTables, destColumns, readNote, receivedTables, removeTechnicalTables,
   upgradeJournal, writeNote,
 } from './tables.js';
-import { confirmDialog, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
+import { confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, pickField, run } from './ui.js';
+import { handoffText, roleGuide } from './guide.js';
+import { stepHelp } from './tutorial.js';
 import { t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
 
@@ -172,7 +174,8 @@ export async function renderTarget(root = container) {
   container.replaceChildren(...[toolbar,
     readOnly ? message('warn', t('common.readonly')) : null,
     out,
-    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty'))].filter(Boolean));
+    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty')),
+    roleGuide({ you: 'target', open: !cards.length })].filter(Boolean));
   // Les journaux qui reçoivent déjà n'ont plus besoin de leur formulaire à l'écran.
   if (!readOnly) collapseForms(groups.filter(g => !g.waiting).flatMap(g => g.pairs.map(p => p.journal))).catch(() => {});
   const waiting = groups.find(g => g.waiting);
@@ -275,7 +278,7 @@ function receiveWizard(group = null) {
   function showCode() {
     const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false', 'aria-label': t('recv.invite.title') });
     const report = el('div', { class: 'report' });
-    wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report],
+    wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report, stepHelp(['t-code']), roleGuide({ you: 'target', current: 1 })],
       [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
         const invitation = parseInvitation(area.value);
         if (invitation.mode === 'public' && new URL(invitation.base).origin !== (await docIdentity()).origin) throw new Error('otherInstance');
@@ -314,7 +317,7 @@ function receiveWizard(group = null) {
       from ? el('p', { class: 'small' }, t('recv.from', { from })) : null,
       el('label', {}, t('recv.dest')),
       ...rows.map(r => el('div', { class: 'dest-row' }, el('span', {}, `${r.tb.table} →`), el('div', {}, r.field, r.name))),
-      report,
+      report, stepHelp(['t-dest']), roleGuide({ you: 'target', current: 1 }),
     ], [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
   }
 
@@ -350,7 +353,7 @@ function receiveWizard(group = null) {
         el('label', {}, t('recv.match')), match,
         el('p', { class: 'muted small' }, t('recv.match.help')));
     });
-    wizard.show(STEP.dest, [el('p', {}, t('recv.existing')), ...blocks, report], [
+    wizard.show(STEP.dest, [el('p', {}, t('recv.existing')), ...blocks, report, stepHelp(['t-dest'])], [
       { label: t('common.back'), onClick: () => showDest(invitation) },
       { label: t('recv.create'), kind: 'btn-primary', onClick: () => run(null, report, () => { plans.forEach(p => p.read && p.read()); return create(invitation, plans); }) },
     ]);
@@ -369,7 +372,7 @@ function receiveWizard(group = null) {
       });
     }
     if (invitation.mode === 'public') {
-      wizard.show(STEP.reply, message('ok', t('recv.public.done')), [{ label: t('common.close'), kind: 'btn-primary' }]);
+      wizard.show(STEP.reply, [message('ok', t('recv.public.done')), roleGuide({ you: 'target', mode: 'public', current: 1 })], [{ label: t('common.close'), kind: 'btn-primary' }]);
       consolidateAll();
       return;
     }
@@ -382,10 +385,13 @@ function receiveWizard(group = null) {
     const page = (await formPages()).get(g.pairs[0].journal);
     const input = el('input', { type: 'url', class: 'input', spellcheck: 'false', 'aria-label': t('recv.link.title') });
     const report = el('div', { class: 'report' });
-    const help = page && !page.samePage ? t('recv.link.help.other', { page: page.name }) : t('recv.link.help');
+    // Les formulaires d'une même page partagent leur clé : un lien, celui de n'importe lequel.
+    const n = g.pairs.length;
+    const where = page && !page.samePage ? t('recv.link.where.other', { page: page.name }) : t('recv.link.where');
+    const help = n > 1 ? t('recv.link.help.many', { n, where, tables: g.pairs.map(p => p.table).join(', ') }) : t('recv.link.help', { where });
     const figure = (text, src) => el('figure', { class: 'help-figure' }, el('figcaption', {}, text), el('img', { src, alt: '' }));
     wizard.show(STEP.link, [el('p', {}, help),
-      figure(t('recv.link.step1'), 'img/aide-partager.png'), figure(t('recv.link.step2'), 'img/aide-copier.png'), input, report],
+      figure(t('recv.link.step1'), 'img/aide-partager.png'), figure(t('recv.link.step2'), 'img/aide-copier.png'), input, report, roleGuide({ you: 'target', current: 2 })],
       [{ label: t('common.later') }, { label: t('recv.link.check'), kind: 'btn-primary', onClick: () => run(null, report, () => check(g, input.value)) }]);
   }
 
@@ -399,7 +405,10 @@ function receiveWizard(group = null) {
       recipient: { email: await myEmail(g.pairs[0].journal), docId: identity.docId, team: identity.team, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
     });
     // 4. Réponse à renvoyer.
-    wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), copyField(code)],
+    wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), copyField(code),
+      el('div', { class: 'handoff' }, copyButton(() => handoffText('source', 'reponse', 3, code), t('guide.copyHandoff')),
+        el('span', { class: 'muted small' }, t('guide.copyHandoff.help'))),
+      roleGuide({ you: 'target', current: 3, open: true }), stepHelp(['t-reply', 's-reply', 's-load', 't-daily'])],
       [{ label: t('common.close'), kind: 'btn-primary' }]);
   }
 }

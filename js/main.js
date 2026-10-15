@@ -6,6 +6,8 @@ import { applyTheme, readPref, writePref } from './prefs.js';
 import { readSchema } from './grist.js';
 import { receivedTables, sentTables } from './tables.js';
 import { copyField, el, message, openModal } from './ui.js';
+import { roleGuide, widgetAddress } from './guide.js';
+import { tutorialView } from './tutorial.js';
 import { renderSource } from './source.js';
 import { consolidateAll, renderTarget, startAutoConsolidation } from './target.js';
 
@@ -33,14 +35,14 @@ function showScreen(...nodes) {
 
 function showStartProblem(text, withAddress) {
   $('tabs').classList.add('hidden');
-  const address = location.origin + location.pathname.replace(/index\.html$/, '');
-  showScreen(message('warn', text), withAddress ? copyField(address) : null);
+  showScreen(message('warn', text), withAddress ? copyField(widgetAddress()) : null);
 }
 
 async function select(tab) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', String(button.dataset.tab === tab));
   const view = el('div', { class: 'view' });
   showScreen(view);
+  if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(widgetAddress()))));
   await (tab === 'send' ? renderSource(view) : renderTarget(view));
 }
 
@@ -49,7 +51,8 @@ function showHome() {
   const tile = (tab, title, desc) => el('button', { class: 'tile', type: 'button', onclick: () => select(tab) },
     el('span', { class: 'tile-title' }, title), el('span', { class: 'tile-desc' }, desc));
   showScreen(el('h1', { class: 'home-title' }, t('home.title')),
-    el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc'))));
+    el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc'))),
+    roleGuide({ open: true }));
 }
 
 function openSettings() {

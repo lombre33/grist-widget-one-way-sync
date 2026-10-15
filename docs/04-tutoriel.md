@@ -17,13 +17,23 @@ Aucune donnée ne passe par les codes : seulement des noms de tables et de colon
 adresse d'écriture.
 
 Les captures viennent du test d'intégration (`CAPTURES=1 npm run test:e2e`) : elles montrent
-l'écran de la version du dépôt.
+l'écran de la version du dépôt. Le même tutoriel, avec les captures, est dans le widget (onglet
+**Tutoriel**) ; chaque étape des assistants en montre le morceau utile (**Aide en images**) et
+**Qui fait quoi ?** dit ce que fait chaque document. Aux étapes où un code change de main,
+**Copier avec les consignes** copie le code et les étapes de l'autre document, prêts pour un
+courriel.
 
 ## 0. Installer le widget (dans chaque document)
 
-**Ajouter**, **Ajouter un widget**, **Personnalisé**, **URL personnalisée**, coller l'adresse du
-widget, puis **Accès complet** dans l'onglet Widget du panneau de droite. Renommer la page, par
-exemple « Synchro » : les tables techniques se rangeront dessous, repliées.
+**Ajouter**, **Ajouter une page**, vue **Personnalisée** (n'importe quelle table), **Ajouter une
+page** ; **URL personnalisée**, coller l'adresse du widget, **Ajouter un widget** (Grist peut
+demander de confirmer) ; dans le panneau de droite, accepter l'**accès complet**. Renommer la
+page, par exemple « Synchro » : les tables techniques se rangeront dessous, repliées.
+
+![Ajouter une page](images/00a-installer-ajouter.png)
+![Vue Personnalisée](images/00b-installer-page.png)
+![URL personnalisée](images/00c-installer-url.png)
+![Accès complet](images/00d-installer-acces.png)
 
 ![Le widget à l'ouverture](images/01-accueil.png)
 
@@ -104,8 +114,9 @@ formulaire de réception par journal. Grist recharge alors le widget : l'assista
 ### 7. Copier le lien du formulaire
 
 L'assistant montre où cliquer : dans la carte d'**un** des formulaires apparus à côté du widget,
-**Partager**, puis **Copier le lien** ; coller ce lien dans le widget, **Tester le lien**. Un seul
-lien suffit pour toutes les tables.
+**Partager**, puis **Copier le lien** ; coller ce lien dans le widget, **Tester le lien**. Avec
+plusieurs tables, il y a un formulaire par table, mais ils ont tous le même lien : un seul suffit,
+celui de n'importe lequel.
 
 ![Lien](images/09-cible-lien.png)
 
@@ -138,13 +149,18 @@ La carte du destinataire montre le dernier envoi reçu et les actions :
 - **Tout renvoyer** ;
 - **Colonnes** : ajouter ou retirer des colonnes à tout moment ; la CIBLE crée seule les
   nouvelles colonnes ;
-- **Mettre en pause** ;
+- **Mettre en pause**, puis **Reprendre** : Grist n'envoie rien pendant une pause. À la reprise, le
+  widget propose de **rattraper** (recommandé) : il renvoie seulement les lignes modifiées ou
+  ajoutées pendant la pause, et la liste des clés pour les suppressions ; ou de reprendre sans
+  rattraper ;
 - **Débloquer la file**, quand un envoi échoue (Grist bloque alors toute la file du document
   environ 15 minutes) ;
 - **Révoquer** : supprime les webhooks et, si plus rien n'envoie la table, propose d'effacer ses
   tables techniques.
 
 ![Destinataire actif](images/13-source-actif.png)
+
+![Reprendre après une pause](images/13b-source-reprendre.png)
 
 ## Au quotidien, côté CIBLE
 

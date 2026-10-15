@@ -10,7 +10,9 @@ import {
   setWebhookEnabled,
 } from './grist.js';
 import { createListTable, readExport, readNote, removeSyncTables, sentTables, setExport, writeNote } from './tables.js';
-import { checkList, confirmDialog, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
+import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
+import { handoffText, roleGuide } from './guide.js';
+import { stepHelp } from './tutorial.js';
 import { t } from './i18n.js';
 
 const now = () => Date.now() / 1000;
@@ -43,9 +45,25 @@ function recipients(tables, hooks) {
 // leurs tables (`mode: 'public'` pour les seconds).
 function notedInvitations(schema) {
   const byId = new Map();
-  for (const table of sentTables(schema)) for (const inv of readNote(schema, listTableId(table)) || []) byId.set(inv.id, inv);
+  for (const table of sentTables(schema)) for (const inv of readNote(schema, listTableId(table)) || []) if (inv.mode !== PAUSE) byId.set(inv.id, inv);
   return [...byId.values()];
 }
+// Mise en pause, notée avec les invitations : un webhook désactivé perd son historique d'envoi
+// (Grist remet son état à zéro), il ne peut donc pas dire depuis quand il ne livre plus. On note
+// la plus récente MajLe de la table : heure du serveur, sans écart d'horloge avec le navigateur.
+const PAUSE = 'pause';
+const pauseEntry = (schema, feed) => (readNote(schema, listTableId(feed.table)) || []).find(e => e.mode === PAUSE && feed.main && e.hook === feed.main.id);
+
+async function notePause(r, pausing) {
+  const schema = await readSchema();
+  for (const f of r.feeds.filter(f => f.main)) {
+    const at = pausing && Math.max(0, ...(await fetchRows(f.table)).map(row => row[ORDER_COL] || 0));
+    const id = listTableId(f.table);
+    const note = (readNote(schema, id) || []).filter(e => !(e.mode === PAUSE && e.hook === f.main.id));
+    await writeNote(schema, id, pausing ? [...note, { id: `${PAUSE}-${f.main.id}`, mode: PAUSE, hook: f.main.id, at }] : note);
+  }
+}
+
 const pendingInvitations = schema => notedInvitations(schema).filter(inv => inv.mode !== 'public');
 const publicShares = schema => notedInvitations(schema).filter(inv => inv.mode === 'public');
 
@@ -95,7 +113,8 @@ export async function renderSource(root = container) {
   container.replaceChildren(...[toolbar,
     ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     out,
-    cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t('send.empty'))].filter(Boolean));
+    cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t('send.empty')),
+    roleGuide({ you: 'source', open: !cards.length })].filter(Boolean));
 }
 
 function actionButton(label, iconName, fn, ownerOnly, out, kind = '') {
@@ -138,10 +157,14 @@ async function publicCode(share) {
   });
 }
 
+// Bouton « copier avec les consignes » : le code et les étapes de la CIBLE, prêts pour un courriel.
+const handoff = (mode, code) => el('div', { class: 'handoff' },
+  copyButton(() => handoffText('target', mode, 1, code), t('guide.copyHandoff')), el('span', { class: 'muted small' }, t('guide.copyHandoff.help')));
+
 async function showPublicCode(share) {
   const code = await publicCode(share);
   await new Promise(resolve => openModal({ title: share.name, onClose: resolve,
-    body: [el('p', {}, t('send.public.help')), copyField(code)], buttons: [{ label: t('common.close'), kind: 'btn-primary' }] }));
+    body: [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code)], buttons: [{ label: t('common.close'), kind: 'btn-primary' }] }));
 }
 
 // Révoquer un lien public retire l'accès des lecteurs à ses vues d'export. Tant que le document
@@ -171,7 +194,8 @@ function recipientCard(r, ownerOnly, out) {
   const actions = [
     action(t('send.action.load'), 'send', async () => { for (const f of r.feeds) await sendAll(f.table, out); }),
     action(t('send.action.columns'), 'columns', () => editColumns(r, out)),
-    status[0] === 'paused' ? action(t('send.action.resume'), 'play', () => enable(true)) : action(t('send.action.pause'), 'pause', () => enable(false)),
+    status[0] === 'paused' ? action(t('send.action.resume'), 'play', () => resume(r, enable, out))
+      : action(t('send.action.pause'), 'pause', async () => { await notePause(r, true); await enable(false); }),
     status[0] === 'error' ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
     action(t('send.action.revoke'), 'trash', () => revoke(r, hooks), 'btn-danger-text'),
   ].filter(Boolean);
@@ -195,6 +219,42 @@ async function cancelInvitation(inv) {
 function lastSuccess(usage) {
   const at = Math.max(0, ...usage.map(u => u.lastSuccessTime || 0));
   return at ? el('p', { class: 'muted small' }, t('send.lastOk', { at: new Date(at).toLocaleString() })) : null;
+}
+
+// Reprendre après une pause : un webhook désactivé ne met rien en file, les changements de la
+// pause sont donc perdus pour la CIBLE. Le rattrapage renvoie les lignes dont MajLe est plus
+// récente que la plus récente au moment de la pause, et la liste des clés pour les suppressions. Heure inconnue
+// (pause faite avant cette version) : toute la table.
+async function resume(r, enable, out) {
+  const schema = await readSchema();
+  const plans = [];
+  for (const f of r.feeds) {
+    const since = (pauseEntry(schema, f) || {}).at;
+    const rows = await fetchRows(f.table);
+    const ids = since === undefined ? rows.map(row => row.id) : rows.filter(row => row[ORDER_COL] > since).map(row => row.id);
+    plans.push({ table: f.table, ids, all: since === undefined });
+  }
+  const n = plans.reduce((sum, p) => sum + p.ids.length, 0);
+  const all = plans.filter(p => p.all).map(p => p.table);
+  const choice = (value, label, help, checked) => [el('label', { class: 'check' },
+    el('input', { type: 'radio', name: 'gristsync-resume', value, checked }), el('strong', {}, label)), el('p', { class: 'muted small choice-help' }, help)];
+  const body = el('div', { class: 'form', role: 'radiogroup' },
+    choice('catchup', t('send.resume.catchup'), t('send.resume.catchup.help', { n }) + (all.length ? ' ' + t('send.resume.all', { tables: all.join(', ') }) : ''), true),
+    choice('as-is', t('send.resume.asIs'), t('send.resume.asIs.help'), false));
+  const picked = await new Promise((resolve) => {
+    let answered = false;
+    const done = (m, value) => { answered = true; resolve(value); m.close(); };
+    openModal({
+      title: t('send.resume.title', { name: r.name }), body,
+      onClose: () => { if (!answered) resolve(null); },
+      buttons: [{ label: t('common.cancel'), onClick: m => done(m, null) },
+        { label: t('send.action.resume'), kind: 'btn-primary', onClick: m => done(m, body.querySelector('input:checked').value) }],
+    });
+  });
+  if (!picked) return;
+  await enable(true);
+  if (picked === 'catchup') for (const p of plans) await touchRows(p.table, p.ids, out);
+  await notePause(r, false);
 }
 
 // Révoquer supprime les webhooks du destinataire. Si plus rien n'envoie une table (ni webhook ni
@@ -288,7 +348,7 @@ async function invitationWizard(pending = null) {
     const body = [el('p', {}, t('send.tables.help')), checkList({
       items: tables.map(id => ({ value: id, label: id })), checked: chosen,
       onChange: (values) => { chosen = values; next.disabled = !chosen.length; wizard.show(STEP.tables, body, [cancel, next]); },
-    })];
+    }), stepHelp(['s-tables']), roleGuide({ you: 'source', current: 0 })];
     wizard.show(STEP.tables, body, [cancel, next]);
   }
 
@@ -326,7 +386,7 @@ async function invitationWizard(pending = null) {
       showOptions();
     };
     wizard.show(STEP.columns, [el('p', {}, t('send.columns.help')), ...blocks,
-      adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report], [
+      adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
       { label: t('common.back'), onClick: showTables },
       { label: adds.length ? t('send.prepare') : t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, prepare) }]);
   }
@@ -346,7 +406,7 @@ async function invitationWizard(pending = null) {
       el('label', {}, t('send.name')), nameInput,
       el('label', {}, t('send.mode')),
       radio('reponse', t('send.mode.reply'), true), radio('public', t('send.mode.public'), false),
-      secretPart, publicPart, report,
+      secretPart, publicPart, report, stepHelp(['s-options', 'public']),
     ], [cancel, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(nameInput.value.trim(), mode() !== 'public' && secretBox.checked, mode() === 'public')) }]);
   }
 
@@ -362,7 +422,9 @@ async function invitationWizard(pending = null) {
     }
     // Les règles d'accès sont posées à la fermeture (le document se recharge alors).
     if (isPublicMode) {
-      wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(await publicCode(entry)), message('warn', t('send.public.turnOn'))],
+      const code = await publicCode(entry);
+      wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code),
+        message('warn', t('send.public.turnOn')), roleGuide({ you: 'source', mode: 'public', current: 1, open: true }), stepHelp(['public'])],
         [{ label: t('common.close'), kind: 'btn-primary' }]);
       return;
     }
@@ -371,7 +433,8 @@ async function invitationWizard(pending = null) {
       id: entry.id, name: entry.name, origin, secret, from: { email: (list[0] || {})[AUTHOR_COL] || '', docId },
       tables: chosen.map(table => ({ table, columns: selected.get(table) })),
     });
-    wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code)],
+    wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code), handoff('reponse', code),
+      roleGuide({ you: 'source', current: 1, open: true }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
       [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
   }
 
@@ -394,7 +457,7 @@ async function invitationWizard(pending = null) {
       wizard.show(STEP.reply, body, [{ label: t('common.later') },
         { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, () => approve(inv, reply)) }]);
     };
-    const body = [el('p', {}, t('send.reply.help')), area, report];
+    const body = [el('p', {}, t('send.reply.help')), area, report, stepHelp(['s-reply', 's-load']), roleGuide({ you: 'source', current: 3 })];
     wizard.show(STEP.reply, body, [{ label: t('common.later') }, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
   }
 
@@ -432,7 +495,11 @@ async function invitationWizard(pending = null) {
 // webhooks (plafonnée à 1000 événements) se vider entre deux tranches, puis renvoyer la liste des
 // clés en recréant la ligne de la table liste (rattrape les suppressions faites pendant une pause).
 async function sendAll(tableId, out) {
-  const ids = (await fetchRows(tableId)).map(r => r.id);
+  await touchRows(tableId, (await fetchRows(tableId)).map(r => r.id), out);
+}
+
+// Renvoie les lignes `ids` (MajLe remise à maintenant) et la liste des clés.
+async function touchRows(tableId, ids, out) {
   let done = 0;
   for (const part of chunk(ids)) {
     await apply([['BulkUpdateRecord', tableId, part, { [ORDER_COL]: part.map(() => now()) }]]);
