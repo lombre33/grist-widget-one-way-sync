@@ -138,8 +138,9 @@ const shot = async name => { if (process.env.CAPTURES) { await clean(); await pa
 // --- Documents
 const source = await newDocWithWidget('Source', [
   // Interne n'est pas cochée à l'invitation : elle ne doit arriver qu'une fois ajoutée à l'export.
-  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }, { id: 'Interne', type: 'Text' }]],
-  ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'], Interne: ['i1', 'i2', 'i3'] }],
+  // Delta, numérique et jamais envoyée : Grist en mettrait le total dans la vue d'export (bug du 15/10).
+  ['AddTable', 'Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }, { id: 'Interne', type: 'Text' }, { id: 'Delta', type: 'Numeric' }]],
+  ['BulkAddRecord', 'Contacts', [null, null, null], { Nom: ['Alice', 'Bob', 'Chloé'], Ville: ['Lyon', 'Paris', 'Nantes'], Interne: ['i1', 'i2', 'i3'], Delta: [1, 2, 3] }],
   ['AddTable', 'Villes', [{ id: 'Ville', type: 'Text' }]],
   ['BulkAddRecord', 'Villes', [null, null], { Ville: ['Lyon', 'Paris'] }],
 ]);
@@ -200,6 +201,7 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByText('Le widget doit ajouter').waitFor();
   await dialog().getByRole('checkbox', { name: 'Interne' }).uncheck();
+  await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
   await shot('03-source-preparation');
   await dialogButton('Préparer pour la synchro').click();
   await dialog().getByText('Prêt à envoyer : 2 tables').waitFor();
@@ -301,6 +303,8 @@ try {
   assert.deepEqual((await pagesOf(target.doc)).map(p => p.name).sort(), ['Communes', 'Contacts', 'Synchro', 'Table1'], 'CIBLE : aucune page technique');
   const sourceTables = (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId);
   assert.ok(['Synchro_Contacts', 'Synchro_Villes', 'Contacts_summary_id_sync', 'Villes_summary_id_sync'].every(id => sourceTables.includes(id)), 'tables techniques gardées');
+  const exportCols = (await api('GET', `/docs/${source.doc}/tables/Contacts_summary_id_sync/columns`)).columns.map(c => c.id).sort();
+  assert.deepEqual(exportCols, ['MajLe', 'Supprime', 'Synchro_Donnees', 'group', 'id_sync'], 'vue d\'export sans total ajouté par Grist');
   const tables = (await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => !id.startsWith('Table'));
   assert.deepEqual(tables.sort(), ['Communes', 'Contacts', 'Journal_Communes', 'Journal_Contacts']);
   const columnsOf = async table => (await api('GET', `/docs/${target.doc}/tables/${table}/columns`)).columns.map(c => c.id).sort();

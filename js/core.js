@@ -295,11 +295,18 @@ export function exportFormula(columns) {
 
 // Actions qui créent les colonnes de la vue d'export (créée juste avant par Grist, avec `count`).
 export const exportColumnsActions = exportId => [
-  ['RemoveColumn', exportId, 'count'],
   ['AddColumn', exportId, ORDER_COL, { type: 'DateTime:UTC', isFormula: true, formula: `max($group.${ORDER_COL})` }],
   ['AddColumn', exportId, DELETE_COL, { type: 'Bool', isFormula: true, formula: `any($group.${DELETE_COL})` }],
   ['AddColumn', exportId, DATA_COL, { type: 'Text', isFormula: true, formula: '""' }],
 ];
+
+// Grist ajoute de lui-même à une table de résumé `count` et un total par colonne numérique de la
+// table (« delta » → SUM($group.delta)). Le webhook enverrait ces colonnes, que le Journal de la
+// CIBLE n'a pas (400 Invalid column, file bloquée) : la vue d'export ne garde que les siennes.
+const EXPORT_KEEP = new Set(['id', 'manualSort', KEY_COL, GROUP_COL, ORDER_COL, DELETE_COL, DATA_COL]);
+export const exportCleanupActions = (exportId, colIds) => colIds
+  .filter(colId => !EXPORT_KEEP.has(colId) && !colId.startsWith('gristHelper_'))
+  .map(colId => ['RemoveColumn', exportId, colId]);
 
 // Lien public : règles d'accès qui ne laissent aux lecteurs (dont le lien public) que les vues
 // d'export et les tables liste de `tables`. Les règles du widget portent ce mémo ; elles passent

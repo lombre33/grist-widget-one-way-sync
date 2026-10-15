@@ -10,7 +10,7 @@ import {
   setWebhookEnabled,
 } from './grist.js';
 import {
-  JOURNAL_PREFIX, createListTable, readExport, readNote, receivedTables, removeSyncTables, sentTables, setExport, writeNote,
+  JOURNAL_PREFIX, cleanExport, createListTable, readExport, readNote, receivedTables, removeSyncTables, sentTables, setExport, writeNote,
 } from './tables.js';
 import { checkList, confirmDialog, copyButton, copyField, el, icon, message, openModal, openWizard, run } from './ui.js';
 import { handoffText, roleGuide } from './guide.js';
@@ -107,6 +107,8 @@ export async function renderSource(root = container) {
   if (!ownerOnly) await syncPublicRules(shares, open);
   // Mises en place d'avant : les tables listes perdent leur page (elles restent dans les données).
   if (!ownerOnly) await dropPages(tables.map(listTableId)).catch(() => {});
+  // Vues d'export d'avant le correctif « Invalid column » : on retire les totaux ajoutés par Grist.
+  if (!ownerOnly) for (const table of tables) await cleanExport(table).catch(() => {});
 
   const out = el('div', { class: 'out' });
   const toolbar = el('div', { class: 'toolbar' },

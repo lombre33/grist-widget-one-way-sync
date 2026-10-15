@@ -7,7 +7,7 @@
 // pas et que la clé du formulaire ne peut pas écrire.
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, GROUP_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, ORDER_COL, RECEIVED_COL, SCHEMA_COL,
-  STATE_COL, exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
+  STATE_COL, exportCleanupActions, exportColumnsActions, exportFormula, exportSchema, exportTableId, listFormula, listTableId,
 } from './core.js';
 import {
   EXPORTS_PAGE, apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages, tuckUnderWidgetPage,
@@ -49,15 +49,28 @@ export async function setExport(tableId, columns) {
     const page = await exportsViewRef();
     const created = (await apply([['CreateViewSection', schema.table(tableId).id, page, 'record', [key.id], null]])).retValues[0];
     await apply(exportColumnsActions(id));
+    await cleanExport(tableId);
     if (!page) {
       await apply([['UpdateRecord', '_grist_Views', created.viewRef, { name: EXPORTS_PAGE }]]);
       await tuckUnderWidgetPage([], [created.viewRef]);
     }
   }
+  else await cleanExport(tableId);
   const list = listTableId(tableId);
   const ids = (await fetchRows(list)).map(r => r.id);
   await apply([['BulkUpdateRecord', list, ids, { [SCHEMA_COL]: ids.map(() => JSON.stringify(exportSchema(columns))) }]]);
   await apply([['ModifyColumn', id, DATA_COL, { formula: exportFormula(columns) }]]);
+}
+
+// Retire de la vue d'export de `tableId` les colonnes ajoutées par Grist (`exportCleanupActions`).
+// Rend vrai s'il y en avait : une vue d'export d'avant ce correctif est réparée à l'affichage.
+export async function cleanExport(tableId) {
+  const id = exportTableId(tableId);
+  const schema = await readSchema();
+  if (!schema.has(id)) return false;
+  const actions = exportCleanupActions(id, schema.columns(id).map(c => c.colId));
+  if (actions.length) await apply(actions);
+  return actions.length > 0;
 }
 
 // Colonnes actuelles de la vue d'export, lues dans la table liste ; [] si elle n'existe pas.

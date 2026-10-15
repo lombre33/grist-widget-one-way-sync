@@ -143,3 +143,8 @@ Pages : les tables techniques n'ont pas de page (`dropPages`, « Données source
 la page commune `Synchro_Exports` des vues d'export : Grist efface une table de résumé dont la
 dernière section disparaît (vérifié). Créer une section sur une autre page que celle du widget ne
 recharge pas le widget.
+
+Une table de résumé reçoit de Grist `count` et un total `SUM($group.x)` par colonne numérique de
+la table : à retirer de la vue d'export (`exportCleanupActions`), sinon le webhook les envoie, 400
+« Invalid column » et file bloquée (bug d'Antoine du 15/10, colonne `delta`). Réparé aussi à
+l'affichage pour les vues d'export déjà créées.

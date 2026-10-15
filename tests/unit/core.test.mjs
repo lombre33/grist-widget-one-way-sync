@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildInvitation, buildReply, buildWebhookUrl, chunk, exportFormula, exportableColumns, expandRows, sentColumns, compareVersion, copyColumns,
   decodeCode, fillKeyActions, latestByKey, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation,
-  parseReply, parseWebhookUrl, loopingTables, planConsolidation, planPull, planPurge, publicAclActions, recentChanges, prepareSourceActions, toRows, toTableId,
+  parseReply, parseWebhookUrl, loopingTables, exportCleanupActions, planConsolidation, planPull, planPurge, publicAclActions, recentChanges, prepareSourceActions, toRows, toTableId,
 } from '../../js/core.js';
 
 const SECRET = '0123456789abcdef0123456789abcdef';
@@ -247,4 +247,9 @@ test('boucles : retour vers le document d’origine et table vers elle-même ref
   assert.deepEqual(loopingTables(links, 'docY', 'docY', []), ['Contacts', 'Villes'], 'vers elle-même');
   assert.deepEqual(loopingTables([{ table: 'Contacts', url: url('Journal_Copie') }], 'docY', 'docY', []), [], 'copie dans le même document');
   assert.deepEqual(loopingTables(links, '', 'docY', received), [], 'document inconnu');
+});
+
+test('vue d’export : seules ses colonnes restent (count et totaux ajoutés par Grist retirés)', () => {
+  assert.deepEqual(exportCleanupActions('T_summary_id_sync', ['id', 'id_sync', 'group', 'count', 'delta', 'MajLe', 'Supprime', 'Synchro_Donnees', 'gristHelper_Display']),
+    [['RemoveColumn', 'T_summary_id_sync', 'count'], ['RemoveColumn', 'T_summary_id_sync', 'delta']]);
 });
