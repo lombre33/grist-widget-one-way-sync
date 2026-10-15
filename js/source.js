@@ -114,6 +114,8 @@ export async function renderSource(root = container) {
     ...shares.map(share => publicCard(share, open, ownerOnly, out)),
     ...recipients(tables, hooks).map(r => recipientCard(r, ownerOnly, out)),
   ];
+  const orphans = ownerOnly ? [] : unusedTables(schema, hooks, tables);
+  if (orphans.length) cards.push(orphanCard(orphans, out));
   container.replaceChildren(...[toolbar,
     ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     out,
@@ -138,7 +140,57 @@ function pendingCard(inv, ownerOnly, out) {
   return card(inv.name, ['invited', 'pending'], `${inv.tables.join(', ')} · ${inv.hash ? t('send.secret.on') : t('send.secret.off')}`,
     el('div', { class: 'card-actions' },
       el('button', { class: 'btn btn-small btn-primary', type: 'button', disabled: ownerOnly, onclick: () => invitationWizard(inv) }, icon('paste'), t('send.reply')),
-      actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, 'btn-danger-text')));
+      actionButton(t('send.action.cancel'), 'trash', () => cancelPending(inv), ownerOnly, out, 'btn-danger-text')));
+}
+
+// Tables préparées qu'aucun envoi n'utilise : ni webhook, ni invitation en attente, ni partage
+// public (mise en place annulée, page rechargée en cours de route, envoi révoqué sans nettoyage).
+function unusedTables(schema, hooks, tables = sentTables(schema)) {
+  const noted = notedInvitations(schema).flatMap(inv => inv.tables);
+  return tables.filter(table => !noted.includes(table) && !hooks.some(h => masterTableId(h.fields.tableId) === table));
+}
+
+function orphanCard(orphans, out) {
+  return card(t('send.orphan.title'), ['orphan', 'off'], t('send.orphan.desc', { tables: orphans.join(', ') }),
+    el('div', { class: 'card-actions' }, actionButton(t('send.orphan.clean'), 'trash', async () => {
+      const { ok } = await confirmCleanup({ title: t('send.orphan.title'), body: t('send.orphan.body'), confirmLabel: t('send.orphan.clean'), orphans: [] });
+      if (ok) await removeSyncTables(orphans);
+    }, false, out, 'btn-danger-text')));
+}
+
+// Annuler une invitation en attente : son code ne pourra plus être accepté. Propose d'effacer
+// les tables techniques que plus rien n'utilise.
+async function cancelPending(inv) {
+  const others = notedInvitations(await readSchema()).filter(i => i.id !== inv.id).flatMap(i => i.tables);
+  const hooks = await listWebhooks();
+  const orphans = inv.tables.filter(table => !others.includes(table) && !hooks.some(h => masterTableId(h.fields.tableId) === table));
+  const { ok, cleanup } = await confirmCleanup({
+    title: t('send.cancel.title', { name: inv.name }), body: t('send.cancel.body'), confirmLabel: t('send.action.cancel'), orphans,
+  });
+  if (!ok) return;
+  await cancelInvitation(inv);
+  if (cleanup) await removeSyncTables(orphans);
+}
+
+// Confirmation d'une action destructrice, avec la case « effacer les tables techniques » quand
+// des tables deviennent inutiles. Promesse de { ok, cleanup }.
+function confirmCleanup({ title, body, confirmLabel, orphans }) {
+  const box = el('input', { type: 'checkbox', checked: true });
+  return new Promise((resolve) => {
+    let answered = false;
+    const done = (m, ok) => { answered = true; resolve({ ok, cleanup: ok && orphans.length > 0 && box.checked }); m.close(); };
+    const modal = openModal({
+      title, width: 400,
+      body: [el('p', {}, body),
+        orphans.length ? el('label', { class: 'check' }, box, t('send.revoke.cleanup', { tables: orphans.map(listTableId).join(', ') })) : null],
+      onClose: () => { if (!answered) resolve({ ok: false, cleanup: false }); },
+      buttons: [
+        { label: t('common.cancel'), onClick: m => done(m, false) },
+        { label: confirmLabel, kind: 'btn-danger', onClick: m => done(m, true) },
+      ],
+    });
+    modal.footer.querySelector('button').focus();
+  });
 }
 
 // Partage par lien public : pas de webhook, la CIBLE lit les vues d'export elle-même.
@@ -174,11 +226,16 @@ async function showPublicCode(share) {
 // Révoquer un lien public retire l'accès des lecteurs à ses vues d'export. Tant que le document
 // reste public, le refus général reste en place : rien d'autre ne devient lisible.
 async function revokePublic(share) {
-  const ok = await confirmDialog({
-    title: t('send.revoke.title', { name: share.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.action.revoke'), danger: true,
+  const schema = await readSchema();
+  const others = notedInvitations(schema).filter(i => i.id !== share.id).flatMap(i => i.tables);
+  const hooks = await listWebhooks();
+  const orphans = share.tables.filter(table => !others.includes(table) && !hooks.some(h => masterTableId(h.fields.tableId) === table));
+  const { ok, cleanup } = await confirmCleanup({
+    title: t('send.revoke.title', { name: share.name }), body: t('send.public.revokeBody'), confirmLabel: t('send.action.revoke'), orphans,
   });
   if (!ok) return;
   await cancelInvitation(share); // le tableau de bord redessiné ajuste les règles d'accès
+  if (cleanup) await removeSyncTables(orphans);
 }
 
 function recipientStatus(hooks) {
@@ -274,24 +331,12 @@ async function revoke(r, hooks) {
   const pending = notedInvitations(await readSchema()).flatMap(inv => inv.tables);
   const orphans = r.feeds.map(f => f.table)
     .filter(table => !others.some(h => masterTableId(h.fields.tableId) === table) && !pending.includes(table));
-  const cleanup = el('input', { type: 'checkbox', checked: true });
-  const ok = await new Promise((resolve) => {
-    let answered = false;
-    const modal = openModal({
-      title: t('send.revoke.title', { name: r.name }), width: 400,
-      body: [el('p', {}, t('send.revoke.body')),
-        orphans.length ? el('label', { class: 'check' }, cleanup, t('send.revoke.cleanup', { tables: orphans.map(listTableId).join(', ') })) : null],
-      onClose: () => { if (!answered) resolve(false); },
-      buttons: [
-        { label: t('common.cancel'), onClick: m => { answered = true; resolve(false); m.close(); } },
-        { label: t('send.action.revoke'), kind: 'btn-danger', onClick: m => { answered = true; resolve(true); m.close(); } },
-      ],
-    });
-    modal.footer.querySelector('button').focus();
+  const { ok, cleanup } = await confirmCleanup({
+    title: t('send.revoke.title', { name: r.name }), body: t('send.revoke.body'), confirmLabel: t('send.action.revoke'), orphans,
   });
   if (!ok) return;
   for (const h of hooks) await deleteWebhook(h.id);
-  if (orphans.length && cleanup.checked) await removeSyncTables(orphans);
+  if (cleanup) await removeSyncTables(orphans);
 }
 
 // Colonnes envoyées, par table : changer la vue d'export vaut pour tous les destinataires de la
@@ -349,11 +394,15 @@ async function invitationWizard(pending = null) {
   const wizard = openWizard({
     title: pending ? pending.name : t('send.new'),
     steps: ['send.step.tables', 'send.step.columns', 'send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k)),
-    onClose: () => renderSource(),
+    onClose: async () => { if (!invited && added.size) await run(null, null, undoPrepare); renderSource(); },
   });
   const cancel = { label: t('common.cancel') };
   let chosen = [];
   const selected = new Map(); // table -> colonnes choisies (exportableColumns)
+  // Mise en place annulée (fenêtre fermée avant l'invitation) : on retire ce que la préparation
+  // a ajouté et que rien d'autre n'utilise, colonnes de la synchro comprises.
+  const added = new Map(); // table -> { cols: colonnes ajoutées, fresh: tables techniques créées ici }
+  let invited = false;
 
   if (pending) return showReply(pending);
   return showTables();
@@ -396,7 +445,10 @@ async function invitationWizard(pending = null) {
     const prepare = async () => {
       if (chosen.some(table => !selected.get(table).length)) throw new Error('noColumn');
       for (const table of chosen) {
-        await apply(prepareSourceActions(table, missingSyncColumns((await readSchema()).columns(table))));
+        const before = await readSchema();
+        const missing = missingSyncColumns(before.columns(table));
+        if (!added.has(table)) added.set(table, { cols: missing, fresh: !before.has(listTableId(table)) });
+        await apply(prepareSourceActions(table, missing));
         // Table reçue (relais) : ses lignes gardent la clé de leur document d'origine. Une ligne
         // ajoutée ici à la main reste sans clé, donc locale : avec une clé, la prochaine liste
         // de l'origine, qui ne la connaît pas, l'effacerait.
@@ -441,6 +493,7 @@ async function invitationWizard(pending = null) {
       const id = listTableId(table);
       await writeNote(schema, id, [...(readNote(schema, id) || []), entry]);
     }
+    invited = true;
     // Les règles d'accès sont posées à la fermeture (le document se recharge alors).
     if (isPublicMode) {
       const code = await publicCode(entry);
@@ -457,6 +510,14 @@ async function invitationWizard(pending = null) {
     wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), copyField(code), handoff('reponse', code),
       roleGuide({ you: 'source', current: 1, open: true }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
       [{ label: t('common.later') }, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(entry) }]);
+  }
+
+  async function undoPrepare() {
+    const schema = await readSchema();
+    const unused = unusedTables(schema, await listWebhooks(), [...added.keys()].filter(table => schema.has(listTableId(table))));
+    await removeSyncTables(unused.filter(table => added.get(table).fresh));
+    const columns = unused.flatMap(table => added.get(table).cols.map(col => ['RemoveColumn', table, col]));
+    if (columns.length) await apply(columns);
   }
 
   // 5. Réponse : vérifier, montrer la fiche, approuver. La réponse doit désigner cette invitation,

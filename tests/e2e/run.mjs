@@ -410,6 +410,20 @@ try {
   assert.equal((await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 0);
   step('CIBLE puis SOURCE : réception arrêtée, révocation et tables techniques effacées');
 
+  // --- Mise en place annulée après « Préparer » : ce que la préparation a ajouté est retiré
+  await button('Nouveau destinataire').click();
+  await dialog().getByRole('checkbox', { name: 'Villes' }).check();
+  await dialogButton('Continuer').click();
+  await dialogButton('Préparer pour la synchro').click();
+  await dialog().getByText('Prêt à envoyer').waitFor();
+  assert.ok((await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro_Villes'), 'Villes préparée');
+  await dialogButton('Annuler').click();
+  await waitFor(async () => !(await records(source.doc, '_grist_Tables')).some(tb => ['Synchro_Villes', 'Villes_summary_id_sync'].includes(tb.tableId)),
+    'préparation annulée : tables techniques retirées');
+  await widget().getByText('Aucun destinataire').or(widget().locator('.card')).first().waitFor();
+  assert.equal(await widget().getByText('Tables préparées sans envoi').count(), 0, 'rien d\'orphelin');
+  step('SOURCE : mise en place annulée, tables techniques retirées');
+
   // --- Lien public : un seul code, la CIBLE lit la vue d'export sans identifiant
   await button('Nouveau destinataire').click();
   await dialog().getByRole('checkbox', { name: 'Contacts' }).check();
@@ -446,8 +460,11 @@ try {
   await openWidget(source.url);
   await button('Révoquer').click();
   await dialogButton('Révoquer').click();
-  await widget().getByText('Aucun destinataire').waitFor();
-  assert.equal(await anon('Contacts_summary_id_sync'), 403, 'vue d\'export fermée après révocation');
+  // Plus rien d'envoyé : le document se recharge (règles d'accès) et le widget revient à l'accueil.
+  await widget().getByText('Que voulez-vous faire dans ce document ?').waitFor();
+  // Révoquer propose d'effacer les tables techniques (coché) : la vue d'export n'existe plus.
+  assert.ok([403, 404].includes(await anon('Contacts_summary_id_sync')), 'vue d\'export fermée après révocation');
+  assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro_Contacts'), 'tables techniques effacées');
   assert.equal(await anon('Contacts'), 403, 'reste du document toujours caché tant qu\'il est public');
   step('Lien public révoqué : plus rien de lisible');
 
