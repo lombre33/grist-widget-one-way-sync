@@ -53,30 +53,41 @@
   colonne inconnue, lien refusé), espaces insécables et nombres à la française, crédits Grist
   Factory dans les Réglages, message clair si Grist ne répond pas au démarrage.
 
+## Faites le 15 octobre 2026 (version 0.5)
+
+- **Échange** : deux documents se tiennent à jour l'un l'autre, pour un destinataire. La
+  modification la plus récente l'emporte des deux côtés, une ligne reçue ne repart pas vers son
+  document d'origine. Branchement en deux codes : l'invitation porte le lien de retour, la réponse
+  branche les deux sens d'un coup.
+- **Filtre de lignes par table** (colonne = valeur) : une ligne qui sort du filtre part une
+  dernière fois marquée supprimée, et revient si elle y rentre.
+- **Tables sans limite de 20 000 lignes** : la liste des clés est remplacée par 256 empreintes,
+  la CIBLE ne compare que les seaux qui changent, et un renvoi envoie la liste complète par
+  morceaux (vérifié avec 21 000 lignes).
+- **Destination renommée dans la CIBLE** : une table ou une colonne de destination renommée est
+  suivie par sa référence, la recopie continue.
+- **Annulation (Ctrl+Z) dans la SOURCE** : la valeur rétablie repart, la CIBLE revient à la valeur
+  d'avant.
+- **Un formulaire par réception, sur sa propre page** rangée sous celle du widget (la page du
+  widget est repliée une fois le lien donné) : une clé n'atteint qu'un journal. « Tester le lien »
+  vérifie que le lien écrit bien dans ce journal-là.
+- **Garde-fous** : lignes forgées rejetées et signalées (« Arrivées suspectes »), bouton « Couper
+  le lien », reprise de la même réception par une nouvelle invitation après confirmation ; un
+  renvoi à la fois par document, budget de renvoi avec heure de reprise affichée, relecture de la
+  CIBLE seulement quand il arrive quelque chose ; en lien public, la note de la SOURCE n'est plus
+  lisible.
+- Boutons de la CIBLE grisés d'emblée pour un lecteur.
+
 ## Encore possibles, sans alourdir l'outil
 
-1. **Échange (synchro dans les deux sens)** : choisi par Antoine le 15 octobre, après les exports.
-   Deux exports croisés entre deux documents, avec une règle de conflit simple et un test d'écho
-   (une ligne reçue ne doit pas repartir vers son document d'origine).
-2. **Filtre de lignes par table** : n'envoyer que les lignes qui passent une condition simple
-   (colonne = valeur). La formule du lot le permet : une ligne qui sort du filtre part une
-   dernière fois marquée supprimée.
-3. **Tables de plus de 20 000 lignes** : n'envoyer à chaque changement que les clés supprimées
-   (une formule de déclenchement garde la liste précédente dans une ligne de `Synchro` qui ne part
-   pas), et la liste complète seulement lors d'un renvoi, par morceaux. Couper la liste en
-   morceaux ne suffit pas : un import touche tous les morceaux, que Grist regroupe en un envoi
-   (vérifié le 15 octobre). Écarté pour l'instant par Antoine au profit du garde-fou.
+1. **Échange à plusieurs** : aujourd'hui un export en Échange n'a qu'un destinataire. Plusieurs
+   demanderaient de choisir quoi faire d'une modification venue de l'un pour les autres.
+2. **Nom des documents sur les cartes** : le jeton du widget ne lit pas la fiche du document
+   (vérifié), la carte montre donc l'identifiant court. Il faudrait que la personne le saisisse.
+3. **Ligne de plus de 1 Mo** : non découpée (choix d'Antoine du 15 octobre), la carte la signale.
 
-4. **Destination renommée dans la CIBLE** : suivre le renommage d'une table ou d'une colonne de
-   destination (aujourd'hui une table renommée n'est plus trouvée, et une colonne renommée est
-   recréée sous son ancien nom).
-   La note du journal garderait la référence de la table plutôt que son nom.
-5. **Annulation (Ctrl+Z) dans la SOURCE** : vérifier qu'une annulation repart bien vers la
-   CIBLE (`MajLe` est une formule de déclenchement ; une annulation la remet-elle à jour ?).
-6. **Réponse vérifiée au collage** : contrôler le code de réponse dès qu'il est collé, sans
-   attendre le bouton.
-7. **Nom des documents** : afficher le nom du document SOURCE et CIBLE, plutôt que son
-   identifiant, sur les cartes.
+Écarté par Antoine le 15 octobre : vérifier le code de réponse dès qu'il est collé, sans attendre
+le bouton.
 
 ## À éviter, pour rester simple
 

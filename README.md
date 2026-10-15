@@ -1,59 +1,89 @@
-# Synchro Grist à sens unique
+# Synchro Grist
 
-Widget Grist qui recopie une table d'un document **SOURCE** dans un document **CIBLE** de la même
-instance, et la tient à jour, **sans serveur à héberger**. Pensé pour `grist.numerique.gouv.fr`,
-compatible avec toute instance Grist récente.
+Widget Grist qui recopie des tables d'un document **SOURCE** dans un document **CIBLE** de la même
+instance, et les tient à jour, **sans serveur à héberger** ; ou, en **Échange**, tient deux
+documents à jour l'un l'autre. Pensé pour `grist.numerique.gouv.fr`, compatible avec toute instance
+Grist récente.
 
-Version 0.4.3 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
+Version 0.5.0 · Grist Factory · licence GNU GPL v3.0 · aucune dépendance, aucune étape de build.
 Il faut Grist 1.7.11 ou plus récent (filtre des webhooks).
 
 ## Comment ça marche
 
 ```
-SOURCE                                                   CIBLE
-Contacts ─┐                                              Journal_Annuaire ─┐ le widget, page ouverte
-Villes  ──┤ formules ─▶ Synchro ── un webhook par ──────▶ (listes, lots)    │ par un éditeur, déplie
-          │            (2 lignes par   destinataire,                       ▼ et recopie par table
-          │             table d'un     filtré sur                  Contacts, Communes (tables
-          │             export)        son export)                 normales, éditables)
-              POST anonyme par la clé d'un formulaire publié dans la CIBLE (…/records?flat=1)
+SOURCE                                                    CIBLE
+Contacts ─┐                                               Journal_Annuaire ─┐ le widget, page ouverte
+Villes  ──┤ formules ─▶ Synchro ── un webhook par ───────▶ (listes, lots)    │ par un éditeur, contrôle,
+          │            (lignes par   destinataire,                          ▼ déplie et recopie
+          │             table d'un   filtré sur                  Contacts, Communes (tables
+          │             export)      son export)                 normales, éditables)
+              POST anonyme par la clé du formulaire de cette réception (…/records?flat=1)
 ```
 
 - La SOURCE organise ses envois en **exports** : un nom, des tables et, pour chacune, les colonnes
-  qui partent. On y ajoute des personnes une à une, on en révoque une seule, on modifie l'export
-  (tables, colonnes, nom) pour tous ses destinataires.
+  qui partent (et en option un filtre de lignes). On y ajoute des personnes une à une, on en
+  révoque une seule, on modifie l'export pour tous ses destinataires.
 - Une **seule table technique**, `Synchro`, quel que soit le nombre d'exports et de tables. Pour
-  chaque table d'un export, une ligne liste les clés existantes (les vraies suppressions partent
-  ainsi) et une ligne porte, en un bloc JSON, les lignes modifiées depuis 5 secondes avec les
-  colonnes cochées. Le reste ne sort jamais du document.
-- Le **transport** est celui de Grist, côté serveur, même quand personne n'a la page ouverte : un
-  webhook natif par destinataire, sur `Synchro`, avec une **condition** qui ne laisse passer que
-  les lignes de son export. Il écrit dans le journal de la CIBLE, à l'adresse d'écriture d'un
-  formulaire publié.
+  chaque table d'un export, une ligne suit les clés existantes (256 empreintes, pour les
+  suppressions) et une ligne porte, en un bloc JSON, les lignes modifiées depuis 5 secondes avec
+  les colonnes cochées. Le reste ne sort jamais du document.
+- Le **transport** est celui de Grist, côté serveur, même page fermée : un webhook natif par
+  destinataire, sur `Synchro`, avec une **condition** qui ne laisse passer que les lignes de son
+  export. Il écrit dans le journal de la CIBLE, par la clé d'un formulaire publié : **une clé par
+  réception**, chaque formulaire sur sa propre page.
 - La **recopie** est faite par le widget, avec les droits de l'éditeur qui ouvre sa page (même
-  replié), toutes les 10 secondes : il déplie ce qui est arrivé, recopie chaque table dans sa
-  destination, et efface les versions remplacées du journal.
-- Une **retouche** faite à la main dans la CIBLE reste en place jusqu'à la prochaine modification
-  de la même ligne dans la SOURCE ; un renvoi des mêmes valeurs ne la défait pas.
-- Une valeur qui change à cause d'une **autre table** (nom d'une ville renommée, affiché par une
-  Référence ; formule) repart seule : `MajLe` suit les colonnes envoyées et leur texte affiché.
-- Un **gros changement** (plus de 2 000 lignes environ d'un coup) ne tient pas dans un envoi :
-  Grist note dans `Synchro` depuis quand des lignes manquent, et le widget SOURCE envoie le reste
-  par tranches, seul, dès qu'un propriétaire ouvre sa page. Un renvoi interrompu (page fermée)
-  reprend de même là où il s'était arrêté.
-- La CIBLE choisit chaque destination, nouvelle ou existante (correspondance des colonnes,
-  rattachement des lignes déjà là par une colonne commune). Une table ajoutée plus tard à
-  l'export lui est **proposée dans une fenêtre** : la recevoir, la refuser, ou plus tard.
-- **Mode lien public**, au choix par destinataire : un seul code ; la SOURCE est partagée en
-  lecture par lien public, et des règles d'accès posées par le widget n'y laissent lire que les
-  instantanés des exports publics ; la CIBLE les lit toutes les 10 secondes, page ouverte.
+  replié) : il écarte ce qui ne peut pas venir de la SOURCE, déplie le reste, recopie chaque table
+  dans sa destination et nettoie le journal.
+
+## Fonctionnalités
+
+- **Exports** : tables, colonnes cochées, filtre de lignes « colonne = valeur » ; destinataires
+  ajoutés, mis en pause, repris (avec rattrapage) ou révoqués un à un.
+- **Trois modes par destinataire** : avec réponse (deux codes, envoi par Grist même page fermée),
+  **Échange** (dans les deux sens, la modification la plus récente l'emporte, pas d'écho) et
+  **lien public** (un seul code, la CIBLE lit les instantanés publiés).
+- **Destinations au choix** dans la CIBLE : table nouvelle ou existante, correspondance des
+  colonnes, rattachement des lignes déjà là par une colonne commune ; table ajoutée plus tard
+  proposée dans une fenêtre (recevoir, refuser, plus tard) ; tables et colonnes de destination
+  renommées suivies.
+- **Fidèle** : ajouts, modifications, suppressions (vraies, ou par une case `Supprime`), valeurs
+  venues d'une autre table (Référence, formule), annulation (Ctrl+Z) ; une retouche faite à la
+  main dans la CIBLE reste jusqu'au prochain changement de la ligne dans la SOURCE.
+- **Grandes tables et gros changements** : liste des clés en 256 empreintes, liste complète par
+  morceaux au besoin, reste d'un gros import envoyé seul par tranches, renvoi reprenable, file
+  bloquée par un envoi trop gros vidée et renvoyée seule.
+- **Ménagement de l'instance** : un renvoi à la fois par document, budget de 20 Mo par 10 minutes,
+  relecture de la CIBLE espacée quand rien n'arrive, rattrapage ralenti onglet caché.
+- **Sécurité** : une clé d'écriture par réception, lien testé sur son journal, lignes forgées
+  rejetées et signalées (« Arrivées suspectes »), lien coupé puis repris, codes contrôlés, clés
+  jamais affichées en entier, lien public limité aux instantanés (voir [`SECURITY.md`](SECURITY.md)).
+- **Suivi** : carte par export (destinataires, dernier envoi reçu, erreurs expliquées), carte par
+  réception (propriétaire des données, lignes manquantes, historique des changements depuis la
+  dernière visite), lecteurs en lecture seule.
+- **Aide intégrée** : onglet Tutoriel, aide en images à chaque étape, « Qui fait quoi ? »,
+  « Copier avec les consignes » pour un courriel prêt à envoyer. Français et anglais, thème clair
+  ou sombre.
 
 ## Installer
 
-Dans chaque document : **Ajouter**, **Ajouter un widget**, **Personnalisé**, **URL
-personnalisée**, coller l'adresse du widget, puis choisir **Accès complet** dans l'onglet Widget du
-panneau de droite. Les documents doivent être dans un **espace d'équipe** (l'écriture anonyme par
-formulaire n'existe pas dans un espace personnel).
+Dans chaque document : **Ajouter**, **Ajouter une page**, vue **Personnalisée**, **URL
+personnalisée**, coller l'adresse du widget, puis accepter l'**accès complet** dans le panneau de
+droite. Les documents doivent être dans un **espace d'équipe** (l'écriture anonyme par formulaire
+n'existe pas dans un espace personnel).
+
+Ce que le widget demande, appelle et garde (détail dans [`SECURITY.md`](SECURITY.md)) :
+
+- **Accès complet** (`requiredAccess: 'full'`) : le widget crée sa table technique et ses
+  colonnes de suivi, lit les métadonnées du document, écrit dans les tables de destination
+  choisies et, pour un propriétaire, gère les webhooks et les règles d'accès du lien public. Les
+  écritures sont listées plus bas, dans « Ce que le widget écrit ».
+- **Réseau** : hors de l'API des widgets, toute requête passe par `gristFetch` (`js/grist.js`),
+  qui refuse toute origine absente de `js/config.js` (`https://grist.numerique.gouv.fr`,
+  `https://docs.getgrist.com`) et n'envoie aucun cookie. La CSP de `index.html` (`connect-src`)
+  répète la même liste. Aucun service tiers, aucune bibliothèque chargée.
+- **Navigateur** (`localStorage`, clés `gristsync.*`, `js/prefs.js`) : la langue, le thème,
+  l'heure de la dernière visite par document CIBLE et un identifiant de navigateur tiré au
+  hasard. Aucune donnée du document.
 
 ## Brancher une synchro (deux codes à copier-coller)
 
@@ -61,19 +91,14 @@ Pas à pas, avec captures d'écran : [`docs/04-tutoriel.md`](docs/04-tutoriel.md
 
 | Où | Qui | Quoi |
 |---|---|---|
-| SOURCE, onglet **Envoyer** | un propriétaire | **Nouvel export** : tables, colonnes, nom (rien n'est écrit avant la fin). Puis **Ajouter un destinataire** : mode, secret en option. Il donne un code d'invitation. |
-| CIBLE, onglet **Recevoir** | un éditeur | **Accepter une invitation** : coller le code, choisir chaque destination. Le widget publie le formulaire de réception sur sa page et montre où cliquer : **Partager**, **Copier le lien**, coller ce lien. Il donne un code de réponse. |
+| SOURCE, onglet **Envoyer** | un propriétaire | **Nouvel export** : tables, colonnes, nom. Puis **Ajouter un destinataire** : mode, secret en option. Il donne un code d'invitation. |
+| CIBLE, onglet **Recevoir** | un éditeur | **Accepter une invitation** : coller le code, choisir chaque destination. Le widget publie le formulaire de réception sur sa page, sous celle du widget : **Partager**, **Copier le lien**, coller ce lien, **Tester le lien**. Il donne un code de réponse. |
 | SOURCE, onglet **Envoyer** | un propriétaire | **Coller la réponse** : vérifier qui a accepté, **Approuver et brancher**, puis **Envoyer** les lignes déjà là. |
 
-En mode lien public, la deuxième ligne s'arrête au choix des destinations et la troisième
-disparaît ; il reste à régler « Lien public » sur Lecture dans le menu Partager de la SOURCE.
-
-Ensuite, côté SOURCE, une carte par export : ses tables, ses destinataires (état, dernier envoi
-reçu, pause et reprise avec rattrapage, déblocage de la file, révocation d'une seule personne),
-ajout d'un destinataire, modification, renvoi complet, suppression. Côté CIBLE, une carte par
-export reçu : e-mail du propriétaire des données, chaque table et sa destination, lignes
-non arrivées (gros import), tables proposées, lignes ajoutées, modifiées ou supprimées depuis la
-dernière visite (20 au plus par table), synchronisation immédiate, arrêt de la réception.
+En Échange, la SOURCE colle d'abord le lien de son formulaire de retour, et la CIBLE doit être
+tenue par un propriétaire. En mode lien public, la deuxième ligne s'arrête au choix des
+destinations et la troisième disparaît ; il reste à régler « Lien public » sur Lecture dans le
+menu Partager de la SOURCE.
 
 ## Ce que le widget écrit dans les documents
 
@@ -82,77 +107,73 @@ table de réglages.
 
 | Document | Ajouts |
 |---|---|
-| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte, jamais ajoutée. La table `Synchro` : par table d'un export, une ligne `cles` (liste des clés) et une ligne `lot` (lignes récentes), plus une ligne `complet` (toutes les lignes) pour un export public ; la colonne `Sync_Etat` y note depuis quand des lignes restent à envoyer (envoi coupé, renvoi en cours), jusqu'à ce que le widget les envoie. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
-| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, dépliées puis effacées par le widget), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Par`, `Sync_Recu` (marque, effet, auteur, date d'arrivée). Une section Formulaire publiée par journal, sur la page du widget (sauf en mode lien public). Ce que la CIBLE a choisi (destinations, colonnes, tables refusées) est noté dans la description de la colonne `Synchro_Ids` du journal. |
+| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte (ajoutée en Échange). La table `Synchro` : par table d'un export, une ligne `cles`, une ligne `lot`, une ligne de suivi, et pour un export public `complet` et `empreinte`. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
+| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, sous celle du widget, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal. |
 
-Les envois créés avant la version 0.4 (vues d'export, tables `Synchro_<table>`, un journal par
-table) sont signalés « à refaire », avec un bouton qui efface l'ancien montage.
+Les envois créés avant la version 0.4 sont signalés « à refaire », avec un bouton qui efface
+l'ancien montage. Les réceptions d'avant la 0.5 dont le formulaire partage sa page avec un autre
+sont signalées, avec un bouton qui les sépare.
 
 ## Limites connues
 
 - Il faut **Grist 1.7.11** ou plus récent : le widget vérifie au branchement que Grist a bien
   enregistré le filtre du webhook, et refuse sinon.
-- Le reste d'un gros changement ne part que lorsqu'un **propriétaire** de la SOURCE ouvre la page
-  du widget (Grist ne sait pas programmer un envoi seul). En attendant, la CIBLE dit combien de
-  lignes manquent ; **Tout renvoyer** reste possible.
+- Les tables de destination ne sont à jour que lorsqu'un éditeur ouvre la page du widget dans la
+  CIBLE ; entre-temps les versions attendent dans le journal (mode lien public : rien n'est lu).
+- Le reste d'un gros changement, et un rattrapage, ne partent que lorsqu'un **propriétaire** de la
+  SOURCE ouvre la page du widget (Grist ne sait pas programmer un envoi seul). En attendant, la
+  CIBLE dit combien de lignes manquent.
+- Un envoi en échec bloque la file de **tous** les webhooks du document SOURCE pendant environ
+  15 minutes (comportement de Grist). Le bouton **Débloquer la file** la vide, puis renvoie seul.
 - Les colonnes d'un export valent pour tous ses destinataires ; un renvoi part vers chacun d'eux
   (sans effet chez ceux qui avaient déjà les mêmes valeurs).
-- Les tables de destination ne sont à jour que lorsqu'un éditeur ouvre la page du widget ;
-  entre-temps les versions attendent dans le journal (mode lien public : rien n'est lu).
-- **20 000 lignes au plus par table envoyée** : la liste des clés part entière à chaque ajout ou
-  suppression, en un envoi que Grist limite à 1 Mo. Le widget refuse une table plus grande, et
-  signale sur la carte une table qui a grandi au-delà.
-- Grist regroupe jusqu'à 100 envois en attente d'un même destinataire (CIBLE qui a refusé un
-  moment, ajouts très rapprochés) : ensemble, ils peuvent dépasser 1 Mo, et Grist les retenterait
-  sans fin. Le widget SOURCE le voit, vide la file et renvoie tout, seul, dès qu'un propriétaire
-  ouvre sa page.
-- Un envoi en échec bloque la file de **tous** les webhooks du document SOURCE pendant environ
-  15 minutes (comportement de Grist). Le bouton **Débloquer la file** la vide, puis renvoie seul
-  les exports dont la personne reçoit encore (page ouverte).
 - Une table ou une colonne **renommée, supprimée ou changée de type dans la SOURCE** ne part plus
   correctement : la carte de l'export le signale, et **Modifier** permet de cocher de nouveau les
-  bonnes colonnes. Les autres tables de l'export continuent de partir.
-- Une **destination renommée dans la CIBLE** n'est pas suivie : une table renommée n'est plus
-  trouvée (la carte le dit, les versions attendent dans le journal jusqu'à ce qu'on lui rende son
-  nom) ; une colonne renommée est recréée sous son ancien nom, qui reçoit seul la suite.
-- Une seule ligne plus grosse que la taille d'un envoi (texte de plusieurs centaines de ko) ne
-  peut pas partir.
-- Les noms `Synchro`, `Synchro_…` et `Journal_…` sont réservés aux tables du widget : une table de
-  ce nom n'est proposée ni à l'envoi ni comme destination.
+  bonnes colonnes.
+- Une seule ligne plus grosse qu'un envoi de Grist (1 Mo) ne peut pas partir : la CIBLE le signale.
+- Un Échange est le seul destinataire de son export ; en cas de conflit, la version la plus
+  récente de la ligne entière l'emporte.
+- En mode lien public, tout lecteur de la SOURCE ne voit plus que les instantanés publics, et les
+  noms des tables des exports restent lisibles dans les formules de `Synchro`.
+- Les noms `Synchro`, `Synchro_…` et `Journal_…` sont réservés aux tables du widget.
 - Le paramètre `?flat=1` n'est pas documenté par Grist ; il est couvert par ses tests depuis 2023.
 
 Détails et preuves : `docs/01-etude-faisabilite.md`, `docs/02-procedure-test-dinum.md`,
-`docs/03-proposition-ux-et-droits.md`. Pistes : [`docs/05-pistes.md`](docs/05-pistes.md). Sécurité : [`SECURITY.md`](SECURITY.md).
+`docs/03-proposition-ux-et-droits.md`. Pistes : [`docs/05-pistes.md`](docs/05-pistes.md).
+Sécurité : [`SECURITY.md`](SECURITY.md).
 
 ## Code
 
 | Fichier | Rôle |
 |---|---|
 | `index.html`, `css/style.css` | Page du widget, politique de sécurité du contenu, charte graphique |
-| `js/main.js` | Démarrage, chargement de l'API des widgets, onglets, Réglages |
-| `js/core.js` | Logique pure : formules de `Synchro`, lots, dépliage, versions, consolidation, purge, codes, adresses |
-| `js/grist.js` | Accès au document (API des widgets) et aux webhooks (API REST, même instance) |
-| `js/source.js` / `js/target.js` | Onglets Envoyer / Recevoir |
-| `js/tables.js` | Tables techniques (`Synchro`, journal par export) et leurs notes |
-| `js/guide.js`, `js/tutorial.js` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images des assistants |
-| `js/ui.js`, `js/i18n.js`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
-| `js/config.js` | Instances Grist autorisées, version |
+| `js/main.js`, `js/config.js` | Démarrage, onglets, Réglages ; instances Grist autorisées, version |
+| `js/grist.js` | Accès au document (API des widgets), webhooks et lectures SQL (API REST de la même instance) ; `gristFetch`, seule porte vers le réseau |
+| `js/pages.js` | Formulaires de réception, un par page, et ménage des pages |
+| `js/form-link.js` | Lien du formulaire : où le trouver, images d'aide, test sur son journal |
+| `js/exchange.js` | Échange : export de retour, webhook vers l'autre document, arrêt |
+| `js/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks, règles du lien public), `resend.js` (renvois, budget), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie) |
+| `js/source/` | Onglet Envoyer : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `actions.js` (pause, reprise, révocation, file), `tab.js` (cartes), `export-wizard.js`, `recipient-wizard.js` |
+| `js/target/` | Onglet Recevoir : `journals.js` (journaux et leur note), `loop.js` (recopie automatique), `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `wizard.js` (assistant de réception) |
+| `js/guide.js`, `js/tutorial.js` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images |
+| `js/ui.js`, `js/i18n.js`, `i18n/*.json`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
 
 ## Tests
 
 ```bash
-npm test                      # tests unitaires de js/core.js (Node 20+, sans dépendance)
+npm test                      # tests unitaires de js/logic, des textes et des images du tutoriel (Node 20+, sans dépendance)
 npm install                   # Playwright, pour le test d'intégration seulement
 tests/e2e/start-grist.sh      # Grist jetable dans Docker
-npm run test:e2e              # parcours complet SOURCE -> CIBLE dans un vrai navigateur
+npm run test:e2e              # parcours complet dans un vrai Grist et un vrai navigateur
 ```
 
-Le test d'intégration déroule tout le parcours ci-dessus avec trois documents, puis vérifie
-l'envoi des lignes existantes, la consolidation, un ajout, une modification, une suppression
-logique, une vraie suppression, la conservation d'une retouche manuelle (y compris pendant le
-renvoi vers un second destinataire), l'historique, le nettoyage du journal, l'absence de page
-technique, la révocation d'une seule personne, l'ajout d'une table à l'export (fenêtre côté CIBLE,
-référentiel existant rattaché par une colonne commune) et d'une colonne, la pause et la reprise
-avec rattrapage, l'arrêt de la réception, la suppression de l'export, et le mode lien public
-(seul l'instantané de l'export est lisible sans identifiant). Avec `CAPTURES=1`, il refait les captures de `docs/images`. Les deux suites tournent à chaque push
+Le test d'intégration déroule tout le parcours ci-dessus avec plusieurs documents : envoi des
+lignes existantes, recopie, ajout, modification, suppressions, retouche manuelle préservée,
+historique, second destinataire et révocation d'un seul, table et colonne ajoutées à l'export
+(table existante rattachée), Référence renommée, Ctrl+Z, destinations renommées, filtre de
+lignes, montage 0.4 mis à niveau, gros import, file bloquée par un envoi trop gros, table de
+21 000 lignes, pause et reprise avec rattrapage, relais, lignes forgées rejetées, lien d'un autre
+document refusé, lien commun signalé puis coupé, réception reprise, arrêts, lien public (seul
+l'instantané est lisible, sans la note de la SOURCE) et Échange. Avec `CAPTURES=1`, il refait les
+captures de `docs/images` et les images d'aide de `img/`. Les deux suites tournent à chaque push
 (`.github/workflows/tests.yml`).

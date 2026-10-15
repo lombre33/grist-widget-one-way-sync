@@ -78,12 +78,20 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   `"ids:" + " ".join(T.all.id_sync)`, surveillée par un second webhook : recalculée (et envoyée)
   à chaque ajout ou suppression, pas à une modification. Vérifié le 14 octobre.
 - Un widget **replié** dans Grist continue de tourner (vérifié le 14 octobre).
-- Plusieurs formulaires publiés sur la même page partagent une seule clé : un seul lien suffit
-  pour tous les journaux d'un envoi (vérifié par le test d'intégration).
+- Plusieurs formulaires publiés sur la même page partagent une seule clé, et cette clé lit aussi
+  les colonnes **et leurs descriptions** (donc les notes) des tables de tous les formulaires de la
+  page (vérifié). Depuis la V0.5 : un formulaire par page, une clé par réception.
 - `_grist_Pages.options` `{"collapsed": true}` replie une page par défaut ; `indentation` en fait
   une sous-page.
 - Ajouter une section à la page du widget recrée l'iframe du widget : toute étape qui en ajoute
-  une (publication du formulaire) doit pouvoir reprendre où elle s'est arrêtée.
+  une doit pouvoir reprendre où elle s'est arrêtée. Créer le formulaire sur une autre page, la
+  ranger sous celle du widget (`indentation`) et replier celle-ci ne recharge pas le widget
+  (vérifié en V0.5, `window.sameFrame` dans le test).
+- `CreateViewSection(table, 0, 'form')` crée une page nommée « New page » : la renommer.
+  `RemoveTable` efface aussi la page devenue vide de son formulaire (mais pas son partage).
+- Une règle de colonne `user.Access == VIEWER` → `-R` sur `Synchro_Export` retire la colonne **et
+  sa description** de `GET /tables/Synchro/columns` en anonyme ; le filtre des lignes sur cette
+  colonne et la règle de ligne marchent toujours (vérifié, lien public).
 
 ## Le design préféré d'Antoine (design C)
 
@@ -100,7 +108,24 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.4.3 (15 octobre 2026)
+## État : V0.5.0 (nuit du 15 au 16 octobre 2026)
+
+V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,
+audit, refacto, gwaudit) : Échange (deux sens, la plus récente l'emporte, sans écho, deux codes),
+filtre de lignes par table (`filtre`), suivi des clés par 256 seaux d'empreintes CRC-32 (`suivi`,
+plus de limite de 20 000 lignes, liste complète par morceaux de 5 000 clés lors d'un renvoi),
+destinations renommées suivies par référence, Ctrl+Z SOURCE (`RecalculLe`), un formulaire par
+réception sur sa propre page rangée sous celle du widget, test du lien qui prouve qu'il écrit
+dans ce journal (`linkElsewhere`), « Arrivées suspectes » et « Couper le lien », reprise de la
+même réception après confirmation, renvois ménagés (un à la fois par document, ligne `charge`,
+budget), note SOURCE masquée en lien public. Les paragraphes suivants décrivent le montage de la
+V0.4, encore valable sauf là où la V0.5 le remplace (la liste `cles` d'un seul tenant ne reste
+que pour le lien public et les montages 0.4 ; le garde-fou `MAX_ROWS` a disparu). Code découpé
+en `js/logic/` (pur, testé par `tests/unit/*.test.mjs`, un fichier par module), `js/source/`,
+`js/target/`, plus `pages.js`, `form-link.js`, `exchange.js` (carte dans `README.md`).
+`el()` met à plat les enfants à toute profondeur (`flat(Infinity)`) : une liste de listes
+affichait « [object HTMLParagraphElement] ». `ui.run` n'écrit dans la console que les erreurs
+sans texte `error.<code>` (le test vérifie une console sans erreur).
 
 Décisions d'Antoine du 15 octobre : la SOURCE s'organise en **exports** (nom, tables, colonnes ;
 ajouter ou révoquer une personne sans refaire l'export ; la synchro dans les deux sens, « Échange »,
@@ -137,8 +162,9 @@ un renvoi vers un nouveau destinataire ne défait pas les retouches des autres.
 Limites : un envoi Grist est limité à 1 Mo (corps JSON, `express.json`) et regroupe jusqu'à 100
 événements consécutifs d'un même webhook ; la liste des clés et le lot qui changent ensemble partent
 donc dans le même envoi, d'où le budget du lot `max(20 ko, min(250 ko, 950 ko - 40 o × lignes))`.
-Une liste des clés de plus de 25 000 lignes environ, ou plusieurs listes en attente regroupées,
-dépassent 1 Mo et bloquent la file (piste : liste en morceaux, `docs/05-pistes.md`). Les montages
+En V0.4, une liste des clés de plus de 25 000 lignes environ, ou plusieurs listes en attente
+regroupées, dépassaient 1 Mo et bloquaient la file : la V0.5 n'envoie plus que les seaux qui
+changent, et la liste complète par morceaux lors d'un renvoi. Les montages
 d'avant la V0.4 sont signalés « à refaire » avec un bouton de nettoyage (`legacyTables`,
 `legacyJournals`).
 
@@ -165,9 +191,7 @@ V0.4.1 (demande d'Antoine : « on anticipe et on fait partir en auto ») :
   l'emporte sur la formule dans la même action. Un webhook n'envoie que les lignes dont une valeur
   a changé.
 
-Garde-fou (choix d'Antoine du 15 octobre, plutôt qu'un nouveau format d'envoi, voir
-`docs/05-pistes.md`) : table de plus de `MAX_ROWS` (20 000) lignes refusée par l'assistant et
-signalée sur la carte (liste des clés trop grosse pour un envoi) ; les lots d'un export se
+Garde-fou de la V0.4.2 (le refus des tables de plus de 20 000 lignes a disparu en V0.5) : les lots d'un export se
 partagent le budget (formule du lot : `lookupRecords` des lignes `cles` de l'export) ; un envoi
 refusé pour sa taille (413 : Grist retente 20 fois, environ 15 minutes, puis remet le lot en fin de
 file, sans fin ; à la fermeture du document, il abandonne après 5 essais) est vu par `catchUp`, qui vide
@@ -227,6 +251,8 @@ V0.4.3 (audit du 15 octobre) :
 
 Effacer une table efface ses sections, mais pas leurs cases dans `layoutSpec` (repliés compris ;
 les numéros de sections sont réutilisés ensuite) ni le partage de la page (`_grist_Pages.shareRef`
-et `_grist_Shares`, donc la clé d'écriture). `tidyPages` nettoie les deux après
-`removeTechnicalTables`. Les tables techniques n'ont pas de page (`dropPages`). Créer une section
-sur une autre page que celle du widget ne recharge pas le widget.
+et `_grist_Shares`, donc la clé d'écriture). Quand la page ne portait que le formulaire de la
+table, Grist efface la page mais garde le partage. `removeTechnicalTables` (`js/pages.js`) relève
+les partages avant d'effacer et nettoie les deux (`tidyActions`). Les tables techniques n'ont pas
+de page (`dropPages`). Créer une section sur une autre page que celle du widget ne recharge pas
+le widget.

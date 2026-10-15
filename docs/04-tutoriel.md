@@ -11,15 +11,18 @@ récent (le widget le vérifie au branchement).
 
 La SOURCE organise ses envois en **exports** : un export a un nom, des tables et, pour chacune, les
 colonnes qui partent. On y ajoute ensuite les personnes qui le reçoivent, une à une, et on peut en
-révoquer une seule sans toucher aux autres. Deux modes par personne :
+révoquer une seule sans toucher aux autres. Trois modes par personne :
 
 - **avec réponse** (recommandé) : ils échangent deux codes ; Grist pousse chaque modification vers
   la CIBLE, même quand personne n'a la page ouverte ;
+- **Échange** : la même chose dans les deux sens, chaque document tient l'autre à jour (voir
+  [plus bas](#échange-dans-les-deux-sens)) ;
 - **lien public** : un seul code ; la SOURCE devient lisible par lien public, mais uniquement les
   exports publics (voir [plus bas](#mode-lien-public)).
 
-Aucune donnée ne passe par les codes : seulement des noms de tables et de colonnes, et une
-adresse d'écriture.
+Aucune donnée ne passe par les codes : seulement des noms de tables et de colonnes, une fiche, et
+une adresse d'écriture. Ils se transmettent donc à la seule personne concernée, comme un mot de
+passe.
 
 Les captures viennent du test d'intégration (`CAPTURES=1 npm run test:e2e`) : elles montrent
 l'écran de la version du dépôt. Le même tutoriel, avec les captures, est dans le widget (onglet
@@ -58,7 +61,9 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 
 Cocher les colonnes qui partent (toutes par défaut). Le reste ne sort jamais du document. Une
 Référence part comme le texte qu'elle affiche ; les pièces jointes ne partent pas. Les colonnes
-valent pour toutes les personnes qui reçoivent l'export.
+valent pour toutes les personnes qui reçoivent l'export. En option, un **filtre de lignes** par
+table : seules partent les lignes où une colonne vaut un texte donné ; une ligne qui en sort est
+effacée chez les destinataires.
 
 ![Colonnes](images/03-source-colonnes.png)
 
@@ -115,19 +120,21 @@ quelle colonne rattacher les lignes déjà là (voir [Une table ajoutée à l'ex
 
 ![Destinations](images/08-cible-destinations.png)
 
-Le widget crée un journal pour l'export, `Journal_<export>` (sans page, dans « Données source »),
-et publie sur sa page un formulaire de réception. Grist recharge alors le widget : l'assistant se
-rouvre seul à l'étape suivante.
+Le widget crée un journal pour l'export, `Journal_<export>` (dans « Données source »), et publie
+son formulaire de réception sur sa propre page, `Journal_<export>`, rangée sous celle du widget.
 
 ### 8. Copier le lien du formulaire
 
-L'assistant montre où cliquer : dans la carte du formulaire apparu à côté du widget, **Partager**,
-puis **Copier le lien** ; coller ce lien dans le widget, **Tester le lien**. Un seul lien sert pour
-toutes les tables de l'export, et pour celles qui s'y ajouteront.
+L'assistant montre où cliquer : ouvrir la page du formulaire, sous celle du widget, puis dans sa
+carte **Partager** et **Copier le lien** ; coller ce lien dans le widget, **Tester le lien**. Le
+widget vérifie que le lien écrit bien dans le journal de cette réception (le lien d'un autre
+formulaire ou d'un autre document est refusé), puis replie sa page. Un seul lien sert pour toutes
+les tables de l'export, et pour celles qui s'y ajouteront.
 
 ![Lien](images/09-cible-lien.png)
 
-Ce lien est un **droit d'écriture** dans votre journal : ne le diffusez pas ailleurs.
+Ce lien est un **droit d'écriture** dans votre journal : ne le diffusez pas ailleurs. Chaque
+réception a le sien, sur sa page.
 
 ### 9. Renvoyer la réponse
 
@@ -192,7 +199,7 @@ la SOURCE n'a pas changée garde ses retouches.
 Chaque ajout, modification ou suppression dans la SOURCE arrive dans le journal en une seconde
 environ, même si personne n'a le widget ouvert. La **recopie** dans les tables de destination se
 fait quand un éditeur ouvre la page du widget (même replié), puis toutes les 10 secondes tant
-qu'elle reste ouverte. Une fois les données arrivées, le formulaire se replie en haut de la page.
+qu'elle reste ouverte.
 
 ![Synchro à jour et historique](images/14-cible-historique.png)
 
@@ -200,8 +207,9 @@ La carte montre le propriétaire des données, chaque table reçue avec sa desti
 passage, et l'historique : depuis votre dernière visite, par table, le nombre de lignes ajoutées,
 modifiées et supprimées, puis les lignes elles-mêmes (20 au plus par table), nommées par la colonne
 de votre choix. Une retouche faite à la main dans la CIBLE reste en place jusqu'à la prochaine
-modification de la même ligne dans la SOURCE. **Arrêter la réception** efface le journal et garde
-les tables de destination.
+modification de la même ligne dans la SOURCE. Une table ou une colonne de destination peut être
+renommée : la recopie suit. **Arrêter la réception** efface le journal, son formulaire et sa page,
+et garde les tables de destination.
 
 ### Une table ajoutée à l'export
 
@@ -233,11 +241,43 @@ lignes ne sont pas encore arrivées :
 Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
 Référence, ou une formule) repart seule, sans toucher la ligne.
 
-Une table de plus de **20 000 lignes** ne peut pas être envoyée : à chaque ajout ou suppression,
-sa liste des clés part entière, et Grist refuse un envoi de plus de 1 Mo. Le widget la refuse à
-la création de l'export, et la signale sur la carte si elle grandit au-delà. Si des envois en
-attente dépassent ensemble cette taille (la CIBLE a refusé un moment), le widget SOURCE vide la
-file et renvoie tout, seul, dès qu'un propriétaire ouvre sa page.
+Une **grande table** part comme une petite : la liste de ses clés tient en 256 empreintes, dont
+seules celles qui changent partent, et le widget envoie la liste complète par morceaux quand il
+le faut (vérifié avec 21 000 lignes). Si des envois en attente dépassent ensemble la taille
+permise par Grist, 1 Mo (la CIBLE a refusé un moment), le widget SOURCE vide la file et renvoie
+tout, seul, dès qu'un propriétaire ouvre sa page.
+
+### Arrivées suspectes, couper le lien
+
+Si des lignes arrivent dans le journal sans pouvoir venir de la SOURCE (autre export, contenu
+illisible), ou en nombre anormal, la carte affiche **Arrivées suspectes** : rien n'a été recopié.
+Si vous ne l'expliquez pas, **Couper le lien** : l'ancien lien n'écrit plus rien. La SOURCE
+révoque alors l'ancien destinataire et vous envoie une nouvelle invitation ; acceptez-la ici, la
+même réception reprend avec ses tables (le widget montre d'abord d'où vient l'invitation).
+
+Une réception créée avant la version 0.5 peut avoir son formulaire sur la même page qu'un autre :
+la carte le signale (**Lien commun à d'autres formulaires**), et **Couper le lien** l'en sépare.
+
+## Échange, dans les deux sens
+
+Deux documents se tiennent à jour l'un l'autre : une modification faite d'un côté passe de
+l'autre, sans revenir ; quand la même ligne change des deux côtés, **la plus récente l'emporte**.
+Il faut un **propriétaire** de chaque côté (chacun envoie par son propre webhook).
+
+1. SOURCE : créer l'export, puis **Ajouter un destinataire** (le premier de l'export), mode
+   **Échange**. Le widget publie un formulaire de retour sur sa propre page, sous celle du widget :
+   copier son lien et le coller, il part dans l'invitation (qui devient un droit d'écriture).
+
+   ![Mode Échange](images/20-echange-mode.png)
+
+2. CIBLE : accepter l'invitation comme d'habitude. La réponse branche les deux sens à la fois.
+3. SOURCE : coller la réponse, **Approuver et brancher**, **Envoyer** les lignes existantes.
+
+![Échange côté CIBLE](images/21-echange-cible.png)
+
+Une case `Supprime` est ajoutée aux tables : cochée d'un côté, la ligne disparaît des deux. Une
+ligne déjà présente dans la CIBLE, sans clé, reste à ce document. Arrêter, d'un côté ou de l'autre,
+arrête les deux sens ; les tables gardent leurs lignes.
 
 ## Mode lien public
 
@@ -271,19 +311,20 @@ d'origine. Deux limites :
   pas (avec une clé, la prochaine liste de A, qui ne la connaît pas, l'effacerait).
 
 Le widget refuse les **boucles** : renvoyer une table reçue vers le document d'où elle vient, ou
-une table vers elle-même. Ce serait une synchro dans les deux sens.
+une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Échange](#échange-dans-les-deux-sens).
 
 ## Si quelque chose coince
 
 | Symptôme | Cause probable | Que faire |
 |---|---|---|
 | Rien n'arrive dans la table de destination | Personne n'a ouvert la page du widget dans la CIBLE | Ouvrir la page ; les versions attendaient dans le journal |
-| La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau |
+| La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception, coupé ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau ; dans la CIBLE, la même réception reprend |
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |
-| « La table … n'existe plus » sur la carte CIBLE, ou une colonne recréée sous son ancien nom | Table ou colonne de destination renommée dans la CIBLE | Lui rendre son nom (les versions attendaient dans le journal) |
+| « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
+| « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 | Carte « Montage d'une version précédente » | Envois créés avant la version 0.4 | Recréer les envois en exports, puis effacer l'ancien montage |
