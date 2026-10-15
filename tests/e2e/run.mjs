@@ -278,9 +278,10 @@ try {
   const contactsRefId = await tableRef(source.doc, 'Contacts');
   assert.ok(contacts.every(r => /^[0-9a-f-]{36}$/.test(r.id_sync)), 'id_sync rempli pour les lignes existantes');
   const synchro = await records(source.doc, 'Synchro');
-  assert.deepEqual(synchro.map(r => `${r.Synchro_Table}:${r.Synchro_Type}`), ['Contacts:cles', 'Contacts:lot']);
+  assert.deepEqual(synchro.map(r => `${r.Synchro_Table}:${r.Synchro_Type}`), ['Contacts:cles', 'Contacts:lot', 'Contacts:suivi']);
   assert.match(synchro[0].Synchro_Export, /^[0-9a-f]{16}$/);
-  assert.match(synchro[0].Synchro_Ids, /^ids:/);
+  assert.equal(synchro[0].Synchro_Ids, '', 'aucune clé partie : la liste n\'envoie rien');
+  assert.equal(JSON.parse(synchro[2].Sync_Etat).cles.length, contacts.length, 'le suivi connaît les clés');
   assert.deepEqual(JSON.parse(synchro[0].Synchro_Colonnes).map(c => c.id), ['Nom', 'Ville', 'Lieu']);
   const majle = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'MajLe' && c.parentId === contactsRefId);
   const helper = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Lieu' && c.parentId === contactsRefId).displayCol;
@@ -428,7 +429,7 @@ try {
   await dialogButton('Enregistrer').click();
   await dialog().getByText(/Enregistré\s:\s[\d\s]+\slignes sont parties/).waitFor();
   await dialogButton('Fermer').click();
-  assert.equal((await records(source.doc, 'Synchro')).length, 4, 'deux lignes Synchro par table');
+  assert.equal((await records(source.doc, 'Synchro')).length, 6, 'trois lignes Synchro par table');
   assert.ok(!(await columnsOf(source.doc, 'Villes')).includes('Supprime'), 'le widget n\'ajoute pas Supprime');
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });
@@ -509,18 +510,29 @@ try {
   await waitFor(async () => (await names()) === everyone, 'lignes revenues sans le filtre');
   step('SOURCE : filtre de lignes posé puis retiré, la CIBLE suit');
 
-  // --- Document monté en version 0.4 : la marque d'envoi coupé et les dépendances de MajLe sont
-  // posées à l'ouverture du widget SOURCE
+  // --- Document monté en version 0.4 : marque d'envoi coupé numérique, sans suivi des clés ni
+  // dépendances de MajLe. Tout est posé à l'ouverture du widget SOURCE, et une suppression suit.
   const synchroRef = await tableRef(source.doc, 'Synchro');
-  await applyActions(source.doc, [['RemoveColumn', 'Synchro', 'Sync_Etat'], ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }]]);
+  const tracks = (await records(source.doc, 'Synchro')).filter(r => r.Synchro_Type === 'suivi').map(r => r.id);
+  const lotRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Lot' && c.parentId === synchroRef).id;
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Synchro', tracks], ['ModifyColumn', 'Synchro', 'Sync_Etat', { type: 'Numeric' }],
+    ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }]]);
+  const markRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Sync_Etat' && c.parentId === synchroRef).id;
+  await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', markRef, { recalcDeps: ['L', lotRef] }]]);
   await openWidget(source.url);
   await waitFor(async () => {
     const cols = await records(source.doc, '_grist_Tables_column');
-    const mark = cols.find(c => c.colId === 'Sync_Etat' && c.parentId === synchroRef);
-    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark && (mark.recalcDeps || []).length === 2;
+    const mark = cols.find(c => c.id === markRef);
+    const rows = await records(source.doc, 'Synchro');
+    return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark.type === 'Any' && (mark.recalcDeps || []).length === 3 &&
+      rows.filter(r => r.Synchro_Type === 'suivi').length === rows.filter(r => r.Synchro_Type === 'cles').length;
   }, 'montage 0.4 mis à niveau');
+  await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Yann' }]]);
   await openWidget(target.url);
-  step('SOURCE : un montage 0.4 reçoit la marque d\'envoi coupé et les dépendances de MajLe');
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'ajout après la mise à niveau');
+  await applyActions(source.doc, [['RemoveRecord', 'Contacts', (await records(source.doc, 'Contacts')).find(r => r.Nom === 'Yann').id]]);
+  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'suppression après la mise à niveau');
+  step('SOURCE : un montage 0.4 reçoit le suivi des clés, la marque d\'envoi coupé et les dépendances de MajLe');
 
   // --- Gros import (4 000 lignes d'un coup) : le lot ne part qu'en partie, la CIBLE le signale ;
   // le widget SOURCE, une fois sa page ouverte, envoie le reste seul
@@ -557,7 +569,8 @@ try {
   await applyActions(target.doc, [['RenameColumn', 'Journal_Annuaire', 'Sync_Par_x', 'Sync_Par']]);
   await waitFor(async () => (await usages()).some(u => u.lastHttpStatus === 413), 'envois regroupés refusés (413)', 120000);
   // Fini quand plus aucun lot n'est marqué ni en renvoi : la page peut se fermer.
-  const settled = async () => (await records(source.doc, 'Synchro')).every(r => !r.Sync_Etat && !r.Synchro_Renvoi || r.Synchro_Type === 'cles');
+  const settled = async () => (await records(source.doc, 'Synchro'))
+    .every(r => (r.Synchro_Type === 'lot' ? !r.Sync_Etat && !r.Synchro_Renvoi : r.Synchro_Type !== 'cles' || !r.Synchro_Renvoi));
   await waitFor(async () => !(await usages()).some(u => u.lastHttpStatus === 413) && await settled(), 'file débloquée, tout renvoyé', 240000);
   await openWidget(target.url);
   await waitFor(async () => {
@@ -568,24 +581,53 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
   step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');
 
-  // --- Une table de plus de 20 000 lignes est refusée à la création de l'export
+  // --- Grande table (21 000 lignes) : envoyée en plusieurs fois. Ses suppressions suivent par la
+  // liste des clés parties ; plus de 5 000 d'un coup, le widget SOURCE renvoie la liste complète,
+  // en morceaux, et la CIBLE n'efface qu'une fois tous les morceaux arrivés.
+  const N = 21000;
   await applyActions(source.doc, [['AddTable', 'Grande', [{ id: 'N', type: 'Int' }]],
-    ['BulkAddRecord', 'Grande', Array(20001).fill(null), { N: Array.from({ length: 20001 }, (_, i) => i) }]]);
-  await openWidget(source.url);
-  await button('Nouvel export').click();
-  await dialog().getByRole('checkbox', { name: 'Grande' }).check();
-  await dialogButton('Continuer').click();
-  await dialog().getByText(/Trop grande pour la synchro\s:\sGrande \(20\s001 lignes\)/).waitFor();
-  await page.keyboard.press('Escape');
-  await dialog().waitFor({ state: 'detached' });
+    ['BulkAddRecord', 'Grande', Array(N).fill(null), { N: Array.from({ length: N }, (_, i) => i) }]]);
+  const editTables = async (table, on) => {
+    await openWidget(source.url);
+    await button('Modifier').click();
+    await dialog().getByRole('checkbox', { name: table })[on ? 'check' : 'uncheck']();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/^Enregistré/).waitFor({ timeout: 900000 });
+    await dialogButton('Fermer').click();
+  };
+  await editTables('Grande', true);
+  await openWidget(target.url);
+  await dialog().getByText('Table ajoutée à l’export : Grande').waitFor({ timeout: 60000 });
+  await dialogButton('Recevoir').click();
+  await dialog().waitFor({ state: 'detached', timeout: 120000 });
+  const grande = async () => (await records(target.doc, 'Grande')).length;
+  await waitFor(async () => await grande() === N, 'grande table reçue en entier', 300000);
+  const sourceTab = await context.newPage();
+  await sourceTab.goto(source.url);
+  await sourceTab.frameLocator('iframe').first().locator('.topbar').waitFor({ timeout: 30000 });
+  await page.bringToFront();
+  const grandeIds = (await records(source.doc, 'Grande')).map(r => r.id);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(0, 5500)]]);
+  await waitFor(async () => await grande() === N - 5500, 'suppression de 5 500 lignes suivie (liste complète)', 300000);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(5500, 5502)]]);
+  await waitFor(async () => await grande() === N - 5502, 'suppression de 2 lignes suivie (clés parties)', 120000);
+  await sourceTab.close();
+  await editTables('Grande', false);
   await applyActions(source.doc, [['RemoveTable', 'Grande']]);
-  step('SOURCE : une table de plus de 20 000 lignes est refusée');
+  step('SOURCE : une table de 21 000 lignes part en plusieurs fois, ses suppressions suivent, même 5 500 d\'un coup');
 
-  // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent
+  // --- Pause puis reprise avec rattrapage : seules les lignes changées pendant la pause repartent,
+  // et une ligne effacée pendant la pause disparaît de la CIBLE (liste complète)
+  const zoe = (await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Zoé' }]])).retValues[0];
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Zoé'), 'Zoé reçue');
   await openWidget(source.url);
   await button('Mettre en pause').click();
   await button('Reprendre').waitFor();
-  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Toulon' }], ['AddRecord', 'Contacts', null, { Nom: 'Emma' }]]);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Alice').id, { Ville: 'Toulon' }], ['AddRecord', 'Contacts', null, { Nom: 'Emma' }],
+    ['RemoveRecord', 'Contacts', zoe]]);
   await new Promise(r => setTimeout(r, 3000));
   assert.ok(!(await records(target.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Toulon')), 'rien envoyé pendant la pause');
   await button('Reprendre').click();
@@ -597,9 +639,9 @@ try {
   await openWidget(target.url);
   await waitFor(async () => {
     const rows = await records(target.doc, 'Contacts');
-    return rows.some(r => r.Nom === 'Emma') && rows.some(r => r.Ville === 'Toulon');
-  }, 'modifications de la pause rattrapées');
-  step('SOURCE : pause, puis reprise qui rattrape les deux lignes changées pendant la pause');
+    return rows.some(r => r.Nom === 'Emma') && rows.some(r => r.Ville === 'Toulon') && !rows.some(r => r.Nom === 'Zoé');
+  }, 'modifications et suppression de la pause rattrapées');
+  step('SOURCE : pause, puis reprise qui rattrape les deux lignes changées et la ligne effacée pendant la pause');
 
   // --- Relais : la CIBLE peut renvoyer une table reçue ; ses journaux ne sont pas proposés
   await widget().getByRole('tab', { name: 'Envoyer' }).click();

@@ -3,10 +3,10 @@
 // destinataire, filtré par Grist sur les lignes de son export. Les exports, les invitations en
 // attente et les pauses sont notés dans la description d'une colonne de Synchro.
 import {
-  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MAX_ROWS, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL,
+  AUTHOR_COL, EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, PUBLIC_MEMO, RESEND_ALL, RESEND_CHUNK, RESEND_COL,
   SYNC_TABLE, TABLE_COL, TYPE_COL, buildInvitation, chunk, chunkMark, conditionExport, docLabel, exportCondition, exportTables, exportableColumns,
-  fillKeyActions, hookName, isPublicRule, keysCount, loopingTables, maskKey, missingSyncColumns, parseLot, parseReply, prepareSourceActions,
-  publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex,
+  fillKeyActions, hookName, isPublicRule, listOverdue, listRequest, loopingTables, maskKey, missingSyncColumns, parseList, parseLot, parseReply,
+  prepareSourceActions, publicAclActions, publicAclRules, randomHex, resendValue, rowsSince, toHex, trackState,
 } from './core.js';
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, docIdentity, docInfo, fetchRows, listWebhooks, readSchema, renameWebhook, setWebhookEnabled,
@@ -24,8 +24,9 @@ import { LANG, t, typeName } from './i18n.js';
 const now = () => Date.now() / 1000;
 const dateText = ms => new Date(ms).toLocaleString(LANG);
 const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
-// Tables trop grandes pour la synchro (voir MAX_ROWS), d'après leur liste des clés.
-const tooBigTables = rows => rows.filter(r => r[TYPE_COL] === KIND.keys && keysCount(r[LIST_COL]) > MAX_ROWS).map(r => r[TABLE_COL]);
+// Ligne Synchro qui demande d'envoyer la liste complète de sa table : renvoi de la liste interrompu
+// (la demande est restée dans la ligne 'cles'), ou trop de clés parties d'un coup (suivi).
+const listDue = r => (r[TYPE_COL] === KIND.keys && Boolean(r[RESEND_COL])) || listOverdue(r);
 // Destinataires d'un export : les webhooks sur Synchro dont la condition nomme cet export.
 const hooksOf = (hooks, conditions, exportId) => hooks.filter(h => h.fields.tableId === SYNC_TABLE && conditionExport(conditions.get(h.id)) === exportId);
 
@@ -52,8 +53,7 @@ async function loadState() {
     return {
       ...meta, tables, recipients, invitations: note.invitations.filter(i => i.export === id),
       email: (rows.find(r => r[EXPORT_COL] === id) || {})[AUTHOR_COL] || '',
-      partial: recipients.some(h => h.fields.enabled) && rows.some(r => r[EXPORT_COL] === id && r[MISSING_COL] > 0),
-      tooBig: tooBigTables(rows.filter(r => r[EXPORT_COL] === id)),
+      partial: recipients.some(h => h.fields.enabled) && rows.some(r => r[EXPORT_COL] === id && ((r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0) || listDue(r))),
       ...drift(schema, tables),
     };
   });
@@ -190,7 +190,6 @@ function exportCard(exp, state, open, out) {
       { table: tb.table, n: tb.columns.length, ...(tb.filter ? { col: tb.filter.id, value: tb.filter.value } : {}) })).join(' · ') || '—'),
     exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
     exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
-    exp.tooBig.length ? message('warn', t('send.export.tooBig', { tables: exp.tooBig.join(', '), max: MAX_ROWS })) : null,
     exp.partial ? message('info', t('send.export.partial')) : null,
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
@@ -379,7 +378,7 @@ async function stopPublic(exp) {
 
 // ---------------------------------------------------------------------------------------------
 // Renvoi des tables d'un export depuis `since` (secondes ; RESEND_ALL : toutes les lignes), par
-// tranches, puis de sa liste des clés. Rien n'est modifié dans les tables : le widget écrit les
+// tranches, puis de leur liste complète des clés (voir sendList). Rien n'est modifié dans les tables : le widget écrit les
 // lignes voulues dans Synchro_Renvoi et Grist recalcule le lot. La tranche suivante attend que les
 // destinataires aient tout reçu (un envoi reste sous la limite de taille de Grist) ; une tranche
 // trop grosse pour un lot est coupée en deux. Le renvoi est reprenable : la marque du lot
@@ -429,10 +428,33 @@ async function resendLocked(exportId, tables, out, since) {
     // Marque effacée à part : écrite avec le lot ordinaire, elle cacherait un nouvel envoi coupé.
     await writeSync([lot], { [MISSING_COL]: 0 });
     await writeSync([lot], { [RESEND_COL]: '' });
-    await writeSync((await rowsOf(table, KIND.keys)).map(r => r.id), { [RESEND_COL]: resendValue(randomHex(4), []) });
+    await sendList(exportId, table, hookIds);
   }
   if (out) out.replaceChildren();
   return total;
+}
+
+// Liste complète des clés d'une table, en morceaux (PART_KEYS clés), chacun quand le précédent est
+// parti : la CIBLE efface les clés absentes une fois tous les morceaux arrivés. Ses lignes sont
+// déjà là : c'est elle qui fait partir les suppressions qu'une liste des clés parties n'a pas
+// portées (file vidée, pause, trop de clés parties d'un coup). La demande du morceau reste dans la
+// ligne 'cles' jusqu'à la fin : une page fermée en cours de route, le rattrapage recommence.
+async function sendList(exportId, table, hookIds) {
+  const mine = async kind => (await fetchRows(SYNC_TABLE)).find(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && r[TYPE_COL] === kind);
+  const [keys, track] = [await mine(KIND.keys), await mine(KIND.track)];
+  if (!keys) return;
+  const overdue = trackState(track).trop;
+  const mark = randomHex(4);
+  for (let n = 1, after = ''; track; n++) {
+    await waitForQueue(hookIds);
+    await writeSync([keys.id], { [RESEND_COL]: listRequest(mark, n, after) });
+    const { part } = parseList((await mine(KIND.keys))[LIST_COL]) || {};
+    if (!part || part.last || !part.keys.length) break;
+    after = part.keys[part.keys.length - 1];
+  }
+  await waitForQueue(hookIds);
+  await writeSync([keys.id], { [RESEND_COL]: '' });
+  if (overdue) await writeSync([track.id], { [RESEND_COL]: overdue });
 }
 
 // Rattrapage, tant qu'un propriétaire a la page du widget ouverte : à l'affichage, puis toutes les
@@ -442,10 +464,12 @@ async function resendLocked(exportId, tables, out, since) {
 //    marque à renvoyer en entier chaque export qui a un destinataire actif. Pas plus d'une fois en
 //    10 minutes, et pas quand une table est trop grande (sa liste seule déborde : la carte le dit).
 //  - Lot marqué (envoi coupé par un gros changement ou une référence très utilisée renommée,
-//    renvoi interrompu, file vidée) : ses lignes depuis la marque repartent. Export sans
-//    destinataire : marque effacée (un destinataire ajouté reçoit tout). Destinataires tous en
-//    pause : marque gardée pour après la reprise. File bloquée par un autre échec (lien de
-//    réception mort) : rien ne part tant que la carte le signale, renvoyer ne ferait qu'attendre.
+//    renvoi interrompu, file vidée) : ses lignes depuis la marque repartent, puis la liste
+//    complète. Liste demandée (renvoi de la liste interrompu, trop de clés parties d'un coup) :
+//    la liste complète repart. Export sans destinataire : marque et demande effacées (un
+//    destinataire ajouté reçoit tout). Destinataires tous en pause : marque gardée pour après la
+//    reprise. File bloquée par un autre échec (lien de réception mort) : rien ne part tant que la
+//    carte le signale, renvoyer ne ferait qu'attendre.
 let catching = false;
 let notOwner = false;
 let repairedAt = 0;
@@ -457,7 +481,7 @@ async function catchUp() {
       if (!(await readSchema()).has(SYNC_TABLE)) return 0;
       let rows = await syncRows();
       const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-      if (hooks.some(tooLarge) && Date.now() - repairedAt > 600000 && !tooBigTables(rows).length) {
+      if (hooks.some(tooLarge) && Date.now() - repairedAt > 600000) {
         repairedAt = Date.now();
         await clearAndMark();
         rows = await syncRows();
@@ -469,7 +493,14 @@ async function catchUp() {
         if (!mine.length) await writeSync([row.id], { [MISSING_COL]: 0 });
         else if (mine.some(h => h.fields.enabled)) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
       }
-      return late.length;
+      const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
+      const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)));
+      for (const row of lists) {
+        const mine = hooksOf(hooks, conditions, row[EXPORT_COL]);
+        if (!mine.length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
+        else if (mine.some(h => h.fields.enabled)) await sendList(row[EXPORT_COL], row[TABLE_COL], mine.filter(h => h.fields.enabled).map(h => h.id));
+      }
+      return late.length + lists.length;
     });
     if (done && container && container.isConnected && !document.querySelector('.scrim')) await renderSource();
   } catch (e) {
@@ -522,23 +553,12 @@ function exportWizard(exp = null) {
     const tables = (await readSchema()).tableIds.filter(isUserTable);
     chosen = chosen.filter(table => tables.includes(table));
     const report = el('div', { class: 'report' });
-    const next = { label: t('common.next'), kind: 'btn-primary', disabled: !chosen.length, onClick: () => run(null, report, () => checkSizes(report)) };
+    const next = { label: t('common.next'), kind: 'btn-primary', disabled: !chosen.length, onClick: () => run(null, report, showColumns) };
     const body = [el('p', {}, t(exp ? 'send.edit.tables' : 'send.tables.help')), checkList({
       items: tables.map(id => ({ value: id, label: id })), checked: chosen, label: t('send.step.tables'),
       onChange: (values) => { chosen = values; next.disabled = !chosen.length; wizard.buttons([cancel, next]); },
     }), report, stepHelp(['s-tables']), exp ? null : roleGuide({ you: 'source', current: 0 })];
     wizard.show(0, body, [cancel, next]);
-  }
-
-  // Une table trop grande (MAX_ROWS) ne peut pas être envoyée.
-  async function checkSizes(report) {
-    const big = [];
-    for (const table of chosen) {
-      const n = (await fetchRows(table)).length;
-      if (n > MAX_ROWS) big.push(t('send.tables.rows', { table, n }));
-    }
-    if (big.length) report.replaceChildren(message('err', t('send.tables.tooBig', { tables: big.join(', '), max: MAX_ROWS })));
-    else await showColumns();
   }
 
   // 2. Colonnes, par table (toutes par défaut), et ce que le widget ajoutera pour la synchro.

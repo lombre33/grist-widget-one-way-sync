@@ -1,6 +1,7 @@
 // Tables techniques du widget :
 //  - SOURCE : une seule table, Synchro, quel que soit le nombre d'exports et de tables. Chaque
-//    table d'un export y a sa liste des clés et son lot de lignes modifiées (voir core.js). Les
+//    table d'un export y a sa liste des clés, son lot de lignes modifiées et son suivi des clés
+//    (voir core.js). Les
 //    exports (nom, lien public), les invitations en attente (et l'empreinte de leur secret) et
 //    les pauses sont notés dans la description de sa colonne Synchro_Export : des métadonnées,
 //    que le webhook n'envoie pas.
@@ -10,7 +11,8 @@
 // Aucune n'a de page : elles restent dans « Données source ».
 import {
   APPLIED_COL, AUTHOR_COL, DATA_COL, DELETE_COL, EXPORT_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECEIVED_COL,
-  RECALC_COL, STATE_COL, SYNC_TABLE, TABLE_COL, exportRowsActions, exportTables, majleAction, prepareSourceActions, syncColumns, syncFormulas,
+  RECALC_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, addTrackRowsAction, exportRowsActions, exportTables, majleAction, prepareSourceActions,
+  syncColumns, syncFormulas,
 } from './core.js';
 import { apply, dropPages, exportsViewRef, fetchRows, hideColumn, readSchema, tidyPages } from './grist.js';
 
@@ -42,9 +44,9 @@ export async function writeSourceNote(note) {
 // Une table renommée ou effacée dans la SOURCE n'y figure plus (la carte de l'export le signale) :
 // son nom inconnu mettrait en erreur les lignes de tous les exports.
 async function refreshFormulas(schema, rows) {
-  const { keys, lot } = syncFormulas(rows.map(r => r[TABLE_COL]).filter(table => schema.has(table)));
+  const { keys, lot, state } = syncFormulas(rows.map(r => r[TABLE_COL]).filter(table => schema.has(table)));
   const cols = schema.columns(SYNC_TABLE);
-  const actions = [[LIST_COL, keys], [LOT_COL, lot]]
+  const actions = [[LIST_COL, keys], [LOT_COL, lot], [TRACK_COL, state]]
     .filter(([colId, formula]) => (cols.find(c => c.colId === colId) || {}).formula !== formula)
     .map(([colId, formula]) => ['ModifyColumn', SYNC_TABLE, colId, { formula }]);
   await apply(actions);
@@ -52,9 +54,10 @@ async function refreshFormulas(schema, rows) {
 }
 
 // Table Synchro à jour : une colonne ajoutée par une version suivante du widget est créée, la
-// marque d'envoi coupé surveille le lot (dépendance posée après coup : Grist la refuse à la
-// création), et les formules sont celles de cette version, pour les tables de `rows` (lignes de
-// Synchro, ou à venir). Rend vrai si quelque chose a changé.
+// colonne de suivi (marque d'envoi coupé des lots, suivi des clés) accepte du texte et surveille le
+// lot et la liste (dépendances posées après coup : Grist les refuse à la création), les formules
+// sont celles de cette version, pour les tables de `rows` (lignes de Synchro, ou à venir), et
+// chaque table d'un export a son suivi des clés. Rend vrai si quelque chose a changé.
 export async function ensureSyncTable(rows = null) {
   let schema = await readSchema();
   if (!schema.has(SYNC_TABLE)) return false;
@@ -65,13 +68,15 @@ export async function ensureSyncTable(rows = null) {
     schema = await readSchema();
   }
   const cols = schema.columns(SYNC_TABLE);
-  const lot = cols.find(c => c.colId === LOT_COL);
-  const watch = cols.find(c => c.colId === MISSING_COL);
-  const deps = ['L', lot.id];
-  const depsChanged = JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps);
+  const watch = cols.find(c => c.colId === TRACK_COL);
+  const deps = ['L', ...[LOT_COL, LIST_COL].map(id => cols.find(c => c.colId === id).id)];
+  const depsChanged = JSON.stringify(watch.recalcDeps || null) !== JSON.stringify(deps) || watch.type !== 'Any';
+  if (watch.type !== 'Any') await apply([['ModifyColumn', SYNC_TABLE, TRACK_COL, { type: 'Any' }]]);
   if (depsChanged) await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
   const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
-  return missing.length > 0 || depsChanged || formulasChanged;
+  const track = addTrackRowsAction(await fetchRows(SYNC_TABLE));
+  if (track) await apply([track]);
+  return missing.length > 0 || depsChanged || formulasChanged || Boolean(track);
 }
 
 // MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction), et

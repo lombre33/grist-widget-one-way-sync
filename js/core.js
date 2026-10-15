@@ -19,21 +19,25 @@ export const SCHEMA_COL = 'Synchro_Colonnes'; // colonnes envoyées : [{ id, typ
 export const JOURNAL_PREFIX = 'Journal_'; // CIBLE : un journal par export reçu
 
 // SOURCE : la seule table technique du widget, quel que soit le nombre d'exports et de tables.
-// Chaque table d'un export y a deux lignes, sa liste des clés et son lot de lignes modifiées, et
-// une troisième pour un export partagé par lien public (instantané complet).
+// Chaque table d'un export y a ses lignes : sa liste des clés et son lot de lignes modifiées
+// (envoyés), son suivi des clés (jamais envoyé), son filtre de lignes s'il y en a un, et son
+// instantané complet pour un export partagé par lien public.
 export const SYNC_TABLE = 'Synchro';
 export const EXPORT_COL = 'Synchro_Export'; // identifiant de l'export
 export const TABLE_COL = 'Synchro_Table'; // table SOURCE (et, dans le journal, table d'origine d'une ligne)
-export const TYPE_COL = 'Synchro_Type'; // 'cles', 'lot', ou 'complet' (lien public)
+export const TYPE_COL = 'Synchro_Type'; // voir KIND
 export const RESEND_COL = 'Synchro_Renvoi'; // lignes à renvoyer, écrites par le widget
 export const LOT_COL = 'Synchro_Lot'; // lot : lignes récentes avec leurs colonnes, en JSON
 // Lot coupé : depuis quand des lignes restent à envoyer (0 : rien). Le webhook envoie chaque ligne
 // de Synchro entière, et un journal refuse une colonne qu'il n'a pas : la marque reprend donc le nom
 // d'une colonne que tous les journaux ont déjà, pour que les CIBLES existantes l'acceptent.
 export const MISSING_COL = STATE_COL;
-// 'filtre' : filtre de lignes d'une table d'un export ; jamais envoyé (la condition des webhooks ne
-// laisse passer que les listes et les lots).
-export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', filter: 'filtre' };
+// Même colonne, ligne 'suivi' : les clés de la table, triées, et celles parties au dernier
+// changement (JSON, voir syncFormulas).
+export const TRACK_COL = STATE_COL;
+// Types de ligne. Les webhooks n'envoient que les listes et les lots ('cles', 'lot') ; le suivi des
+// clés et le filtre de lignes restent dans la SOURCE ; 'complet' n'est lu que par le lien public.
+export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', filter: 'filtre', track: 'suivi' };
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
 // Au chargement du document, Grist recalcule RECALC_COL pour toutes les lignes : ce n'est pas une
 // annulation, sauf dans une petite table, renvoyée alors en entier (quelques lignes).
@@ -44,10 +48,11 @@ const SMALL_TABLE = 20;
 const LOT_MAX = 250000;
 const POST_MAX = 950000;
 const LOT_MIN = 20000;
-const KEY_BYTES = 40; // une clé dans la liste : UUID et séparateur
-// Une table de plus de MAX_ROWS lignes ne peut pas être envoyée : sa liste des clés part en un seul
-// envoi, que Grist refuse au-delà de 1 Mo (413), et la file d'envoi se bloque.
-export const MAX_ROWS = 20000;
+// La liste des clés ne porte que les clés parties (au plus GONE_MAX d'un coup : au-delà, le widget
+// SOURCE renvoie la liste complète) ; la liste complète ne part qu'au renvoi, par morceaux de
+// PART_KEYS clés. Une clé (UUID) fait une quarantaine d'octets : de quoi laisser la place aux lots.
+const GONE_MAX = 5000;
+const PART_KEYS = 5000;
 export const RESEND_CHUNK = 200; // lignes par renvoi
 export const RESEND_ALL = 1; // marque de renvoi : toute la table, lignes sans MajLe comprises
 
@@ -113,7 +118,16 @@ export function freeTableId(base, taken) {
 // qui doivent exister : une table inconnue mettrait toutes les lignes en erreur) : le widget les
 // réécrit quand un export gagne ou perd une table. Leurs variables sont en minuscules, comme aucun
 // nom de table Grist.
-//  - Synchro_Ids (lignes 'cles') : la liste des clés, recalculée à chaque ajout ou suppression ;
+//  - TRACK_COL (lignes 'suivi', formule de déclenchement) : les clés de la table, triées, et celles
+//    parties depuis le changement précédent (`moins`, avec l'heure `t`). Au-delà de GONE_MAX clés
+//    parties d'un coup, `trop` (l'heure) reste posé jusqu'à ce que le widget SOURCE ait renvoyé la
+//    liste complète (il recopie alors `trop` dans Synchro_Renvoi du suivi). Sur les lignes 'lot',
+//    la même colonne est la marque d'envoi coupé : la plus ancienne date d'un lot coupé, gardée
+//    jusqu'à ce que le widget envoie le reste (un lot de renvoi coupé ne compte pas : le widget le
+//    recoupe lui-même).
+//  - Synchro_Ids : lignes 'cles', ce qu'il faut envoyer de la liste, en JSON : les clés parties, et
+//    pendant un renvoi le morceau demandé dans Synchro_Renvoi ({ marque, n, apres }) ; lignes
+//    'suivi', le nombre de clés : recalculé à chaque ajout ou retrait de clé, il déclenche le suivi.
 //  - Synchro_Lot (lignes 'lot') : les lignes modifiées depuis WINDOW_S secondes et celles
 //    demandées dans Synchro_Renvoi, avec les colonnes de l'export, plafonné à LOT_MAX octets
 //    (`total` dit combien il y en avait) ; lignes 'complet' (lien public) : toutes les lignes.
@@ -127,7 +141,7 @@ export function syncFormulas(tables) {
   const ids = [...new Set(tables)].filter(id => COL_ID.test(id)).sort();
   const pick = `tables = {${ids.map(id => `"${id}": ${id}`).join(', ')}}\nsrc = tables.get($${TABLE_COL})`;
   // Lecture d'une valeur (`g`) et filtre de lignes de la table dans l'export (`keep`), communs aux
-  // deux formules : une ligne qui sort du filtre quitte la liste des clés, la CIBLE l'efface.
+  // formules : une ligne qui sort du filtre quitte les clés, la CIBLE l'efface.
   const read = [
     'import json, datetime',
     'def v(x):',
@@ -153,8 +167,19 @@ export function syncFormulas(tables) {
     'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
   ];
   const keys = [
-    `if $${TYPE_COL} != "${KIND.keys}": return ""`, pick, 'if src is None: return ""', ...read,
-    `return "${LIST_PREFIX}" + " ".join(r.${KEY_COL} for r in src.all if r.${KEY_COL} and keep(r))`,
+    `if $${TYPE_COL} == "${KIND.keys}":`,
+    '  import json, bisect',
+    `  s = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
+    `  state = json.loads(s.${TRACK_COL}) if s.id and isinstance(s.${TRACK_COL}, str) and s.${TRACK_COL}.startswith("{") else {}`,
+    '  out = {"t": state["t"], "moins": state["moins"]} if state.get("moins") else {}',
+    `  ask = json.loads($${RESEND_COL}) if ($${RESEND_COL} or "").startswith("{") else None`,
+    '  if ask and "cles" in state:',
+    '    have = state["cles"]',
+    '    i = bisect.bisect_right(have, str(ask.get("apres") or ""))',
+    `    out["liste"] = {"marque": ask.get("marque"), "n": ask.get("n"), "t": NOW().timestamp(), "cles": have[i:i + ${PART_KEYS}], "fin": i + ${PART_KEYS} >= len(have)}`,
+    '  return json.dumps(out) if out else ""',
+    `if $${TYPE_COL} != "${KIND.track}": return ""`, pick, 'if src is None: return ""', ...read,
+    `return str(sum(1 for r in src.all if r.${KEY_COL} and keep(r)))`,
   ].join('\n');
   const lot = [
     `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}"): return ""`, pick, 'if src is None: return ""', ...read,
@@ -169,9 +194,10 @@ export function syncFormulas(tables) {
     `  if len(recent) + len(undone) == len(rows) > ${SMALL_TABLE}: undone = set()`,
     '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone]',
     `def when(r): return v(getattr(r, "${RECALC_COL}") if r.id in undone else r.${ORDER_COL})`,
-    `mine = [r.${TABLE_COL} for r in ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}") if r.${TABLE_COL} in tables]`,
-    `room = ${POST_MAX} - ${KEY_BYTES} * sum(len(tables[t].all) for t in mine)`,
-    `budget = max(${LOT_MIN}, min(${LOT_MAX}, room // max(1, len(mine))))`,
+    // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.
+    `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
+    `room = ${POST_MAX} - sum(len(r.${LIST_COL} or "") for r in lists)`,
+    `budget = max(${LOT_MIN}, min(${LOT_MAX}, room // max(1, len(lists))))`,
     `capped = $${TYPE_COL} == "${KIND.lot}"`,
     'out, size, big = [], 0, []',
     `for r in sorted(rows, key=lambda r: when(r) or 0, reverse=True):`,
@@ -190,24 +216,33 @@ export function syncFormulas(tables) {
     `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
     'return json.dumps(lot, ensure_ascii=False)',
   ].join('\n');
-  return { keys, lot };
+  const state = [
+    'import json',
+    `if $${TYPE_COL} == "${KIND.lot}":`,
+    `  lot = json.loads($${LOT_COL} or "{}")`,
+    '  if lot.get("depuis") and not lot.get("renvoi"):',
+    '    return min(value, lot["depuis"]) if value else lot["depuis"]',
+    '  return value',
+    `if $${TYPE_COL} != "${KIND.track}": return value`, pick, 'if src is None: return value', ...read,
+    `have = sorted(set(str(r.${KEY_COL}) for r in src.all if r.${KEY_COL} and keep(r)))`,
+    'old = json.loads(value) if isinstance(value, str) and value.startswith("{") else {}',
+    'if old.get("cles") == have: return value',
+    't = v(NOW())',
+    'state = {"t": t, "cles": have}',
+    'gone = sorted(set(old.get("cles", [])).difference(have))',
+    `if len(gone) > ${GONE_MAX}: state["trop"] = str(t)`,
+    'else:',
+    '  if gone: state["moins"] = gone',
+    `  if old.get("trop") and old["trop"] != $${RESEND_COL}: state["trop"] = old["trop"]`,
+    'return json.dumps(state)',
+  ].join('\n');
+  return { keys, lot, state };
 }
-
-// Marque d'envoi coupé (formule de déclenchement, recalculée quand le lot change) : la plus ancienne
-// date d'un lot coupé, gardée jusqu'à ce que le widget SOURCE envoie le reste et l'efface. Un lot
-// de renvoi coupé ne compte pas : le widget le recoupe lui-même.
-export const missingFormula = [
-  'import json',
-  `lot = json.loads($${LOT_COL} or "{}") if $${TYPE_COL} == "${KIND.lot}" else {}`,
-  'if lot.get("depuis") and not lot.get("renvoi"):',
-  '  return min(value, lot["depuis"]) if value else lot["depuis"]',
-  'return value',
-].join('\n');
 
 // Colonnes de la table Synchro. Le journal de la CIBLE doit toutes les avoir (le webhook envoie
 // chaque ligne entière) : une colonne ajoutée ici doit déjà exister dans les journaux.
 export function syncColumns(tables) {
-  const { keys, lot } = syncFormulas(tables);
+  const { keys, lot, state } = syncFormulas(tables);
   return [
     { id: EXPORT_COL, type: 'Text', isFormula: false },
     { id: TABLE_COL, type: 'Text', isFormula: false },
@@ -216,20 +251,21 @@ export function syncColumns(tables) {
     { id: RESEND_COL, type: 'Text', isFormula: false },
     { id: LIST_COL, type: 'Text', isFormula: true, formula: keys },
     { id: LOT_COL, type: 'Text', isFormula: true, formula: lot },
-    { id: MISSING_COL, type: 'Numeric', isFormula: false, formula: missingFormula, recalcWhen: 0 },
+    // Formule de déclenchement : ses dépendances (Synchro_Lot et Synchro_Ids) sont posées après coup.
+    { id: TRACK_COL, type: 'Any', isFormula: false, formula: state, recalcWhen: 0 },
     // E-mail de la personne qui crée l'export : présenté à la CIBLE comme propriétaire.
     { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 },
   ];
 }
 
-// Lignes Synchro d'un export : par table, sa liste des clés, son lot, et son instantané complet
-// s'il est partagé par lien public. `rows` : lignes Synchro existantes. Rend les actions qui
+// Lignes Synchro d'un export : par table, sa liste des clés, son lot, son suivi des clés, son
+// filtre s'il en a un, et son instantané complet s'il est partagé par lien public. `rows` : lignes Synchro existantes. Rend les actions qui
 // amènent l'export à `tables` ([{ table, columns }], colonnes de `exportableColumns`) : lignes
 // ajoutées, colonnes changées, lignes des tables retirées effacées. `changed` : tables nouvelles
 // ou aux colonnes changées, dont les lignes sont à renvoyer.
 export function exportRowsActions(rows, exportId, tables, { isPublic = false } = {}) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId);
-  const kinds = [KIND.keys, KIND.lot, ...(isPublic ? [KIND.full] : [])];
+  const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full] : [])];
   const add = [];
   const update = [];
   const changed = [];
@@ -256,6 +292,17 @@ export function exportRowsActions(rows, exportId, tables, { isPublic = false } =
   if (update.length) actions.push(['BulkUpdateRecord', SYNC_TABLE, update.map(u => u[0]), { [SCHEMA_COL]: update.map(u => u[1]) }]);
   if (remove.length) actions.push(['BulkRemoveRecord', SYNC_TABLE, remove]);
   return { actions, changed };
+}
+
+// Montage d'avant la version 0.5 : le suivi des clés manque aux tables des exports. Rend l'action
+// qui l'ajoute (le suivi part des clés présentes : rien n'est effacé dans les CIBLES), ou null.
+export function addTrackRowsAction(rows) {
+  const has = new Set(rows.filter(r => r[TYPE_COL] === KIND.track).map(r => `${r[EXPORT_COL]}|${r[TABLE_COL]}`));
+  const add = rows.filter(r => r[TYPE_COL] === KIND.keys && !has.has(`${r[EXPORT_COL]}|${r[TABLE_COL]}`));
+  if (!add.length) return null;
+  const cols = [EXPORT_COL, TABLE_COL, SCHEMA_COL];
+  return ['BulkAddRecord', SYNC_TABLE, add.map(() => null),
+    { ...Object.fromEntries(cols.map(c => [c, add.map(r => r[c] ?? '')])), [TYPE_COL]: add.map(() => KIND.track), [RESEND_COL]: add.map(() => '') }];
 }
 
 // Tables et colonnes d'un export, lues dans ses lignes Synchro.
@@ -302,8 +349,37 @@ export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
 // pour que la valeur change même si les lignes sont les mêmes.
 export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
 
-// Nombre de clés d'une liste (Synchro_Ids).
-export const keysCount = list => (String(list || '').startsWith(LIST_PREFIX) ? String(list).slice(LIST_PREFIX.length).split(' ').filter(Boolean).length : 0);
+// Morceau `n` de la liste complète d'un renvoi, après la clé `after` (Synchro_Renvoi de la ligne
+// 'cles'). `mark` distingue un renvoi des autres.
+export const listRequest = (mark, n, after) => JSON.stringify({ marque: mark, n, apres: after });
+
+// Suivi des clés d'une table (ligne 'suivi') : { t, cles, moins, trop } ; {} s'il n'y en a pas.
+export const trackState = row => (row && row[TYPE_COL] === KIND.track ? parseJson(row[TRACK_COL], null) || {} : {});
+
+// Plus de GONE_MAX clés parties d'un coup, et la liste complète pas encore renvoyée depuis.
+export const listOverdue = (row) => {
+  const { trop } = trackState(row);
+  return Boolean(trop) && trop !== row[RESEND_COL];
+};
+
+// Liste reçue (Synchro_Ids d'une ligne 'cles') : { gone: { t, keys } } pour les clés parties,
+// { part: { mark, n, t, keys, last } } pour un morceau de liste complète, les deux à la fois, ou
+// { full: [clés] } pour une liste complète d'un seul tenant (« ids:… » : montage 0.4, lien public).
+// null si elle est vide ou illisible.
+export function parseList(text) {
+  const s = String(text || '');
+  if (s.startsWith(LIST_PREFIX)) return { full: s.slice(LIST_PREFIX.length).split(' ').filter(Boolean) };
+  const list = parseJson(s);
+  if (!list || typeof list !== 'object') return null;
+  const strings = a => (Array.isArray(a) ? a.filter(k => !isBlank(k)).map(String) : []);
+  const out = {};
+  if (Array.isArray(list.moins) && typeof list.t === 'number') out.gone = { t: list.t, keys: strings(list.moins) };
+  const p = list.liste;
+  if (p && typeof p === 'object' && typeof p.marque === 'string' && p.marque && Number.isInteger(p.n) && p.n > 0 && typeof p.t === 'number') {
+    out.part = { mark: p.marque, n: p.n, t: p.t, keys: strings(p.cles), last: p.fin === true };
+  }
+  return out.gone || out.part ? out : null;
+}
 
 // Lot reçu : { lines: [{ key, order, deleted, data }], total } ; null s'il est illisible.
 export function parseLot(text) {
@@ -443,7 +519,8 @@ export function latestByKey(journalRows) {
 const isRaw = row => !isBlank(row[TYPE_COL]);
 
 // Dépliage, dans l'ordre d'arrivée : chaque lot devient une ligne par version (clé, date,
-// suppression, bloc des colonnes, table d'origine), chaque liste des clés une ligne de liste ; les
+// suppression, bloc des colonnes, table d'origine), chaque liste des clés une ligne de liste (qui
+// porte aussi la description des colonnes) ; les
 // lignes reçues sont effacées dans le même lot. Les nouvelles lignes gardent l'ordre d'arrivée
 // (numéros croissants) et la date d'arrivée. Rend aussi, par table, les lignes qu'un lot trop gros
 // n'a pas portées depuis le dernier renvoi (`missing`) et les tables reçues par un renvoi
@@ -459,8 +536,9 @@ export function planUnpack(journalRows, journalTable) {
     const table = String(row[TABLE_COL] || '');
     if (!COL_ID.test(table)) continue;
     const base = { [TABLE_COL]: table, [RECEIVED_COL]: row[RECEIVED_COL] ?? null };
-    if (row[TYPE_COL] === KIND.keys && String(row[LIST_COL] || '').startsWith(LIST_PREFIX)) {
-      added.push({ ...base, [LIST_COL]: row[LIST_COL], [SCHEMA_COL]: row[SCHEMA_COL] || '' });
+    if (row[TYPE_COL] === KIND.keys) {
+      const list = String(row[LIST_COL] || '');
+      if (list || row[SCHEMA_COL]) added.push({ ...base, [LIST_COL]: list, [SCHEMA_COL]: row[SCHEMA_COL] || '' });
       continue;
     }
     const lot = parseLot(row[LOT_COL]);
@@ -596,7 +674,7 @@ export function sentColumns(rows, fallback = []) {
   return validColumns(cols) ? exportSchema(cols) : fallback;
 }
 
-// Dernière liste des clés reçue (ligne du Journal sans clé, colonne Synchro_Ids).
+// Dernière liste complète d'un seul tenant reçue (« ids:… », voir parseList).
 function latestList(rows) {
   let latest = null;
   for (const row of rows) {
@@ -612,15 +690,43 @@ function sameValue(sent, have) {
   return JSON.stringify(norm(sent)) === JSON.stringify(norm(have));
 }
 
+// Listes du journal pas encore traitées, dans l'ordre d'arrivée, avec leur contenu lu.
+const pendingLists = rows => rows.filter(r => isBlank(r[KEY_COL]) && !isTrue(r[APPLIED_COL]))
+  .map(row => ({ row, list: parseList(row[LIST_COL]) })).filter(l => l.list).sort((a, b) => a.row.id - b.row.id);
+
+// Marque du dernier renvoi dont un morceau de liste est arrivé.
+const lastMark = pending => (pending.filter(l => l.list.part).pop() || { list: { part: {} } }).list.part.mark;
+
+// Morceaux de liste complète arrivés en entier (du premier au dernier), par renvoi : { rows,
+// keys, t } avec l'heure du premier morceau.
+function completeLists(pending) {
+  const byMark = new Map();
+  for (const { row, list } of pending) {
+    if (!list.part) continue;
+    if (!byMark.has(list.part.mark)) byMark.set(list.part.mark, []);
+    byMark.get(list.part.mark).push({ row, part: list.part });
+  }
+  const done = [];
+  for (const parts of byMark.values()) {
+    const last = parts.find(p => p.part.last);
+    const have = new Set(parts.map(p => p.part.n));
+    if (!last || Array.from({ length: last.part.n }, (_, i) => i + 1).some(n => !have.has(n))) continue;
+    done.push({ rows: parts.map(p => p.row), keys: new Set(parts.flatMap(p => p.part.keys)), t: Math.min(...parts.map(p => p.part.t)) });
+  }
+  return done;
+}
+
 // Actions qui amènent la destination à l'état de la SOURCE, en un seul lot, pour une table
 // (lignes du journal de cette table seulement) :
 //  - la dernière version de chaque clé, si elle n'a pas encore été recopiée ; une clé inconnue
 //    de la destination peut y reprendre une ligne existante sans clé de même valeur dans la
 //    colonne `matchCol` (rattachement d'un référentiel déjà rempli) ;
-//  - la suppression des lignes cochées `Supprime`, ou absentes de la dernière liste des clés
-//    (ligne effacée dans la SOURCE) quand aucune version plus récente n'est arrivée depuis ;
-//  - le marquage des versions et de la liste traitées (`Sync_Applique`) et de leur effet
-//    (`Sync_Etat`), pour l'historique ; une suppression venue de la liste est notée sur la
+//  - la suppression des lignes cochées `Supprime`, des clés parties de la SOURCE (liste des clés
+//    parties, ou absentes d'une liste complète arrivée en entier), sauf si une version plus récente
+//    que la liste est arrivée (clé recréée, annulation) : « plus récente » se lit à l'heure de la
+//    SOURCE, ou à l'ordre d'arrivée pour une liste « ids:… » qui n'a pas d'heure ;
+//  - le marquage des versions et des listes traitées (`Sync_Applique`) et de leur effet
+//    (`Sync_Etat`), pour l'historique ; une suppression venue d'une liste est notée sur la
 //    dernière version de la clé, à la date d'arrivée de la liste.
 // Une retouche manuelle survit donc jusqu'à la prochaine modification côté SOURCE, et rejouer le
 // plan après application ne change rien (idempotent).
@@ -640,19 +746,34 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const matchFrom = (copyCols.find(([, to]) => to === matchCol) || [])[0];
   const latest = latestByKey(journalRows);
   const applied = latestByKey(journalRows.filter(r => isTrue(r[APPLIED_COL]) && !isTrue(r[DELETE_COL])));
-  const list = latestList(journalRows);
-  const marks = new Map(); // ligne du Journal -> effet ('' pour la liste ou une version sans effet)
-  const listGone = [];
+  const marks = new Map(); // ligne du Journal -> effet ('' pour une liste ou une version sans effet)
+  const listGone = []; // [version, date d'arrivée de la liste]
   const gone = new Set();
-  if (list && !isTrue(list[APPLIED_COL])) {
-    const present = new Set(String(list[LIST_COL]).slice(LIST_PREFIX.length).split(' ').filter(Boolean));
-    for (const key of destByKey.keys()) {
-      const version = latest.get(key);
-      if (present.has(key) || (version && version.id > list.id)) continue;
-      gone.add(key);
-      if (version) listGone.push(version.id);
-    }
-    marks.set(list.id, '');
+  // Clé partie d'après une liste (heure `t` de la SOURCE, ou null : ordre d'arrivée).
+  const drop = (key, t, listRow) => {
+    if (gone.has(key)) return;
+    const version = latest.get(key);
+    if (version && (t === null ? version.id > listRow.id : compareOrder(version.order, t) > 0)) return;
+    gone.add(key);
+    if (version && destByKey.has(key)) listGone.push([version.id, listRow[RECEIVED_COL] ?? null]);
+  };
+  const known = () => new Set([...destByKey.keys(), ...latest.keys()]);
+  const pending = pendingLists(journalRows);
+  const mark = lastMark(pending);
+  for (const { row, list } of pending) {
+    if (list.gone) list.gone.keys.forEach(key => drop(key, list.gone.t, row));
+    // Un morceau de liste complète attend les autres ; celui d'un renvoi remplacé par un autre
+    // (interrompu, repris sous une autre marque) ne servira plus.
+    if (!list.part || list.part.mark !== mark) marks.set(row.id, '');
+  }
+  const full = pending.filter(l => l.list.full).pop();
+  if (full) {
+    const present = new Set(full.list.full);
+    for (const key of known()) if (!present.has(key)) drop(key, null, full.row);
+  }
+  for (const { rows, keys, t } of completeLists(pending)) {
+    for (const key of known()) if (!keys.has(key)) drop(key, t, rows[rows.length - 1]);
+    rows.forEach(row => marks.set(row.id, ''));
   }
 
   const upserts = [];
@@ -709,14 +830,16 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
       { [APPLIED_COL]: part.map(() => true), [STATE_COL]: part.map(([, state]) => state) }]);
   }
   for (const part of chunk(listGone)) {
-    actions.push(['BulkUpdateRecord', journalTable, part,
-      { [STATE_COL]: part.map(() => 'suppression'), [RECEIVED_COL]: part.map(() => list[RECEIVED_COL] ?? null) }]);
+    actions.push(['BulkUpdateRecord', journalTable, part.map(([id]) => id),
+      { [STATE_COL]: part.map(() => 'suppression'), [RECEIVED_COL]: part.map(([, at]) => at) }]);
   }
   return { actions, stats };
 }
 
 // Nettoyage du Journal, dans le même lot. Restent, par table : la dernière version de chaque clé,
-// la dernière liste et la dernière description des colonnes (avec leur marque `Sync_Applique`) ;
+// la dernière liste « ids:… » et la dernière description des colonnes (avec leur marque
+// `Sync_Applique`) ; les clés parties pas encore traitées et les morceaux du dernier renvoi pas
+// encore arrivé en entier ;
 // toutes les lignes des tables `keep` (proposées par la SOURCE, pas encore rangées) ; les lignes
 // reçues pas encore dépliées ; et la ligne la plus récente, pour que Grist ne réutilise pas son
 // numéro. Le reste (versions remplacées, tables `drop` refusées, test du lien) disparaît.
@@ -730,6 +853,9 @@ export function planPurge(journalRows, journalTable, { keep = [], drop = [] } = 
     }
     for (const v of latestByKey(rows).values()) kept.add(v.id);
     for (const row of [latestList(rows), latestSchemaRow(rows)]) if (row) kept.add(row.id);
+    const pending = pendingLists(rows);
+    const mark = lastMark(pending);
+    for (const { row, list } of pending) if (list.gone || (list.part && list.part.mark === mark)) kept.add(row.id);
   }
   kept.add(journalRows.reduce((max, r) => Math.max(max, r.id), 0));
   const ids = journalRows.filter(r => !kept.has(r.id)).map(r => r.id);
