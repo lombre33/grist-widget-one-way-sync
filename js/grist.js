@@ -21,6 +21,8 @@ export async function readSchema() {
     tableIds: tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => tb.tableId).sort(),
     has: tableId => byId.has(tableId),
     table: tableId => byId.get(tableId),
+    // Nom exact d'une table nommée `tableId` aux majuscules près (Grist ne les distingue pas), ou null.
+    resolve: tableId => (tables.find(tb => tb.tableId.toLowerCase() === String(tableId).toLowerCase()) || {}).tableId || null,
     // Nom actuel de la table de numéro `ref` (il change si on la renomme), ou null.
     tableIdOf: ref => (tables.find(tb => tb.id === ref) || {}).tableId || null,
     // Colonnes d'une table, dans l'ordre de leur création ; null si la table n'existe pas.

@@ -103,6 +103,8 @@ export const randomHex = n => toHex(crypto.getRandomValues(new Uint8Array(n)));
 const COL_ID = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEX16 = /^[0-9a-f]{16}$/;
 const SECRET = /^[0-9a-f]{32}$/;
+// Contrôle d'une valeur lue dans un code : `RegExp.test` changerait un tableau ou `undefined` en texte.
+const is = (re, value) => typeof value === 'string' && re.test(value);
 
 // Identifiant de table Grist valide à partir d'un nom libre.
 export function toTableId(name, fallback = 'Table') {
@@ -112,11 +114,15 @@ export function toTableId(name, fallback = 'Table') {
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
-// Premier identifiant libre : `base`, puis `base_2`, `base_3`…
+// Premier identifiant libre : `base`, puis `base_2`, `base_3`… Grist ne distingue pas les
+// majuscules d'un identifiant à l'autre (`ANNUAIRE` prendrait la place d'`Annuaire`) : la
+// comparaison non plus.
 export function freeTableId(base, taken) {
-  if (!taken.includes(base)) return base;
+  const used = new Set(taken.map(id => id.toLowerCase()));
+  const free = id => !used.has(id.toLowerCase());
+  if (free(base)) return base;
   let n = 2;
-  while (taken.includes(`${base}_${n}`)) n++;
+  while (!free(`${base}_${n}`)) n++;
   return `${base}_${n}`;
 }
 
@@ -1140,8 +1146,9 @@ function encodeCode(payload) {
   return CODE_PREFIX + toBase64Url(JSON.stringify(payload));
 }
 
+// Un code recopié d'un courriel peut avoir été coupé en plusieurs lignes : les blancs sont ôtés.
 export function decodeCode(text, kind) {
-  const raw = String(text || '').trim();
+  const raw = String(text || '').replace(/\s+/g, '');
   if (raw.startsWith('GRISTSYNC1.')) throw new Error('codeOld');
   if (!raw.startsWith(CODE_PREFIX)) throw new Error('codeFormat');
   const payload = parseJson(fromBase64UrlSafe(raw.slice(CODE_PREFIX.length)));
@@ -1156,8 +1163,8 @@ function fromBase64UrlSafe(text) {
 
 function validColumns(cols) {
   return Array.isArray(cols) && cols.length > 0 && new Set(cols.map(c => c && c.id)).size === cols.length &&
-    cols.every(c => c && COL_ID.test(c.id) && typeof c.type === 'string' && /^[A-Za-z0-9:_/+-]+$/.test(c.type) // DateTime:Europe/Paris
-      && (c.as === undefined || COL_ID.test(c.as)));
+    cols.every(c => c && is(COL_ID, c.id) && is(/^[A-Za-z0-9:_/+-]+$/, c.type) // DateTime:Europe/Paris
+      && (c.as === undefined || is(COL_ID, c.as)));
 }
 
 // Une invitation donne accès à un export (`export`, ses tables et colonnes) pour une personne :
@@ -1177,8 +1184,8 @@ export function buildInvitation({ id, exportId, name, origin, secret = '', from 
 
 export function parseInvitation(text) {
   const inv = decodeCode(text, 'invitation');
-  const ok = HEX16.test(inv.id) && HEX16.test(inv.export) && typeof inv.name === 'string' && (!inv.secret || SECRET.test(inv.secret)) &&
-    Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && COL_ID.test(tb.table) && validColumns(tb.columns)) &&
+  const ok = is(HEX16, inv.id) && is(HEX16, inv.export) && typeof inv.name === 'string' && (!inv.secret || is(SECRET, inv.secret)) &&
+    Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && is(COL_ID, tb.table) && validColumns(tb.columns)) &&
     new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
   const publicBase = inv.mode === 'public' ? safeDocBaseUrl(inv.base) : '';
   const back = inv.mode === 'echange' ? parseWebhookUrl(inv.retour) : null;
@@ -1203,7 +1210,7 @@ export function buildReply({ id, secret = '', recipient, url, retour = null }) {
 export function parseReply(text, sourceOrigin) {
   const reply = decodeCode(text, 'reponse');
   const target = parseWebhookUrl(reply.url);
-  if (!HEX16.test(reply.id) || (reply.secret && !SECRET.test(reply.secret)) || !target || !target.flat ||
+  if (!is(HEX16, reply.id) || (reply.secret && !is(SECRET, reply.secret)) || !target || !target.flat ||
       !reply.recipient || typeof reply.recipient !== 'object') {
     throw new Error('codeInvalid');
   }
@@ -1214,7 +1221,7 @@ export function parseReply(text, sourceOrigin) {
   if (reply.retour === undefined) return out;
   const back = Array.isArray(reply.retour) ? reply.retour : [];
   const unique = key => new Set(back.map(b => b && b[key])).size === back.length;
-  if (!back.length || !back.every(b => b && COL_ID.test(b.table) && COL_ID.test(b.dest)) || !unique('table') || !unique('dest')) throw new Error('codeInvalid');
+  if (!back.length || !back.every(b => b && is(COL_ID, b.table) && is(COL_ID, b.dest)) || !unique('table') || !unique('dest')) throw new Error('codeInvalid');
   return { ...out, retour: back.map(({ table, dest }) => ({ table, dest })) };
 }
 

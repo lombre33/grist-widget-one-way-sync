@@ -507,7 +507,9 @@ function destField(schema, table) {
     items: [{ value: '', label: t('recv.dest.new') }, ...tables.map(id => ({ value: id, label: id }))],
     onChange: (v) => { name.classList.toggle('hidden', v !== ''); },
   });
-  return { node: el('div', {}, field, name), dest: () => field.value() || toTableId(name.value, table) };
+  // Un nom tapé qui est celui d'une table existante (aux majuscules près) désigne cette table.
+  const typed = () => toTableId(name.value, table);
+  return { node: el('div', {}, field, name), dest: () => field.value() || schema.resolve(typed()) || typed() };
 }
 
 // Colonne qui reçoit chaque colonne envoyée (la même, une autre, ou une nouvelle), et colonne
