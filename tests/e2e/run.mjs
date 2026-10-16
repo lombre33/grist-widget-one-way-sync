@@ -923,7 +923,14 @@ try {
   assert.ok(!(await widget().getByText('Arrivées suspectes').count()), 'la fin n\'est pas une arrivée suspecte');
   step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours ; la carte du révoqué le dit');
 
-  // --- Modifier l'export : une table et une colonne de plus ; la CIBLE range la table (fenêtre)
+  // --- Modifier l'export : une table et une colonne de plus ; la CIBLE range la table (fenêtre).
+  // D'abord un rechargement du document SOURCE : Grist recalcule RecalculLe de toutes les lignes, et
+  // la petite table Contacts repart à l'heure du rechargement. Les renvois qui suivent (colonne
+  // ajoutée, filtre retiré), plus anciens selon MajLe, doivent quand même l'emporter dans la
+  // CIBLE (sans quoi les lignes revenues dans le filtre ne sont pas recopiées : vérifié).
+  await api('POST', `/docs/${source.doc}/force-reload`);
+  await new Promise(r => setTimeout(r, 3000));
+  await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'envoi du rechargement parti');
   await openWidget(source.url);
   await button('Modifier').click();
   await dialog().getByRole('checkbox', { name: 'Villes' }).check();
