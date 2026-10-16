@@ -113,7 +113,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.6 (16 octobre 2026)
+## État : V0.5.7 (16 octobre 2026)
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
@@ -151,6 +151,17 @@ signalée. Une colonne reçue effacée ici (`droppedColumns` : dans `refs.cols` 
 absente de la destination) n'est plus recréée vide à chaque passage : elle est notée (`dropped`),
 signalée, et « Corriger » la recrée (`AddVisibleColumn`) puis remet lignes et valeurs de la SOURCE.
 L'Échange recrée toujours seul une colonne effacée.
+V0.5.7 (Antoine : l'alerte « dès que ça se passe », et « dire dans l'historique qu'une colonne a
+été ajoutée à l'export ») : toutes les 10 s, `due` (`js/target/loop.js`) demande à Grist les tables
+changées depuis l'état vu au coup d'œil précédent (`docChanges` : `GET /compare?left=<hash>&right=HEAD&maxRows=1`,
+une dizaine de ms ; 500 « Cannot read hash » si l'état est sorti de l'historique, alors relu depuis
+HEAD ; `tableRenames` non vide : tout relire ; réservé à qui peut tout lire du document, sinon
+l'ancien rythme). Un passage n'a lieu que si un journal, une destination ou `_grist_Tables*` a
+changé (`touchedTables`), au moins une fois par minute, et au rythme d'avant pour un lien public ;
+une destination changée perd son cache (`settled`, qui note `dest`) et est relue. Nos propres
+écritures valent un passage de plus, sans effet. Colonnes ajoutées à l'export : notées dans
+l'entrée (`addedCols`, `addedColumns`, les 10 dernières) quand `newColumnsMap` les range, et
+montrées dans l'historique (état `colonne`, icône `column`).
 
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,

@@ -1,7 +1,7 @@
 // Journal (CIBLE) : dépliage des lignes reçues, lots et listes, purge, historique, lien public.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareVersion, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns } from '../../js/logic/journal.js';
+import { compareVersion, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../../js/logic/journal.js';
 import { KIND } from '../../js/logic/common.js';
 import { j, list, done, gone, part, EXPORT } from './fixtures.mjs';
 
@@ -247,6 +247,14 @@ test('purge : journal vide, tables refusées effacées', () => {
   assert.deepEqual(planPurge([], 'J'), []);
   const rows = [{ id: 1, Synchro_Table: 'Villes', id_sync: 'v', MajLe: 1 }, { id: 2, Synchro_Table: 'Contacts', id_sync: 'c', MajLe: 1 }, { id: 3, Synchro_Table: 'Villes', id_sync: 'v', MajLe: 2 }];
   assert.deepEqual(planPurge(rows, 'J', { drop: ['Villes'] }), [['BulkRemoveRecord', 'J', [1]]], 'la ligne la plus récente reste (numéro non réutilisé)');
+});
+
+test('coup d\'œil : seuls journaux, destinations et schéma suivis demandent un passage', () => {
+  const watched = new Set(['Journal_Annuaire', 'Contacts']);
+  assert.deepEqual(touchedTables(new Set(['Contacts', 'Autre', '_grist_Views_section']), watched), ['Contacts']);
+  assert.deepEqual(touchedTables(new Set(['_grist_Tables_column']), watched), ['_grist_Tables_column'], 'colonne ajoutée ou effacée');
+  assert.deepEqual(touchedTables(new Set(['Autre']), watched), [], 'une autre table : rien à relire');
+  assert.equal(touchedTables(null, watched), null, 'on ne sait pas : tout relire');
 });
 
 test('historique : dates illisibles écartées', () => {

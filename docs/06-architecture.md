@@ -28,7 +28,9 @@ Villes  ──┤ formules ─▶ Synchro ── un webhook par ─────�
   réception**, chaque formulaire sur sa propre page.
 - La **recopie** est faite par le widget, avec les droits de l'éditeur qui ouvre sa page (même
   replié) : il écarte ce qui ne peut pas venir de la SOURCE, déplie le reste, recopie chaque table
-  dans sa destination et nettoie le journal.
+  dans sa destination et nettoie le journal. Toutes les 10 secondes, il demande à Grist quelles
+  tables ont changé (`docChanges`, comparaison de deux états du document) et ne passe que si un
+  journal, une destination ou le schéma a bougé, et au moins une fois par minute.
 
 L'étude de départ, avec les preuves dans le code de Grist, est dans
 [`01-etude-faisabilite.md`](01-etude-faisabilite.md).

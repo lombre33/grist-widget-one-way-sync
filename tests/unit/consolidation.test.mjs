@@ -1,7 +1,7 @@
 // Recopie des versions reçues dans les tables de destination (CIBLE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyColumns, destRefs, droppedColumns, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
+import { addedColumns, copyColumns, destRefs, droppedColumns, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
@@ -218,6 +218,17 @@ test('colonne ajoutée à l\'export après coup : jamais sur une colonne de la d
   assert.equal(newColumnsMap(entry, [{ id: 'Nom' }, { id: 'Ville' }], ['Nom', 'Commune']), null);
   assert.deepEqual(newColumnsMap(entry, [{ id: 'Nom' }, { id: 'Note' }, { id: 'Tel' }], ['Nom', 'Commune', 'Note', 'Note_2']),
     { Ville: 'Commune', Note: 'Note_3', Tel: 'Tel' });
+});
+
+test('colonne ajoutée à l\'export : notée pour l\'historique sous son nom d\'ici, une seule fois', () => {
+  const entry = { columns: [{ id: 'Nom' }], map: { Ville: 'Commune' } };
+  const next = { Ville: 'Commune', Note: 'Note_3', Tel: 'Tel' };
+  assert.deepEqual(addedColumns(entry, next, 50), [{ col: 'Note_3', at: 50 }, { col: 'Tel', at: 50 }]);
+  const later = { ...entry, map: next, addedCols: addedColumns(entry, next, 50) };
+  assert.deepEqual(addedColumns(later, { ...next, Mail: 'Mail' }, 60).map(a => a.col), ['Note_3', 'Tel', 'Mail'], 'les précédentes restent');
+  assert.equal(addedColumns({}, { Nom: 'Nom' }, 50), undefined, 'ancien montage sans colonnes connues : rien de noté');
+  const many = Array.from({ length: 12 }, (_, i) => [`C${i}`, `C${i}`]);
+  assert.equal(addedColumns(entry, Object.fromEntries(many), 70).length, 10, 'les dix dernières seulement');
 });
 
 test('CIBLE : destination renommée suivie par ses numéros Grist', () => {

@@ -639,11 +639,10 @@ try {
   await openWidget(target.url);
   await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
   assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
-  // Une ligne et une colonne reçues, effacées ici, sont signalées aussi (destination relue sur
-  // « Synchroniser ») ; « Corriger » remet alors l'état exact de la SOURCE.
+  // Une ligne et une colonne reçues, effacées ici, sont signalées aussi, sans clic : le widget voit
+  // que la destination a changé ; « Corriger » remet alors l'état exact de la SOURCE.
   const denis = (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Denis');
   await applyActions(target.doc, [['RemoveRecord', 'Contacts', denis.id], ['RemoveColumn', 'Contacts', 'Lieu']]);
-  await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await drift.getByText(/Contacts\s:\s3 modifications faites à la main ici/).waitFor({ timeout: 30000 });
   assert.deepEqual((await driftRows()).map(r => r.slice(1)), [['', 'Lieu', 'Colonne supprimée ici, toujours envoyée par la SOURCE'],
     ['Bob', 'Ville', 'retouche', 'Paris'], ['Denis', 'Ligne supprimée ici, toujours dans la SOURCE']], 'écarts : colonne, valeur, ligne');
@@ -699,11 +698,13 @@ try {
   await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue et remplie');
   const shown = await pageColumns(target.doc, 'Contacts');
   assert.ok(shown.includes('Interne') && !shown.includes('id_sync'), `colonne ajoutée visible sur la page, clé masquée : ${shown}`);
+  await waitFor(async () => (await widget().locator('.chg-row.chg-colonne').allTextContents()).some(x => /Colonne\s«\sInterne\s».*ajoutée par la SOURCE/.test(x)),
+    'historique : colonne Interne ajoutée par la SOURCE');
   await historyHas('Paris', 'ajout');
   assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Contacts', 'Communes'], 'historique groupé par table');
   await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression dans la table ajoutée');
-  step('SOURCE puis CIBLE : table et colonne ajoutées à l\'export, rangées par la CIBLE dans une table existante');
+  step('SOURCE puis CIBLE : table et colonne ajoutées à l\'export, rangées par la CIBLE dans une table existante, colonne annoncée dans l\'historique');
 
   // --- Une ville renommée : le texte affiché par la Référence repart seul, sans toucher Contacts
   await applyActions(source.doc, [['UpdateRecord', 'Villes', 1, { Ville: 'Villeurbanne' }]]);
