@@ -1,8 +1,8 @@
 // Recopie des versions reçues dans les tables de destination (CIBLE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyColumns, destRefs, followRenames, newColumnsMap, planConsolidation } from '../../js/logic/consolidation.js';
-import { j, plan, marked, list, done, gone, part } from './fixtures.mjs';
+import { copyColumns, destRefs, followRenames, manualEdits, newColumnsMap, planConsolidation, rowNumbers } from '../../js/logic/consolidation.js';
+import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
   const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'Age', 'manualSort', 'gristHelper_X'].map(colId => ({ colId }));
@@ -21,6 +21,7 @@ test('consolidation : ajout, mise à jour, suppression, versions déjà appliqu�
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b', 'e'] }, { Nom: ['b2', 'n7'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [13]],
     marked([5, 6, 7], ['modif', 'suppression', 'ajout']),
+    replaced([[5, { v: { Nom: null } }], [6, { n: 3 }]]),
   ]);
 });
 
@@ -39,6 +40,7 @@ test('consolidation : une clé absente de la liste est effacée, sauf version pl
     ['BulkRemoveRecord', 'Dest', [2]],
     marked([3, 4], ['', 'ajout']),
     ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [50] }],
+    replaced([[2, { n: 2 }]]),
   ]);
 });
 
@@ -85,6 +87,7 @@ test('Échange : la version la plus récente gagne et écrit MajLe ; les listes 
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a', 'c', 'f'] }, { Nom: ['là-bas', 'là-bas', 'nouvelle'], MajLe: [30, 5, null] }, { on_many: 'all' }],
     marked([7, 8, 1, 2, 3, 4, 5, 6], ['', '', 'modif', '', 'modif', '', '', 'ajout']),
+    replaced([[1, { v: { Nom: 'ici' } }], [3, { v: { Nom: 'ici' } }]]),
   ]);
   const deleted = swap([j(1, 'e', 25, { Supprime: true })], destRows);
   assert.deepEqual(deleted.actions[0], ['BulkRemoveRecord', 'Dest', [5]], 'Supprime plus récente : la ligne est effacée');
@@ -105,6 +108,7 @@ test('consolidation : clés parties d\'un seau effacées, sauf version plus réc
     ['BulkRemoveRecord', 'Dest', [2]],
     marked([5, 3, 4], ['', 'ajout', '']),
     ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [60] }],
+    replaced([[2, { n: 2 }]]),
   ]);
 });
 
@@ -133,9 +137,36 @@ test('consolidation : liste complète en morceaux, appliquée une fois tous arri
   assert.deepEqual(plan([...base, part(4, 1, 40, ['a'], false)], destRows).actions, [], 'un morceau seul attend les autres');
   const { actions, stats } = plan([...base, part(4, 1, 40, ['a'], false), part(5, 2, 41, ['c'], true)], destRows);
   assert.equal(stats.removed, 1, 'b absente ; d, créée pendant le renvoi (heure 50), reste');
-  assert.deepEqual(actions, [['BulkRemoveRecord', 'Dest', [2]], marked([4, 5], ['', '']), ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [null] }]]);
-  const replaced = plan([...base, part(4, 1, 40, ['a'], false), part(5, 1, 60, ['a'], false, 'm2')], destRows);
-  assert.deepEqual(replaced.actions, [marked([4], [''])], 'renvoi interrompu, repris sous une autre marque : l\'ancien morceau ne sert plus');
+  assert.deepEqual(actions, [['BulkRemoveRecord', 'Dest', [2]], marked([4, 5], ['', '']), ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [null] }],
+    replaced([[2, { n: 2 }]])]);
+  const other = plan([...base, part(4, 1, 40, ['a'], false), part(5, 1, 60, ['a'], false, 'm2')], destRows);
+  assert.deepEqual(other.actions, [marked([4], [''])], 'renvoi interrompu, repris sous une autre marque : l\'ancien morceau ne sert plus');
+});
+
+test('numéros de ligne : ordre de la table (manualSort), pas l\'id', () => {
+  const destRows = [{ id: 1, id_sync: 'a', manualSort: 3 }, { id: 2, id_sync: 'b', manualSort: 1 }, { id: 3, id_sync: '', manualSort: 2 }, { id: 4, id_sync: 'd' }];
+  assert.deepEqual([...rowNumbers(destRows)], [['b', 1], ['a', 3], ['d', 4]], 'une ligne sans clé compte dans la numérotation');
+});
+
+test('consolidation : une ligne rattachée note les valeurs qu\'elle remplace', () => {
+  const { actions } = plan([j(1, 'a', 10, { Nom: 'Lyon' })], [{ id: 7, id_sync: '', Nom: 'Lyon' }, { id: 8, id_sync: 'z', Nom: 'x' }], 'Nom');
+  assert.equal(actions.find(a => a[3] && a[3].Sync_Avant), undefined, 'rien de remplacé : rien de noté');
+  const changed = planConsolidation({ journalRows: [j(1, 'a', 10, { Nom: 'Lyon', Tel: '02' })], destRows: [{ id: 7, id_sync: '', Nom: 'Lyon', Tel: '01' }],
+    copyCols: [['Nom', 'Nom'], ['Tel', 'Tel']], destTable: 'Dest', journalTable: 'J', matchCol: 'Nom' });
+  assert.deepEqual(changed.actions.at(-1), replaced([[1, { v: { Tel: '01' } }]]));
+});
+
+test('écarts : valeurs retouchées ici, par numéro de ligne ; rien en Échange', () => {
+  const copyCols = [['Nom', 'Nom'], ['Ville', 'Commune']];
+  const journalRows = [j(1, 'a', 10, { Ville: 'Lyon', ...done }), j(2, 'b', 10, { Ville: 'Nice', ...done }), j(3, 'b', 5, { Ville: 'ancienne', ...done }),
+    j(4, 'c', 10, { Supprime: true, ...done }), j(5, 'e', 10, { Ville: null, Tags: ['x'], ...done })];
+  const destRows = [{ id: 1, id_sync: 'b', manualSort: 2, Nom: 'n2', Commune: 'Nice' }, { id: 2, id_sync: 'a', manualSort: 1, Nom: 'Alice', Commune: 'Paris' },
+    { id: 3, id_sync: 'c', manualSort: 3, Nom: 'x' }, { id: 4, id_sync: '', manualSort: 4, Nom: 'locale' }, { id: 5, id_sync: 'e', manualSort: 5, Nom: 'n5', Commune: '' }];
+  const edits = manualEdits({ journalRows, destRows, copyCols });
+  assert.deepEqual(edits.map(e => [e.key, e.n, e.cells]), [['a', 1, [['Nom', 'Nom', 'Alice', 'n1'], ['Ville', 'Commune', 'Paris', 'Lyon']]]],
+    'b suit sa dernière version, c est supprimée, une ligne locale sans clé et un vide égal à vide ne comptent pas');
+  assert.equal(edits[0].row.Nom, 'n1', 'la version reçue nomme la ligne');
+  assert.deepEqual(manualEdits({ journalRows, destRows, copyCols, exchange: true }), []);
 });
 
 test('consolidation idempotente : rejouer après application ne fait rien', () => {

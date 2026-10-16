@@ -113,7 +113,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.3 (16 octobre 2026)
+## État : V0.5.4 (16 octobre 2026)
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
@@ -130,6 +130,14 @@ confirmation ; côté CIBLE, revenir avant le lien défait la réception créée
 d'un export repliés derrière deux boutons (tout part par défaut), modes « Dans un seul sens
 (recommandé) » puis « Autres modes », destinations en grille avec le libellé « Nom de la
 nouvelle table ».
+V0.5.4 (Antoine) : côté CIBLE, les valeurs retouchées à la main sont signalées sur la carte
+(`manualEdits` : cellule d'une ligne reçue différente de sa dernière version ; rien en Échange),
+avec numéro de ligne, valeur d'ici et de la SOURCE. La destination est relue pour cela au plus
+toutes les 5 minutes (`REREAD_MS`), au retour sur la page ou sur « Synchroniser ». L'historique
+montre le numéro de ligne (`rowNumbers` : rang de `manualSort`, comme Grist l'affiche, pas l'`id`)
+et l'avant/après en petit tableau ; la recopie note ce qu'elle remplace dans `Sync_Avant`, colonne
+propre au journal (`{v}` modification, `{n}` numéro d'une ligne supprimée), ajoutée aux anciens
+journaux par `upgradeJournal`.
 
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,

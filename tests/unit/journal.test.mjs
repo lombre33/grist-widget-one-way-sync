@@ -35,9 +35,31 @@ test('purge : clés parties pas encore traitées et morceaux du dernier renvoi g
 test('historique : versions recopiées arrivées après la visite, plus récentes d\'abord, plafonnées', () => {
   const rows = [j(1, 'a', 10, { Sync_Etat: 'ajout' }), j(2, 'a', 30, { Sync_Etat: 'modif', Sync_Recu: 31 }),
     j(3, 'b', 20, { Sync_Etat: 'suppression', Sync_Recu: 40 }), j(4, 'c', 15, { Sync_Etat: 'ajout' }), j(5, 'd', 50), list(6, ['a'])];
-  assert.deepEqual(recentChanges(rows, 'Nom', 12, 20), [
+  const brief = c => ({ at: c.at, label: c.label, state: c.state });
+  assert.deepEqual(recentChanges(rows, 'Nom', 12, 20).map(brief), [
     { at: 40, label: 'n3', state: 'suppression' }, { at: 31, label: 'n2', state: 'modif' }, { at: 15, label: 'n4', state: 'ajout' }]);
   assert.equal(recentChanges(rows, 'Nom', 0, 1).length, 1);
+});
+
+test('historique : numéro de ligne d\'ici, avant et après sur les colonnes recopiées', () => {
+  const copyCols = [['Nom', 'Nom'], ['Ville', 'Commune']];
+  const rows = [
+    j(1, 'a', 10, { Ville: 'Lyon', Sync_Etat: 'ajout', Sync_Recu: 11 }),
+    j(2, 'b', 20, { Ville: 'Nice', Sync_Etat: 'modif', Sync_Recu: 21, Sync_Avant: JSON.stringify({ v: { Ville: 'Paris' } }) }),
+    j(3, 'c', 30, { Ville: 'Metz', Sync_Etat: 'suppression', Sync_Recu: 31, Sync_Avant: JSON.stringify({ n: 7 }) }),
+    j(4, 'd', 40, { Sync_Etat: 'modif', Sync_Recu: 41 }),
+    j(5, 'e', 50, { Sync_Etat: 'modif', Sync_Recu: 51, Sync_Avant: JSON.stringify({ v: { toString: 'x', constructor: 'y' }, n: -1 }) }),
+    j(6, 'f', 60, { Sync_Etat: 'suppression', Sync_Recu: 61, Sync_Avant: '{"n":"3"}' }),
+  ];
+  const numbers = new Map([['a', 4], ['b', 2], ['c', 9], ['e', 5]]);
+  const byKey = Object.fromEntries(recentChanges(rows, 'Nom', 0, 10, { copyCols, numbers }).map(c => [c.label, c]));
+  assert.deepEqual(byKey.n1, { at: 11, label: 'n1', state: 'ajout', n: 4, detail: { cols: copyCols, before: null, after: ['n1', 'Lyon'] } });
+  assert.deepEqual(byKey.n2, { at: 21, label: 'n2', state: 'modif', n: 2, detail: { cols: [['Ville', 'Commune']], before: ['Paris'], after: ['Nice'] } });
+  assert.deepEqual(byKey.n3, { at: 31, label: 'n3', state: 'suppression', n: 7, detail: { cols: copyCols, before: ['n3', 'Metz'], after: null } },
+    'une ligne supprimée garde le numéro qu\'elle avait');
+  assert.equal(byKey.n4.detail, null, 'modification sans valeurs d\'avant notées (version plus ancienne) : pas de détail');
+  assert.deepEqual([byKey.n5.n, byKey.n5.detail], [5, null], 'seules les colonnes recopiées sont lues');
+  assert.equal(byKey.n6.n, null, 'numéro illisible ignoré');
 });
 
 test('lot : lignes reçues, lignes illisibles écartées', () => {
@@ -229,7 +251,7 @@ test('purge : journal vide, tables refusées effacées', () => {
 
 test('historique : dates illisibles écartées', () => {
   const rows = [{ id: 1, id_sync: 'a', MajLe: 'hier', Sync_Etat: 'ajout' }, { id: 2, id_sync: 'b', MajLe: 5, Sync_Etat: 'modif', Sync_Recu: 9, Nom: null }];
-  assert.deepEqual(recentChanges(rows, 'Nom', 0, 10), [{ at: 9, label: '', state: 'modif' }]);
+  assert.deepEqual(recentChanges(rows, 'Nom', 0, 10), [{ at: 9, label: '', state: 'modif', n: null, detail: null }]);
 });
 
 test('noms reçus : aucune table ne peut viser une propriété des objets JavaScript', () => {
@@ -259,5 +281,5 @@ test('lots démesurés : trop de lignes refusées, clés trop grosses plafonnée
 
 test('historique : seuls les trois états connus sont montrés', () => {
   const rows = [{ id: 1, id_sync: 'a', MajLe: 5, Sync_Etat: '<img src=x>' }, { id: 2, id_sync: 'b', MajLe: 6, Sync_Etat: 'suppression' }, { id: 3, id_sync: 'c', MajLe: 7, Sync_Etat: '' }];
-  assert.deepEqual(recentChanges(rows, null, 0, 10), [{ at: 6, label: '', state: 'suppression' }]);
+  assert.deepEqual(recentChanges(rows, null, 0, 10), [{ at: 6, label: '', state: 'suppression', n: null, detail: null }]);
 });

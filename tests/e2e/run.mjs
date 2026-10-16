@@ -586,12 +586,32 @@ try {
   await historyHas('Alice', 'modif');
   await historyHas('Chloé', 'suppression');
   await historyHas('Dora', 'suppression');
+  // Avant et après en petit tableau, numéros de ligne de la table d'ici ; la modification est
+  // ouverte, l'ajout et les suppressions s'ouvrent au clic.
+  const item = label => widget().locator('.chg-item', { has: widget().locator('.chg-label', { hasText: label }) });
+  const gridOf = async label => item(label).locator('.mini-grid tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent)));
+  assert.deepEqual(await gridOf('Alice'), [['Avant', 'Lyon'], ['Après', 'Marseille']], 'Alice : Ville avant et après');
+  assert.ok(await item('Alice').locator('details').evaluate(d => d.open), 'une modification montre son avant et son après');
+  assert.ok(!(await item('Denis').locator('details').evaluate(d => d.open)), 'un ajout s\'ouvre au clic');
+  assert.deepEqual((await gridOf('Denis'))[0].slice(0, 2), ['Après', 'Denis'], 'ajout : ses valeurs après');
+  assert.deepEqual((await gridOf('Dora'))[0].slice(0, 3), ['Avant', 'Dora', 'Brest'], 'suppression : ses valeurs avant');
+  const numberOf = async label => Number(await item(label).locator('.chg-n').textContent());
+  const destOrder = (await api('GET', `/docs/${target.doc}/tables/Contacts/records?hidden=true`)).records
+    .sort((x, y) => x.fields.manualSort - y.fields.manualSort).map(r => r.fields.Nom);
+  assert.equal(await numberOf('Alice'), destOrder.indexOf('Alice') + 1, 'numéro de la ligne dans la table d\'ici');
+  assert.equal(await numberOf('Denis'), destOrder.indexOf('Denis') + 1);
+  assert.ok(await numberOf('Dora') > 0, 'une ligne supprimée garde le numéro qu\'elle avait');
+  // La retouche de Bob est signalée, avec son numéro de ligne, la valeur d'ici et celle de la SOURCE.
+  const drift = widget().locator('.drift');
+  await drift.getByText(/Contacts\s:\s1 valeur modifiée à la main ici/).waitFor({ timeout: 30000 });
+  assert.deepEqual(await drift.locator('tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent))),
+    [[String(destOrder.indexOf('Bob') + 1), 'Bob', 'Ville', 'retouche', 'Paris']], 'écart : ligne, nom, colonne, ici, SOURCE');
   await shot('14-cible-historique');
   await waitFor(async () => {
     const rows = await records(target.doc, 'Journal_Annuaire');
     return !rows.some(r => r.Synchro_Type) && rows.filter(r => r.id_sync).length === 5;
   }, 'journal déplié et nettoyé : une version par ligne');
-  step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée ; journal nettoyé');
+  step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée et signalée ; historique avant/après numéroté ; journal nettoyé');
 
   // --- Second destinataire du même export, sans secret, sans refaire l'export
   await openWidget(source.url);
@@ -802,6 +822,7 @@ try {
     const rows = await records(target.doc, 'Contacts');
     return rows.filter(r => r.Interne === 'r5').length === blocIds.length && rows.find(r => r.Nom === 'Bob').Ville === 'Brest';
   }, 'tout reçu après le déblocage', 240000);
+  await widget().locator('.drift').waitFor({ state: 'detached', timeout: 30000 }); // la SOURCE a changé la ligne de Bob : plus d'écart
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', blocIds]]);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
   step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');

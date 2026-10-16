@@ -41,7 +41,7 @@ table de réglages.
 | Document | Ajouts |
 |---|---|
 | SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte (ajoutée en Échange). La table `Synchro` : par table d'un export, une ligne `cles`, une ligne `lot`, une ligne de suivi, et pour un export public `complet` et `empreinte`. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
-| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, à la racine de la liste des pages, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal. |
+| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Avant` (ce que la recopie a remplacé, pour l'historique), `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, à la racine de la liste des pages, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal. |
 
 Les envois créés avant la version 0.4 sont signalés « à refaire », avec un bouton qui efface
 l'ancien montage. Les réceptions d'avant la 0.5 dont le formulaire partage sa page avec un autre
@@ -100,7 +100,7 @@ npm run test:e2e              # parcours complet dans un vrai Grist et un vrai n
 ```
 
 Le test d'intégration déroule tout le parcours avec plusieurs documents : envoi des lignes
-existantes, recopie, ajout, modification, suppressions, retouche manuelle préservée, historique,
+existantes, recopie, ajout, modification, suppressions, retouche manuelle préservée et signalée, historique avec avant et après,
 second destinataire et révocation d'un seul, table et colonne ajoutées à l'export (table existante
 rattachée), Référence renommée, Ctrl+Z, destinations renommées, filtre de lignes, montage 0.4 mis
 à niveau, gros import, file bloquée par un envoi trop gros, table de 21 000 lignes, pause et

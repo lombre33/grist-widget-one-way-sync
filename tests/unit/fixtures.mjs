@@ -8,6 +8,8 @@ export const SECRET = '0123456789abcdef0123456789abcdef';
 export const j = (id, key, majle, extra = {}) => ({ id, id_sync: key, MajLe: majle, Supprime: false, Nom: `n${id}`, ...extra });
 export const plan = (journalRows, destRows, matchCol) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', matchCol });
 export const marked = (ids, states) => ['BulkUpdateRecord', 'J', ids, { Sync_Applique: ids.map(() => true), Sync_Etat: states }];
+// Ce que la recopie a remplacé, noté pour l'historique : [[ligne du journal, { v } ou { n }]].
+export const replaced = entries => ['BulkUpdateRecord', 'J', entries.map(([id]) => id), { Sync_Avant: entries.map(([, was]) => JSON.stringify(was)) }];
 export const list = (id, keys, extra = {}) => ({ id, id_sync: '', Synchro_Ids: `ids:${keys.join(' ')}`, ...extra });
 export const done = { Sync_Applique: true };
 // Seaux qui ont perdu les clés `keys` : chacun part avec ses clés restantes (parmi `left`).
