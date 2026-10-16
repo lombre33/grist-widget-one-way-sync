@@ -137,7 +137,19 @@ async function installShots() {
 // CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
 // Captures sans le bandeau du serveur de test ni l'erreur de la galerie de widgets (hors ligne).
 const clean = () => page.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
-const shot = async name => { if (process.env.CAPTURES) { await clean(); await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) }); } };
+// Avec `part`, la même capture recadrée sur la fenêtre ouverte (`modal`, sans le voile derrière)
+// ou sur la première carte (`card`), pour le README (docs/images/readme) : lisible en vignette.
+const shot = async (name, part) => {
+  if (!process.env.CAPTURES) return;
+  await clean();
+  await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) });
+  if (!part) return;
+  const target = part === 'modal' ? widget().locator('[role=dialog]').last() : widget().locator('.card').first();
+  const { x, y, width, height } = await target.boundingBox();
+  const m = part === 'modal' ? 0 : 8;
+  await page.screenshot({ path: join(ROOT, 'docs/images/readme', `${name}.png`), style: '.scrim { background: none !important; }',
+    clip: { x: x - m, y: y - m, width: width + 2 * m, height: height + 2 * m } });
+};
 
 // --- Documents
 const source = await newDocWithWidget('Source', [
@@ -284,7 +296,7 @@ try {
     await dialog().locator('textarea.code').first().fill(reply);
     await dialogButton('Vérifier').click();
     await dialog().getByText(env.email).waitFor();
-    if (shots) await shot('11-source-fiche');
+    if (shots) await shot('11-source-fiche', 'modal');
     await dialogButton('Approuver et brancher').click();
     await dialog().getByText('Branché').waitFor();
     if (shots) await shot('12-source-envoi');
@@ -311,7 +323,7 @@ try {
     await dialogButton('Ajouter un destinataire').click();
     await dialog().getByRole('radio', { name: /Échange/ }).check();
     await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
-    await shot('20-echange-mode');
+    await shot('20-echange-mode', 'modal');
     await dialogButton('Créer l’invitation').click();
     const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
     await openWidget(a.url); // l'assistant reprend à l'étape du lien de retour
@@ -403,7 +415,7 @@ try {
   assert.equal(await dialog().getByRole('checkbox', { name: 'Supprime' }).count(), 0, 'Supprime n\'est pas une colonne envoyée');
   await dialog().getByRole('checkbox', { name: 'Interne' }).uncheck();
   await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
-  await shot('03-source-colonnes');
+  await shot('03-source-colonnes', 'modal');
   assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'rien d\'écrit avant la fin de l\'assistant');
   await dialogButton('Continuer').click();
   await dialog().getByLabel('Nom de l’export').fill('Annuaire');
@@ -449,7 +461,7 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
-  await shot('08-cible-destinations');
+  await shot('08-cible-destinations', 'modal');
   const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
   await widgetFrame.evaluate(() => { window.sameFrame = true; });
   await dialogButton('Continuer').click();
@@ -585,7 +597,7 @@ try {
   await approve(reply2);
   await widget().locator('.person').nth(1).getByText('Actif').waitFor();
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'file vide');
-  await shot('13-source-actif');
+  await shot('13-source-actif', 'card');
   await openWidget(target2.url);
   await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'second destinataire servi');
   await openWidget(target.url);

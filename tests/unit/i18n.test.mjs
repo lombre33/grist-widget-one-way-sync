@@ -1,6 +1,6 @@
 // Textes de l'interface : les deux langues ont les mêmes clés et les mêmes valeurs à insérer, toute
 // clé employée par le code existe, la mise en forme suit la typographie de chaque langue, et les
-// images du tutoriel existent.
+// images du tutoriel, comme les images et liens des README, existent.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -67,5 +67,16 @@ test('toute image du tutoriel existe', () => {
   const names = [...read('js/tutorial.js').matchAll(/images: \[([^\]]*)\]/g)].flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(n => n[1]));
   assert.ok(names.length > 20);
   const missing = names.map(name => (name.startsWith('img/') ? name : `docs/images/${name}.png`)).filter(path => !existsSync(new URL(`../../${path}`, import.meta.url)));
+  assert.deepEqual(missing, []);
+});
+
+test('toute image et tout lien des README et de la documentation existent', () => {
+  const pages = ['README.md', 'README.en.md', 'docs/04-tutoriel.md', 'docs/06-architecture.md'];
+  const missing = pages.flatMap(page => {
+    const dir = new URL(`../../${page}`, import.meta.url);
+    return [...read(page).matchAll(/(?:src="|\]\()([^")#]+)/g)].map(m => m[1])
+      .filter(path => !/^https?:/.test(path) && !existsSync(new URL(path, dir)))
+      .map(path => `${page} : ${path}`);
+  });
   assert.deepEqual(missing, []);
 });

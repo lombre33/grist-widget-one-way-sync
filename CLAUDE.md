@@ -122,7 +122,7 @@ budget), note SOURCE masquée en lien public. Les paragraphes suivants décriven
 V0.4, encore valable sauf là où la V0.5 le remplace (la liste `cles` d'un seul tenant ne reste
 que pour le lien public et les montages 0.4 ; le garde-fou `MAX_ROWS` a disparu). Code découpé
 en `js/logic/` (pur, testé par `tests/unit/*.test.mjs`, un fichier par module), `js/source/`,
-`js/target/`, plus `pages.js`, `form-link.js`, `exchange.js` (carte dans `README.md`).
+`js/target/`, plus `pages.js`, `form-link.js`, `exchange.js` (carte dans `docs/06-architecture.md`).
 Plusieurs listes des clés d'une même table peuvent attendre le même passage de la CIBLE (une
 ligne brute arrivée entre le dépliage et la recopie attend le passage suivant) : seule la plus
 récente qui couvre un seau décide (`droppedKeys`), sinon une ligne revenue dans un filtre était
@@ -204,11 +204,12 @@ file »). Tout renvoi est reprenable : la marque de chaque lot est écrite avant
 puis réécrite à chaque tranche (`chunkMark`, lignes dans l'ordre de `MajLe`), et effacée à part à
 la fin.
 
-Code à la racine, sans build : `index.html`, `css/`, `js/` (carte des modules dans `README.md`,
+Code à la racine, sans build : `index.html`, `css/`, `js/` (présentation dans `README.md` et `README.en.md`, carte des modules dans `docs/06-architecture.md`,
 analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests : `npm test`
 (logique pure), `npm run test:e2e` après `tests/e2e/start-grist.sh` (parcours complet dans un
-Grist Docker, trois documents ; `CAPTURES=1` refait les captures de `docs/images` et les images
-d'aide de `img/`). Les instances autorisées sont à la fois dans `js/config.js` et dans la CSP de
+Grist Docker, trois documents ; `CAPTURES=1` refait les captures de `docs/images`, leurs vignettes
+recadrées du README (`docs/images/readme`, `shot(nom, 'modal' | 'card')`) et les images d'aide
+de `img/` ; `npm test` vérifie les images et liens des README). Les instances autorisées sont à la fois dans `js/config.js` et dans la CSP de
 `index.html`. Aide intégrée (V0.3) : onglet Tutoriel (`js/tutorial.js`), « Qui fait quoi ? » et
 « Copier avec les consignes » (`js/guide.js`), aide en images à chaque étape des assistants.
 
