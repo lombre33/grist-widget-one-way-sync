@@ -6,6 +6,7 @@ import {
   APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, MISSING_COL, ORDER_COL, RECEIVED_COL, STATE_COL,
 } from '../logic/common.js';
 import { syncColumns } from '../logic/formulas.js';
+import { SIG_KEY } from '../logic/trust.js';
 import { apply, readSchema } from '../grist.js';
 import { dropPages, hideColumn } from '../pages.js';
 
@@ -68,6 +69,29 @@ export function addDestColumnsActions(schema, dest, columns, map = {}) {
     .map(({ id, type, label }) => ({ id: map[id] || id, type, label: map[id] ? map[id] : label, key: id === KEY_COL }))
     .filter(c => !have.has(c.id))
     .map(({ id, key, ...info }) => [key ? 'AddColumn' : 'AddVisibleColumn', dest, id, { ...info, isFormula: false }]);
+}
+
+// Clé qui signe les envois d'un export reçu (voir trust.js) : dans la description de la colonne
+// id_sync de ses destinations ({ signature: { <place>: <clé> } }), pas dans la note du journal,
+// que la clé du formulaire peut lire. La place est l'export ; pour un journal de retour d'Échange,
+// le journal lui-même : chaque participant signe avec sa propre clé, donnée dans sa réponse.
+export const keySlot = (journal, note) => (note.retour ? journal : note.export);
+const keyColumn = (schema, table) => (schema.columns(table) || []).find(c => c.colId === KEY_COL);
+function keysOf(column) {
+  try {
+    const value = JSON.parse((column && column.description) || 'null');
+    return value && value.signature && typeof value.signature === 'object' ? value.signature : {};
+  } catch (e) { return {}; }
+}
+export function receivedKey(schema, journal, note) {
+  const slot = keySlot(journal, note);
+  return (note.tables || []).map(tb => keysOf(keyColumn(schema, tb.dest))[slot]).find(k => SIG_KEY.test(k || '')) || '';
+}
+export async function storeKey(tables, slot, key) {
+  if (!SIG_KEY.test(key || '')) return;
+  const schema = await readSchema();
+  await apply(tables.map(table => keyColumn(schema, table)).filter(c => c && keysOf(c)[slot] !== key)
+    .map(c => ['UpdateRecord', '_grist_Tables_column', c.id, { description: JSON.stringify({ signature: { ...keysOf(c), [slot]: key } }) }]));
 }
 
 export async function createJournal(journal, note) {

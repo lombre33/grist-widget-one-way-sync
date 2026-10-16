@@ -35,9 +35,11 @@ export const TRACK_COL = STATE_COL;
 // Une seule ligne 'charge', d'aucun export, suit les renvois du document (voir resend.js). Le widget
 // SOURCE envoie lui-même au journal de la CIBLE la fin d'un envoi ('fin') et les morceaux des
 // fichiers ('fichier', voir files.js).
+// La ligne 'signature' d'un export garde, dans Synchro_Colonnes, la clé qui signe ses envois (voir
+// trust.js) ; seuls les propriétaires la lisent (voir acl.js).
 export const KIND = {
   keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge', end: 'fin',
-  files: 'fichiers', part: 'fichier',
+  files: 'fichiers', part: 'fichier', sign: 'signature',
 };
 // Échange à plusieurs : marque de la ligne 'echange' (dans Synchro_Colonnes, que le webhook n'envoie
 // pas) quand l'export a au moins deux participants. Le document qui administre renvoie alors aux

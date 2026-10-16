@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FILE_MAX, PART_BYTES, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, partRow, readPart, readTracking,
+  FILE_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, partRow, readPart, readTracking,
   recordSent, resolveCell, resolveRows, sha1, shaOf, short, trackingNote,
 } from '../../js/logic/files.js';
 import { EXPORT } from './fixtures.mjs';
@@ -106,6 +106,17 @@ test('CIBLE : fichier arrivé en entier, envoi remplacé, envoi abandonné, lign
   assert.deepEqual(stale, [3]);
   assert.deepEqual(rejected, [6]);
   assert.deepEqual(fileArrivals(rows, EXPORT, 1000 + 90000).stale.sort(), [3, 4, 5]);
+  assert.deepEqual([ready[0].old, fileArrivals(rows, EXPORT, 1000 + 90000).ready[0].old], [false, true], 'arrivé depuis plus d\'un jour');
+});
+
+test('CIBLE : seuls les fichiers cités par une version, ou attendus par une cellule, sont déposés', () => {
+  const rows = [
+    { id: 1, id_sync: 'k1', Synchro_Donnees: JSON.stringify({ Photo: [[`${A}.pdf`, 'a.pdf', 10]], Nom: 'x' }) },
+    { id: 2, id_sync: 'k2', Synchro_Donnees: JSON.stringify({ Photo: null, Liste: ['x', 'y'] }) },
+    { id: 3, Synchro_Type: 'fichier', Synchro_Colonnes: JSON.stringify({ sha: C }) },
+  ];
+  assert.deepEqual([...citedFiles(rows, [short(B)])].sort(), [short(A), short(B)]);
+  assert.deepEqual([...citedFiles([])], []);
 });
 
 test('CIBLE : cellules résolues avec les fichiers présents, attendus, trop gros', () => {

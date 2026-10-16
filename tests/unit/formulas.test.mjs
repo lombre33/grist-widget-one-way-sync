@@ -3,10 +3,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deleteColumnAction, fillKeyActions, keyTriggerAction, majleAction, missingSyncColumns, prepareSourceActions, syncColumns, syncFormulas } from '../../js/logic/formulas.js';
 
+// Corps d'une formule signée (voir signed dans formulas.js), désindenté ; la signature est
+// vérifiée à part.
+function bodyOf(formula) {
+  const lines = formula.split('\n');
+  const end = lines.indexOf('text = body()');
+  return lines[0] === 'def body():' && end > 0 ? lines.slice(1, end).map(line => line.slice(2)).join('\n') : formula;
+}
+
 test('table Synchro : ses colonnes, et des formules qui nomment les tables des exports', () => {
   assert.deepEqual(syncColumns([]).map(c => c.id),
     ['Synchro_Export', 'Synchro_Table', 'Synchro_Type', 'Synchro_Colonnes', 'Synchro_Renvoi', 'Synchro_Ids', 'Synchro_Lot', 'Sync_Etat', 'Sync_Par']);
-  const { keys, lot, state } = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
+  const formulas = syncFormulas(['Villes', 'Contacts', 'Villes', 'mauvais nom']);
+  const [keys, lot, { state }] = [bodyOf(formulas.keys), bodyOf(formulas.lot), formulas];
   assert.match(keys, /^if \$Synchro_Type == "empreinte":\n  import zlib\n  c = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="complet"\)\.Synchro_Lot or ""\n  return "%d:%08x" % \(len\(c\), zlib\.crc32\(c\.encode\(\)\)\)\n/,
     'empreinte de l\'instantané public : la CIBLE ne le relit que s\'il change');
   assert.match(keys, /\nif \$Synchro_Type not in \("cles", "suivi"\): return ""\n.*\ntables = \{"Contacts": Contacts, "Villes": Villes\}\nsrc = tables\.get\(\$Synchro_Table\)/);
@@ -50,10 +59,12 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
     'écho : ligne recalculée par la consolidation, MajLe plus ancienne qu\'elle');
   assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\n/);
   assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap\.id else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
-  assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
+  assert.match(lot, /if r\.id in undone: return v\(getattr\(r, "RecalculLe"\)\)/, 'une annulation part à son heure');
+  assert.match(lot, /if r\.id in again and \$Synchro_Type == "lot" and not swap\.id: return max\(v\(r\.MajLe\) or 0, v\(getattr\(r, "RecalculLe", None\)\) or 0\)/,
+    'un renvoi part au plus tôt au dernier recalcul, hors Échange');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
-  assert.match(syncFormulas([]).keys, /tables = \{\}\nsrc = tables\.get/);
+  assert.match(bodyOf(syncFormulas([]).keys), /tables = \{\}\nsrc = tables\.get/);
   assert.match(lot, /    if s == "Attachments": return \[\[y\.fileIdent, y\.fileName, y\.fileSize\] for y in x\] or None\n/, 'pièces jointes : la liste de leurs fichiers');
   assert.match(lot, /^if \$Synchro_Type not in \("lot", "complet", "fichiers"\): return ""\n/);
   assert.match(lot, /\nif \$Synchro_Type == "fichiers":\n  files = \{\}\n  for r in rows:\n    for c in cols:\n      if c\.get\("source"\) != "Attachments": continue\n/,

@@ -34,8 +34,11 @@ courriel.
 ## 0. Installer le widget (dans chaque document)
 
 **Ajouter**, **Ajouter une page**, vue **Personnalisée** (n'importe quelle table), **Ajouter une
-page** ; **URL personnalisée**, coller l'adresse du widget, **Ajouter un widget** (Grist peut
-demander de confirmer) ; dans le panneau de droite, accepter l'**accès complet**. Renommer la
+page** ; choisir Synchro Grist dans la galerie de l'instance s'il y est, sinon **URL
+personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
+ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
+**Ajouter un widget** (Grist peut demander de confirmer) ; dans le panneau de droite, accepter
+l'**accès complet**. Renommer la
 page, par exemple « Synchro ». Les tables techniques n'ont pas de page : elles sont dans « Données
 source ».
 
@@ -92,16 +95,22 @@ Les destinataires voient ce nom. **Créer l'export**, puis **Ajouter un destinat
 
 ![Options](images/04-source-options.png)
 
-Choisir le mode. Le **secret** (coché par défaut) garantit que la réponse vient de quelqu'un qui a
-reçu l'invitation ; sans secret, l'approbation repose sur la seule fiche du destinataire, que vous
-vérifiez à l'étape 10.
+Choisir le mode. L'invitation porte toujours un secret, qui garantit que la réponse vient de
+quelqu'un qui l'a reçue, et vaut 7 jours. La case **Sécurité renforcée** rend obligatoire la
+comparaison du code de contrôle (étape 10), fait valider toute suppression reçue par la CIBLE et
+interdit le lien public pour cet export : à cocher pour des données sensibles.
+
+À la première invitation, le widget réserve la table `Synchro` aux propriétaires du document (une
+règle d'accès, reconnaissable à son mémo) : Grist recharge alors la page une fois.
 
 ### 5. Copier l'invitation
 
 ![Invitation](images/05-source-invitation.png)
 
-Envoyer ce code à la personne de la CIBLE. **Plus tard** ferme l'assistant : l'invitation reste en
-attente sur la carte de l'export.
+Envoyer ce code à la personne de la CIBLE, directement : il vaut un mot de passe (pas dans une IA,
+un ticket ou un salon de discussion). **Plus tard** ferme l'assistant : l'invitation reste en
+attente sur la carte de l'export, avec sa date d'expiration ; expirée, **Refaire le code** en
+produit une nouvelle.
 
 ![Invitation en attente](images/06-source-attente.png)
 
@@ -123,6 +132,8 @@ quelle colonne rattacher les lignes déjà là (voir [Une table ajoutée à l'ex
 
 Le widget crée un journal pour l'export, `Journal_<export>` (dans « Données source »), et publie
 son formulaire de réception sur sa propre page, `Journal_<export>`, en bas de la liste des pages.
+La case **Journal réservé aux éditeurs** (cochée) cache le journal aux lecteurs du document : il
+garde les versions reçues et ce qu'elles ont remplacé.
 
 ### 8. Copier le lien du formulaire
 
@@ -142,15 +153,20 @@ réception a le sien, sur sa page.
 ![Réponse](images/10-cible-reponse.png)
 
 Copier le code de réponse et le renvoyer à la SOURCE. Il contient l'adresse d'écriture et votre
-fiche (e-mail, document, équipe).
+fiche (e-mail, document, équipe). Le **code de contrôle** affiché dessous (six caractères) est
+celui que la SOURCE verra : comparez-le avec elle par téléphone.
 
 ## Côté SOURCE : approuver
 
 ### 10. Coller la réponse
 
 Sur la carte de l'export, ligne de l'invitation, **Coller la réponse**. Le widget montre qui a
-accepté et quelles tables partiront : vérifier que c'est la bonne personne, puis **Approuver et
-brancher**. Grist reçoit un webhook filtré sur cet export : la personne ne reçoit que ses lignes.
+accepté, le document qui recevra tel que Grist le donne (nom, dossier, équipe : une réponse qui
+désigne un autre document est refusée, un espace personnel est signalé), le code de contrôle et
+les tables qui partiront. Comparer le code avec la personne (obligatoire en sécurité renforcée),
+puis **Approuver et brancher**. Grist reçoit un webhook filtré sur cet export : la personne ne
+reçoit que ses lignes. Ensuite, le widget revérifie toutes les heures que ce webhook écrit
+toujours dans ce document, et alerte sinon.
 
 ![Fiche du destinataire](images/11-source-fiche.png)
 
@@ -289,13 +305,21 @@ arrivée :
 ### Arrivées suspectes, couper le lien
 
 Si des lignes arrivent dans le journal sans pouvoir venir de la SOURCE (autre export, contenu
-illisible), ou en nombre anormal, la carte affiche **Arrivées suspectes** : rien n'a été recopié.
+illisible, signature absente ou fausse, date dans le futur), ou en nombre anormal, la carte affiche
+**Arrivées suspectes** : rien n'a été recopié.
 Si vous ne l'expliquez pas, **Couper le lien** : l'ancien lien n'écrit plus rien. La SOURCE
 révoque alors l'ancien destinataire et vous envoie une nouvelle invitation ; acceptez-la ici, la
 même réception reprend avec ses tables (le widget montre d'abord d'où vient l'invitation).
 
 Une réception créée avant la version 0.5 peut avoir son formulaire sur la même page qu'un autre :
 la carte le signale (**Lien commun à d'autres formulaires**), et **Couper le lien** l'en sépare.
+
+### Vague de suppressions
+
+Quand un passage effacerait d'un coup plus de 10 lignes et plus d'une sur cinq des lignes reçues
+d'une table (toutes les suppressions, en sécurité renforcée), rien n'est effacé : la carte demande
+**Appliquer** (les lignes sont supprimées ici aussi) ou **Ignorer** (elles restent ici, détachées
+de la SOURCE, qui ne les tiendra plus à jour).
 
 ## Échange, dans les deux sens
 
@@ -309,7 +333,11 @@ Il faut un **propriétaire** de chaque côté (chacun envoie par son propre webh
 
    ![Mode Échange](images/20-echange-mode.png)
 
-2. CIBLE : accepter l'invitation comme d'habitude. La réponse branche les deux sens à la fois.
+2. CIBLE : accepter l'invitation comme d'habitude. Le widget montre le document qui invite tel que
+   Grist le donne, et le code de contrôle de l'adresse de retour (à comparer ; obligatoire en
+   sécurité renforcée). Si une table reçue va dans une table existante, il liste les colonnes de
+   celle-ci qui partiront vers la SOURCE et demande de confirmer. La réponse branche les deux sens
+   à la fois.
 3. SOURCE : coller la réponse, **Approuver et brancher**, **Envoyer** les lignes existantes.
 
 ![Échange côté CIBLE](images/21-echange-cible.png)
@@ -355,10 +383,13 @@ L'historique montre les changements refusés.
 
 ## Mode lien public
 
-À l'étape 4, choisir **Lien public**. Le widget pose des règles d'accès : toute personne qui n'est
-que **lectrice** du document, dont le lien public, ne voit plus que les instantanés des exports
-publics, dans la table `Synchro`. Ensuite, dans le menu **Partager** du document, régler « Lien
-public » sur **Lecture**. La ligne passe de « Lien public à activer » à « Public ».
+À l'étape 4, choisir **Lien public** (impossible pour un export en sécurité renforcée). Le
+widget liste en rouge les colonnes qui deviendront publiques, et refuse une table dont une règle
+d'accès cache des lignes ou des colonnes. Il pose ensuite des règles d'accès : toute personne qui
+n'est que **lectrice** du document, dont le lien public, ne voit plus que les instantanés des
+exports publics, dans la table `Synchro`. Enfin, dans le menu **Partager** du document, régler
+« Lien public » sur **Lecture** (jamais **Éditeur** : la carte le signale). La ligne passe de
+« Lien public à activer » à « Public ».
 
 ![Mode lien public](images/15-source-public.png)
 

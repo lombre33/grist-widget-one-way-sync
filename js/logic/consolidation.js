@@ -296,6 +296,28 @@ function reviewItem(ctx, key, version, state) {
   return { id: version.id, key, state, row: version.row, cells };
 }
 
+// Vague de suppressions retenue (voir WAVE) : rend ce qui remplace les suppressions du plan. En
+// attente de décision (`held` : nombre et premiers numéros de lignes), rien n'est effacé ni noté :
+// les listes et les versions qui suppriment restent à traiter, et le passage suivant refait le
+// même calcul. Ignorées (`wave` : 'ignorer') : les lignes sont détachées (`detach`), et leurs
+// versions notées parties (LEFT) ; les listes, traitées.
+function holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, numbers, wave }) {
+  const versions = removed.map(key => latest.get(key)).filter(Boolean);
+  const ids = new Set(versions.map(v => v.id));
+  const kept = { listGone: listGone.filter(([id]) => !ids.has(id)), leftGone: [...leftGone] };
+  if (wave === 'ignorer') {
+    for (const v of versions) {
+      if (marks.has(v.id)) marks.set(v.id, LEFT);
+      else kept.leftGone.push(v.id);
+    }
+    return { ...kept, detach: removed.flatMap(key => dest.byKey.get(key).map(r => r.id)) };
+  }
+  for (const id of ids) marks.delete(id);
+  for (const { row } of pending) marks.delete(row.id);
+  const shown = removed.map(key => numbers.get(key)).filter(Boolean).sort((a, b) => a - b).slice(0, 10);
+  return { ...kept, detach: [], held: { n: removed.length, numbers: shown } };
+}
+
 // Le plan en actions Grist : ajouts et modifications par clé, rattachements, suppressions, puis
 // marques dans le journal et, pour l'historique, ce qui a été remplacé.
 function consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
@@ -382,8 +404,16 @@ export function refusedGaps({ journalRows, destRows, copyCols }) {
 // (`decisions` : version du journal -> accepter ou refuser) ; un changement refusé est marqué
 // REFUSED et, à corriger, rend les écritures qui font repartir la ligne d'ici (`fix` : actions et
 // clés, voir fixActions), à appliquer à part.
+// Vague de suppressions : au-delà de WAVE.min lignes et d'une part WAVE.share des lignes reçues ici
+// (une SOURCE vidée par erreur, ou une liste forgée), ou dès une ligne en sécurité renforcée
+// (WAVE_STRICT), les suppressions d'un passage attendent une décision sur la carte : les appliquer,
+// ou les ignorer (les lignes restent ici, détachées : leur clé est effacée, plus rien ne les suit).
+export const WAVE = { min: 11, share: 0.2 };
+export const WAVE_STRICT = { min: 1, share: 0 };
+
 export function planConsolidation({
   journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
+  hold = null, wave = '',
 }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
@@ -417,14 +447,21 @@ export function planConsolidation({
     if (state === 'modif') plan.stats.updated++;
     if (state === 'suppression' && ctx.hub) plan.stats.removed++;
   }
-  const removed = [...gone].filter(key => dest.byKey.has(key));
+  let removed = [...gone].filter(key => dest.byKey.has(key));
+  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
+  const waved = hold && wave !== 'appliquer' && removed.length >= hold.min && removed.length > hold.share * dest.byKey.size
+    ? holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, numbers, wave }) : null;
+  if (waved) removed = [];
   plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
-  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
   for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
+  const detach = waved ? waved.detach : [];
   return {
-    actions: consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol }, { ...plan, removeIds, listGone, leftGone }),
-    stats: plan.stats, gone,
+    actions: [
+      ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol }, { ...plan, removeIds, ...(waved || { listGone, leftGone }) }),
+      ...chunk(detach).map(part => ['BulkUpdateRecord', destTable, part, { [KEY_COL]: part.map(() => '') }]),
+    ],
+    stats: plan.stats, gone, held: (waved && waved.held) || null,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol), keys: plan.fixes.map(f => f.key) },
   };

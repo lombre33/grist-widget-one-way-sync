@@ -3,4 +3,9 @@
 // Content-Security-Policy de index.html), aux mêmes endroits.
 export const GRIST_ORIGINS = ['https://grist.numerique.gouv.fr', 'https://docs.getgrist.com'];
 
-export const VERSION = '0.7.0';
+// Adresse officielle du widget, donnée dans les consignes à transmettre (jamais l'adresse d'où
+// cette copie est servie : une copie piégée se ferait recommander). Une instance qui héberge sa
+// propre copie, ou la publie dans sa galerie de widgets, met ici son adresse.
+export const WIDGET_URL = 'https://grist-factory.github.io/grist-widget-syncPlus/';
+
+export const VERSION = '0.8.0';

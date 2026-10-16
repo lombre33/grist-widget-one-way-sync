@@ -57,6 +57,23 @@ const READ = [
   'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
 ];
 
+// Signature d'un lot ou d'une liste des clés (`kind`) par la clé de l'export (ligne 'signature' de
+// Synchro, que seuls les propriétaires lisent) : HMAC-SHA256 de l'export, de la table, du type, des
+// colonnes et du texte, ajouté en dernier champ du JSON (voir trust.js). Sans clé (export d'avant la 0.8 pas
+// encore réinvité), le texte part tel quel.
+function signed(lines, kind) {
+  return [
+    'def body():', ...lines.join('\n').split('\n').map(line => `  ${line}`),
+    'text = body()',
+    `if $${TYPE_COL} != "${kind}" or not isinstance(text, str) or not text.startswith("{"): return text`,
+    `k = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.sign}").${SCHEMA_COL}`,
+    'if not k: return text',
+    'import hmac, hashlib',
+    `m = "|".join([$${EXPORT_COL} or "", $${TABLE_COL} or "", $${TYPE_COL} or "", $${SCHEMA_COL} or "", text])`,
+    'return text[:-1] + \', "sig": "%s"}\' % hmac.new(k.encode(), m.encode("utf-8"), hashlib.sha256).hexdigest()',
+  ];
+}
+
 // Formules de la table Synchro. Elles nomment en clair les tables qu'elles peuvent lire (`tables`,
 // qui doivent exister : une table inconnue mettrait toutes les lignes en erreur) : le widget les
 // réécrit quand un export gagne ou perd une table. Leurs variables sont en minuscules, comme aucun
@@ -73,7 +90,7 @@ export function syncFormulas(tables) {
 // et la somme de leurs CRC-32, recalculés à chaque changement des clés, qui déclenchent le suivi.
 // Lignes 'empreinte' : la taille et le CRC-32 de l'instantané public.
 function keysFormula(pick) {
-  return [
+  return signed([
     // Empreinte de l'instantané public : la CIBLE ne relit l'instantané que si elle change.
     `if $${TYPE_COL} == "${KIND.mark}":`,
     '  import zlib',
@@ -98,7 +115,7 @@ function keysFormula(pick) {
     '  i = bisect.bisect_right(have, str(ask.get("apres") or ""))',
     `  out["liste"] = {"marque": ask.get("marque"), "n": ask.get("n"), "t": state["t"], "cles": have[i:i + ${PART_KEYS}], "fin": i + ${PART_KEYS} >= len(have)}`,
     'return json.dumps(out) if out else ""',
-  ].join('\n');
+  ], KIND.keys).join('\n');
 }
 
 // Synchro_Lot. Lignes 'lot' : les lignes modifiées depuis WINDOW_S secondes et celles demandées
@@ -121,7 +138,7 @@ function keysFormula(pick) {
 // d'où il vient le reçoit aussi, sans effet chez lui (même version).
 // `Supprime` part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
 function lotFormula(pick) {
-  return [
+  return signed([
     `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...READ,
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
     `again = set(int(i) for i in ($${RESEND_COL} or "").split(":")[-1].split(",") if i.strip().isdigit())`,
@@ -155,7 +172,14 @@ function lotFormula(pick) {
     // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
     `  if len(touched) == len(rows) > (0 if swap.id else ${SMALL_TABLE}): undone = set()`,
     '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
-    `def when(r): return v(getattr(r, "${RECALC_COL}") if r.id in undone else r.${ORDER_COL})`,
+    // Une ligne renvoyée part au plus tôt à son dernier recalcul (hors Échange) : un rechargement
+    // du document a pu la faire partir à cette heure-là (petite table), et la CIBLE ignorerait
+    // sinon le renvoi, plus ancien, par exemple celui d'une colonne ajoutée à l'export (vérifié).
+    // En Échange, un renvoi garde l'heure de sa version, pour ne pas l'emporter à tort.
+    'def when(r):',
+    `  if r.id in undone: return v(getattr(r, "${RECALC_COL}"))`,
+    `  if r.id in again and $${TYPE_COL} == "${KIND.lot}" and not swap.id: return max(v(r.${ORDER_COL}) or 0, v(getattr(r, "${RECALC_COL}", None)) or 0)`,
+    `  return v(r.${ORDER_COL})`,
     // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.
     `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
     `room = ${POST_MAX} - sum(len(r.${LIST_COL} or "") for r in lists)`,
@@ -178,7 +202,7 @@ function lotFormula(pick) {
     'if big: lot["tropGros"] = big',
     `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
     'return json.dumps(lot, ensure_ascii=False)',
-  ].join('\n');
+  ], KIND.lot).join('\n');
 }
 
 // Sync_Etat (formule de déclenchement). Lignes 'suivi' : l'heure du dernier changement des clés

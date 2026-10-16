@@ -1,6 +1,6 @@
 // SOURCE : un export (des tables, leurs colonnes, un filtre de lignes facultatif) et ses lignes
-// dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; son lien public (règles
-// d'accès) ; ce qu'un Échange renvoie.
+// dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; ce qu'un Échange renvoie. Les
+// règles d'accès du lien public sont dans acl.js.
 import { COL_ID, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
@@ -56,9 +56,10 @@ function tableChanged(here, values) {
 // Lignes Synchro d'un export : par table, sa liste des clés, son lot, son suivi des clés, son
 // filtre s'il en a un, la liste de ses fichiers si elle envoie des pièces jointes, et son
 // instantané complet avec son empreinte s'il est partagé par lien public ; un export en Échange
-// (`swap`) a en plus sa ligne 'echange' (sans table). `rows` : lignes Synchro existantes. Rend les
-// actions qui amènent l'export à `tables` ([{ table, columns, filter }], colonnes de
-// `exportableColumns`) et `changed`, les tables dont les lignes sont à renvoyer.
+// (`swap`) a en plus sa ligne 'echange' (sans table) ; sa ligne 'signature' reste telle quelle (voir
+// signingKey). `rows` : lignes Synchro existantes. Rend les actions qui amènent l'export à `tables`
+// ([{ table, columns, filter }], colonnes de `exportableColumns`) et `changed`, les tables dont les
+// lignes sont à renvoyer.
 export function exportRowsActions(rows, exportId, tables, { isPublic = false, swap = false } = {}) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId);
   const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full, KIND.mark] : [])];
@@ -75,7 +76,7 @@ export function exportRowsActions(rows, exportId, tables, { isPublic = false, sw
   const add = wanted.filter(w => !w.row)
     .map(w => ({ [EXPORT_COL]: exportId, [TABLE_COL]: w.table, [TYPE_COL]: w.kind, [SCHEMA_COL]: w.value, [RESEND_COL]: '' }));
   const update = wanted.filter(w => w.row && w.kind !== KIND.swap && w.row[SCHEMA_COL] !== w.value);
-  const remove = mine.filter(r => !keys.has(`${r[TABLE_COL]}|${r[TYPE_COL]}`)).map(r => r.id);
+  const remove = mine.filter(r => r[TYPE_COL] !== KIND.sign && !keys.has(`${r[TABLE_COL]}|${r[TYPE_COL]}`)).map(r => r.id);
   const actions = [];
   if (add.length) actions.push(['BulkAddRecord', SYNC_TABLE, add.map(() => null), Object.fromEntries(SYNC_FIELDS.map(c => [c, add.map(r => r[c])]))]);
   if (update.length) actions.push(['BulkUpdateRecord', SYNC_TABLE, update.map(w => w.row.id), { [SCHEMA_COL]: update.map(w => w.value) }]);
@@ -96,7 +97,7 @@ export function addTrackRowsAction(rows) {
 
 // Tables, colonnes et filtres d'un export, lus dans ses lignes Synchro.
 export function exportTables(rows, exportId) {
-  const mine = rows.filter(r => r[EXPORT_COL] === exportId && r[TYPE_COL] !== KIND.swap);
+  const mine = rows.filter(r => r[EXPORT_COL] === exportId && r[TYPE_COL] !== KIND.swap && r[TYPE_COL] !== KIND.sign);
   const tables = new Map();
   for (const r of mine) {
     if (r[TYPE_COL] !== KIND.filter && !tables.has(r[TABLE_COL])) tables.set(r[TABLE_COL], parseJson(r[SCHEMA_COL], []) || []);
@@ -161,52 +162,4 @@ export function exchangeColumns(sent, allowed, map = {}) {
   const target = c => map[c.id] || c.as || c.id;
   const kept = sent.filter(c => allowed.has(target(c)));
   return { sent: kept, map: Object.fromEntries(kept.map(c => [c.id, target(c)])) };
-}
-
-// ---------------------------------------------------------------------------------------------
-// Lien public : règles d'accès qui ne laissent aux lecteurs (dont le lien public) que les lignes
-// 'complet' et 'empreinte' des exports `exportIds` dans la table Synchro, sans la colonne
-// Synchro_Export : un lecteur lirait sinon sa description, la note de la SOURCE (noms des exports,
-// invitations en attente ; vérifié). Le filtre sur cette colonne marche encore (vérifié). Les
-// règles du widget portent ce mémo ; elles passent avant les règles existantes. Sans export,
-// `keepDeny` garde le refus général : à utiliser tant que le document reste partagé publiquement.
-export const PUBLIC_MEMO = 'Synchro : lecture limitée aux exports publics';
-const LEGACY_MEMO = 'Synchro : lecture limitée aux vues d’export';
-const VIEWER_ONLY = 'user.Access == VIEWER';
-
-export const isPublicRule = r => r.memo === PUBLIC_MEMO || r.memo === LEGACY_MEMO;
-
-// Règles voulues : [{ tableId, colIds, aclFormula, permissionsText }], dans l'ordre.
-export function publicAclRules(exportIds, { keepDeny = false } = {}) {
-  const ids = exportIds.filter(id => HEX16.test(id)).sort();
-  if (!ids.length && !keepDeny) return [];
-  return [
-    ...(ids.length ? [
-      { tableId: SYNC_TABLE, colIds: EXPORT_COL, aclFormula: VIEWER_ONLY, permissionsText: '-R' },
-      { tableId: SYNC_TABLE, colIds: '*', permissionsText: '+R',
-        aclFormula: `${VIEWER_ONLY} and rec.${EXPORT_COL} in [${ids.map(id => `"${id}"`).join(', ')}] and rec.${TYPE_COL} in ["${KIND.full}", "${KIND.mark}"]` },
-    ] : []),
-    { tableId: '*', colIds: '*', aclFormula: VIEWER_ONLY, permissionsText: '-R' },
-  ];
-}
-
-// Une règle, telle que la compare syncPublicRules.
-export const ruleText = ({ tableId, colIds, aclFormula, permissionsText }) => `${tableId}|${colIds}|${aclFormula}|${permissionsText}`;
-
-// Actions qui remplacent les règles du widget par les règles voulues. `resources`, `rules` : lignes
-// de _grist_ACLResources et _grist_ACLRules.
-export function publicAclActions(resources, rules, exportIds, options = {}) {
-  const actions = [['BulkRemoveRecord', '_grist_ACLRules', rules.filter(isPublicRule).map(r => r.id)]].filter(a => a[2].length);
-  let pos = Math.min(0, ...rules.map(r => r.rulePos || 0));
-  let newRef = 0;
-  const resourceFor = (tableId, colIds) => {
-    const found = resources.find(r => r.tableId === tableId && r.colIds === colIds);
-    if (found) return found.id;
-    actions.push(['AddRecord', '_grist_ACLResources', --newRef, { tableId, colIds }]);
-    return newRef;
-  };
-  for (const { tableId, colIds, aclFormula, permissionsText } of publicAclRules(exportIds, options)) {
-    actions.push(['AddRecord', '_grist_ACLRules', null, { resource: resourceFor(tableId, colIds), aclFormula, permissionsText, rulePos: --pos, memo: PUBLIC_MEMO }]);
-  }
-  return actions;
 }

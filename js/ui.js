@@ -143,6 +143,13 @@ export function copyField(value, label = t('common.code')) {
   return el('div', { class: 'copy-field' }, area, copyButton(() => value, t('common.copy'), () => area.select()));
 }
 
+// Code d'invitation ou de réponse : il vaut un mot de passe, on le dit sous le bouton Copier.
+export const codeField = value => el('div', {}, copyField(value), el('p', { class: 'muted small' }, t('common.codeSecret')));
+
+// Code de contrôle (voir trust.js), à comparer par téléphone avec l'autre personne.
+export const controlLine = (label, code) => el('p', { class: 'control-code' }, label, ' ', el('strong', {}, code), el('br'),
+  el('span', { class: 'muted small' }, t('common.controlHelp')));
+
 // Bouton qui copie `text()` dans le presse-papiers ; `onFail` si le navigateur le refuse.
 export function copyButton(text, label, onFail = () => {}) {
   const button = el('button', { class: 'btn', type: 'button' }, icon('copy'), label);
@@ -210,10 +217,11 @@ export function pickField({ items, value, label, onChange = () => {} }) {
   return field;
 }
 
-// Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`), sinon une phrase
-// générique avec le détail technique.
+// Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`, avec ses valeurs
+// `vars`), sinon une phrase générique avec le détail technique.
 const known = e => t(`error.${e.message}`) !== `error.${e.message}`;
-export const errorText = e => (known(e) ? t(`error.${e.message}`) : t('error.generic', { detail: e.message || String(e) }));
+export const errorText = e => (known(e) ? t(`error.${e.message}`, e.vars || {}) : t('error.generic', { detail: e.message || String(e) }));
+export const failure = (code, vars) => Object.assign(new Error(code), { vars });
 
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).

@@ -14,6 +14,9 @@ import { readFile } from 'node:fs/promises';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { partRow } from '../../js/logic/files.js';
+import { decodeCode } from '../../js/logic/codes.js';
+import { signText } from '../../js/logic/trust.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
@@ -291,17 +294,27 @@ try {
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
     const code2 = await testLink('Lien du formulaire', await formLink(doc, forms[0]), 'Le lien fonctionne');
+    shownControl = await dialog().locator('.control-code strong').first().textContent();
     await dialogButton('Fermer').click();
     return code2;
   }
+  // Code de contrôle montré par la CIBLE avec sa réponse : la SOURCE doit voir le même.
+  let shownControl = '';
   // SOURCE : coller la réponse sur la ligne de l'invitation, approuver, envoyer l'existant.
-  async function approve(reply, { shots = false, url = source.url } = {}) {
+  async function approve(reply, { shots = false, url = source.url, compare = false } = {}) {
     await openWidget(url);
     await button('Coller la réponse').click();
     await dialog().locator('textarea.code').first().fill(reply);
     await dialogButton('Vérifier').click();
     await dialog().getByText(env.email).waitFor();
+    await dialog().getByText('Document, dossier et équipe sont donnés par Grist').waitFor();
+    assert.equal(await dialog().locator('.control-code strong').textContent(), shownControl, 'même code de contrôle des deux côtés');
     if (shots) await shot('11-source-fiche', 'modal');
+    if (compare) {
+      await dialogButton('Approuver et brancher').click();
+      await dialog().getByText('comparez d’abord le code de contrôle').waitFor();
+      await dialog().getByRole('checkbox', { name: 'J’ai comparé ce code avec la personne' }).check();
+    }
     await dialogButton('Approuver et brancher').click();
     await dialog().getByText('Branché').waitFor();
     if (shots) await shot('12-source-envoi');
@@ -311,6 +324,15 @@ try {
     await dialog().waitFor({ state: 'detached' });
   }
   const rawRows = async (doc, journal) => (await records(doc, journal)).filter(r => r.Synchro_Type);
+  // CIBLE (page ouverte) : vague de suppressions retenue (plus de 10 lignes et de 20 %), rien
+  // d'effacé avant la décision ; « Appliquer » sur la carte.
+  async function applyWave(dest, timeout = 120000) {
+    const wave = widget().locator('.wave', { hasText: new RegExp(`${dest}\\s:\\sla SOURCE a supprimé`) });
+    await wave.waitFor({ timeout });
+    await wave.getByRole('button', { name: 'Appliquer' }).click();
+    await dialogButton('Appliquer').click();
+    await wave.waitFor({ state: 'detached', timeout });
+  }
 
   // --- Échange : deux documents se tiennent à jour l'un l'autre. A invite (formulaire de retour
   // publié chez A, son lien dans le code), B accepte et répond, A approuve. Une modification va
@@ -364,6 +386,15 @@ try {
     const damien = (await fiches(b.doc)).Damien.id_sync;
     assert.match(damien, /^[0-9a-f-]{36}$/, 'B : clé posée à la création');
     assert.equal((await fiches(a.doc)).Damien.id_sync, damien, 'même clé des deux côtés');
+    // Qui a vu l'invitation a l'adresse de retour et la clé de signature de A, pas celle de B : un
+    // lot signé avec la clé de l'invitation est rejeté par A.
+    const invitation = decodeCode(code, 'invitation');
+    assert.match(invitation.cle, /^[0-9a-f]{32}$/);
+    const row = { Synchro_Export: invitation.export, Synchro_Table: 'Fiches', Synchro_Type: 'lot', Synchro_Colonnes: '' };
+    const lot = await signText(invitation.cle, row, JSON.stringify({ lignes: [['intrus', Date.now() / 1000, false, { Nom: 'Intrus', Ville: 'Nulle part' }]], total: 1 }));
+    assert.ok((await fetch(invitation.retour, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([{ ...row, Synchro_Lot: lot }]) })).ok);
+    await waitFor(async () => !(await rawRows(a.doc, aJournal)).some(r => r.Synchro_Lot === lot), 'lot forgé lu par A');
+    assert.ok(!(await fiches(a.doc)).Intrus, 'lot signé avec la clé de l\'invitation : rejeté');
     await new Promise(r => setTimeout(r, 3000));
     assert.ok(!(await sentLines(b.doc, bJournal)).some(l => ['Brest', 'Metz'].includes(l[3].Ville)), 'pas d\'écho vers B');
 
@@ -688,6 +719,8 @@ try {
   assert.equal((await records(source.doc, 'Journal_Annuaire')).length, 1, 'la ligne de test est arrivée dans l\'autre document');
   await stray.remove();
   const reply = await testLink('Lien du formulaire', await formLink(target.doc, formSections[0]), 'Le lien fonctionne');
+  shownControl = await dialog().locator('.control-code strong').first().textContent();
+  assert.match(shownControl, /^[A-HJKMNP-Z2-9]{3}-[A-HJKMNP-Z2-9]{3}$/, 'code de contrôle montré avec la réponse');
   await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
   step('CIBLE : un journal pour l\'export, un formulaire, réponse produite');
@@ -734,10 +767,17 @@ try {
   await viewerPage.goto(`${env.grist}/test/login?username=lecteur@sync.local&name=Lecteur&next=${env.grist}/`);
   await viewerPage.goto(target.url);
   const viewerWidget = viewerPage.frameLocator('iframe').first();
+  // Le journal lui est caché : le widget ne sait pas que ce document reçoit, il propose les deux rôles.
+  await viewerWidget.locator('.tile', { hasText: 'Recevoir des tables' }).click({ timeout: 30000 });
   await viewerWidget.getByText('Lecture seule : un éditeur doit ouvrir cette page').waitFor({ timeout: 30000 });
   assert.ok(await viewerWidget.getByRole('button', { name: 'Accepter une invitation' }).isDisabled(), 'lecteur : boutons grisés');
+  assert.equal(await viewerWidget.locator('.card').count(), 0, 'journal réservé aux éditeurs : le lecteur ne voit pas la réception');
+  await viewerWidget.getByText('Aucune réception visible').waitFor();
   await viewerContext.close();
-  step('CIBLE : un lecteur voit les boutons grisés d\'emblée');
+  const memos = async doc => (await records(doc, '_grist_ACLRules')).map(r => r.memo);
+  assert.ok((await memos(target.doc)).includes('Synchro : journaux réservés aux éditeurs'));
+  assert.ok((await memos(source.doc)).includes('Synchro : réservée aux propriétaires'));
+  step('CIBLE : un lecteur voit les boutons grisés d\'emblée, pas le journal ; Synchro réservée aux propriétaires de la SOURCE');
 
   // --- Pages et tables : aucune page technique, une seule table technique côté SOURCE
   assert.deepEqual((await pagesOf(source.doc)).map(p => p.name), ['Table1', 'Contacts', 'Villes', 'Synchro'], 'SOURCE : aucune page technique');
@@ -811,21 +851,37 @@ try {
   }, 'journal déplié et nettoyé : une version par ligne');
   step('CIBLE : ajout, modification, suppression logique et vraie suppression appliqués seuls ; retouche préservée et signalée ; historique avant/après numéroté ; journal nettoyé');
 
-  // --- Second destinataire du même export, sans secret, sans refaire l'export
+  // --- Second destinataire du même export, en sécurité renforcée, sans refaire l'export : le code
+  // de contrôle doit avoir été comparé, et ses suppressions reçues attendent une décision.
   await openWidget(source.url);
   await button('Ajouter un destinataire').click();
-  await dialog().getByRole('checkbox', { name: 'Protéger l’invitation par un secret' }).uncheck();
+  await dialog().getByRole('checkbox', { name: 'Sécurité renforcée' }).check();
   await dialogButton('Créer l’invitation').click();
   await dialog().getByText('Transmettez ce code').waitFor();
+  await dialog().getByText(/Valable jusqu’au/).waitFor();
+  await dialog().getByText('Ce code vaut un mot de passe').first().waitFor();
   const invitation2 = await dialog().locator('textarea.code').first().inputValue();
   await dialogButton('Plus tard').click();
+  await widget().locator('.person', { hasText: 'sécurité renforcée' }).waitFor();
   const reply2 = await accept(target2.doc, target2.url, invitation2);
-  await approve(reply2);
+  await approve(reply2, { compare: true });
   await widget().locator('.person').nth(1).getByText('Actif').waitFor();
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'file vide');
   await shot('13-source-actif', 'card');
   await openWidget(target2.url);
   await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'second destinataire servi');
+  // Sécurité renforcée : une ligne effacée dans la SOURCE attend la décision ici ; « Ignorer » la
+  // garde, détachée de la SOURCE.
+  const ulysse = (await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Ulysse' }]])).retValues[0];
+  await waitFor(async () => (await records(target2.doc, 'Contacts')).some(r => r.Nom === 'Ulysse'), 'ajout reçu');
+  await applyActions(source.doc, [['RemoveRecord', 'Contacts', ulysse]]);
+  const wave2 = widget().locator('.wave');
+  await wave2.getByText(/Contacts\s:\sla SOURCE a supprimé 1 ligne/).waitFor({ timeout: 60000 });
+  assert.ok((await records(target2.doc, 'Contacts')).some(r => r.Nom === 'Ulysse'), 'rien d\'effacé avant la décision');
+  await wave2.getByRole('button', { name: 'Ignorer' }).click();
+  await dialogButton('Ignorer').click();
+  await wave2.waitFor({ state: 'detached', timeout: 30000 });
+  assert.equal((await records(target2.doc, 'Contacts')).find(r => r.Nom === 'Ulysse').id_sync, '', 'gardée ici, détachée de la SOURCE');
   await openWidget(target.url);
   await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
   assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
@@ -845,7 +901,16 @@ try {
   step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer ; ligne, colonne et valeur retouchées ici signalées, « Corriger » remet la SOURCE');
 
   // --- Révoquer le second seulement : le premier continue
+  // Un webhook détourné (adresse changée dans les réglages de Grist) est signalé sur sa ligne.
+  const hooksNow = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
+  const second = hooksNow.find(h => (h.fields.memo || '').includes(target2.doc.slice(0, 10)));
+  const first = hooksNow.find(h => h.id !== second.id);
+  await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: first.fields.url });
   await openWidget(source.url);
+  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByText(/envoie maintenant vers un autre document/).waitFor({ timeout: 30000 });
+  await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: second.fields.url });
+  await openWidget(source.url);
+  assert.equal(await widget().getByText(/envoie maintenant vers un autre document/).count(), 0);
   await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
   await moveAlice('Nancy', 'le premier reçoit toujours');
@@ -869,7 +934,7 @@ try {
   await dialogButton('Enregistrer').click();
   await dialog().getByText(/Enregistré\s:\s[\d\s]+\slignes sont parties/).waitFor();
   await dialogButton('Fermer').click();
-  assert.equal((await records(source.doc, 'Synchro')).filter(r => r.Synchro_Type !== 'charge').length, 6, 'trois lignes Synchro par table');
+  assert.equal((await records(source.doc, 'Synchro')).filter(r => !['charge', 'signature'].includes(r.Synchro_Type)).length, 6, 'trois lignes Synchro par table (plus la charge et la clé de signature)');
   assert.ok(!(await columnsOf(source.doc, 'Villes')).includes('Supprime'), 'le widget n\'ajoute pas Supprime');
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });
@@ -1010,6 +1075,7 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + imported.length, 'gros import reçu en entier', 120000);
   await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'avis de la CIBLE retiré', 30000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', imported]]);
+  await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
   step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
 
@@ -1037,6 +1103,7 @@ try {
   }, 'tout reçu après le déblocage', 240000);
   await widget().locator('.drift').waitFor({ state: 'detached', timeout: 30000 }); // la SOURCE a changé la ligne de Bob : plus d'écart
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', blocIds]]);
+  await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
   step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');
 
@@ -1069,6 +1136,7 @@ try {
   await page.bringToFront();
   const grandeIds = (await records(source.doc, 'Grande')).map(r => r.id);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(0, 5500)]]);
+  await applyWave('Grande', 300000);
   await waitFor(async () => await grande() === N - 5500, 'suppression de 5 500 lignes suivie (liste complète)', 300000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(5500, 5502)]]);
   await waitFor(async () => await grande() === N - 5502, 'suppression de 2 lignes suivie (seaux)', 120000);
@@ -1124,21 +1192,32 @@ try {
   const neighbour = (await applyActions(target.doc, [['CreateViewSection', await tableRef(target.doc, 'Communes'), journalForm.parentId, 'form', null, null]])).retValues[0];
   await applyActions(target.doc, [['UpdateRecord', '_grist_Views_section', neighbour.sectionRef, { shareOptions: '{"form": true, "publish": true}' }]]);
   const exportId = (await records(source.doc, 'Synchro'))[0].Synchro_Export;
+  const forgedSha = createHash('sha1').update('pirate').digest('hex');
   const forge = rows => fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
   const pirate = JSON.stringify({ lignes: [['pirate', 9e9, false, { Nom: 'Pirate' }]], total: 1 });
+  const unsigned = JSON.stringify({ lignes: [['pirate2', Date.now() / 1000, false, { Nom: 'Pirate' }]], total: 1 });
   assert.ok((await forge([
     { Synchro_Export: 'ffffffffffffffff', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: pirate },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: 'pas du JSON' },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
+    // Bien formées, du bon export, mais sans la signature de la SOURCE : un lot, un avis de fin.
+    { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: unsigned },
+    { Synchro_Export: exportId, Synchro_Type: 'fin', Synchro_Lot: '{"fin": true}' },
+    // Un fichier complet et intègre, mais qu'aucune version signée ne cite : il attend, sans dépôt.
+    partRow(exportId, { sha: forgedSha, name: 'pirate.txt', size: 6 }, '0000abcd', 0, 1, Buffer.from('pirate').toString('base64')),
   ])).ok, 'le lien du formulaire accepte n\'importe quelle ligne');
   await widget().getByRole('tab', { name: 'Recevoir' }).click();
   // Rien n'est arrivé depuis plus d'une minute : le passage suivant viendrait dans une minute.
   await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await widget().getByText('Arrivées suspectes').waitFor();
-  await widget().getByText(/3\s+lignes rejetées/).waitFor();
+  await widget().getByText(/5\s+lignes rejetées/).waitFor();
+  assert.equal(await widget().getByText('Coupé par la SOURCE').count(), 0, 'un avis de fin forgé ne coupe pas la réception');
   await widget().getByText('Lien commun à d’autres formulaires').waitFor();
   assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Pirate'), 'rien de recopié');
-  assert.equal((await rawRows(target.doc, 'Journal_Annuaire')).length, 0, 'lignes rejetées effacées');
+  const leftRaw = await rawRows(target.doc, 'Journal_Annuaire');
+  assert.deepEqual(leftRaw.map(r => r.Synchro_Type), ['fichier'], 'lignes rejetées effacées, le fichier non cité attend');
+  assert.ok(!(await records(target.doc, '_grist_Attachments')).some(a => a.fileIdent.startsWith(forgedSha)), 'fichier non cité : pas déposé');
+  await applyActions(target.doc, [['BulkRemoveRecord', 'Journal_Annuaire', leftRaw.map(r => r.id)]]);
   await shot('17-cible-suspect');
   await button('Couper le lien').first().click();
   await dialogButton('Couper le lien').click();
@@ -1152,6 +1231,18 @@ try {
   await waitFor(async () => !(await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 'ancien destinataire révoqué');
   await button('Ajouter un destinataire').click();
   await dialogButton('Créer l’invitation').click();
+  await dialog().getByText('Transmettez ce code').waitFor();
+  const syncRef = await tableRef(source.doc, 'Synchro');
+  await dialogButton('Plus tard').click();
+  // Une invitation vaut 7 jours : expirée, son code est refait d'un clic.
+  const noteCol = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export' && c.parentId === syncRef);
+  const sourceNote = JSON.parse(noteCol.description);
+  sourceNote.invitations = sourceNote.invitations.map(i => ({ ...i, at: i.at - 8 * 86400 }));
+  await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', noteCol.id, { description: JSON.stringify(sourceNote) }]]);
+  await openWidget(source.url);
+  await widget().getByText('Expirée', { exact: true }).waitFor();
+  await button('Refaire le code').click();
+  await dialogButton('Refaire le code').click();
   await dialog().getByText('Transmettez ce code').waitFor();
   const invitation3 = await dialog().locator('textarea.code').first().inputValue();
   await dialogButton('Plus tard').click();
@@ -1170,8 +1261,9 @@ try {
   assert.notEqual(forms3[0].parentId, journalForm.parentId, 'sur une nouvelle page, à lui seul');
   assert.equal((await records(target.doc, '_grist_Views_section')).filter(sc => sc.parentId === forms3[0].parentId).length, 1);
   const reply3 = await testLink('Lien du formulaire', await formLink(target.doc, forms3[0]), 'Le lien fonctionne');
+  shownControl = await dialog().locator('.control-code strong').first().textContent();
   await dialogButton('Fermer').click();
-  await approve(reply3);
+  await approve(reply3, { compare: true }); // l'export est passé en sécurité renforcée avec le second destinataire
   // Fin du montage d'avant la 0.5 simulé : la page commune et son partage disparaissent.
   const oldPage = await pageOf(target.doc, journalForm.parentId);
   await applyActions(target.doc, [['RemoveView', journalForm.parentId], ['RemoveRecord', '_grist_Shares', oldPage.shareRef]]);
@@ -1197,14 +1289,32 @@ try {
   await widget().getByText('Personne ne reçoit encore cet export.').waitFor();
   await button('Supprimer').click();
   await dialogButton('Supprimer').click();
-  await widget().getByText('Aucun export.', { exact: false }).waitFor();
+  // Synchro effacée, ses règles partent au dessin suivant : le document se recharge, et le widget,
+  // sans rôle, revient à l'accueil.
+  const home = () => widget().locator('.tile', { hasText: 'Envoyer des tables' });
+  await home().waitFor({ timeout: 60000 });
+  assert.ok(!(await records(source.doc, '_grist_ACLRules')).some(r => r.memo === 'Synchro : réservée aux propriétaires'), 'règles de Synchro retirées avec elle');
   assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Table1', 'Villes'], 'table Synchro effacée');
   assert.equal((await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length, 0);
   step('CIBLE puis SOURCE : réception arrêtée, révocation, export supprimé avec sa table technique');
 
-  // --- Lien public : un seul code, la CIBLE lit les instantanés de l'export sans identifiant
+  // --- Lien public : un seul code, la CIBLE lit les instantanés de l'export sans identifiant. Refusé
+  // tant qu'une règle d'accès cache une partie d'une table de l'export (le lien public la montrerait).
+  const hiding = (await applyActions(source.doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Contacts', colIds: 'Interne' }]])).retValues[0];
+  const hidingRule = (await applyActions(source.doc, [['AddRecord', '_grist_ACLRules', null,
+    { resource: hiding, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 100, memo: 'e2e' }]])).retValues[0];
+  await openWidget(source.url);
+  await home().click();
   await newExport('Contacts', 'Annuaire');
   await dialogButton('Ajouter un destinataire').click();
+  await dialog().getByRole('radio', { name: /Lien public/ }).check();
+  await dialog().getByText(/Toute personne qui a le lien du document pourra lire ces colonnes\s:\sContacts \(/).waitFor();
+  await dialogButton('Créer l’invitation').click();
+  await dialog().getByText(/Lien public refusé\s:\sune règle d’accès cache une partie de Contacts/).waitFor();
+  await dialogButton('Annuler').click();
+  await applyActions(source.doc, [['RemoveRecord', '_grist_ACLRules', hidingRule], ['RemoveRecord', '_grist_ACLResources', hiding]]);
+  await openWidget(source.url);
+  await button('Ajouter un destinataire').click();
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
   await shot('15-source-public');
   await dialogButton('Créer l’invitation').click();
@@ -1226,6 +1336,13 @@ try {
   assert.ok(!anonColumns.some(c => /invitations|exports/.test(c.fields.description || '')), 'note de la SOURCE cachée au lien public');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
+  // Lien public réglé sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus.
+  await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'editors' } } });
+  await openWidget(source.url);
+  await widget().getByText(/Le lien public de ce document est réglé sur Éditeur/).waitFor();
+  await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
+  await openWidget(source.url);
+  assert.equal(await widget().getByText(/réglé sur Éditeur/).count(), 0);
 
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
@@ -1249,7 +1366,7 @@ try {
   await openWidget(source.url);
   await button('Supprimer').click();
   await dialogButton('Supprimer').click();
-  await widget().getByText('Aucun export.', { exact: false }).waitFor();
+  await home().waitFor({ timeout: 60000 });
   assert.equal((await anon('Contacts')).status, 403, 'reste du document toujours caché tant qu\'il est public');
   step('Lien public coupé, export supprimé : plus rien de lisible');
 

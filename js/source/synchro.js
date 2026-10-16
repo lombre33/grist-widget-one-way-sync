@@ -5,10 +5,11 @@
 // notés dans la description de sa colonne Synchro_Export : des métadonnées, que le webhook
 // n'envoie pas. Synchro n'a pas de page : elle reste dans « Données source ».
 import {
-  EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL,
+  EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, randomHex,
 } from '../logic/common.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
-import { addTrackRowsAction, exportRowsActions, exportTables } from '../logic/exports.js';
+import { addTrackRowsAction, endNotice, exportRowsActions, exportTables } from '../logic/exports.js';
+import { SIG_KEY, signText } from '../logic/trust.js';
 import { apply, fetchRows, readSchema } from '../grist.js';
 import { dropPages, exportsViewRef, removeTechnicalTables } from '../pages.js';
 
@@ -150,6 +151,26 @@ export async function removeExport(exportId) {
   }
   await apply([['BulkRemoveRecord', SYNC_TABLE, rows.filter(r => r[EXPORT_COL] === exportId).map(r => r.id)]]);
   await refreshFormulas(await readSchema(), left);
+}
+
+// Clé qui signe les envois d'un export (ligne 'signature' de Synchro, réservée aux propriétaires),
+// tirée au besoin (`create`, ou la clé reçue dans l'invitation d'un Échange) ; '' sans clé. Les
+// formules signent dès qu'elle est là (voir formulas.js).
+export async function signingKey(exportId, { create = false, key = '' } = {}) {
+  const row = (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.sign);
+  const have = row && SIG_KEY.test(row[SCHEMA_COL] || '') ? row[SCHEMA_COL] : '';
+  const want = SIG_KEY.test(key) ? key : have || (create ? randomHex(16) : '');
+  if (!want || want === have) return have;
+  await apply([row ? ['UpdateRecord', SYNC_TABLE, row.id, { [SCHEMA_COL]: want }]
+    : ['AddRecord', SYNC_TABLE, null, { [EXPORT_COL]: exportId, [TABLE_COL]: '', [TYPE_COL]: KIND.sign, [SCHEMA_COL]: want, [RESEND_COL]: '' }]]);
+  return want;
+}
+
+// Avis de fin d'un export (voir endNotice), signé s'il a une clé.
+export async function endRows(exportId) {
+  const key = await signingKey(exportId).catch(() => '');
+  const rows = endNotice(exportId);
+  return key ? Promise.all(rows.map(async row => ({ ...row, [LOT_COL]: await signText(key, row, '{"fin": true}') }))) : rows;
 }
 
 // Écrit les mêmes champs dans des lignes de Synchro (renvoi, marque d'envoi coupé).

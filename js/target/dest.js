@@ -2,10 +2,11 @@
 // table existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
 // Aussi : la fenêtre d'une table que la SOURCE ajoute à un export déjà reçu.
 import { EXPORT_COL, KEY_COL, TABLE_COL, isUserTable, toTableId } from '../logic/common.js';
-import { docIdentity, readSchema } from '../grist.js';
+import { docIdentity, isOwner, readSchema } from '../grist.js';
+import { exportableColumns } from '../logic/exports.js';
 import { syncRows } from '../source/synchro.js';
 import { wireExchange } from '../exchange.js';
-import { destColumns, prepareDest, receivedDests, receivedJournals, updateJournalNote } from './journals.js';
+import { destColumns, keySlot, prepareDest, receivedDests, receivedJournals, receivedKey, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
 import { confirmDialog, el, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
@@ -56,6 +57,16 @@ export function mappingBlock(schema, table, dest, columns) {
   return { node, read };
 }
 
+// Échange rangé dans des tables existantes (`dests`) : toutes leurs colonnes partiront vers l'autre
+// document (voir wireExchange), y compris celles que l'export ne reçoit pas. La personne le
+// confirme, colonnes nommées ; `where` : le document qui les recevra.
+export async function confirmOutgoing(schema, dests, where) {
+  const existing = dests.filter(d => schema.has(d));
+  if (!existing.length) return true;
+  const list = existing.map(d => `${d} (${exportableColumns(schema.columns(d) || []).map(c => c.id).join(', ')})`).join(' ; ');
+  return confirmDialog({ title: t('recv.outgoing.title'), body: t('recv.outgoing.body', { list, where }), confirmLabel: t('recv.outgoing.ok') });
+}
+
 // Une destination ne reçoit qu'une table, d'un seul export, et n'est ni une table du widget, ni
 // une table que ce document envoie lui-même (ses lignes, absentes des listes de la SOURCE, y
 // seraient effacées ; le relais, lui, reçoit d'abord puis envoie). Copie dans le même document :
@@ -88,10 +99,12 @@ export async function offerDialog(group, offer, onDone) {
   };
   const accept = async (entry, m) => {
     await prepareDest({ dest: entry.dest, columns: offer.columns, map: entry.map });
+    await storeKey([entry.dest], keySlot(group.journal, group.note), receivedKey(await readSchema(), group.journal, group.note));
     // Deux éditeurs qui rangent la même table : la première réponse compte.
     await updateJournalNote(group.journal, note => (note.tables.some(tb => tb.table === entry.table) ? note : { ...note, tables: [...note.tables, entry] }));
-    // Échange, côté CIBLE : la table rangée repart aussi vers la SOURCE.
-    if (exchange && !group.note.retour) await wireExchange(receivedJournals(await readSchema()).find(r => r.journal === group.journal).note);
+    // Échange, côté CIBLE : la table rangée repart aussi vers la SOURCE (par un propriétaire : le
+    // passage d'un propriétaire le fera sinon, voir followExchange).
+    if (exchange && !group.note.retour && await isOwner()) await wireExchange(receivedJournals(await readSchema()).find(r => r.journal === group.journal).note);
     await finish(m);
   };
   const refuse = async (m) => {
@@ -105,6 +118,8 @@ export async function offerDialog(group, offer, onDone) {
     await checkDests(schema, [{ table: offer.table, dest }], (group.note.from || {}).docId, exchange ? group.note.export : null);
     const entry = { table: offer.table, dest, columns: offer.columns };
     if (!schema.has(dest)) return accept(entry, m);
+    const from = group.note.from || {};
+    if (exchange && !(await confirmOutgoing(schema, [dest], from.docName || from.docId || group.note.name))) return null;
     const mapping = mappingBlock(schema, offer.table, dest, offer.columns);
     step.replaceChildren(el('p', {}, t('recv.existing')), mapping.node);
     m.setButtons([{ label: t('common.back'), onClick: () => { step.replaceChildren(first); m.setButtons(buttons); } },

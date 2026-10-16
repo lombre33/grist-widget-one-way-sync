@@ -21,6 +21,10 @@ test('Échange : invitation avec adresse de retour, réponse avec les tables de 
   const reply = parseReply(buildReply({ id, recipient, url, retour: [{ table: 'Contacts_2', dest: 'Contacts', extra: 1 }] }), 'https://g.fr');
   assert.deepEqual(reply.retour, [{ table: 'Contacts_2', dest: 'Contacts' }]);
   assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').retour, undefined, 'réponse ordinaire');
+  assert.equal(reply.cle, '', 'Échange sans clé de signature (version précédente)');
+  const cle = '0123456789abcdef0123456789abcdef';
+  assert.equal(parseReply(buildReply({ id, recipient, url, retour: [{ table: 'A', dest: 'B' }], cle }), 'https://g.fr').cle, cle, 'clé de l\'envoi de retour');
+  assert.throws(() => parseReply(buildReply({ id, recipient, url, retour: [{ table: 'A', dest: 'B' }], cle: 'xyz' }), 'https://g.fr'), /codeInvalid/);
   for (const wrong of [[], [{ table: 'a;b', dest: 'Contacts' }], [{ table: 'A', dest: 'C' }, { table: 'B', dest: 'C' }], 'Contacts']) {
     assert.throws(() => parseReply(buildReply({ id, recipient, url, retour: wrong }), 'https://g.fr'), /codeInvalid/, JSON.stringify(wrong));
   }
@@ -46,6 +50,10 @@ test('invitation : aller-retour, plusieurs tables, refus des codes invalides', (
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
   const twice = buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }, { table: 'Contacts', columns }] });
   assert.throws(() => parseInvitation(twice), /codeInvalid/);
+  // Durée de vie, sécurité renforcée et clé de signature des envois voyagent avec l'invitation.
+  const strong = parseInvitation(buildInvitation({ id, exportId, name: 'x', secret: SECRET, origin: '', tables: [{ table: 'Contacts', columns }], expire: 1760604800, renforce: true, cle: SECRET }));
+  assert.deepEqual([strong.expire, strong.renforce, strong.cle], [1760604800, true, SECRET]);
+  assert.deepEqual([inv.expire, inv.renforce, inv.cle], [0, false, ''], 'une invitation d\'avant la 0.8 : ni date, ni clé');
 });
 
 test('réponse : même instance, une adresse par clé de formulaire seulement', () => {
@@ -137,6 +145,9 @@ test('invitation forgée : chaque champ est contrôlé', () => {
     'Échange sans adresse de retour': { mode: 'echange' },
     'Échange vers une adresse de lecture': { mode: 'echange', retour: 'https://g.fr/api/docs/abc/tables/T/records' },
     'Échange vers une adresse sans ?flat=1': { mode: 'echange', retour: 'https://g.fr/api/s/Key1/tables/Journal_A/records' },
+    'date d\'expiration qui n\'est pas un nombre': { expire: '2026-10-23' },
+    'clé de signature mal formée': { cle: 'zz' },
+    'clé de signature dans un tableau': { cle: ['0123456789abcdef0123456789abcdef'] },
   };
   for (const [why, change] of Object.entries(refused)) assert.throws(() => parseInvitation(forge({ ...base, ...change })), /codeInvalid/, why);
   const long = parseInvitation(forge({ ...base, name: 'x'.repeat(500), from: { email: 7, docId: { a: 1 }, extra: 'x' } }));

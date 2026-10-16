@@ -3,11 +3,13 @@
 // destinataire, filtré par Grist sur les lignes de son export.
 import { AUTHOR_COL, EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../logic/common.js';
 import { maskKey } from '../logic/codes.js';
-import { PUBLIC_MEMO, conditionExport, exportTables, exportableColumns, hooksOf, isPublicRule, publicAclActions, publicAclRules, ruleText } from '../logic/exports.js';
+import { conditionExport, exportTables, exportableColumns, hooksOf } from '../logic/exports.js';
 import { STATES, parseLot } from '../logic/journal.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, parseCharge } from '../logic/resend.js';
-import { apply, deleteWebhook, docIdentity, fetchRows, gristFetch, listWebhooks, readSchema, webhookConditions } from '../grist.js';
+import { deleteWebhook, docIdentity, fetchRows, gristFetch, listWebhooks, readSchema, shareInfo, webhookConditions } from '../grist.js';
+import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
+import { reloading, syncRules } from '../acl.js';
 import { ensureSyncTable, isCharge, legacyTables, readSourceNote, refreshMajLe, removeLegacy } from './synchro.js';
 import { catchUp, chargeNotice, hookStatus, resendTables } from './resend.js';
 import { filesPending, resendFiles } from './files.js';
@@ -74,41 +76,31 @@ function drift(schema, tables) {
   return { lost, changed };
 }
 
-// Lien public : le document est-il lisible sans identifiant ? (requête anonyme) Vrai, faux, ou
-// null quand la réponse ne permet pas de le dire (réseau, serveur occupé) : rien ne change alors.
-async function isPublic(base) {
+// Lien public : le document est-il lisible sans identifiant ? (requête anonyme) Rend le droit du
+// lien public ('viewers', ou 'editors' si on l'a réglé sur Éditeur : les règles du widget, qui
+// visent les lecteurs, ne protègent alors plus rien), '' s'il n'est pas public, ou null quand la
+// réponse ne permet pas de le dire (réseau, serveur occupé) : rien ne change alors.
+async function publicAccess(base) {
   try {
     const response = await gristFetch(base);
-    if (response.ok) return true;
-    return [401, 403, 404].includes(response.status) ? false : null;
+    if (response.ok) return String(((await response.json().catch(() => null)) || {}).access || 'viewers');
+    return [401, 403, 404].includes(response.status) ? '' : null;
   } catch (e) {
     return null;
   }
 }
 
-// Règles d'accès du lien public, accordées aux exports partagés : réécrites seulement si elles
-// diffèrent (changer une règle fait recharger le document, et donc le widget). Le refus général
-// posé par le widget reste tant que le document est public ; le widget n'en pose jamais un sur un
-// document qu'il n'a pas partagé lui-même (un document public sans export public reste lisible).
-async function syncPublicRules(exportIds, open) {
-  const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-  const mine = rules.filter(isPublicRule);
-  const keepDeny = open && mine.length > 0;
-  const resource = id => resources.find(r => r.id === id) || {};
-  const have = mine.map(r => ruleText({ ...resource(r.resource), ...r }) + r.memo).sort().join('\n');
-  const want = publicAclRules(exportIds, { keepDeny }).map(r => ruleText(r) + PUBLIC_MEMO).sort().join('\n');
-  if (have !== want) await apply(publicAclActions(resources, rules, exportIds, { keepDeny }));
-}
-
 // ---------------------------------------------------------------------------------------------
 // Tableau de bord
 
-// Redessine l'onglet s'il est affiché et qu'aucune fenêtre n'est ouverte (rattrapage terminé).
+// Redessine l'onglet s'il est affiché et qu'aucune fenêtre n'est ouverte (rattrapage terminé). Ce
+// redessin périodique ne touche pas aux règles d'accès : leur changement rechargerait le widget au
+// milieu d'une action en cours (vu : le partage d'un formulaire effacé restait).
 export async function refreshSource() {
-  if (container && container.isConnected && !document.querySelector('.scrim')) await renderSource();
+  if (container && container.isConnected && !document.querySelector('.scrim')) await renderSource(container, { periodic: true });
 }
 
-export async function renderSource(root = container) {
+export async function renderSource(root = container, { periodic = false } = {}) {
   container = root;
   let state = await loadState();
   // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
@@ -119,27 +111,57 @@ export async function renderSource(root = container) {
     if (upgraded || majle) state = await loadState();
     catchUp(refreshSource);
   }
-  // Document lisible par lien public ? Vérifié à chaque affichage : tant qu'il l'est, le refus
-  // général posé par le widget reste en place, même sans export public.
-  const open = await isPublic((await docIdentity()).baseUrl);
-  if (!state.ownerOnly && open !== null) await syncPublicRules(state.exports.filter(e => e.public).map(e => e.id), open);
+  // Règles d'accès du widget (voir syncRules) : Synchro réservée aux propriétaires, et lien public
+  // accordé aux exports partagés. Document lisible par lien public ? Vérifié à chaque affichage :
+  // tant qu'il l'est, le refus général posé par le widget reste en place, même sans export public ;
+  // le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même.
+  const access = await publicAccess((await docIdentity()).baseUrl);
+  const open = access === null ? null : Boolean(access);
+  if (!periodic && !state.ownerOnly && await syncRules({ publicIds: state.exports.filter(e => e.public).map(e => e.id), open })) {
+    reloading(container, renderSource);
+    return;
+  }
   const out = el('div', { class: 'out' }, notice);
   notice = null;
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly, onclick: () => exportWizard(null, renderSource) }, icon('plus'), t('send.new')));
-  const cards = state.exports.map(exp => exportCard(exp, state, open, out));
+  // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
+  const cards = state.ownerOnly ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
   if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
   if (state.legacy.tables.length) cards.push(legacyCard(state, out));
   container.replaceChildren(...[toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
+    access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
     chargeNotice(state.charge),
     out,
-    cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t('send.empty')),
+    cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t(state.ownerOnly && state.exports.length ? 'send.ownersOnly' : 'send.empty')),
     roleGuide({ you: 'source' })].filter(Boolean));
   // Échange qui attend le lien de son formulaire de retour (page fermée en route) : l'assistant
   // reprend à cette étape, une fois par chargement.
   const pending = state.exports.flatMap(exp => exp.invitations.filter(inv => inv.journal && !inv.ready).map(inv => [exp, inv]))[0];
   if (pending && !resumed && !state.ownerOnly && !document.querySelector('.scrim')) openRecipient(...pending);
+  if (!state.ownerOnly && await checkHooks(state.exports.flatMap(exp => exp.recipients))) await renderSource(root, { periodic });
+}
+
+// Chaque destinataire est revérifié chez Grist au plus une fois par heure (voir shareInfo) : la clé
+// de son webhook désigne-t-elle toujours le document de sa fiche (mémo) ? Un co-propriétaire peut
+// changer l'adresse d'un webhook dans les réglages de Grist. Rend vrai si un résultat a changé.
+const CHECK_MS = 3600000;
+const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' }
+async function checkHooks(hooks) {
+  const due = hooks.filter((h) => {
+    const was = checked.get(h.id);
+    return !was || was.url !== h.fields.url || Date.now() - was.at > CHECK_MS;
+  });
+  let changed = false;
+  await Promise.all(due.map(async (h) => {
+    const info = await shareInfo(h.fields.url).catch(() => undefined);
+    if (info === undefined) return; // Grist ne répond pas : au prochain affichage
+    const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
+    changed ||= (checked.get(h.id) || { other: '' }).other !== other;
+    checked.set(h.id, { at: Date.now(), url: h.fields.url, other });
+  }));
+  return changed;
 }
 
 const openRecipient = (exp, pending = null) => {
@@ -232,8 +254,10 @@ function personRow(exp, h, ownerOnly, out) {
   const u = h.usage || {};
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const failing = status === 'error';
+  const other = (checked.get(h.id) || {}).other;
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), pill(status, tone)),
+    other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
     failing ? el('p', { class: 'small text-danger' }, hookError(u)) : null,
@@ -246,14 +270,17 @@ function personRow(exp, h, ownerOnly, out) {
 
 // Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et
 // son code peut être refait (nouveau secret) : il n'est gardé nulle part.
+// Une invitation vaut 7 jours : expirée, son code est à refaire.
 function inviteRow(exp, inv, ownerOnly, out) {
   const back = inv.journal && !inv.ready;
+  const expired = !back && isExpired(inv.at, Date.now() / 1000);
+  const until = t(expired ? 'send.invite.expiredOn' : 'send.invite.until', { at: dateText(expiresAt(inv.at) * 1000) });
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },
-      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), pill('invited', 'pending')),
-    el('p', { class: 'muted small' }, back ? t('send.mode.echange') : inv.hash ? t('send.secret.on') : t('send.secret.off')),
+      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), expired ? pill('expired', 'err') : pill('invited', 'pending')),
+    el('p', { class: 'muted small' }, [back ? t('send.mode.echange') : until, inv.renforce ? t('send.renforce.on') : ''].filter(Boolean).join(' · ')),
     el('div', { class: 'person-actions' },
-      wizardButton(back ? t('send.back.resume') : t('send.reply'), back ? 'link' : 'paste', () => openRecipient(exp, inv), { primary: true, ownerOnly }),
+      wizardButton(back ? t('send.back.resume') : expired ? t('send.newCode.ok') : t('send.reply'), back ? 'link' : expired ? 'key' : 'paste', () => openRecipient(exp, inv), { primary: true, ownerOnly }),
       inv.journal && inv.ready ? wizardButton(t('send.back.again'), 'key', () => openRecipient(exp, { ...inv, ready: false }), { ownerOnly }) : null,
       actionButton(t('send.action.cancel'), 'trash', () => cancelInvitation(inv), ownerOnly, out, { kind: 'btn-danger-text' })));
 }

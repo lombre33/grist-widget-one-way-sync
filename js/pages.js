@@ -111,6 +111,11 @@ export async function removeTechnicalTables(tableIds) {
   const orphans = [...shared].filter(ref => !pages.some(p => !emptied.includes(p.viewRef) && p.shareRef === ref));
   await apply([...emptied.map(v => ['RemoveView', v]), ...orphans.map(ref => ['RemoveRecord', '_grist_Shares', ref])]);
   await apply(still.filter(v => left.has(v)).flatMap(v => tidyActions(v, sections, views, pages)));
+  // Les règles du widget sur ces tables restent jusqu'au prochain affichage d'un propriétaire
+  // (voir syncRules) : les retirer ici ferait recharger le document, et donc le widget, avant la
+  // fin de ce qui suit (vu : un participant retiré laissait l'Échange marqué « à plusieurs »).
+  // Une règle qui nomme une table absente ne gêne rien d'autre que les changements de règles
+  // (vérifié), et syncRules libère sa ressource.
 }
 
 // Tables techniques sans page : elles restent dans « Données source », pas dans la liste des

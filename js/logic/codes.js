@@ -2,6 +2,7 @@
 // Grist qu'ils portent. Tout ce qui vient d'un code collé est contrôlé ici : identifiants, colonnes,
 // adresses réécrites à partir de leurs seuls éléments reconnus.
 import { HEX16, is, isSafeId, parseJson } from './common.js';
+import { SIG_KEY } from './trust.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;
@@ -57,15 +58,18 @@ const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from
 // Invitation (SOURCE -> CIBLE) et réponse (CIBLE -> SOURCE)
 
 // Une invitation donne accès à un export (`export`, ses tables et colonnes) pour une personne :
-// `id` la désigne dans la réponse ; `secret`, facultatif et choisi à la création, prouve que la
-// réponse vient de quelqu'un qui l'a reçue (la SOURCE n'en garde que l'empreinte).
+// `id` la désigne dans la réponse ; `secret`, tiré à la création, prouve que la réponse vient de
+// quelqu'un qui l'a reçue (la SOURCE n'en garde que l'empreinte). `expire` : heure (en secondes) où
+// elle ne vaut plus ; `renforce` : sécurité renforcée (code de contrôle comparé, suppressions à
+// valider) ; `cle` : clé de signature des envois de l'export (voir trust.js).
 // Mode « lien public » (`base` : adresse REST du document SOURCE) : pas de réponse, la CIBLE lit
 // les instantanés de l'export elle-même, sans identifiant. Mode « Échange » (`retour` : adresse
 // d'écriture du journal de retour de la SOURCE) : la CIBLE renvoie ses modifications à cette
 // adresse, par un webhook à elle. Ce code-là est donc un droit d'écriture.
-export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '' }) {
+export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '', expire = 0, renforce = false, cle = '' }) {
   return encodeCode({
     kind: 'invitation', id, export: exportId, name, origin, secret, from,
+    ...(expire ? { expire } : {}), ...(renforce ? { renforce: true } : {}), ...(cle ? { cle } : {}),
     ...(base ? { mode: 'public', base } : retour ? { mode: 'echange', retour } : {}),
     tables: tables.map(({ table, columns }) => ({ table, columns: exportSchema(columns) })),
   });
@@ -73,6 +77,7 @@ export function buildInvitation({ id, exportId, name, origin, secret = '', from 
 
 function validInvitation(inv) {
   return is(HEX16, inv.id) && is(HEX16, inv.export) && typeof inv.name === 'string' && (!inv.secret || is(SECRET, inv.secret))
+    && (inv.expire === undefined || Number.isFinite(inv.expire)) && (inv.cle === undefined || is(SIG_KEY, inv.cle))
     && Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && isSafeId(tb.table) && validColumns(tb.columns))
     && new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
 }
@@ -97,6 +102,7 @@ export function parseInvitation(text) {
   const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
   return {
     id: inv.id, export: inv.export, name: inv.name.slice(0, 200), secret: inv.secret || '', origin: String(inv.origin || ''), ...mode,
+    expire: inv.expire || 0, renforce: inv.renforce === true, cle: inv.cle || '',
     from: text200(from, ['email', 'docId']),
     tables: inv.tables.map(tb => ({ table: tb.table, columns: exportSchema(tb.columns) })),
   };
@@ -104,8 +110,9 @@ export function parseInvitation(text) {
 
 // `url` : l'adresse d'écriture du journal de l'export dans la CIBLE. Échange : `retour` dit où la
 // CIBLE a rangé chaque table ([{ table: table de la CIBLE, dest: table de la SOURCE }]).
-export function buildReply({ id, secret = '', recipient, url, retour = null }) {
-  return encodeCode({ kind: 'reponse', id, secret, recipient, url, ...(retour ? { retour } : {}) });
+// `cle` (Échange) : clé qui signe l'envoi de retour de ce document (voir trust.js).
+export function buildReply({ id, secret = '', recipient, url, retour = null, cle = '' }) {
+  return encodeCode({ kind: 'reponse', id, secret, recipient, url, ...(retour ? { retour } : {}), ...(cle ? { cle } : {}) });
 }
 
 // Tables d'un Échange dans la réponse : chacune nommée, une seule fois de chaque côté.
@@ -120,11 +127,12 @@ export function parseReply(text, sourceOrigin) {
   const reply = decodeCode(text, 'reponse');
   const target = parseWebhookUrl(reply.url);
   const ok = is(HEX16, reply.id) && (!reply.secret || is(SECRET, reply.secret)) && target && target.flat
-    && reply.recipient && typeof reply.recipient === 'object' && (reply.retour === undefined || validRetour(reply.retour));
+    && reply.recipient && typeof reply.recipient === 'object' && (reply.retour === undefined || validRetour(reply.retour))
+    && (reply.cle === undefined || is(SIG_KEY, reply.cle));
   if (!ok) throw new Error('codeInvalid');
   if (target.origin !== sourceOrigin) throw new Error('otherInstance');
   const out = { id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url };
-  return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })) };
+  return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })), cle: reply.cle || '' };
 }
 
 // ---------------------------------------------------------------------------------------------

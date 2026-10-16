@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.7.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.8.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -126,21 +126,26 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 site; an owner of the SOURCE document and an editor of the TARGET document (an owner for
 Exchange). **No dependencies**: no library, no build step, no third-party service.
 
-1. Publish this folder as is at an https address (GitHub Pages or any static file hosting). That
-   address is the widget's URL.
-2. In each document: **Add New**, **Add Page**, **Custom** widget, **Custom URL**, paste the
-   address, **Add Widget**.
-3. In the right panel, grant **full access**.
+1. In each document: **Add New**, **Add Page**, **Custom** widget. Pick Synchro Grist from the
+   instance's **gallery** if it is there; otherwise **Custom URL** and the official address,
+   `https://grist-factory.github.io/grist-widget-syncPlus/`, never an address received by email.
+   Then **Add Widget**.
+2. In the right panel, grant **full access**: the widget reads and writes the document (see
+   below).
 
 The widget works with `grist.numerique.gouv.fr` and `docs.getgrist.com`. For another instance,
-add its address to `js/config.js` and to the CSP in `index.html`.
+add its address to `js/config.js` and to the CSP in `index.html`. To host your own copy
+(advised in production, see [`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement)), publish this
+folder as is at an https address and set it as `WIDGET_URL` (`js/config.js`): it is the address
+the widget's instructions give.
 
 ### Document access
 
 - **Full access** (`requiredAccess: 'full'`): the widget reads the structure of the entire
   document (tables and columns, to offer exports and destinations). It creates its technical
   table and tracking columns, writes to the chosen destination tables and, for an owner, manages
-  webhooks and the public link's access rules. Read access would allow none of these writes,
+  webhooks and the access rules it sets (technical table reserved to owners, journals to
+  editors, public link). Read access would allow none of these writes,
   listed in full in [`docs/06-architecture.md`](docs/06-architecture.md#ce-que-le-widget-écrit-dans-les-documents).
 - **Network**: apart from the widget API, the widget only talks to the Grist instance, through a
   single function (`gristFetch`, `js/grist.js`) that refuses any other origin and sends no
@@ -155,8 +160,17 @@ add its address to `js/config.js` and to the CSP in `index.html`.
   The form link is a write permission: do not share it.
 - The TARGET rejects and reports forged rows (“Suspicious arrivals”); a button cuts the link, and
   a new invitation resumes the same reception, with its tables.
-- The codes only hold table and column names, the recipient's details and a write address: send
-  them only to the person concerned, like a password.
+- The receiving document is checked with Grist (name, workspace, team) at approval, then every
+  hour; a six-character control code can be compared over the phone.
+- Sends are signed: a reception's write key alone cannot get anything copied. A wave of
+  deletions waits for a decision on the card.
+- The technical table is reserved to the SOURCE's owners, the journals to the TARGET's editors
+  (access rules set by the widget).
+- The codes only hold table and column names, the recipient's details, a write address, a secret
+  and a signing key: send them only to the person concerned, like a password; an invitation is
+  valid for 7 days.
+- An **Enhanced security** box, when inviting, makes comparing the code mandatory, has every
+  received deletion validated and forbids the public link for that export.
 
 Full analysis (in French): [`SECURITY.md`](SECURITY.md).
 

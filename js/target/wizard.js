@@ -2,14 +2,16 @@
 // réception en attente (ou à rebrancher) l'ouvre directement à l'étape Lien (`group`).
 import { APPLIED_COL, AUTHOR_COL, JOURNAL_PREFIX, LIST_COL, freeTableId, toTableId } from '../logic/common.js';
 import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../logic/codes.js';
-import { apply, docIdentity, fetchRows, isOwner, readSchema } from '../grist.js';
+import { controlCode, sameDoc } from '../logic/trust.js';
+import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../grist.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
 import { wireExchange } from '../exchange.js';
-import { createJournal, prepareDest, receivedJournals, updateJournalNote } from './journals.js';
+import { signingKey } from '../source/synchro.js';
+import { createJournal, prepareDest, receivedJournals, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
-import { checkDests, destField, mappingBlock } from './dest.js';
-import { confirmDialog, copyButton, copyField, el, message, openWizard, run } from '../ui.js';
+import { checkDests, confirmOutgoing, destField, mappingBlock } from './dest.js';
+import { codeField, confirmDialog, controlLine, copyButton, el, message, openWizard, run } from '../ui.js';
 import { handoffText, roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';
@@ -39,16 +41,26 @@ function showCode(ctx) {
     [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
 
-// Invitation lue et contrôlée : même instance que ce document ; un Échange suppose un propriétaire
-// (ce document enverra aussi, par un webhook).
+// Invitation lue et contrôlée : même instance que ce document, encore valable ; un Échange suppose
+// un propriétaire (ce document enverra aussi, par un webhook), et son adresse de retour doit
+// désigner le document qui invite (demandé à Grist, voir shareInfo) : `share` le décrit, et
+// `backCode` est le code de contrôle de l'envoi de retour.
 async function readInvitation(text) {
   const invitation = parseInvitation(text);
   const { origin } = await docIdentity();
   if (invitation.mode === 'public' && new URL(invitation.base).origin !== origin) throw new Error('otherInstance');
-  if (invitation.mode === 'echange' && invitation.retourOrigin !== origin) throw new Error('otherInstance');
-  if (invitation.mode === 'echange' && !(await isOwner())) throw new Error('exchangeOwner');
-  return invitation;
+  if (invitation.expire && Date.now() / 1000 > invitation.expire) throw new Error('invitationExpired');
+  if (invitation.mode !== 'echange') return invitation;
+  if (invitation.retourOrigin !== origin) throw new Error('otherInstance');
+  if (!(await isOwner())) throw new Error('exchangeOwner');
+  const share = await shareInfo(invitation.retour);
+  if (!share) throw new Error('shareUnknown');
+  if (!sameDoc(share.docId, invitation.from.docId || '')) throw new Error('shareOtherDoc');
+  return { ...invitation, share, backCode: await controlCode(invitation.retour, invitation.secret) };
 }
+
+// Document vérifié chez Grist : nom (dossier · équipe), ou espace personnel.
+const shareText = share => `${share.name} (${[share.folder, share.personal ? t('send.reply.personalSpace') : share.teamName || share.team].filter(Boolean).join(' · ')})`;
 
 // Nouvelle invitation pour un export déjà reçu (lien coupé, destinataire révoqué) : la même
 // réception reprend, avec son journal et ses tables, si l'invitation vient du même document, dans
@@ -60,8 +72,10 @@ function showRelink(ctx, known, invitation) {
   if (!same) throw new Error('alreadyReceived');
   const report = el('div', { class: 'report' });
   const relink = async () => {
-    const { id, secret, name, from } = invitation;
-    await updateJournalNote(known.journal, n => ({ ...n, id, secret, name, from }));
+    const { id, secret, name, renforce } = invitation;
+    const from = { ...invitation.from, ...(invitation.share ? { docName: invitation.share.name } : {}) };
+    await updateJournalNote(known.journal, n => ({ ...n, id, secret, name, from, renforce: renforce || undefined }));
+    await storeKey(known.note.tables.map(tb => tb.dest), invitation.export, invitation.cle);
     const note = receivedJournals(await readSchema()).find(r => r.journal === known.journal).note;
     if (invitation.mode === 'echange') await wireExchange(note, invitation.retour);
     await ensureForm(known.journal);
@@ -71,20 +85,33 @@ function showRelink(ctx, known, invitation) {
     [back(() => showCode(ctx)), cancel, { label: t('recv.relink.ok'), kind: 'btn-primary', onClick: () => run(null, report, relink) }]);
 }
 
-// D'où vient une invitation : export, tables, personne et document qui l'ont faite.
+// D'où vient une invitation : export, tables, personne et document qui l'ont faite ; pour un
+// Échange, le document vérifié chez Grist et le code de contrôle de l'envoi de retour.
 function sourceFiche(invitation) {
-  const { from } = invitation;
+  const { from, share } = invitation;
   return el('div', {},
     message('info', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
-    from.email ? el('p', { class: 'small' }, t(from.docId ? 'recv.fromDoc' : 'recv.from', { from: from.email, doc: from.docId })) : null);
+    from.email ? el('p', { class: 'small' }, t(from.docId ? 'recv.fromDoc' : 'recv.from', { from: from.email, doc: from.docId })) : null,
+    share ? el('p', { class: 'small' }, t('recv.backDoc', { doc: shareText(share) })) : null,
+    share && share.personal ? message('warn', t('recv.backPersonal')) : null,
+    invitation.backCode ? controlLine(t('recv.backCode'), invitation.backCode) : null,
+    invitation.renforce ? el('p', { class: 'small' }, t('recv.renforce')) : null);
 }
 
 // 2. Destinations : une par table reçue.
+// Le journal est lisible par les éditeurs seulement (case cochée par défaut, voir acl.js) : il garde
+// les versions reçues, quelles que soient les règles des tables de destination. Un Échange
+// renforcé demande d'avoir comparé le code de contrôle de l'envoi de retour.
 async function showDest(ctx, invitation) {
   const schema = await readSchema();
   const rows = invitation.tables.map(tb => ({ tb, pick: destField(schema, tb.table) }));
   const report = el('div', { class: 'report' });
+  const reserveBox = el('input', { type: 'checkbox', checked: ctx.reserve !== false });
+  const compared = el('input', { type: 'checkbox' });
+  const mustCompare = invitation.renforce && invitation.mode === 'echange';
   const next = async () => {
+    if (mustCompare && !compared.checked) throw new Error('codeNotCompared');
+    ctx.reserve = reserveBox.checked;
     const current = await readSchema();
     const plans = rows.map(({ tb, pick }) => ({ tb, dest: pick.dest() }));
     await checkDests(current, plans.map(p => ({ table: p.tb.table, dest: p.dest })), invitation.from.docId);
@@ -98,6 +125,8 @@ async function showDest(ctx, invitation) {
       ...rows.flatMap(r => [el('span', { class: 'dest-from' }, r.tb.table), r.pick.node])),
     invitation.mode === 'echange' ? message('info', t('recv.consent.echange')) : null,
     el('p', { class: 'muted small' }, t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
+    el('label', { class: 'check' }, reserveBox, t('recv.reserve')),
+    mustCompare ? el('label', { class: 'check' }, compared, t('recv.backCompared')) : null,
     report, stepHelp(['t-dest']), roleGuide({ you: 'target', mode: invitation.mode, current: 1 }),
   ], [back(() => showCode(ctx)), cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
@@ -106,8 +135,9 @@ async function showDest(ctx, invitation) {
 function showColumns(ctx, invitation, plans, schema) {
   const report = el('div', { class: 'report' });
   const blocks = plans.filter(p => schema.has(p.dest)).map(p => ({ p, block: mappingBlock(schema, p.tb.table, p.dest, p.tb.columns) }));
-  const next = () => {
+  const next = async () => {
     for (const { p, block } of blocks) Object.assign(p, block.read());
+    if (invitation.mode === 'echange' && !(await confirmOutgoing(schema, plans.map(p => p.dest), shareText(invitation.share)))) return null;
     return create(ctx, invitation, plans);
   };
   ctx.wizard.show(STEP.dest, [el('p', {}, t('recv.existing')), ...blocks.map(b => b.block.node), report, stepHelp(['t-dest'])], [
@@ -121,14 +151,18 @@ function showColumns(ctx, invitation, plans, schema) {
 async function create(ctx, invitation, plans) {
   const journal = freeTableId(JOURNAL_PREFIX + toTableId(invitation.name, 'Export'), (await readSchema()).tableIds);
   const { mode } = invitation;
+  const reserve = ctx.reserve !== false;
   const note = {
-    id: invitation.id, export: invitation.export, name: invitation.name, secret: invitation.secret, from: invitation.from,
+    id: invitation.id, export: invitation.export, name: invitation.name, secret: invitation.secret,
+    from: { ...invitation.from, ...(invitation.share ? { docName: invitation.share.name } : {}) },
     ...(mode === 'public' ? { mode, base: invitation.base } : mode === 'echange' ? { mode } : {}),
+    ...(invitation.renforce ? { renforce: true } : {}), ...(reserve ? { reserve: true } : {}),
     tables: plans.map(p => ({ table: p.tb.table, dest: p.dest, columns: p.tb.columns, ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}) })),
     refused: [], missing: {},
   };
   const before = await readSchema();
   for (const p of plans) await prepareDest({ dest: p.dest, columns: p.tb.columns, map: p.map });
+  await storeKey(plans.map(p => p.dest), invitation.export, invitation.cle);
   await createJournal(journal, note);
   ctx.made = mode === 'reponse' || !mode ? { invitation, journal, tables: plans.map(p => p.dest).filter(d => !before.has(d)) } : null;
   if (mode === 'echange') await wireExchange(note, invitation.retour);
@@ -172,12 +206,15 @@ async function showReply(ctx, { journal, note }, link) {
   const url = buildWebhookUrl(link, journal);
   await testUrl(url, journal);
   const identity = await docIdentity();
+  const exchange = note.mode === 'echange';
   const code = buildReply({
-    id: note.id, secret: note.secret, url, retour: note.mode === 'echange' ? note.tables.map(tb => ({ table: tb.dest, dest: tb.table })) : null,
+    id: note.id, secret: note.secret, url, retour: exchange ? note.tables.map(tb => ({ table: tb.dest, dest: tb.table })) : null,
+    cle: exchange ? await signingKey(note.export) : '',
     recipient: { email: await myEmail(journal), docId: identity.docId, team: identity.team, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
   });
   const flow = flowOf(note);
-  ctx.wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), copyField(code),
+  ctx.wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), codeField(code),
+    controlLine(t('recv.reply.code'), await controlCode(url, note.secret)),
     el('div', { class: 'handoff' }, copyButton(() => handoffText('source', flow, 3, code), t('guide.copyHandoff')), el('span', { class: 'muted small' }, t('guide.copyHandoff.help'))),
     roleGuide({ you: 'target', mode: flow, current: 3 }), stepHelp(['t-reply', 's-reply', 's-load', 't-daily'])],
   [back(() => showLink(ctx, { journal, note })), { label: t('common.close'), kind: 'btn-primary' }]);

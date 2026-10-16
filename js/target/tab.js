@@ -4,11 +4,12 @@
 import { isBlank } from '../logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
 import { fileList } from '../logic/files.js';
-import { fetchRows, isReadOnly, readSchema } from '../grist.js';
+import { fetchRows, isOwner, isReadOnly, readSchema } from '../grist.js';
+import { reloading, syncRules } from '../acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { endExchange } from '../exchange.js';
 import { legacyJournals, receivedJournals, updateJournalNote } from './journals.js';
-import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
 import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { receiveWizard } from './wizard.js';
@@ -20,6 +21,7 @@ const HISTORY_MAX = 20;
 const DRIFT_MAX = 10;
 const REVIEW_MAX = 10;
 let container;
+let owner = null; // propriétaire du document (lu une fois par chargement)
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
 // Historiques et lignes d'historique ouverts : repliés par défaut, ils le restent d'un dessin à
@@ -28,8 +30,10 @@ const opened = new Set();
 const keepOpen = id => e => (e.currentTarget.open ? opened.add(id) : opened.delete(id));
 
 // Redessine l'onglet s'il est affiché (un passage de la recopie a changé quelque chose).
+// Redessin périodique (après un passage) : il ne touche pas aux règles d'accès, dont le changement
+// rechargerait le widget au milieu d'une action en cours (voir syncRules).
 export async function refreshTarget() {
-  if (container && container.isConnected) await renderTarget();
+  if (container && container.isConnected) await renderTarget(container, { periodic: true });
 }
 
 // Réceptions à montrer. Le journal de retour d'un Échange se règle depuis l'onglet Envoyer : il
@@ -48,10 +52,16 @@ async function receivedGroups(schema) {
 
 const button = (label, iconName, onclick, kind = '') => el('button', { class: `btn btn-small ${kind}`, type: 'button', disabled: state.readOnly, onclick }, icon(iconName), label);
 
-export async function renderTarget(root = container) {
+export async function renderTarget(root = container, { periodic = false } = {}) {
   if (!container) state.viewer = isReadOnly();
   container = root;
   state.readOnly ||= state.viewer;
+  // Règles d'accès du widget (journaux cachés aux lecteurs, Synchro d'un Échange réservée aux
+  // propriétaires) : seul un propriétaire peut les poser.
+  if (!periodic && !state.readOnly && (owner ??= await isOwner()) && await syncRules()) {
+    reloading(container, renderTarget);
+    return;
+  }
   const schema = await readSchema();
   const groups = await receivedGroups(schema);
   // Formulaire des exports en attente, chacun sur sa page.
@@ -72,7 +82,7 @@ export async function renderTarget(root = container) {
   container.replaceChildren(...[toolbar,
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
-    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t('recv.empty')),
+    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
     roleGuide({ you: 'target' })].filter(Boolean));
   if (!state.readOnly) await openPending(groups);
 }
@@ -103,7 +113,7 @@ function cardStatus(group) {
   if (note.ended) return ['ended', 'off'];
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
-  if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
+  if (tables.some(r => r.pendingCount || r.held)) return ['review', 'pending'];
   const incomplete = Object.keys({ ...note.missing, ...note.big }).length || tables.some(r => r.files && r.files.waiting);
   return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }
@@ -162,7 +172,7 @@ function syncCard(group) {
     cardNotes(group),
     note.tables.map(entry => filesNotes(group, entry)),
     uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
-    note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
+    note.tables.map(entry => [waveBlock(group, entry), reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link', () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : ''),
@@ -287,6 +297,34 @@ async function correct(group, entry, { driftCount, driftGone = 0, droppedCols = 
   if (!(await confirmDialog({ title: t('recv.drift.fixTitle', { dest: entry.dest }), body, confirmLabel: t('recv.drift.fix') }))) return;
   await restoreSource(group.journal, entry.table);
   await renderTarget();
+}
+
+// Vague de suppressions retenue (voir WAVE) : rien n'est effacé avant la décision. « Appliquer »
+// efface les lignes ; « Ignorer » les garde ici, détachées de la SOURCE (après confirmation).
+function waveBlock(group, entry) {
+  const { held } = state.results.get(tableKey(group.journal, entry.table)) || {};
+  if (!held) return null;
+  const out = () => container.querySelector('.out');
+  const texts = {
+    appliquer: [t('recv.wave.applyTitle', { n: held.n, dest: entry.dest }), t('recv.wave.applyBody', { n: held.n }), t('recv.wave.apply')],
+    ignorer: [t('recv.wave.ignoreTitle', { n: held.n, dest: entry.dest }), t('recv.wave.ignoreBody', { n: held.n }), t('recv.wave.ignore')],
+  };
+  const choose = async (e, choice) => {
+    const target = e.currentTarget;
+    const [title, body, confirmLabel] = texts[choice];
+    if (!(await confirmDialog({ title, body, confirmLabel }))) return;
+    await run(target, out(), async () => {
+      await decideWave(group.journal, entry.table, choice);
+      await renderTarget();
+    });
+  };
+  return el('div', { class: 'msg msg-warn wave', role: 'status' },
+    el('strong', {}, t('recv.wave.title', { n: held.n, dest: entry.dest })),
+    el('p', { class: 'small' }, t(group.note.renforce ? 'recv.wave.strict' : 'recv.wave.body')),
+    held.numbers.length ? el('p', { class: 'small' }, t('recv.wave.rows', { rows: held.numbers.join(', ') })) : null,
+    el('div', { class: 'card-actions' },
+      button(t('recv.wave.apply'), 'trash', e => choose(e, 'appliquer'), 'btn-danger-text'),
+      button(t('recv.wave.ignore'), 'stop', e => choose(e, 'ignorer'))));
 }
 
 // ---------------------------------------------------------------------------------------------

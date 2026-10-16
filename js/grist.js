@@ -6,8 +6,9 @@
 //    (`getAccessToken`) passé en paramètre `auth=`.
 // Toute requête réseau du widget passe par gristFetch.
 import { GRIST_ORIGINS } from './config.js';
-import { maskKey, parseDocBaseUrl } from './logic/codes.js';
+import { maskKey, parseDocBaseUrl, parseWebhookUrl } from './logic/codes.js';
 import { toRows } from './logic/common.js';
+import { readShare } from './logic/trust.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).
@@ -203,3 +204,17 @@ export async function deleteWebhookWithNotice(h, rows) {
   await deleteWebhook(h.id);
 }
 export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
+
+// Document que désigne l'adresse d'écriture `url` (clé d'un formulaire publié), lu chez Grist par
+// une requête anonyme : nom, dossier, équipe, identifiant (voir readShare). Null si la clé n'existe
+// pas (lien coupé) ; une erreur si Grist ne répond pas.
+export async function shareInfo(url) {
+  const target = parseWebhookUrl(url);
+  if (!target) return null;
+  const response = await gristFetch(`${target.origin}${target.prefix}/api/s/${target.key}`, { signal: AbortSignal.timeout(15000) });
+  if (response.status === 404 || response.status === 403) return null;
+  if (!response.ok) throw new Error('shareUnreadable');
+  const info = readShare(await response.json().catch(() => null));
+  if (!info) throw new Error('shareUnreadable');
+  return info;
+}

@@ -6,10 +6,10 @@
 // webhook et son journal de retour ; les participants ne se connaissent pas (voir markHub).
 import { EXPORT_COL, HUB, KIND, SCHEMA_COL, SYNC_TABLE, TYPE_COL } from './logic/common.js';
 import { deleteColumnAction, keyTriggerAction, missingSyncColumns, prepareSourceActions } from './logic/formulas.js';
-import { endNotice, exchangeTables, exportCondition, exportTables, exportableColumns, hookName, hooksOf } from './logic/exports.js';
+import { exchangeTables, exportCondition, exportTables, exportableColumns, hookName, hooksOf } from './logic/exports.js';
 import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, listWebhooks, readSchema, webhookConditions } from './grist.js';
 import { removeTechnicalTables } from './pages.js';
-import { removeExport, saveExport, syncRows, updateSourceNote } from './source/synchro.js';
+import { endRows, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
 import { receivedJournals } from './target/journals.js';
 
 // Côté CIBLE : l'export de retour (identifiant et nom de l'export reçu) envoie les destinations à
@@ -24,6 +24,9 @@ export async function wireExchange(note, retour = '') {
   }
   schema = await readSchema();
   await saveExport(note.export, exchangeTables(note.tables, dest => exportableColumns(schema.columns(dest) || [])), { swap: true });
+  // L'envoi de retour est signé par une clé propre à ce document, donnée dans la réponse (voir
+  // trust.js) : l'invitation seule, qui porte l'adresse de retour, ne suffit pas pour la forger.
+  await signingKey(note.export, { create: true });
   await updateSourceNote((n) => {
     const was = n.exports.find(e => e.id === note.export) || { at: Date.now() / 1000 };
     n.exports = [...n.exports.filter(e => e.id !== note.export), { ...was, id: note.export, name: note.name, echange: true, retour: true }];
@@ -57,7 +60,7 @@ const ownJournal = hook => ({ note }) => note.hook === hook.id
 // arrête aussi son envoi de retour, voir stopReturn), puis son journal de retour et sa clé ; les
 // autres continuent.
 export async function removeParticipant(exportId, hook) {
-  await deleteWebhookWithNotice(hook, endNotice(exportId));
+  await deleteWebhookWithNotice(hook, await endRows(exportId));
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.retour).filter(ownJournal(hook));
   await removeTechnicalTables(journals.map(r => r.journal));
   await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== hook.id); });
@@ -83,7 +86,7 @@ export async function addDeleteColumns(tables) {
 // (export de retour) il disparaît aussi.
 export async function endExchange(exportId, { keepExport }) {
   const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  for (const h of hooksOf(hooks, conditions, exportId)) await deleteWebhookWithNotice(h, endNotice(exportId));
+  for (const h of hooksOf(hooks, conditions, exportId)) await deleteWebhookWithNotice(h, await endRows(exportId));
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.mode === 'echange');
   await removeTechnicalTables(journals.map(r => r.journal));
   if (keepExport) await saveExport(exportId, exportTables(await syncRows(), exportId));

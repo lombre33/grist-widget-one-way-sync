@@ -1,12 +1,11 @@
 // SOURCE : actions sur un export et ses destinataires, depuis sa carte.
 import { ORDER_COL, RESEND_ALL } from '../logic/common.js';
 import { buildInvitation } from '../logic/codes.js';
-import { endNotice } from '../logic/exports.js';
 import { rowsSince } from '../logic/resend.js';
 import { deleteWebhookWithNotice, docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
 import { removeTechnicalTables } from '../pages.js';
 import { endExchange, removeParticipant } from '../exchange.js';
-import { readSourceNote, removeExport, saveExport, updateSourceNote } from './synchro.js';
+import { endRows, readSourceNote, removeExport, saveExport, updateSourceNote } from './synchro.js';
 import { clearAndMark, resendTables } from './resend.js';
 import { confirmDialog, copyButton, copyField, el, openModal } from '../ui.js';
 import { handoffText } from '../guide.js';
@@ -62,7 +61,7 @@ export async function resume(exp, h, out) {
 }
 
 // Révoquer une personne : son webhook disparaît, les autres destinataires continuent ; sa carte le
-// dit (voir endNotice). Un Échange s'arrête dans les deux sens (voir endExchange) ; dans un Échange
+// dit (voir endRows). Un Échange s'arrête dans les deux sens (voir endExchange) ; dans un Échange
 // à plusieurs, pour ce participant seulement (voir removeParticipant).
 export async function revoke(exp, h) {
   const one = exp.echange && !exp.retour && exp.recipients.length > 1;
@@ -76,7 +75,7 @@ export async function revoke(exp, h) {
     await endExchange(exp.id, { keepExport: !exp.retour });
     return;
   }
-  await deleteWebhookWithNotice(h, endNotice(exp.id));
+  await deleteWebhookWithNotice(h, await endRows(exp.id));
   await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
 }
 
@@ -103,7 +102,7 @@ export async function deleteExport(exp) {
     await endExchange(exp.id, { keepExport: false });
     return;
   }
-  for (const h of exp.recipients) await deleteWebhookWithNotice(h, endNotice(exp.id));
+  for (const h of exp.recipients) await deleteWebhookWithNotice(h, await endRows(exp.id));
   await updateSourceNote((note) => {
     note.exports = note.exports.filter(e => e.id !== exp.id);
     note.invitations = note.invitations.filter(i => i.export !== exp.id);

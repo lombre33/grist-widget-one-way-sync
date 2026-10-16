@@ -153,7 +153,58 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
   arrive si elle vaut encore la résolution partielle (`fillActions`). Carte : « N fichiers
   attendus », fichiers de plus de 25 Mo, rien par lien public. En Échange, les colonnes Pièces
   jointes ne sont pas proposées. Une CIBLE d'avant la 0.7 refuse un lot qui porte des fichiers.
-  Testé de bout en bout dans `filesSteps` (`ONLY_FILES=1`).
+  Testé de bout en bout dans `filesSteps` (`ONLY_FILES=1`). Depuis la 0.8, un fichier n'est déposé
+  que si une version du journal ou une cellule en attente (`waiting`) le cite (`citedFiles`) : les
+  morceaux ne sont pas signés ; un fichier non cité attend un jour (`old`), puis est effacé.
+- Sécurité (V0.8.0, corrections 1 à 13 de `/mnt/project-files/notes/audit-securite-donnees/corrections-impacts.md`,
+  niveau choisi par Antoine : « Standard + case Renforcé ») ; logique pure dans `js/logic/trust.js`
+  et `js/logic/acl.js`, règles posées par `js/acl.js` (`syncRules`) :
+  - `GET <instance>[/o/<équipe>]/api/s/<clé>` en anonyme rend nom, identifiant (complet), dossier
+    et équipe du document de la clé (vérifié) : `shareInfo` dans `js/grist.js`, `sameDoc` compare
+    par préfixe d'urlId (12 caractères au moins). Vérifié à « Vérifier » (SOURCE), à la lecture d'une
+    invitation d'Échange (CIBLE), et toutes les heures par webhook (`checkHooks`, onglet Envoyer).
+  - Code de contrôle (`controlCode`) : 6 caractères de SHA-256(`url\nsecret`), « XXX-XXX ». Secret
+    toujours ; invitation valable 7 jours (`expire`, `isExpired`, « Refaire le code » remet `at`).
+  - Signatures : clé par export dans la ligne `signature` de `Synchro` (`Synchro_Colonnes`,
+    `signingKey`) ; les formules (`signed()` de `formulas.js`) ajoutent `, "sig": "<hex>"}` à la liste
+    et au lot (HMAC-SHA256 de `export|table|type|colonnes|texte`), `endRows` signe la ligne `fin`.
+    CIBLE : clé dans la description de `id_sync` des destinations (`{"signature": {<place>: clé}}`,
+    `storeKey`, `receivedKey`) ; place = export, ou le journal pour un journal de retour d'Échange
+    (`keySlot`) : en Échange, chaque côté signe avec sa clé, donnée dans son propre code (`cle` de
+    l'invitation, `cle` de la réponse ; vérifié qu'un lot signé avec la clé de l'invitation est
+    rejeté). `checkSigned` : 'bad' rejeté (suspect), 'bare' (liste vide non signée : colonnes non
+    lues), morceaux de fichiers non signés. Une réception sans clé accepte tout (branchée avant).
+    Versions et listes de plus de 600 s dans le futur rejetées (`planUnpack`, `now`).
+  - Règles d'accès du widget (mémos dans `logic/acl.js`) : lien public, puis `Synchro` réservée aux
+    propriétaires (5 règles, exception éditeur pour la recopie d'un Échange), puis journaux réservés
+    aux éditeurs (`note.reserve`, case cochée à l'acceptation). **Piège vérifié** : Grist range chaque
+    `AddRecord` de règle avant la première position plus grande, positions toujours positives :
+    des ajouts successifs à positions négatives s'inversent, et le widget reposait les règles à
+    chaque chargement (rechargement en boucle). Tout part en un seul `BulkAddRecord`. Changer une
+    règle recharge le document : l'onglet affiche `common.reloading` et se redessine au bout de 8 s
+    s'il est encore là ; jamais pendant un assistant (`.scrim`). Grist refuse tout changement de
+    règle tant qu'une ressource nomme une table absente (« Invalid tables in rules »), mais rien
+    d'autre (vérifié) : `removeTechnicalTables` laisse donc les règles d'une table effacée, et le
+    `syncRules` suivant d'un propriétaire libère sa ressource (`aclActions`, `missing`). Les retirer
+    tout de suite rechargeait le widget au milieu de l'action (`markHub` sautait). Pour la même
+    raison, les redessins périodiques (`refreshSource`, `refreshTarget` : `periodic`) ne posent
+    jamais de règle ; seuls l'ouverture d'un onglet et le dessin qui suit une action le font (vu :
+    un redessin du passage de recopie rechargeait le widget pendant « Arrêter la réception », et
+    le partage du formulaire effacé restait). Une requête en cours pendant ce rechargement échoue
+    (« Failed to fetch ») : `select` (`js/main.js`) réessaie l'onglet une fois au bout de 3 s et ne
+    l'écrit qu'en avertissement (vu une fois au test, au démarrage d'Envoyer). Un onglet cliqué
+    pendant le démarrage l'emporte sur le premier écran (`picked`, `ready` dans `js/main.js` ; le
+    test clique dès que la barre d'onglets paraît). Un lecteur de la CIBLE ne voit plus le journal, donc pas la réception (accueil
+    à deux tuiles, puis `recv.emptyViewer`).
+  - Vague de suppressions (`WAVE` : plus de 10 lignes et plus de 20 % ; `WAVE_STRICT` en Renforcé :
+    toute suppression ; jamais en Échange) : rien n'est effacé, `held` sur la carte, Appliquer ou
+    Ignorer (`decideWave` ; Ignorer détache les lignes, `id_sync` vide, versions `partie`).
+  - Renforcé (case à l'invitation, `renforce` dans l'invitation et la note) : comparaison du code
+    exigée (`codeNotCompared`), vague stricte, pas de lien public. Lien public refusé si une règle
+    d'autrui cache des lignes ou colonnes d'une table de l'export (`hiddenTables`), colonnes publiques
+    listées en rouge, alerte si le lien public n'est pas en lecture seule. Échange rangé dans une
+    table existante : `confirmOutgoing` liste ce qui repartira. Consignes : `WIDGET_URL`
+    (`js/config.js`), galerie d'abord.
 
 ## Le design préféré d'Antoine (design C)
 
@@ -170,9 +221,14 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.7.0 (16 octobre 2026)
+## État : V0.8.0 (16 octobre 2026)
 
-V0.7.0 : pièces jointes (voir « Après l'Alpha »). V0.6.0 : `main` reprend la Bêta (Échange à
+V0.8.0 : corrections de sécurité 1 à 13 (voir « Après l'Alpha »). Piège vu au test : au chargement
+du document SOURCE (Grist décharge un document inactif), une petite table (20 lignes au plus) part
+en entier avec l'heure du chargement (`undone`) ; un renvoi plus tard (colonne ajoutée à l'export)
+portait la `MajLe` des lignes, plus ancienne, et la CIBLE l'ignorait : la colonne restait vide.
+Hors Échange, une ligne renvoyée part donc au plus tôt à son `RecalculLe` (`when` de la formule du
+lot). L'Alpha (0.5.7) a le même défaut. V0.7.0 : pièces jointes. V0.6.0 : `main` reprend la Bêta (Échange à
 plusieurs, règles de A). L'Alpha publiée est la V0.5.7 (branche `alpha`).
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre

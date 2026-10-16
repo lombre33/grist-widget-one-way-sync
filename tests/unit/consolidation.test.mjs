@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, refusedGaps, restoreActions, rowNumbers,
+  WAVE, WAVE_STRICT, addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, refusedGaps, restoreActions,
+  rowNumbers,
 } from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
@@ -375,4 +376,37 @@ test('refusedGaps : une ligne refusée reste signalée jusqu\'à sa prochaine mo
   assert.deepEqual(refusedGaps({ journalRows, destRows: later, copyCols: [['Nom', 'Nom']] }).map(g => g.key), ['b', 'x'], 'modifiée ici depuis : plus d\'écart');
   const fixed = destRows.map(r => ({ ...r, MajLe: 30 + 0.001 }));
   assert.deepEqual(refusedGaps({ journalRows, destRows: fixed, copyCols: [['Nom', 'Nom']] }).map(g => g.key), ['x'], 'refus corrigé : la ligne d\'ici est datée après');
+});
+
+test('vague de suppressions : retenue au-delà de 10 lignes et de 20 % ; Appliquer efface, Ignorer détache', () => {
+  const keys = Array.from({ length: 40 }, (_, i) => `k${i}`);
+  const kept = keys.slice(0, 28);
+  const journalRows = [...keys.map((k, i) => j(i + 1, k, 10, done)), list(100, kept, { Sync_Recu: 50 }), j(101, 'k39', 20, { Supprime: true })];
+  const destRows = keys.map((k, i) => ({ id: i + 1, id_sync: k, manualSort: i + 1, Nom: `n${i + 1}` }));
+  const run = (options = {}) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', hold: WAVE, ...options });
+  // 12 lignes parties (11 par la liste, 1 cochée Supprime) sur 40 : 30 %.
+  const held = run();
+  assert.deepEqual(held.held, { n: 12, numbers: [29, 30, 31, 32, 33, 34, 35, 36, 37, 38] });
+  assert.equal(held.stats.removed, 0);
+  assert.deepEqual(held.actions, [], 'rien d\'effacé ni de noté : la liste et la version attendent la décision');
+  const applied = run({ wave: 'appliquer' });
+  assert.equal(applied.held, null);
+  assert.equal(applied.stats.removed, 12);
+  assert.deepEqual(applied.actions.find(a => a[0] === 'BulkRemoveRecord'), ['BulkRemoveRecord', 'Dest', keys.slice(28).map((k, i) => i + 29)]);
+  const ignored = run({ wave: 'ignorer' });
+  assert.equal(ignored.held, null);
+  assert.equal(ignored.stats.removed, 0);
+  assert.ok(!ignored.actions.some(a => a[0] === 'BulkRemoveRecord'));
+  assert.deepEqual(ignored.actions.find(a => a[1] === 'Dest'), ['BulkUpdateRecord', 'Dest', keys.slice(28).map((k, i) => i + 29), { id_sync: keys.slice(28).map(() => '') }],
+    'les lignes restent ici, sans clé : plus rien ne les suit');
+  assert.deepEqual(ignored.actions.find(a => a[1] === 'J' && a[3].Sync_Applique), marked([100, 101], ['', 'partie']));
+  assert.deepEqual(ignored.actions.find(a => a[1] === 'J' && !a[3].Sync_Applique), ['BulkUpdateRecord', 'J', keys.slice(28, 39).map((k, i) => i + 29), { Sync_Etat: keys.slice(28, 39).map(() => 'partie') }]);
+  // Sous les seuils : appliquée sans attendre.
+  const few = planConsolidation({ journalRows: [...journalRows.slice(0, 40), list(100, keys.slice(0, 35))], destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', hold: WAVE });
+  assert.equal(few.held, null);
+  assert.equal(few.stats.removed, 5);
+  // Sécurité renforcée : dès une ligne.
+  const one = planConsolidation({ journalRows: [...journalRows.slice(0, 40), list(100, keys.slice(0, 39))], destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', hold: WAVE_STRICT });
+  assert.deepEqual(one.held, { n: 1, numbers: [40] });
+  assert.equal(plan(journalRows, destRows).held, null, 'sans seuil (Échange) : rien n\'est retenu');
 });

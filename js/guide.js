@@ -1,6 +1,7 @@
 // Mode d'emploi à deux rôles : qui fait quoi, dans quel document. Affiché sur l'accueil et en bas
 // des assistants, pour que chacun sache ce qu'il fait et ce que l'autre document doit faire, et
 // texte de consignes à transmettre avec un code.
+import { WIDGET_URL } from './config.js';
 import { t } from './i18n.js';
 import { copyField, el } from './ui.js';
 
@@ -11,7 +12,7 @@ const STEPS = {
   echange: [['source', 'guide.e.s1'], ['target', 'guide.e.t1'], ['target', 'guide.t2'], ['source', 'guide.s2'], ['target', 'guide.e.t3']],
 };
 
-export const widgetAddress = () => location.origin + location.pathname.replace(/index\.html$/, '');
+export const widgetAddress = () => WIDGET_URL;
 
 // `you` : rôle de ce document ('source', 'target' ou null sur l'accueil). `current` : étape en
 // cours ou attendue (-1 : aucune). Replié par défaut dans les assistants.

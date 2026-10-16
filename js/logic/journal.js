@@ -70,10 +70,16 @@ export function parseLot(text) {
 // ---------------------------------------------------------------------------------------------
 // Dépliage
 
+// Une version ou une liste datée de plus de FUTURE_S secondes après l'heure d'ici ne peut pas venir
+// de la SOURCE (même instance, même horloge) : elle l'emporterait sur toutes les vraies versions.
+const FUTURE_S = 600;
+const listTime = list => Math.max(list.buckets ? list.buckets.t : 0, list.part ? list.part.t : 0);
+
 // Ce que dit une ligne brute : { table, list, text }, { table, lot } ou { end } (la SOURCE a coupé
 // cet envoi, voir endNotice), ou null si elle ne peut pas venir de la SOURCE de cet export
-// (`exportId`) : autre export, type inconnu, table au nom invalide, liste, lot ou colonnes illisibles.
-function readRaw(row, exportId) {
+// (`exportId`) : autre export, type inconnu, table au nom invalide, liste, lot ou colonnes
+// illisibles, liste datée du futur (après `limit`).
+function readRaw(row, exportId, limit) {
   const table = row[TABLE_COL];
   const cols = isBlank(row[SCHEMA_COL]) ? [] : parseJson(row[SCHEMA_COL]);
   const columnsOk = Array.isArray(cols) && (!cols.length || validColumns(cols));
@@ -82,17 +88,18 @@ function readRaw(row, exportId) {
   if (!isSafeId(table) || !columnsOk) return null;
   if (row[TYPE_COL] === KIND.keys) {
     const text = String(row[LIST_COL] || '');
-    return !text || parseList(text) ? { table, text } : null;
+    const list = text ? parseList(text) : null;
+    return !text || (list && !(listTime(list) > limit)) ? { table, text } : null;
   }
   const lot = row[TYPE_COL] === KIND.lot ? parseLot(row[LOT_COL]) : null;
   return lot ? { table, lot } : null;
 }
 
-// Lignes à ajouter au journal pour une ligne brute lue.
-function unpackedRows(row, { table, text, lot }) {
+// Lignes à ajouter au journal pour une ligne brute lue (`lines` : celles du lot gardées).
+function unpackedRows(row, { table, text }, lines) {
   const base = { [TABLE_COL]: table, [RECEIVED_COL]: row[RECEIVED_COL] ?? null };
-  if (!lot) return text || row[SCHEMA_COL] ? [{ ...base, [LIST_COL]: text, [SCHEMA_COL]: row[SCHEMA_COL] || '' }] : [];
-  return lot.lines.map((l, i) => ({
+  if (!lines) return text || row[SCHEMA_COL] ? [{ ...base, [LIST_COL]: text, [SCHEMA_COL]: row[SCHEMA_COL] || '' }] : [];
+  return lines.map((l, i) => ({
     ...base, [KEY_COL]: l.key, [ORDER_COL]: l.order, [DELETE_COL]: l.deleted, [DATA_COL]: JSON.stringify(l.data),
     ...(i === 0 ? { [SCHEMA_COL]: row[SCHEMA_COL] || '' } : {}),
   }));
@@ -109,22 +116,29 @@ function unpackedRows(row, { table, text, lot }) {
 // null si des données sont arrivées après, absent si ce passage n'en dit rien. Au plus `max` lignes
 // reçues par passage, les plus anciennes : les suivantes attendent le passage d'après (`left`).
 // Les morceaux de fichiers de l'export restent pour la réception des fichiers (voir files.js).
-export function planUnpack(journalRows, journalTable, { exportId = null, max = Infinity } = {}) {
+// Rejetées aussi (comptées dans `rejected`) : les lignes de `bad` (mal signées, voir trust.js) et
+// les versions datées du futur (`now` : heure d'ici, en secondes). Les colonnes décrites par une
+// ligne de `bare` (liste vide, non signée) ne sont pas lues.
+export function planUnpack(journalRows, journalTable, { exportId = null, max = Infinity, now = Infinity, bad = new Set(), bare = new Set() } = {}) {
   const all = journalRows.filter(r => isRaw(r) && !(exportId && r[TYPE_COL] === KIND.part && r[EXPORT_COL] === exportId)).sort((a, b) => a.id - b.id);
   const raw = all.slice(0, max);
   const added = [];
   const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set() };
   let rejected = 0;
   let ended;
-  for (const row of raw) {
-    const read = readRaw(row, exportId);
+  const limit = now + FUTURE_S;
+  for (const got of raw) {
+    const row = bare.has(got.id) ? { ...got, [SCHEMA_COL]: '' } : got;
+    const read = bad.has(row.id) ? null : readRaw(row, exportId, limit);
     if (!read) {
       rejected++;
       continue;
     }
     ended = read.end ? { at: typeof row[RECEIVED_COL] === 'number' ? row[RECEIVED_COL] : null } : null;
     if (read.end) continue;
-    added.push(...unpackedRows(row, read));
+    const lines = read.lot ? read.lot.lines.filter(l => !(l.order > limit)) : null;
+    rejected += read.lot ? read.lot.lines.length - lines.length : 0;
+    added.push(...unpackedRows(row, read, lines));
     if (read.lot) noteGaps(gaps, read.table, read.lot, !isBlank(row[RESEND_COL]));
   }
   const cols = [...new Set(added.flatMap(Object.keys))];

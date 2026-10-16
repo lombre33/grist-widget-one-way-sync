@@ -6,7 +6,7 @@
 // cellules. Un fichier se reconnaît des deux côtés au SHA-1 de son contenu : un fichier que la
 // CIBLE a déjà n'est pas déposé deux fois.
 import { APPLIED_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LOT_COL, RECEIVED_COL, SCHEMA_COL, TYPE_COL, chunk, groupBy, is, isTrue, parseJson, toHex } from './common.js';
-import { latestByKey } from './journal.js';
+import { expandRows, latestByKey } from './journal.js';
 
 export const FILE_MAX = 25 * 1024 * 1024; // octets par fichier, au plus
 // Octets d'un morceau avant base64 : environ 700 ko envoyés, sous la limite de 1 Mo d'un envoi.
@@ -149,8 +149,9 @@ export function readPart(row, exportId) {
 
 // Fichiers arrivés : pour chaque empreinte, l'envoi le plus récent (celui de la dernière ligne
 // arrivée), s'il a tous ses morceaux (`ready` : { sha, name, size, data: [base64, dans l'ordre],
-// ids }). Les morceaux d'un envoi plus ancien ou resté incomplet plus de PART_TTL secondes
-// (`stale`) et les lignes illisibles (`rejected`) sont à effacer. `now` : secondes.
+// ids, old }). Les morceaux d'un envoi plus ancien ou resté incomplet plus de PART_TTL secondes
+// (`stale`) et les lignes illisibles (`rejected`) sont à effacer. `old` : arrivé il y a plus de
+// PART_TTL secondes. `now` : secondes.
 export function fileArrivals(rows, exportId, now) {
   const ready = [];
   const stale = [];
@@ -168,11 +169,23 @@ export function fileArrivals(rows, exportId, now) {
       const { sha, name, size, parts: count } = items[items.length - 1].part;
       const byN = new Map(items.filter(p => p.part.parts === count).map(p => [p.part.n, p.part.data]));
       const arrived = Math.max(...items.map(p => (typeof p.row[RECEIVED_COL] === 'number' ? p.row[RECEIVED_COL] : now)));
-      if (send === last && byN.size === count) ready.push({ sha, name, size, data: Array.from({ length: count }, (_, n) => byN.get(n)), ids });
+      if (send === last && byN.size === count) ready.push({ sha, name, size, data: Array.from({ length: count }, (_, n) => byN.get(n)), ids, old: now - arrived > PART_TTL });
       else if (send !== last || now - arrived > PART_TTL) stale.push(...ids);
     }
   }
   return { ready, stale, rejected };
+}
+
+// Fichiers cités par les versions du journal (lignes brutes `rows`), et par les cellules qui en
+// attendent encore (`waiting` : empreintes abrégées, notées par la recopie) : seuls ceux-là sont
+// déposés. Les morceaux ne sont pas signés (voir trust.js), les versions si : qui n'a que la clé du
+// formulaire ne peut pas faire déposer un fichier que la SOURCE n'a pas cité.
+export function citedFiles(rows, waiting = []) {
+  const cited = new Set(waiting);
+  for (const row of expandRows(rows)) {
+    for (const value of Object.values(row)) for (const f of fileList(value)) cited.add(short(f.sha));
+  }
+  return cited;
 }
 
 // Contenu d'un fichier à partir de ses morceaux.

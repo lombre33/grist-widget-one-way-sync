@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.7.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.8.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -130,21 +130,26 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 espace d'équipe ; un propriétaire du document SOURCE, un éditeur du document CIBLE (propriétaire
 en Échange). **Aucune dépendance** : ni bibliothèque, ni étape de build, ni service tiers.
 
-1. Publier ce dossier tel quel sur une adresse https (GitHub Pages ou tout hébergement de fichiers
-   statiques). Cette adresse est celle du widget.
-2. Dans chaque document : **Ajouter**, **Ajouter une page**, vue **Personnalisée**, **URL
-   personnalisée**, coller l'adresse, **Ajouter un widget**.
-3. Dans le panneau de droite, accepter l'**accès complet**.
+1. Dans chaque document : **Ajouter**, **Ajouter une page**, vue **Personnalisée**. Choisir
+   Synchro Grist dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
+   l'adresse officielle, `https://grist-factory.github.io/grist-widget-syncPlus/`, jamais une
+   adresse reçue par courriel. Puis **Ajouter un widget**.
+2. Dans le panneau de droite, accepter l'**accès complet** : le widget lit et écrit le document
+   (voir plus bas).
 
 Le widget fonctionne avec `grist.numerique.gouv.fr` et `docs.getgrist.com`. Pour une autre
-instance, ajouter son adresse dans `js/config.js` et dans la CSP de `index.html`.
+instance, ajouter son adresse dans `js/config.js` et dans la CSP de `index.html`. Pour héberger sa
+propre copie (conseillé en production, voir [`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement)),
+publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_URL`
+(`js/config.js`) : c'est l'adresse que donnent les consignes du widget.
 
 ### Accès au document
 
 - **Accès complet** (`requiredAccess: 'full'`) : le widget lit la structure de l'ensemble du
   document (tables et colonnes, pour proposer exports et destinations). Il crée sa table technique
   et ses colonnes de suivi, écrit dans les tables de destination choisies et, pour un
-  propriétaire, gère les webhooks et les règles d'accès du lien public. Un accès en lecture ne
+  propriétaire, gère les webhooks et les règles d'accès qu'il pose (table technique réservée aux
+  propriétaires, journaux aux éditeurs, lien public). Un accès en lecture ne
   permettrait aucune de ces écritures, dont la liste complète est dans
   [`docs/06-architecture.md`](docs/06-architecture.md#ce-que-le-widget-écrit-dans-les-documents).
 - **Réseau** : en dehors de l'API des widgets, le widget ne parle qu'à l'instance Grist, par une
@@ -161,8 +166,17 @@ instance, ajouter son adresse dans `js/config.js` et dans la CSP de `index.html`
   entier. Le lien du formulaire est un droit d'écriture : il ne se diffuse pas.
 - La CIBLE rejette et signale les lignes forgées (« Arrivées suspectes ») ; un bouton coupe le
   lien, et une nouvelle invitation fait reprendre la même réception, avec ses tables.
-- Les codes ne contiennent que des noms de tables et de colonnes, une fiche et une adresse
-  d'écriture : ils se transmettent à la seule personne concernée, comme un mot de passe.
+- Le document qui recevra est vérifié auprès de Grist (nom, dossier, équipe) à l'approbation,
+  puis toutes les heures ; un code de contrôle de six caractères se compare par téléphone.
+- Les envois sont signés : la clé d'écriture d'une réception ne suffit pas pour y faire recopier
+  quoi que ce soit. Une vague de suppressions attend une décision sur la carte.
+- La table technique est réservée aux propriétaires de la SOURCE, les journaux aux éditeurs de la
+  CIBLE (règles d'accès posées par le widget).
+- Les codes ne contiennent que des noms de tables et de colonnes, une fiche, une adresse
+  d'écriture, un secret et une clé de signature : ils se transmettent à la seule personne
+  concernée, comme un mot de passe, et une invitation vaut 7 jours.
+- Une case **Sécurité renforcée**, à l'invitation, rend la comparaison du code obligatoire, fait
+  valider toute suppression reçue et interdit le lien public pour cet export.
 
 L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
 

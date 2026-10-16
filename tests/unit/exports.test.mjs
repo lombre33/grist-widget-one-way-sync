@@ -1,9 +1,9 @@
-// Exports (SOURCE) : colonnes envoyables, lignes de Synchro, webhooks et leur condition, lien public.
+// Exports (SOURCE) : colonnes envoyables, lignes de Synchro, webhooks et leur condition.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrackRowsAction, conditionExport, exchangeColumns, exchangeTables, exportableColumns, exportCondition, exportRowsActions, exportTables, hookName, hooksOf, isFileColumn, isPublicRule,
-  publicAclActions, publicAclRules, rowFilter, ruleText,
+  addTrackRowsAction, conditionExport, exchangeColumns, exchangeTables, exportableColumns, exportCondition, exportRowsActions, exportTables, hookName, hooksOf, isFileColumn,
+  rowFilter,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { resendValue } from '../../js/logic/resend.js';
@@ -109,28 +109,6 @@ test('webhook d\'un destinataire : condition sur son export, relue à l\'identiq
   assert.equal(resendValue('ab12', [3, 4]), 'ab12:3,4');
 });
 
-test('lien public : règles d\'accès du widget, avant les règles existantes, retirables', () => {
-  const E = '0123456789abcdef';
-  const F = 'fedcba9876543210';
-  assert.deepEqual(publicAclRules([F, E, 'pas un export']), [
-    { tableId: 'Synchro', colIds: 'Synchro_Export', aclFormula: 'user.Access == VIEWER', permissionsText: '-R' },
-    { tableId: 'Synchro', colIds: '*', permissionsText: '+R', aclFormula: `user.Access == VIEWER and rec.Synchro_Export in ["${E}", "${F}"] and rec.Synchro_Type in ["complet", "empreinte"]` },
-    { tableId: '*', colIds: '*', aclFormula: 'user.Access == VIEWER', permissionsText: '-R' },
-  ], 'la colonne qui porte la note de la SOURCE est cachée aux lecteurs');
-  assert.deepEqual(publicAclRules([]), []);
-  assert.deepEqual(publicAclRules([], { keepDeny: true }).map(r => r.tableId), ['*']);
-  const resources = [{ id: 1, tableId: '*', colIds: '*' }];
-  const rules = [{ id: 5, resource: 1, rulePos: 1, memo: '' }, { id: 6, resource: 1, rulePos: -1, memo: 'Synchro : lecture limitée aux vues d’export' }];
-  const actions = publicAclActions(resources, rules, [E]);
-  assert.deepEqual(actions[0], ['BulkRemoveRecord', '_grist_ACLRules', [6]], 'règle d\'une version précédente retirée');
-  assert.deepEqual(actions.filter(a => a[1] === '_grist_ACLResources').map(a => `${a[3].tableId}:${a[3].colIds}`), ['Synchro:Synchro_Export', 'Synchro:*']);
-  const added = actions.filter(a => a[1] === '_grist_ACLRules' && a[0] === 'AddRecord');
-  assert.deepEqual(added.map(a => [a[3].resource, a[3].permissionsText]), [[-1, '-R'], [-2, '+R'], [1, '-R']]);
-  assert.equal(ruleText(publicAclRules([E])[0]), 'Synchro|Synchro_Export|user.Access == VIEWER|-R');
-  assert.ok(added.every(a => a[3].rulePos < -1 && a[3].memo === 'Synchro : lecture limitée aux exports publics'));
-  assert.deepEqual(publicAclActions(resources, rules, []), [['BulkRemoveRecord', '_grist_ACLRules', [6]]]);
-});
-
 // Cas limites.
 
 test('filtre de lignes : formes acceptées', () => {
@@ -152,7 +130,6 @@ test('condition d\'un webhook : rien d\'autre que la forme exacte', () => {
   const hooks = [{ id: 'h1', fields: { tableId: 'Synchro' } }, { id: 'h2', fields: { tableId: 'Contacts' } }, { id: 'h3', fields: { tableId: 'Synchro' } }];
   const conditions = new Map([['h1', ok], ['h2', ok], ['h3', '']]);
   assert.deepEqual(hooksOf(hooks, conditions, EXPORT).map(h => h.id), ['h1'], 'webhook d\'une autre table ou sans filtre : pas un destinataire');
-  assert.ok(isPublicRule({ memo: 'Synchro : lecture limitée aux exports publics' }) && !isPublicRule({ memo: '' }));
 });
 
 test('Échange : colonnes renvoyées sous leur nom d\'origine, correspondance déduite', () => {

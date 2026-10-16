@@ -131,6 +131,27 @@ test('CIBLE : lignes forgées par le lien du formulaire effacées et comptées, 
   assert.deepEqual(withParts.actions.at(-1), ['BulkRemoveRecord', 'J', [1, 9]]);
 });
 
+test('CIBLE : versions et listes datées du futur rejetées, lignes mal signées aussi', () => {
+  const row = (id, extra) => ({ id, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: '[]', Synchro_Renvoi: '', ...extra });
+  const now = 1000;
+  const lot = row(1, { Synchro_Lot: JSON.stringify({ lignes: [['a', 900, false, {}], ['b', 1500, false, {}], ['c', 1700, false, {}]], total: 3 }) });
+  const later = row(2, { Synchro_Type: 'cles', Synchro_Ids: JSON.stringify({ t: 99999, seaux: { 3: [] } }) });
+  const soon = row(3, { Synchro_Type: 'cles', Synchro_Ids: JSON.stringify({ t: 1500, seaux: { 3: [] } }) });
+  const plan = planUnpack([lot, later, soon], 'J', { exportId: 'e', now });
+  assert.equal(plan.rejected, 2, 'une version et une liste à plus de dix minutes');
+  assert.deepEqual(plan.actions[0][3].id_sync, ['a', 'b', ''], 'à dix minutes près, ça passe');
+  assert.deepEqual(plan.arrived, { Contacts: ['a', 'b', 'c'] }, 'les clés annoncées par le lot restent comptées');
+  assert.equal(planUnpack([lot], 'J', { exportId: 'e' }).rejected, 0, 'sans heure, rien n\'est rejeté');
+  const signed = planUnpack([lot, soon], 'J', { exportId: 'e', now: 5000, bad: new Set([3]) });
+  assert.deepEqual([signed.rejected, signed.actions.at(-1)], [1, ['BulkRemoveRecord', 'J', [1, 3]]], 'ligne mal signée rejetée et effacée');
+  // Liste vide non signée : acceptée, mais la description des colonnes qu'elle porte n'est pas lue.
+  const cols = '[{"id": "Nom", "type": "Text"}]';
+  const empty = row(4, { Synchro_Type: 'cles', Synchro_Ids: '', Synchro_Colonnes: cols });
+  assert.deepEqual(planUnpack([empty], 'J', { exportId: 'e' }).actions[0][3].Synchro_Colonnes, [cols]);
+  const bare = planUnpack([empty], 'J', { exportId: 'e', bare: new Set([4]) });
+  assert.deepEqual([bare.rejected, bare.actions], [0, [['BulkRemoveRecord', 'J', [4]]]]);
+});
+
 test('CIBLE : fin d\'envoi annoncée par la SOURCE, effacée si des données arrivent ensuite', () => {
   const lot = { id: 1, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: '[]', Synchro_Renvoi: '', Synchro_Lot: '{"lignes": [["k", 1, false, {}]], "total": 1}', Sync_Recu: 50 };
   const end = { id: 2, Synchro_Export: 'e', Synchro_Type: KIND.end, Sync_Recu: 60 };
