@@ -138,7 +138,7 @@ async function installShots() {
   await page.getByRole('button', { name: 'Accepter' }).waitFor();
   await save('00d-installer-acces');
   await page.getByRole('button', { name: 'Accepter' }).click();
-  await widget().locator('.guide-steps').waitFor({ timeout: 30000 });
+  await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
   await page.locator('.test-right-opener').click().catch(() => {});
 }
 // CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
@@ -398,7 +398,8 @@ try {
   if (process.env.INSTALL_ONLY) process.exit(0);
   // --- Accueil et Tutoriel
   await openWidget(source.url);
-  await widget().locator('.guide-steps').waitFor();
+  await widget().locator('.guide summary').first().waitFor();
+  assert.ok(!(await widget().locator('.guide-steps').first().isVisible()), '« Qui fait quoi ? » replié par défaut');
   await shot('01-accueil');
   await widget().getByRole('tab', { name: 'Tutoriel' }).click();
   await widget().locator('.tuto-section').first().waitFor();
@@ -416,9 +417,13 @@ try {
   await shot('02-source-tables');
   await dialogButton('Continuer').click();
   await dialog().getByText('Le widget ajoutera').waitFor();
+  await dialog().getByText(/Toutes les colonnes \(5\) · toutes les lignes/).waitFor();
+  assert.ok(!(await dialog().getByRole('checkbox', { name: 'Interne' }).isVisible()), 'colonnes repliées : toutes partent par défaut');
+  await dialogButton('Choisir les colonnes').click();
   assert.equal(await dialog().getByRole('checkbox', { name: 'Supprime' }).count(), 0, 'Supprime n\'est pas une colonne envoyée');
   await dialog().getByRole('checkbox', { name: 'Interne' }).uncheck();
   await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
+  await dialog().getByText(/3 colonnes sur 5 · toutes les lignes/).waitFor();
   await shot('03-source-colonnes', 'modal');
   assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'rien d\'écrit avant la fin de l\'assistant');
   await dialogButton('Continuer').click();
@@ -448,7 +453,8 @@ try {
   await dialog().getByText('Transmettez ce code').waitFor();
   const invitation = await dialog().locator('textarea.code').first().inputValue();
   assert.ok(invitation.startsWith('GRISTSYNC2.'));
-  assert.match(await dialog().locator('.guide-steps li.current').innerText(), /CIBLE[\s\S]*Accepter une invitation/);
+  assert.match(await dialog().locator('.guide-steps li.current').textContent(), /CIBLE[\s\S]*Accepter une invitation/);
+  assert.ok(!(await dialog().locator('.guide-steps').isVisible()), '« Qui fait quoi ? » replié dans la fenêtre');
   await dialogButton('Copier avec les consignes').waitFor();
   await shot('05-source-invitation');
   await dialogButton('Plus tard').click();
@@ -701,6 +707,8 @@ try {
     await openWidget(source.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
+    const rowsButton = dialog().getByRole('button', { name: 'Filtrer les lignes', exact: true }).first();
+    if (await rowsButton.getAttribute('aria-expanded') !== 'true') await rowsButton.click();
     await pick('Lignes de Contacts à envoyer', column);
     if (value) await dialog().getByRole('textbox', { name: 'Valeur des lignes de Contacts à envoyer' }).fill(value);
     await dialogButton('Continuer').click();

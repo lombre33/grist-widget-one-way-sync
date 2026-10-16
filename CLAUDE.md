@@ -113,7 +113,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.1 (16 octobre 2026)
+## État : V0.5.3 (16 octobre 2026)
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
@@ -122,6 +122,14 @@ V0.5.2 : révoquer, supprimer l'export ou arrêter un Échange envoie d'abord un
 (`KIND.end`, `endNotice`) directement à l'adresse du webhook (`deleteWebhookWithNotice`) ; la CIBLE
 la lit (`planUnpack` rend `ended`), la note (`ended` dans la note du journal) et la carte affiche
 « Coupé par la SOURCE ». Des données arrivées après effacent l'avis.
+V0.5.3 (retours UX d'Antoine : « le parcours principal, sens unique d'une table complète avec
+secret, doit être super clair, le reste en option discrète ») : assistants larges de 720 px
+(`openWizard`, repliés sur un petit panneau), « Qui fait quoi ? » toujours replié, bouton Retour
+à chaque étape (changer d'options après l'invitation la retire et en refait une, avec
+confirmation ; côté CIBLE, revenir avant le lien défait la réception créée), colonnes et filtre
+d'un export repliés derrière deux boutons (tout part par défaut), modes « Dans un seul sens
+(recommandé) » puis « Autres modes », destinations en grille avec le libellé « Nom de la
+nouvelle table ».
 
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,
