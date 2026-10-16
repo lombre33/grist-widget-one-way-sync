@@ -163,12 +163,14 @@ const SECTIONS = [
       'Deux documents se tiennent à jour l’un l’autre : une modification faite d’un côté passe de l’autre, sans revenir ; quand la même ligne change des deux côtés, la plus récente l’emporte. Il faut un propriétaire de chaque côté.',
       'SOURCE : en ajoutant un destinataire (le premier de l’export), choisir Échange. Le widget publie un formulaire de retour sur sa propre page : copier son lien, il part dans l’invitation. CIBLE : accepter comme d’habitude ; la réponse branche les deux sens à la fois. SOURCE : approuver.',
       'Une case Supprime est ajoutée aux tables : cochée d’un côté, la ligne disparaît des deux. Arrêter, d’un côté ou de l’autre, arrête les deux sens ; les tables gardent leurs lignes.',
+      'Échange à plusieurs : sur un export déjà en Échange, « Ajouter un participant » invite un document de plus. Le document qui invite administre : il reçoit les modifications de chacun et les renvoie aux autres ; les participants ne se branchent qu’à lui. Une ligne cochée Supprime par un participant reste chez lui, cochée, et disparaît chez les autres. Révoquer ne retire qu’un participant.',
     ], [
       'Two documents keep each other up to date: a change made on one side reaches the other, without coming back; when the same row changes on both sides, the most recent wins. Each side needs an owner.',
       'SOURCE: when adding a recipient (the first of the export), pick Exchange. The widget publishes a return form on its own page: copy its link, it goes into the invitation. TARGET: accept as usual; the reply connects both ways at once. SOURCE: approve.',
       'A Supprime box is added to the tables: ticked on one side, the row disappears on both. Stopping, on either side, stops both ways; the tables keep their rows.',
+      'Multi-party Exchange: on an export already in Exchange, “Add a participant” invites one more document. The inviting document runs the Exchange: it receives each one’s changes and passes them on to the others; participants only connect to it. A row ticked Supprime by a participant stays there, ticked, and disappears for the others. Revoke only removes one participant.',
     ]],
-    images: ['20-echange-mode', '21-echange-cible'] },
+    images: ['20-echange-mode', '21-echange-cible', '22-echange-plusieurs'] },
   { id: 'public', role: 'both',
     title: ['Variante : lien public', 'Variant: public link'],
     text: [[

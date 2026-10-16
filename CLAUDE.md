@@ -98,6 +98,23 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   sa description** de `GET /tables/Synchro/columns` en anonyme ; le filtre des lignes sur cette
   colonne et la règle de ligne marchent toujours (vérifié, lien public).
 
+## Branche `beta` (jamais publiée sur grist-factory)
+
+Plan : `/mnt/project-files/notes/beta-plan.md`. Les correctifs Alpha se font sur `main`, puis
+`beta` les reprend (avance rapide ou fusion).
+- Échange à plusieurs (fait) : un export en Échange accepte plusieurs participants (« Ajouter un
+  participant », mode Échange seul). Chaque participant a son journal de retour chez A, dont la note
+  garde l'id de son webhook (`hook`, posé à l'approbation ; un Échange plus ancien est retrouvé par
+  le document cité dans le mémo). Dès deux participants, `markHub` marque la ligne `echange` de
+  `Synchro` (`Synchro_Colonnes` = `HUB`, 'plusieurs' ; le webhook ne l'envoie pas) : la formule du lot
+  ne tait plus l'écho (`mute`), donc ce qu'un participant envoie repart vers tous, lui compris (sans
+  effet chez lui, même MajLe). Chez A (`hub` dans `copyContext`, journal `retour` d'un export
+  marqué), une ligne cochée `Supprime` n'est pas effacée mais recopiée cochée (sinon elle ne
+  repartirait pas) ; `withoutEffect` compare alors aussi `Supprime`. Révoquer un participant
+  (`removeParticipant`) n'enlève que son webhook (avec la ligne `fin`) et son journal ; chez lui,
+  un journal `echange` qui voit `ended` arrête son envoi de retour (`stopReturn`, propriétaire),
+  pour ne pas bloquer sa file. Testé de bout en bout (A, B, C) dans `exchangeSteps`.
+
 ## Le design préféré d'Antoine (design C)
 
 Le webhook dépose les versions dans `Journal` (table A). Un widget en accès complet, ouvert dans

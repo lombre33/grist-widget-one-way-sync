@@ -1,7 +1,7 @@
 // SOURCE : les formules de la table Synchro, et les colonnes que le widget ajoute aux tables
 // envoyées (clé, MajLe, RecalculLe, Supprime).
 import {
-  AUTHOR_COL, BUCKETS, COL_ID, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL,
+  AUTHOR_COL, BUCKETS, COL_ID, DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL,
   SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, chunk, isBlank,
 } from './common.js';
 
@@ -112,6 +112,9 @@ function keysFormula(pick) {
 // (à une seconde près) et dont MajLe est plus ancienne vient de l'autre document. Elle n'y repart
 // pas (pas d'écho) ; vers les autres exports (relais), elle part avec l'heure de sa version. Une
 // modification ici a une MajLe plus récente que la ligne 'echange' : elle part toujours.
+// Échange à plusieurs (ligne 'echange' marquée HUB) : tous les participants reçoivent le même lot,
+// donc ce qu'un participant envoie repart vers les autres, avec l'heure de sa version ; celui
+// d'où il vient le reçoit aussi, sans effet chez lui (même version).
 // `Supprime` part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
 function lotFormula(pick) {
   return [
@@ -121,7 +124,8 @@ function lotFormula(pick) {
     `rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
     'undone = set()',
     `if $${TYPE_COL} == "${KIND.lot}":`,
-    `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id`,
+    `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}")`,
+    `  mute = swap.id and swap.${SCHEMA_COL} != "${HUB}"`,
     `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
     `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
     // Seule RECALC_COL (un nombre : lu vite) est lue sur toutes les lignes ; les dates, bien plus
@@ -130,12 +134,12 @@ function lotFormula(pick) {
     '  def echo(r):',
     `    t, m = v(getattr(r, "${RECALC_COL}")) or 0, v(r.${ORDER_COL}) or 0`,
     '    return any(abs(t - s) < 1 and m < s for s in stamps)',
-    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut and not (swap and echo(r)))`,
-    '  fresh = set() if swap else set(r.id for r in touched if r.id not in recent and echo(r))',
+    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut and not (mute and echo(r)))`,
+    '  fresh = set() if mute else set(r.id for r in touched if r.id not in recent and echo(r))',
     '  undone = set(r.id for r in touched if r.id not in recent and r.id not in fresh and not echo(r))',
     // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
     // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
-    `  if len(touched) == len(rows) > (0 if swap else ${SMALL_TABLE}): undone = set()`,
+    `  if len(touched) == len(rows) > (0 if swap.id else ${SMALL_TABLE}): undone = set()`,
     '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
     `def when(r): return v(getattr(r, "${RECALC_COL}") if r.id in undone else r.${ORDER_COL})`,
     // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.

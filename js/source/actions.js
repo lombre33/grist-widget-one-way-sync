@@ -5,7 +5,7 @@ import { endNotice } from '../logic/exports.js';
 import { rowsSince } from '../logic/resend.js';
 import { deleteWebhookWithNotice, docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
 import { removeTechnicalTables } from '../pages.js';
-import { endExchange } from '../exchange.js';
+import { endExchange, removeParticipant } from '../exchange.js';
 import { readSourceNote, removeExport, saveExport, updateSourceNote } from './synchro.js';
 import { clearAndMark, resendTables } from './resend.js';
 import { confirmDialog, copyButton, copyField, el, openModal } from '../ui.js';
@@ -62,10 +62,16 @@ export async function resume(exp, h, out) {
 }
 
 // Révoquer une personne : son webhook disparaît, les autres destinataires continuent ; sa carte le
-// dit (voir endNotice). Un Échange s'arrête dans les deux sens (voir endExchange).
+// dit (voir endNotice). Un Échange s'arrête dans les deux sens (voir endExchange) ; dans un Échange
+// à plusieurs, pour ce participant seulement (voir removeParticipant).
 export async function revoke(exp, h) {
-  const body = t(exp.echange ? 'send.revoke.exchange' : 'send.revoke.body');
+  const one = exp.echange && !exp.retour && exp.recipients.length > 1;
+  const body = t(one ? 'send.revoke.participant' : exp.echange ? 'send.revoke.exchange' : 'send.revoke.body');
   if (!(await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body, confirmLabel: t('send.action.revoke') }))) return;
+  if (one) {
+    await removeParticipant(exp.id, h);
+    return;
+  }
   if (exp.echange) {
     await endExchange(exp.id, { keepExport: !exp.retour });
     return;

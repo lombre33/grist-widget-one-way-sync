@@ -2,14 +2,14 @@
 // widget demande à Grist quelles tables ont changé (voir due) ; si un journal ou une destination a
 // changé, et au moins une fois par minute, chaque journal est déplié, recopié dans ses
 // destinations, puis nettoyé. Le résultat de chaque passage est gardé ici pour l'onglet.
-import { EXPORT_COL, KEY_COL, KIND, LIST_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, randomHex } from '../logic/common.js';
+import { EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, randomHex } from '../logic/common.js';
 import { exchangeColumns, exportTables } from '../logic/exports.js';
 import { awaitingPartner, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../logic/journal.js';
 import { addedColumns, copyColumns, destRefs, droppedColumns, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../logic/consolidation.js';
 import { apply, docChanges, docIdentity, fetchRows, gristFetch, readSchema, withLock } from '../grist.js';
 import { addDestColumnsActions, destColumns, receivedJournals, updateJournalNote, upgradeJournal } from './journals.js';
 import { syncRows } from '../source/synchro.js';
-import { wireExchange } from '../exchange.js';
+import { stopReturn, wireExchange } from '../exchange.js';
 import { errorText } from '../ui.js';
 import { t } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
@@ -52,6 +52,7 @@ const inflow = new Map(); // journal -> { ids, at } : lignes reçues vues au pas
 const settled = new Map(); // `journal|table` -> { signature, at } : journal déjà recopié sans effet
 const lastRead = new Map(); // `journal|table` -> { numbers, drift } : numéros de ligne et retouches, à la dernière lecture
 const pulled = new Map(); // journal -> empreintes des instantanés publics déjà lus
+const stopped = new Set(); // Échanges coupés par l'autre document dont l'envoi de retour est arrêté
 
 export function startAutoConsolidation(render) {
   onChange = render;
@@ -203,7 +204,7 @@ function receivedColumns(entry, tableRows, schema, allowed) {
 // correspondance, colonnes effacées), les compteurs, les colonnes recopiées et leurs types, les
 // numéros de ligne et les retouches faites à la main (lus après la recopie).
 async function copyTable(ctx, noted) {
-  const { journal, groups, exchange, swap, allowedFor } = ctx;
+  const { journal, groups, exchange, hub, swap, allowedFor } = ctx;
   let entry = followRenames(noted, ctx.schema);
   if (!ctx.schema.has(entry.dest)) return { entry, error: t('error.destMissing', { dest: entry.dest }) };
   const tableRows = groups.get(entry.table) || [];
@@ -229,7 +230,7 @@ async function copyTable(ctx, noted) {
   }
   const destRows = await fetchRows(entry.dest);
   const { actions, stats, gone } = planConsolidation({
-    journalRows: tableRows, destRows, copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '', exchange,
+    journalRows: tableRows, destRows, copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '', exchange, hub,
   });
   // Échange : la ligne 'echange' de l'export est touchée dans le même lot (voir syncFormulas) :
   // les lignes reçues ne repartent pas vers l'autre document.
@@ -243,14 +244,16 @@ async function copyTable(ctx, noted) {
 }
 
 // Contexte de la recopie d'un journal. Échange : la ligne 'echange' de l'export et, côté du
-// document qui a invité, les colonnes que son export envoie par table.
+// document qui a invité, les colonnes que son export envoie par table, et s'il administre un
+// Échange à plusieurs (`hub`, voir planConsolidation).
 async function copyContext(schema, journal, note, groups) {
   const exchange = note.mode === 'echange';
   const rows = exchange ? await syncRows(schema) : [];
   const own = note.retour ? new Map(exportTables(rows, note.export).map(tb => [tb.table, new Set(tb.columns.map(c => c.id))])) : null;
+  const swap = rows.find(r => r[EXPORT_COL] === note.export && r[TYPE_COL] === KIND.swap) || null;
   return {
-    schema, journal, groups, exchange,
-    swap: rows.find(r => r[EXPORT_COL] === note.export && r[TYPE_COL] === KIND.swap) || null,
+    schema, journal, groups, exchange, swap,
+    hub: Boolean(note.retour && swap && swap[SCHEMA_COL] === HUB),
     allowedFor: dest => (own ? own.get(dest) || new Set() : null),
   };
 }
@@ -312,6 +315,10 @@ export async function restoreSource(journal, table) {
 async function consolidate(schema, { journal, note: noteBefore }) {
   if (noteBefore.mode === 'public' && await pull(noteBefore, journal)) lastArrival = Date.now();
   const { note, rows, left } = await unpack(journal, noteBefore);
+  if (note.ended && note.mode === 'echange' && !note.retour && !stopped.has(note.export)) {
+    stopped.add(note.export);
+    await stopReturn(note.export).catch(() => {});
+  }
   const groups = rowsByTable(expandRows(rows));
   const { pending, offers } = offersOf(groups, note);
   state.offers.set(journal, offers);

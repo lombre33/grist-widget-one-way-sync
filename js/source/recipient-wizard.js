@@ -8,7 +8,7 @@ import { exportCondition, hookName } from '../logic/exports.js';
 import { createWebhook, docIdentity, fetchRows, readSchema } from '../grist.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
-import { addDeleteColumns } from '../exchange.js';
+import { addDeleteColumns, markHub } from '../exchange.js';
 import { saveExport, syncRows, updateSourceNote } from './synchro.js';
 import { createJournal, receivedDests, updateJournalNote } from '../target/journals.js';
 import { resendTables } from './resend.js';
@@ -33,12 +33,17 @@ export function recipientWizard(exp, pending, onClose) {
 }
 
 // 1. Mode (réponse, lien public ou Échange) et secret (sans objet pour le lien public : grisé).
-// L'Échange suppose un export sans autre destinataire.
+// L'Échange suppose un export sans autre destinataire, ou déjà en Échange : un participant de plus
+// (Échange à plusieurs, ce document administre) ; un export en Échange n'a que des participants.
 function showOptions(ctx) {
   const { exp } = ctx;
+  const more = (exp.echange && !exp.retour) || exp.invitations.some(inv => inv.journal);
   const secretBox = el('input', { type: 'checkbox', checked: true });
   const secretPart = el('div', { class: 'form' }, el('label', { class: 'check' }, secretBox, t('send.secret')), el('p', { class: 'muted small' }, t('send.secret.help')));
-  const parts = { public: el('div', { class: 'hidden' }, message('warn', t('send.public.warn'))), echange: el('div', { class: 'hidden' }, message('info', t('send.mode.echange.help'))) };
+  const parts = {
+    public: el('div', { class: 'hidden' }, message('warn', t('send.public.warn'))),
+    echange: el('div', { class: more ? '' : 'hidden' }, message('info', t(more ? 'send.mode.echange.moreHelp' : 'send.mode.echange.help'))),
+  };
   const radio = (value, label, checked, disabled) => el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'gristsync-mode', value, checked, disabled, onchange: () => {
       secretBox.disabled = value === 'public';
@@ -46,16 +51,16 @@ function showOptions(ctx) {
     } }), label);
   const report = el('div', { class: 'report' });
   const mode = () => (document.querySelector('input[name="gristsync-mode"]:checked') || {}).value;
-  const exchangeOk = !exp.recipients.length && !exp.invitations.length && !exp.public;
+  const exchangeOk = more || (!exp.recipients.length && !exp.invitations.length && !exp.public);
   // Le parcours principal d'abord (un seul sens, avec secret) ; les autres modes, plus discrets.
   ctx.wizard.show(STEP.options, [
     el('p', { class: 'muted small' }, t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
     el('p', { class: 'field-title', id: 'gristsync-mode-title' }, t('send.mode')),
     el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-mode-title' },
-      radio('reponse', t('send.mode.reply'), true, false),
+      radio('reponse', t('send.mode.reply'), !more, more),
       el('p', { class: 'muted small' }, t('send.mode.others')),
-      radio('echange', exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), false, !exchangeOk),
-      radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public)),
+      radio('echange', more ? t('send.mode.echange.more') : exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), more, !exchangeOk),
+      radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public || more)),
     secretPart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
   ], [{ label: t('common.cancel') }, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(ctx, mode() !== 'public' && secretBox.checked, mode())) }]);
 }
@@ -183,12 +188,13 @@ function replyFiche(reply, docId) {
 }
 
 // Un webhook sur Synchro, filtré sur l'export, vers le journal de la CIBLE. Échange : l'export
-// reçoit sa ligne 'echange', et le journal de retour sait d'où viennent ses tables : il commence
-// à recopier.
+// reçoit sa ligne 'echange', le journal de retour sait d'où viennent ses tables (il commence à
+// recopier) et quel webhook est celui de ce participant ; dès deux participants, l'Échange est à
+// plusieurs (markHub).
 async function approve(ctx, inv, reply) {
   const { exp } = ctx;
   const r = reply.recipient;
-  await createWebhook({
+  const hook = await createWebhook({
     name: hookName(exp.name, exp.id), memo: [r.email, r.docId, r.team].filter(Boolean).join(' · '), url: reply.url,
     tableId: SYNC_TABLE, condition: exportCondition(exp.id),
   });
@@ -196,8 +202,9 @@ async function approve(ctx, inv, reply) {
     await addDeleteColumns(exp.tables.map(tb => tb.table));
     await saveExport(exp.id, exp.tables, { swap: true });
     await updateJournalNote(inv.journal, n => ({
-      ...n, from: { email: r.email, docId: r.docId }, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
+      ...n, from: { email: r.email, docId: r.docId }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
     }));
+    await markHub(exp.id);
   }
   await updateSourceNote((note) => {
     note.invitations = note.invitations.filter(i => i.id !== inv.id);

@@ -214,11 +214,14 @@ const newest = rows => rows.map(r => r[ORDER_COL]).reduce((a, b) => (compareOrde
 
 // Sans effet : la destination a déjà ces valeurs, ou la SOURCE n'a rien changé depuis la version
 // déjà recopiée (un renvoi, l'arrivée d'un autre destinataire, une colonne non envoyée modifiée).
-// Une retouche faite à la main dans la destination reste donc en place.
-function withoutEffect({ applied, copyCols }, version, here) {
-  const before = applied.get(version.row[KEY_COL]);
+// Une retouche faite à la main dans la destination reste donc en place. Échange à plusieurs
+// (`hub`) : la case Supprime compte aussi, et seule la destination fait foi (une version plus
+// ancienne que la ligne d'ici a déjà été écartée).
+function withoutEffect({ applied, copyCols, hub }, version, here) {
+  const before = hub ? null : applied.get(version.row[KEY_COL]);
   if (before && copyCols.every(([from]) => sameValue(version.row[from], before.row[from]))) return true;
-  return here.every(row => copyCols.every(([from, to]) => sameValue(version.row[from], row[to])));
+  return here.every(row => copyCols.every(([from, to]) => sameValue(version.row[from], row[to]))
+    && (!hub || isTrue(version.row[DELETE_COL]) === isTrue(row[DELETE_COL])));
 }
 
 // Effet de la dernière version d'une clé pas encore recopiée : 'suppression', 'modif' (dont le
@@ -228,7 +231,11 @@ function versionState(ctx, plan, key, version) {
   const here = ctx.dest.byKey.get(key);
   // Échange : la version reçue n'a d'effet que si elle est plus récente que la ligne d'ici.
   if (ctx.exchange && here && compareOrder(version.order, newest(here)) <= 0) return '';
-  if (isTrue(version.row[DELETE_COL])) plan.gone.add(key);
+  // Échange à plusieurs : une ligne cochée Supprime par un participant reste ici, cochée, pour
+  // repartir vers les autres ; elle est effacée chez eux.
+  const tombstone = ctx.hub && isTrue(version.row[DELETE_COL]);
+  if (tombstone && !here) return LEFT;
+  if (isTrue(version.row[DELETE_COL]) && !tombstone) plan.gone.add(key);
   if (plan.gone.has(key)) return here ? 'suppression' : LEFT;
   const candidates = !here && ctx.matchFrom ? ctx.dest.unkeyed.get(version.row[ctx.matchFrom]) : null;
   if (candidates && candidates.length) {
@@ -240,14 +247,16 @@ function versionState(ctx, plan, key, version) {
   if (here && withoutEffect(ctx, version, here)) return '';
   plan.upserts.push(version);
   if (here) noteReplaced(plan, ctx.copyCols, version, here[0]);
+  if (tombstone) return 'suppression';
   return here ? 'modif' : 'ajout';
 }
 
 // Le plan en actions Grist : ajouts et modifications par clé, rattachements, suppressions, puis
 // marques dans le journal et, pour l'historique, ce qui a été remplacé.
-function consolidationActions({ destTable, journalTable, copyCols, exchange }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
+function consolidationActions({ destTable, journalTable, copyCols, exchange, hub }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
   const values = (versions) => {
     const out = Object.fromEntries(copyCols.map(([from, to]) => [to, versions.map(v => v.row[from] ?? null)]));
+    if (hub) out[DELETE_COL] = versions.map(v => isTrue(v.row[DELETE_COL]));
     return exchange ? { ...out, [ORDER_COL]: versions.map(v => v.order ?? null) } : out;
   };
   return [
@@ -282,7 +291,9 @@ function consolidationActions({ destTable, journalTable, copyCols, exchange }, {
 // récente gagne : une version reçue n'a d'effet que si elle est plus récente que la ligne d'ici
 // (MajLe), et elle y écrit MajLe à son heure. Les listes des clés sont sans effet : une clé absente
 // de la liste de l'autre document peut n'y être pas encore arrivée ; seule `Supprime` efface.
-export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false }) {
+// Échange à plusieurs, côté du document qui administre (`hub`) : `Supprime` n'efface pas ici, elle
+// est recopiée (la ligne cochée repart vers les autres participants, qui l'effacent).
+export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
   const marks = new Map(); // ligne du journal -> effet ('' pour une liste ou une version sans effet)
@@ -290,7 +301,7 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, dest.byKey, marks);
   if (exchange) pending.forEach(({ row }) => marks.set(row.id, ''));
   const ctx = {
-    dest, copyCols, exchange,
+    dest, copyCols, exchange, hub: exchange && hub,
     matchFrom: (copyCols.find(([, to]) => to === matchCol) || [])[0],
     applied: latestByKey(journalRows.filter(r => isTrue(r[APPLIED_COL]) && !isTrue(r[DELETE_COL]))),
   };
@@ -301,13 +312,14 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
     marks.set(version.id, state);
     if (state === 'ajout') plan.stats.added++;
     if (state === 'modif') plan.stats.updated++;
+    if (state === 'suppression' && ctx.hub) plan.stats.removed++;
   }
   const removed = [...gone].filter(key => dest.byKey.has(key));
-  plan.stats.removed = removed.length;
+  plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
   if (removed.length) {
     const numbers = rowNumbers(destRows);
     for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
   }
-  return { actions: consolidationActions({ destTable, journalTable, copyCols, exchange }, { ...plan, removeIds, listGone, leftGone }), stats: plan.stats, gone };
+  return { actions: consolidationActions({ destTable, journalTable, copyCols, exchange, hub: ctx.hub }, { ...plan, removeIds, listGone, leftGone }), stats: plan.stats, gone };
 }

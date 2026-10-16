@@ -2,7 +2,9 @@
 // un export (même identifiant des deux côtés, avec sa ligne 'echange') et un journal en mode
 // 'echange' qui reçoit l'autre. Le journal de retour du document qui a invité (`retour`) attend
 // la réponse (`from` encore vide) avant de recopier quoi que ce soit.
-import { SYNC_TABLE } from './logic/common.js';
+// Échange à plusieurs : le document qui invite en administre plusieurs à la fois, chacun avec son
+// webhook et son journal de retour ; les participants ne se connaissent pas (voir markHub).
+import { EXPORT_COL, HUB, KIND, SCHEMA_COL, SYNC_TABLE, TYPE_COL } from './logic/common.js';
 import { deleteColumnAction, keyTriggerAction, missingSyncColumns, prepareSourceActions } from './logic/formulas.js';
 import { endNotice, exchangeTables, exportCondition, exportTables, exportableColumns, hookName, hooksOf } from './logic/exports.js';
 import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, listWebhooks, readSchema, webhookConditions } from './grist.js';
@@ -34,6 +36,40 @@ export async function wireExchange(note, retour = '') {
     name: hookName(note.name, note.export), memo: [from.email, from.docId].filter(Boolean).join(' · '), url: retour,
     tableId: SYNC_TABLE, condition: exportCondition(note.export),
   });
+}
+
+// Échange à plusieurs : la ligne 'echange' de l'export est marquée dès deux participants (webhooks
+// de l'export) ; la formule du lot renvoie alors aux autres ce que chacun envoie. Un seul : l'Échange
+// à deux, sans écho.
+export async function markHub(exportId) {
+  const [hooks, conditions, rows] = await Promise.all([listWebhooks(), webhookConditions(), syncRows()]);
+  const value = hooksOf(hooks, conditions, exportId).length >= 2 ? HUB : '';
+  const row = rows.find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.swap);
+  if (row && (row[SCHEMA_COL] || '') !== value) await apply([['UpdateRecord', SYNC_TABLE, row.id, { [SCHEMA_COL]: value }]]);
+}
+
+// Journal de retour d'un participant (webhook `hook`) : noté à l'approbation (`hook`) ; pour un
+// Échange branché avant, retrouvé par le document de la fiche, cité dans le mémo du webhook.
+const ownJournal = hook => ({ note }) => note.hook === hook.id
+  || (!note.hook && Boolean((note.from || {}).docId) && (hook.fields.memo || '').split(' · ').includes(note.from.docId));
+
+// Retirer un participant d'un Échange à plusieurs : son webhook part (avec l'avis de fin, qui
+// arrête aussi son envoi de retour, voir stopReturn), puis son journal de retour et sa clé ; les
+// autres continuent.
+export async function removeParticipant(exportId, hook) {
+  await deleteWebhookWithNotice(hook, endNotice(exportId));
+  const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.retour).filter(ownJournal(hook));
+  await removeTechnicalTables(journals.map(r => r.journal));
+  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== hook.id); });
+  await markHub(exportId);
+}
+
+// Échange coupé par l'autre document : son journal de retour n'existe plus, chaque envoi de retour
+// échouerait et bloquerait la file de ce document. L'envoi de retour s'arrête donc ici aussi
+// (propriétaire seulement ; sinon, au premier passage d'un propriétaire).
+export async function stopReturn(exportId) {
+  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
+  for (const h of hooksOf(hooks, conditions, exportId)) await deleteWebhook(h.id);
 }
 
 // Échange, côté du document qui invite : ses tables reçoivent la case Supprime.

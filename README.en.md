@@ -24,7 +24,8 @@ a row is added, changed or deleted in the original.
 - **Nothing to host**: Grist itself carries the changes, even when nobody has the document open.
 - **You choose what leaves**: the tables, the columns and, optionally, the rows.
 - **Each recipient on their own**: add one, pause one, revoke one without touching the others.
-- **Both ways if needed**: in Exchange mode, two documents keep each other up to date.
+- **Both ways if needed**: in Exchange mode, two documents keep each other up to date; with more
+  participants, one document runs the Exchange and relays between them.
 
 ## How it works
 
@@ -166,7 +167,7 @@ Full analysis (in French): [`SECURITY.md`](SECURITY.md).
   15 minutes (Grist behaviour); **Unblock the queue** clears it, then resends.
 - A table or column renamed in the SOURCE is no longer sent correctly: the export card says so,
   and **Edit** lets you tick the columns again.
-- An Exchange is the only recipient of its export. A row larger than 1 MB cannot be sent.
+- An export in Exchange only has Exchange participants. A row larger than 1 MB cannot be sent.
 
 Full list (in French): [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 

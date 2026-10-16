@@ -28,7 +28,7 @@ l'original.
 - **Chaque destinataire à part** : on en ajoute, on en met un en pause, on en révoque un sans
   toucher aux autres.
 - **Dans les deux sens si besoin** : en mode Échange, deux documents se tiennent à jour l'un
-  l'autre.
+  l'autre ; à plusieurs, un document administre et relaie entre les participants.
 
 ## Comment ça marche
 
@@ -172,7 +172,8 @@ L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
   15 minutes (comportement de Grist) ; **Débloquer la file** la vide puis renvoie.
 - Une table ou une colonne renommée dans la SOURCE ne part plus correctement : la carte de
   l'export le signale, et **Modifier** permet de cocher de nouveau les colonnes.
-- Un Échange est le seul destinataire de son export. Une ligne de plus de 1 Mo ne peut pas partir.
+- Un export en Échange n'a que des participants à l'Échange. Une ligne de plus de 1 Mo ne peut pas
+  partir.
 
 La liste complète est dans [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 

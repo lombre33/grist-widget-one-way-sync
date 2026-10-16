@@ -265,6 +265,23 @@ test('consolidation : clés en double dans la destination, version supprimée d\
   assert.deepEqual(actions[1][3].Sync_Etat, ['modif', 'partie'], 'suppression d\'une clé jamais reçue : sans effet, notée partie');
 });
 
+test('Échange à plusieurs, chez A : une ligne cochée Supprime reste ici, cochée, pour repartir vers les autres', () => {
+  const hub = (journalRows, destRows) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', exchange: true, hub: true });
+  const destRows = [{ id: 1, id_sync: 'a', Nom: 'A', MajLe: 20, Supprime: false }, { id: 2, id_sync: 'b', Nom: 'B', MajLe: 20, Supprime: true }];
+  const deleted = hub([j(1, 'a', 30, { Nom: 'A', Supprime: true }), j(2, 'x', 30, { Supprime: true })], destRows);
+  assert.deepEqual(deleted.stats, { added: 0, updated: 0, removed: 1 });
+  assert.deepEqual(deleted.actions.slice(0, 2), [
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a'] }, { Nom: ['A'], Supprime: [true], MajLe: [30] }, { on_many: 'all' }],
+    marked([1, 2], ['suppression', 'partie']),
+  ], 'rien n\'est effacé ici ; une clé inconnue ici reste sans effet');
+  assert.deepEqual(hub([j(1, 'b', 30, { Nom: 'B', Supprime: true })], destRows).actions, [marked([1], [''])], 'déjà cochée : sans effet');
+  const back = hub([j(1, 'b', 40, { Nom: 'B', Supprime: false })], destRows);
+  assert.deepEqual(back.actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b'] }, { Nom: ['B'], Supprime: [false], MajLe: [40] }, { on_many: 'all' }],
+    'décochée par un participant : décochée ici, et repart');
+  assert.deepEqual(planConsolidation({ journalRows: [j(1, 'a', 30, { Nom: 'A', Supprime: true })], destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', hub: true }).stats,
+    { added: 0, updated: 0, removed: 1 }, 'hors Échange, la marque est sans objet : la ligne est effacée');
+});
+
 test('Échange : suppression plus ancienne que la ligne d\'ici sans effet, plus récente appliquée', () => {
   const destRows = [{ id: 10, id_sync: 'a', MajLe: 50, Nom: 'A' }];
   const run = order => planConsolidation({

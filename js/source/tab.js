@@ -181,7 +181,7 @@ const exportNotes = exp => [
   exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
   exp.partial ? message('info', t('send.export.partial')) : null,
   exp.retour ? message('info', t('send.exchange.managed')) : null,
-  exp.echange && !exp.retour ? el('p', { class: 'muted small' }, t('send.exchange.with')) : null,
+  exp.echange && !exp.retour ? el('p', { class: 'muted small' }, exp.recipients.length > 1 ? t('send.exchange.hub', { n: exp.recipients.length }) : t('send.exchange.with')) : null,
 ];
 
 const tablesLine = exp => exp.tables.map(tb => t(tb.filter ? 'send.export.tableFiltered' : 'send.export.table',
@@ -200,16 +200,14 @@ function exportCard(exp, state, open, out) {
     const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
     notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
   };
-  // Échange : un seul destinataire ; l'export de retour (reçu d'un autre document) se règle depuis
-  // l'onglet Recevoir.
-  const single = exp.echange || exp.invitations.some(inv => inv.journal) ? t('send.exchange.single') : '';
+  // L'export de retour d'un Échange (reçu d'un autre document) se règle depuis l'onglet Recevoir.
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
     exportNotes(exp),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
-      exp.retour ? null : wizardButton(t('send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: true, ownerOnly, reason: single }),
+      exp.retour ? null : wizardButton(t(exp.echange ? 'send.action.addParticipant' : 'send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: true, ownerOnly }),
       exp.retour ? null : wizardButton(t('send.action.edit'), 'edit', () => exportWizard(exp, renderSource), { ownerOnly }),
       actionButton(t('send.action.load'), 'send', load, ownerOnly, out, { reason: n ? '' : t('send.load.nobody') }),
       actionButton(t('send.action.delete'), 'trash', () => deleteExport(exp), ownerOnly, out, { kind: 'btn-danger-text' })));

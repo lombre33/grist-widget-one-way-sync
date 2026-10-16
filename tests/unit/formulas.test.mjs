@@ -36,18 +36,20 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /  if not capped and size > 2000000: return json\.dumps\(\{"lignes": \[\], "total": len\(rows\), "trop": True\}\)/, 'instantané public plafonné');
   assert.match(lot, /  touched = \[r for r in rows if \(v\(getattr\(r, "RecalculLe", None\)\) or 0\) > v\(cut\)\]\n/,
     'seule RecalculLe (un nombre) est lue sur toutes les lignes, MajLe sur les lignes recalculées');
-  assert.match(lot, /  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut and not \(swap and echo\(r\)\)\)/,
+  assert.match(lot, /  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut and not \(mute and echo\(r\)\)\)/,
     'une ligne reçue par l\'Échange ne repart pas vers l\'autre document, même dans les 5 secondes');
+  assert.match(lot, /  mute = swap\.id and swap\.Synchro_Colonnes != "plusieurs"\n/,
+    'Échange à plusieurs : ce qu\'envoie un participant repart vers les autres');
+  assert.match(lot, /  fresh = set\(\) if mute else set\(r\.id for r in touched if r\.id not in recent and echo\(r\)\)/,
+    'une ligne reçue par l\'Échange part vers les autres exports (relais), à l\'heure de sa version');
   assert.match(lot, /undone = set\(r\.id for r in touched if r\.id not in recent and r\.id not in fresh and not echo\(r\)\)/,
     'une ligne annulée (RecalculLe récent, MajLe ancienne) repart');
   assert.match(lot, /  stamps = \[x\.Sync_Etat for x in Synchro\.lookupRecords\(Synchro_Type="echange"\) if isinstance\(x\.Sync_Etat, \(int, float\)\)\]/,
     'heures des dernières consolidations d\'Échange');
   assert.match(lot, /    t, m = v\(getattr\(r, "RecalculLe"\)\) or 0, v\(r\.MajLe\) or 0\n    return any\(abs\(t - s\) < 1 and m < s for s in stamps\)/,
     'écho : ligne recalculée par la consolidation, MajLe plus ancienne qu\'elle');
-  assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\.id/);
-  assert.match(lot, /  fresh = set\(\) if swap else set\(r\.id for r in touched if r\.id not in recent and echo\(r\)\)/,
-    'une ligne reçue par l\'Échange part vers les autres exports (relais), à l\'heure de sa version');
-  assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
+  assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\n/);
+  assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap\.id else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
   assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');

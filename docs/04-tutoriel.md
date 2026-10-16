@@ -291,6 +291,21 @@ Une case `Supprime` est ajoutée aux tables : cochée d'un côté, la ligne disp
 ligne déjà présente dans la CIBLE, sans clé, reste à ce document. Arrêter, d'un côté ou de l'autre,
 arrête les deux sens ; les tables gardent leurs lignes.
 
+### Échange à plusieurs
+
+Sur un export déjà en Échange, **Ajouter un participant** invite un document de plus, avec les
+mêmes étapes. Le document qui invite **administre** l'Échange : il reçoit les modifications de
+chaque participant et les renvoie aux autres, la plus récente l'emportant. Les participants ne se
+connaissent pas : chacun n'est branché qu'à lui. La recopie chez lui se fait quand sa page du
+widget est ouverte : tant qu'elle ne l'est pas, une modification d'un participant attend dans son
+journal et n'atteint pas les autres.
+
+![Échange à plusieurs](images/22-echange-plusieurs.png)
+
+Une ligne cochée `Supprime` par un participant reste chez celui qui administre, cochée, et
+disparaît chez les autres. **Révoquer** ne retire qu'un participant : son journal de retour et sa
+clé sont effacés, et son propre widget arrête son envoi de retour.
+
 ## Mode lien public
 
 À l'étape 4, choisir **Lien public**. Le widget pose des règles d'accès : toute personne qui n'est

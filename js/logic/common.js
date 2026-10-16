@@ -34,6 +34,10 @@ export const TRACK_COL = STATE_COL;
 // son empreinte ne sont lus que par le lien public. Une seule ligne 'charge', d'aucun export, suit
 // les renvois du document (voir resend.js).
 export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge', end: 'fin' };
+// Échange à plusieurs : marque de la ligne 'echange' (dans Synchro_Colonnes, que le webhook n'envoie
+// pas) quand l'export a au moins deux participants. Le document qui administre renvoie alors aux
+// autres ce que chacun lui envoie (voir lotFormula).
+export const HUB = 'plusieurs';
 
 // CIBLE : un journal par export reçu, où le webhook dépose les lignes de Synchro.
 export const JOURNAL_PREFIX = 'Journal_';

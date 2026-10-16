@@ -346,7 +346,7 @@ try {
     const bRows = await waitFor(async () => { const r = await fiches(b.doc); return Object.keys(r).length === 3 && r; }, 'B reçoit les fiches de A');
     assert.deepEqual(Object.values(bRows).map(r => `${r.Nom}:${r.Ville}:${r.id_sync === aRows[r.Nom].id_sync}`).sort(), ['Anna:Lyon:true', 'Basile:Paris:true', 'Céline:Nantes:true']);
     assert.ok(['MajLe', 'RecalculLe', 'Supprime'].every(c => c in bRows.Anna), 'B : colonnes de l\'envoi de retour');
-    await widget().getByText('Échange : vos modifications de ces tables repartent vers ce document.').waitFor();
+    await widget().getByText('Échange : vos modifications de ces tables repartent vers ce document, qui peut les transmettre à d’autres participants.').waitFor();
     await shot('21-echange-cible');
     // Lignes de A recopiées chez B : rien ne repart vers A.
     const sentLines = async (doc, table) => (await rawRows(doc, table)).flatMap(r => (r.Synchro_Type === 'lot' ? JSON.parse(r.Synchro_Lot || '{}').lignes || [] : []));
@@ -387,6 +387,59 @@ try {
     await waitFor(async () => !(await fiches(a.doc)).Anna, 'Supprime cochée chez B : ligne effacée chez A');
     assert.equal((await fiches(b.doc)).Anna.Supprime, true);
     step('Échange : modifications dans les deux sens, sans écho, la plus récente l\'emporte, Supprime efface des deux côtés');
+
+    // --- Échange à plusieurs : C rejoint l'Échange que A administre. Ce que B envoie repart vers C
+    // par A, et inversement ; une ligne cochée Supprime chez C reste cochée chez A et disparaît chez
+    // B ; A retire C, dont l'envoi de retour s'arrête ; B continue.
+    const c = await newDocWithWidget('Échange C');
+    await openWidget(a.url);
+    await button('Ajouter un participant').click();
+    assert.ok(await dialog().getByRole('radio', { name: /Un participant de plus/ }).isChecked(), 'l\'Échange est proposé d\'office');
+    assert.ok(await dialog().getByRole('radio', { name: /Dans un seul sens/ }).isDisabled(), 'un export en Échange n\'a que des participants');
+    await dialogButton('Créer l’invitation').click();
+    const backC = await waitFor(async () => { const f = (await publishedForms(a.doc)).filter(x => x.id !== back[0].id); return f.length === 1 && f; }, 'second formulaire de retour publié');
+    await openWidget(a.url);
+    const codeC = await testLink('Lien du formulaire de retour', await formLink(a.doc, backC[0]), 'Transmettez ce code');
+    await dialogButton('Plus tard').click();
+    const answerC = await accept(c.doc, c.url, codeC, '« Partage » : table Fiches.');
+    await approve(answerC, { url: a.url });
+    const swapRow = async () => (await records(a.doc, 'Synchro')).find(r => r.Synchro_Type === 'echange');
+    assert.equal((await swapRow()).Synchro_Colonnes, 'plusieurs', 'Échange à plusieurs dès deux participants');
+    await widget().getByText(/Échange à plusieurs \(2 participants\)/).waitFor();
+    await shot('22-echange-plusieurs');
+    const names = async doc => Object.values(await fiches(doc)).filter(r => !r.Supprime).map(r => `${r.Nom}:${r.Ville}`).sort().join();
+    await openWidget(c.url);
+    await waitFor(async () => (await names(c.doc)) === (await names(a.doc)), 'C reçoit les fiches de A');
+
+    const bNow = await fiches(b.doc);
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Basile.id, { Ville: 'Vannes' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => (await fiches(a.doc)).Basile.Ville === 'Vannes', 'A reçoit la modification de B');
+    await openWidget(c.url);
+    await waitFor(async () => (await fiches(c.doc)).Basile.Ville === 'Vannes', 'C reçoit, par A, la modification de B');
+    await applyActions(c.doc, [['AddRecord', 'Fiches', null, { Nom: 'Élise', Ville: 'Caen' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => ((await fiches(a.doc)).Élise || {}).Ville === 'Caen', 'A reçoit l\'ajout de C');
+    await openWidget(b.url);
+    await waitFor(async () => ((await fiches(b.doc)).Élise || {}).Ville === 'Caen', 'B reçoit, par A, l\'ajout de C');
+    await applyActions(c.doc, [['UpdateRecord', 'Fiches', (await fiches(c.doc)).Damien.id, { Supprime: true }]]);
+    await openWidget(a.url);
+    await waitFor(async () => ((await fiches(a.doc)).Damien || {}).Supprime === true, 'A garde Damien, cochée Supprime');
+    await openWidget(b.url);
+    await waitFor(async () => !(await fiches(b.doc)).Damien, 'B efface Damien');
+
+    await openWidget(a.url);
+    await revoke(widget().locator('.person', { hasText: c.doc.slice(0, 10) }));
+    await waitFor(async () => (await api('GET', `/docs/${a.doc}/webhooks`)).webhooks.length === 1, 'un participant de moins');
+    assert.deepEqual((await publishedForms(a.doc)).map(f => f.id), [back[0].id], 'son journal de retour et sa clé sont effacés, pas ceux de B');
+    assert.equal((await swapRow()).Synchro_Colonnes, '', 'retour à l\'Échange à deux');
+    await openWidget(c.url);
+    await widget().getByText('Coupé par la SOURCE').waitFor({ timeout: 30000 });
+    await waitFor(async () => !(await api('GET', `/docs/${c.doc}/webhooks`)).webhooks.length, 'C : envoi de retour arrêté');
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Céline.id, { Ville: 'Tours' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => (await fiches(a.doc)).Céline.Ville === 'Tours', 'B et A continuent');
+    step('Échange à plusieurs : ce que B envoie repart vers C par A, et inversement ; Supprime cochée chez C efface chez B, reste cochée chez A ; A retire C, B continue');
   }
   if (process.env.ONLY_EXCHANGE) {
     await exchangeSteps();
