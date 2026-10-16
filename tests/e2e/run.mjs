@@ -51,6 +51,13 @@ async function api(method, path, body) {
 const applyActions = (doc, actions) => api('POST', `/docs/${doc}/apply`, actions);
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
 const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
+// Colonnes affichées sur la page d'une table (ses vues en grille).
+async function pageColumns(doc, tableId) {
+  const table = (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId);
+  const sections = new Set((await records(doc, '_grist_Views_section')).filter(sc => sc.parentId === table.primaryViewId && sc.parentKey === 'record').map(sc => sc.id));
+  const cols = new Map((await records(doc, '_grist_Tables_column')).map(c => [c.id, c.colId]));
+  return [...new Set((await records(doc, '_grist_Views_section_field')).filter(f => sections.has(f.parentId)).map(f => cols.get(f.colRef)))];
+}
 
 async function newDocWithWidget(name, setup) {
   const workspace = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
@@ -241,8 +248,6 @@ try {
   }
   const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
     sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
-  // La page du widget est repliée une fois le lien donné : la page du formulaire ne se voit plus.
-  const widgetPageCollapsed = async doc => JSON.parse((await pagesOf(doc)).find(p => p.name === 'Synchro').options || '{}').collapsed === true;
 
   // SOURCE : un export d'une table, toutes ses colonnes.
   async function newExport(table, name) {
@@ -285,7 +290,6 @@ try {
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
     const code2 = await testLink('Lien du formulaire', await formLink(doc, forms[0]), 'Le lien fonctionne');
-    await waitFor(() => widgetPageCollapsed(doc), 'page du widget repliée');
     await dialogButton('Fermer').click();
     return code2;
   }
@@ -473,8 +477,7 @@ try {
   const widgetPage = await pageOf(target.doc, widgetSection.parentId);
   const formPage = await pageOf(target.doc, formSections[0].parentId);
   assert.notEqual(formPage.id, widgetPage.id, 'formulaire sur sa propre page');
-  assert.equal(formPage.indentation, widgetPage.indentation + 1, 'page du formulaire sous celle du widget');
-  assert.ok(!JSON.parse(widgetPage.options || '{}').collapsed, 'page du widget dépliée pour montrer le formulaire');
+  assert.equal(formPage.indentation, 0, 'page du formulaire à la racine');
   await dialog().getByText(/sur la page\s+«\s+Journal_Annuaire\s+»/).waitFor();
   await dialog().getByText(/il sert pour toutes les tables de l’export/).waitFor();
   await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; }));
@@ -489,7 +492,6 @@ try {
   assert.equal((await records(source.doc, 'Journal_Annuaire')).length, 1, 'la ligne de test est arrivée dans l\'autre document');
   await stray.remove();
   const reply = await testLink('Lien du formulaire', await formLink(target.doc, formSections[0]), 'Le lien fonctionne');
-  await waitFor(() => widgetPageCollapsed(target.doc), 'page du widget repliée');
   await shot('10-cible-reponse');
   await dialogButton('Fermer').click();
   step('CIBLE : un journal pour l\'export, un formulaire, réponse produite');
@@ -544,7 +546,8 @@ try {
   // --- Pages et tables : aucune page technique, une seule table technique côté SOURCE
   assert.deepEqual((await pagesOf(source.doc)).map(p => p.name), ['Table1', 'Contacts', 'Villes', 'Synchro'], 'SOURCE : aucune page technique');
   const targetPages = (await pagesOf(target.doc)).map(p => `${p.indentation}:${p.name}`);
-  assert.equal(targetPages[targetPages.indexOf('0:Synchro') + 1], '1:Journal_Annuaire', 'CIBLE : la page du formulaire juste sous celle du widget');
+  assert.ok(targetPages.includes('0:Journal_Annuaire'), 'CIBLE : la page du formulaire à la racine');
+  assert.ok(!JSON.parse((await pagesOf(target.doc)).find(p => p.name === 'Synchro').options || '{}').collapsed, 'page du widget laissée dépliée');
   assert.deepEqual(targetPages.map(p => p.slice(2)).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Synchro', 'Table1'], 'CIBLE : aucune autre page technique');
   assert.deepEqual((await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Contacts', 'Synchro', 'Table1', 'Villes']);
   assert.deepEqual((await records(target.doc, '_grist_Tables')).map(tb => tb.tableId).sort(), ['Communes', 'Contacts', 'Journal_Annuaire', 'Table1']);
@@ -552,8 +555,7 @@ try {
   assert.deepEqual(await columnsOf(target.doc, 'Contacts'), ['Lieu', 'Nom', 'Ville', 'id_sync']);
   const hiddenOf = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/columns?hidden=true`)).columns.map(c => c.id);
   assert.ok(!(await hiddenOf(source.doc, 'Synchro')).includes('manualSort'), 'Synchro sans manualSort (le webhook l\'enverrait)');
-  assert.ok(await widgetPageCollapsed(target.doc), 'page du widget repliée');
-  step('SOURCE et CIBLE : tables techniques sans page, destination sans colonne technique, formulaire sur sa page, repliée');
+  step('SOURCE et CIBLE : tables techniques sans page, destination sans colonne technique, formulaire sur sa page, à la racine');
 
   // --- Ajout, modification, retouche manuelle, suppression logique, vraie suppression
   const bob = dest.find(r => r.Nom === 'Bob');
@@ -642,6 +644,8 @@ try {
   assert.deepEqual(communes.map(r => `${r.Commune}:${r.Note}`).sort(), ['Lyon:déjà là', 'Paris:'], 'Lyon rattachée, pas doublée');
   assert.deepEqual(await columnsOf(target.doc, 'Communes'), ['Commune', 'Note', 'id_sync'], 'table existante complétée de la seule clé');
   await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue et remplie');
+  const shown = await pageColumns(target.doc, 'Contacts');
+  assert.ok(shown.includes('Interne') && !shown.includes('id_sync'), `colonne ajoutée visible sur la page, clé masquée : ${shown}`);
   await historyHas('Paris', 'ajout');
   assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Contacts', 'Communes'], 'historique groupé par table');
   await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);

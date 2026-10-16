@@ -86,7 +86,12 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 - Ajouter une section à la page du widget recrée l'iframe du widget : toute étape qui en ajoute
   une doit pouvoir reprendre où elle s'est arrêtée. Créer le formulaire sur une autre page, la
   ranger sous celle du widget (`indentation`) et replier celle-ci ne recharge pas le widget
-  (vérifié en V0.5, `window.sameFrame` dans le test).
+  (vérifié en V0.5, `window.sameFrame` dans le test). Depuis la V0.5.1 (Antoine, 16 octobre :
+  « pour que les gens la trouvent »), la page du formulaire reste à la racine, en fin de liste, et
+  la page du widget n'est plus repliée. `Synchro` n'a toujours pas de page.
+- `AddColumn` ne met une colonne que dans « Données source » et la fiche, pas dans les vues de la
+  page : une colonne ajoutée plus tard à une destination arrivait cachée. `AddVisibleColumn` l'ajoute
+  aux vues en grille (vérifié, V0.5.1).
 - `CreateViewSection(table, 0, 'form')` crée une page nommée « New page » : la renommer.
   `RemoveTable` efface aussi la page devenue vide de son formulaire (mais pas son partage).
 - Une règle de colonne `user.Access == VIEWER` → `-R` sur `Synchro_Export` retire la colonne **et
@@ -108,7 +113,12 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.0 (nuit du 15 au 16 octobre 2026)
+## État : V0.5.1 (16 octobre 2026)
+
+V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
+d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
+colonnes ajoutées plus tard visibles dans la destination ; formulaires à la racine des pages.
+
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,
 audit, refacto, gwaudit) : Échange (deux sens, la plus récente l'emporte, sans écho, deux codes),
