@@ -113,7 +113,15 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.7 (16 octobre 2026)
+## État : V0.5.8 (16 octobre 2026)
+
+V0.5.8 (deux défauts trouvés par les tests de la V0.8.0, préparés sur `alpha` à la demande
+d'Antoine, non publiés) : au chargement du document SOURCE, Grist recalcule `RecalculLe` de toutes
+les lignes, et une petite table repart à cette heure-là ; un renvoi plus ancien selon `MajLe`
+(colonne ajoutée à l'export, nouveau destinataire) était ensuite ignoré par la CIBLE. Une ligne
+renvoyée part désormais, hors Échange, à `max(MajLe, RecalculLe)` (`when` de la formule du lot ;
+test : `force-reload` avant la colonne ajoutée). Un onglet cliqué pendant le démarrage du widget
+l'emporte sur le premier écran (`picked`, `ready` dans `js/main.js`).
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;

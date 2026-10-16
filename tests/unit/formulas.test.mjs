@@ -48,7 +48,9 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /  fresh = set\(\) if swap else set\(r\.id for r in touched if r\.id not in recent and echo\(r\)\)/,
     'une ligne reçue par l\'Échange part vers les autres exports (relais), à l\'heure de sa version');
   assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
-  assert.match(lot, /def when\(r\): return v\(getattr\(r, "RecalculLe"\) if r\.id in undone else r\.MajLe\)/, 'une annulation part à son heure');
+  assert.match(lot, /if r\.id in undone: return v\(getattr\(r, "RecalculLe"\)\)/, 'une annulation part à son heure');
+  assert.match(lot, /if r\.id in again and \$Synchro_Type == "lot" and not swap: return max\(v\(r\.MajLe\) or 0, v\(getattr\(r, "RecalculLe", None\)\) or 0\)/,
+    'un renvoi part au plus tôt au dernier recalcul, hors Échange');
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
   assert.match(syncFormulas([]).keys, /tables = \{\}\nsrc = tables\.get/);
