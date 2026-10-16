@@ -1,7 +1,9 @@
 // Recopie des versions reçues dans les tables de destination (CIBLE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addedColumns, copyColumns, destRefs, droppedColumns, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
+import {
+  addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, refusedGaps, restoreActions, rowNumbers,
+} from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
@@ -291,4 +293,86 @@ test('Échange : suppression plus ancienne que la ligne d\'ici sans effet, plus 
   assert.deepEqual(run(60).stats, { added: 0, updated: 0, removed: 1 });
   const fresh = planConsolidation({ journalRows: [{ id: 1, id_sync: 'b', MajLe: null, Supprime: false, Nom: 'B' }], destRows, copyCols: [['Nom', 'Nom']], destTable: 'D', journalTable: 'J', exchange: true });
   assert.deepEqual(fresh.actions[0][3], { Nom: ['B'], MajLe: [null] }, 'ligne nouvelle sans date : ajoutée');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Échange administré ici : règles pour les changements des participants
+
+test('exchangeRules : tout accepté rend null ; règles et refus lus, valeurs inconnues ramenées au défaut', () => {
+  assert.equal(exchangeRules(undefined), null);
+  assert.equal(exchangeRules({ regles: { ajout: 'accepter' }, refus: 'signaler' }), null);
+  assert.deepEqual(exchangeRules({ regles: { modif: 'valider' } }), { ajout: 'accepter', modif: 'valider', suppression: 'accepter', refus: 'corriger' });
+  assert.deepEqual(exchangeRules({ regles: { ajout: 'toString', suppression: 'refuser' }, refus: 'signaler' }),
+    { ajout: 'accepter', modif: 'accepter', suppression: 'refuser', refus: 'signaler' });
+});
+
+const hubDest = () => [{ id: 10, id_sync: 'a', Nom: 'A', MajLe: 20, Supprime: false, manualSort: 1 }, { id: 11, id_sync: 'b', Nom: 'B', MajLe: 20, Supprime: false, manualSort: 2 }];
+const proposals = () => [j(1, 'a', 30, { Nom: 'A2' }), j(2, 'x', 30, { Nom: 'X' }), j(3, 'b', 30, { Nom: 'B', Supprime: true })];
+const ruledArgs = rule => ({
+  journalRows: proposals(), destRows: hubDest(), copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', exchange: true, deleteCol: true,
+  rules: { ajout: rule, modif: rule, suppression: rule, refus: 'corriger' },
+});
+const ruled = (rule, extra = {}) => planConsolidation({ ...ruledArgs(rule), ...extra });
+
+test('Échange administré ici : un changement à valider attend, sans marque ni écriture ; la décision l\'applique', () => {
+  const waiting = ruled('valider');
+  assert.deepEqual(waiting.actions, [], 'rien n\'est écrit, rien n\'est marqué');
+  assert.deepEqual(waiting.pending.map(p => [p.id, p.key, p.state, p.n, p.cells]), [
+    [1, 'a', 'modif', 1, [['Nom', 'Nom', 'A', 'A2']]],
+    [2, 'x', 'ajout', null, [['Nom', 'Nom', null, 'X']]],
+    [3, 'b', 'suppression', 2, [['Nom', 'Nom', 'B', null]]],
+  ]);
+  const accepted = ruled('valider', { decisions: new Map([[1, 'accepter'], [3, 'refuser']]) });
+  assert.deepEqual(accepted.stats, { added: 0, updated: 1, removed: 0 });
+  assert.deepEqual(accepted.actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a'] }, { Nom: ['A2'], Supprime: [false], MajLe: [30] }, { on_many: 'all' }]);
+  assert.deepEqual(accepted.actions[1], marked([1, 3], ['modif', 'refus']));
+  assert.deepEqual(accepted.pending.map(p => p.id), [2], 'l\'ajout attend toujours');
+  const older = planConsolidation({ journalRows: [j(1, 'a', 10, { Nom: 'vieux' })], destRows: hubDest(), copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J',
+    exchange: true, rules: { ajout: 'valider', modif: 'valider', suppression: 'valider', refus: 'corriger' } });
+  assert.deepEqual([older.pending, older.actions], [[], [marked([1], [''])]], 'plus ancienne que la ligne d\'ici : sans effet, rien à valider');
+});
+
+test('Échange administré ici : un refus corrigé fait repartir la ligne d\'ici, datée juste après ; un ajout refusé y reste coché Supprime', () => {
+  const refused = ruled('refuser');
+  assert.deepEqual(refused.stats, { added: 0, updated: 0, removed: 0 });
+  assert.deepEqual(refused.actions, [
+    marked([1, 2, 3], ['refus', 'refus', 'refus']),
+    replaced([[1, { v: { Nom: 'A' }, k: 'modif' }], [2, { k: 'ajout' }], [3, { k: 'suppression' }]]),
+  ], 'rien n\'est recopié ; le refus est noté pour l\'historique');
+  assert.deepEqual(refused.fix.keys, ['a', 'x', 'b']);
+  assert.deepEqual(refused.fix.actions, [
+    ['BulkUpdateRecord', 'Dest', [10, 11], { MajLe: [30 + 0.001, 30 + 0.001] }],
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['x'] }, { Nom: ['X'], Supprime: [true], MajLe: [30 + 0.001] }, { on_many: 'all' }],
+  ]);
+  const flagged = ruled('refuser', { rules: { ajout: 'refuser', modif: 'refuser', suppression: 'refuser', refus: 'signaler' } });
+  assert.deepEqual([flagged.fix.actions, flagged.fix.keys], [[], []], 'écart signalé : rien ne repart');
+  assert.deepEqual(flagged.actions[0], marked([1, 2, 3], ['refus', 'refus', 'refus']));
+});
+
+test('Échange : une version plus récente, non cochée, fait revenir une ligne cochée Supprime ici (suppression refusée)', () => {
+  const destRows = [{ id: 1, id_sync: 'a', Nom: 'A', MajLe: 30, Supprime: true }];
+  const run = deleteCol => planConsolidation({ journalRows: [j(1, 'a', 30 + 0.001, { Nom: 'A' })], destRows, copyCols: [['Nom', 'Nom']], destTable: 'D', journalTable: 'J', exchange: true, deleteCol });
+  assert.deepEqual(run(true).actions[0], ['BulkAddOrUpdateRecord', 'D', { id_sync: ['a'] }, { Nom: ['A'], Supprime: [false], MajLe: [30 + 0.001] }, { on_many: 'all' }]);
+  assert.deepEqual(run(false).stats, { added: 0, updated: 0, removed: 0 }, 'sans case Supprime ici, rien à décocher');
+});
+
+test('refusedGaps : une ligne refusée reste signalée jusqu\'à sa prochaine modification ici ; un refus corrigé n\'en laisse pas', () => {
+  const refusedRow = (id, key, extra) => j(id, key, 30, { Sync_Applique: true, Sync_Etat: 'refus', ...extra });
+  const journalRows = [
+    refusedRow(1, 'a', { Nom: 'A2', Sync_Avant: JSON.stringify({ v: { Nom: 'A' }, k: 'modif' }) }),
+    refusedRow(2, 'x', { Nom: 'X', Sync_Avant: JSON.stringify({ k: 'ajout' }) }),
+    refusedRow(3, 'b', { Nom: 'B', Supprime: true, Sync_Avant: JSON.stringify({ k: 'suppression' }) }),
+    j(4, 'c', 30, { Sync_Applique: true, Sync_Etat: 'modif' }),
+  ];
+  const destRows = [...hubDest(), { id: 12, id_sync: 'c', Nom: 'n4', MajLe: 30, manualSort: 3 }];
+  const gaps = refusedGaps({ journalRows, destRows, copyCols: [['Nom', 'Nom']] });
+  assert.deepEqual(gaps.map(g => [g.key, g.n, g.state, g.cells]), [
+    ['a', 1, 'modif', [['Nom', 'Nom', 'A', 'A2']]],
+    ['b', 2, 'suppression', []],
+    ['x', null, 'ajout', [['Nom', 'Nom', null, 'X']]],
+  ]);
+  const later = destRows.map(r => (r.id_sync === 'a' ? { ...r, MajLe: 40 } : r));
+  assert.deepEqual(refusedGaps({ journalRows, destRows: later, copyCols: [['Nom', 'Nom']] }).map(g => g.key), ['b', 'x'], 'modifiée ici depuis : plus d\'écart');
+  const fixed = destRows.map(r => ({ ...r, MajLe: 30 + 0.001 }));
+  assert.deepEqual(refusedGaps({ journalRows, destRows: fixed, copyCols: [['Nom', 'Nom']] }).map(g => g.key), ['x'], 'refus corrigé : la ligne d\'ici est datée après');
 });

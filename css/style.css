@@ -132,6 +132,7 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .radios { display: flex; gap: 14px; }
 .radios label { font-weight: 400; display: flex; gap: 5px; align-items: center; }
 .dest-row { display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center; }
+.rules-grid { display: grid; grid-template-columns: max-content minmax(0, 260px); gap: 6px 12px; align-items: center; }
 .dest-grid { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 8px 12px; align-items: start; margin: 4px 0 8px; }
 .dest-grid .dest-head { font-size: 12px; color: var(--text-muted); }
 .dest-grid .dest-from { padding-top: 7px; font-weight: 600; }
@@ -255,6 +256,7 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .chg-modif { --chg: var(--accent-ink); --chg-soft: var(--accent-soft); }
 .chg-suppression { --chg: var(--danger-ink); --chg-soft: var(--danger-soft); }
 .chg-colonne { --chg: var(--good); --chg-soft: var(--good-soft); }
+.chg-refus { --chg: var(--warn); --chg-soft: var(--warn-soft); }
 .chg { color: var(--chg); background: var(--chg-soft); }
 .history-table { margin-top: 8px; }
 .history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
@@ -286,6 +288,14 @@ summary.chg-row:hover { background: var(--surface-sunken); }
 .mg-here { font-weight: 600; }
 .drift p { margin: 4px 0 0; }
 .drift .mini-grid-wrap { margin-top: 6px; }
+/* Changements d'un participant à valider (Échange administré ici). */
+.review p { margin: 4px 0 0; }
+.review-rows { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); color: var(--text); }
+.review-item + .review-item { border-top: 1px solid var(--border); }
+.review-head { display: grid; grid-template-columns: 2.4em auto 1fr auto auto; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; font-size: 12.5px; }
+.review-actions { display: inline-flex; gap: 4px; }
+.review-item .mini-grid-wrap { padding: 0 8px 8px calc(2.4em + 12px); }
+.review .card-actions { margin-top: 8px; }
 .btn-link { border: 0; background: none; color: var(--accent); padding: 4px 0; margin-top: 4px; }
 .btn-link:hover:not(:disabled) { color: var(--accent-ink); text-decoration: underline; }
 .icon-edit { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'/%3E%3C/svg%3E"); }

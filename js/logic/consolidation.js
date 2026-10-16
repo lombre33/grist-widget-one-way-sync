@@ -2,9 +2,24 @@
 // correspondance des colonnes entre les deux.
 import {
   APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
-  STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue,
+  STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue, parseJson,
 } from './common.js';
-import { compareOrder, completeLists, lastMark, latestByKey, pendingLists } from './journal.js';
+import { REFUSED, STATES, compareOrder, completeLists, lastMark, latestByKey, pendingLists } from './journal.js';
+
+// Échange, chez le document qui l'administre : ce qu'il fait de chaque type de changement reçu d'un
+// participant (`regles` de l'export : accepter, refuser, ou garder à valider sur la carte), et d'un
+// refus (`refus`) : le participant reprend la ligne d'ici (« corriger », par défaut), ou garde sa
+// version et l'écart est signalé ici (« signaler »). Rend null quand tout est accepté : la
+// recopie est alors celle de toujours.
+export const RULES = ['accepter', 'refuser', 'valider'];
+export const REFUSALS = ['corriger', 'signaler'];
+export function exchangeRules(exp) {
+  const { regles = {}, refus } = exp || {};
+  const rule = state => (RULES.includes(regles[state]) ? regles[state] : RULES[0]);
+  const rules = Object.fromEntries(STATES.map(state => [state, rule(state)]));
+  if (STATES.every(state => rules[state] === RULES[0])) return null;
+  return { ...rules, refus: REFUSALS.includes(refus) ? refus : REFUSALS[0] };
+}
 
 // Colonnes recopiées, en couples [colonne du journal, colonne de la destination] : colonnes
 // envoyées présentes des deux côtés (sous le nom choisi dans `map`, sinon le même), hors colonnes
@@ -214,29 +229,40 @@ const newest = rows => rows.map(r => r[ORDER_COL]).reduce((a, b) => (compareOrde
 
 // Sans effet : la destination a déjà ces valeurs, ou la SOURCE n'a rien changé depuis la version
 // déjà recopiée (un renvoi, l'arrivée d'un autre destinataire, une colonne non envoyée modifiée).
-// Une retouche faite à la main dans la destination reste donc en place. Échange à plusieurs
-// (`hub`) : la case Supprime compte aussi, et seule la destination fait foi (une version plus
-// ancienne que la ligne d'ici a déjà été écartée).
-function withoutEffect({ applied, copyCols, hub }, version, here) {
-  const before = hub ? null : applied.get(version.row[KEY_COL]);
-  if (before && copyCols.every(([from]) => sameValue(version.row[from], before.row[from]))) return true;
-  return here.every(row => copyCols.every(([from, to]) => sameValue(version.row[from], row[to]))
-    && (!hub || isTrue(version.row[DELETE_COL]) === isTrue(row[DELETE_COL])));
+// Une retouche faite à la main dans la destination reste donc en place. Échange : seule la
+// destination fait foi (une version plus ancienne que la ligne d'ici a déjà été écartée), et la
+// case Supprime compte aussi quand la destination l'a (`deleteCol`) : une ligne cochée ici revient
+// quand une version plus récente ne l'est pas (refus d'une suppression, voir fixActions).
+const deleteDiffers = (ctx, version, row) => ctx.exchange && ctx.deleteCol && isTrue(version.row[DELETE_COL]) !== isTrue(row[DELETE_COL]);
+function withoutEffect(ctx, version, here) {
+  const before = ctx.exchange ? null : ctx.applied.get(version.row[KEY_COL]);
+  if (before && ctx.copyCols.every(([from]) => sameValue(version.row[from], before.row[from]))) return true;
+  return here.every(row => ctx.copyCols.every(([from, to]) => sameValue(version.row[from], row[to])) && !deleteDiffers(ctx, version, row));
 }
 
-// Effet de la dernière version d'une clé pas encore recopiée : 'suppression', 'modif' (dont le
-// rattachement d'une ligne sans clé), 'ajout', ou '' (sans effet). Les lignes à écrire sont notées
-// dans `plan`.
-function versionState(ctx, plan, key, version) {
+// Effet qu'aurait la dernière version d'une clé pas encore recopiée : 'suppression', 'modif' (dont
+// le rattachement d'une ligne sans clé), 'ajout', LEFT (clé qui n'est plus ici) ou '' (sans effet).
+// Rien n'est encore noté (voir writeEffect).
+function versionEffect(ctx, key, version, gone) {
   const here = ctx.dest.byKey.get(key);
   // Échange : la version reçue n'a d'effet que si elle est plus récente que la ligne d'ici.
   if (ctx.exchange && here && compareOrder(version.order, newest(here)) <= 0) return '';
+  const deleted = isTrue(version.row[DELETE_COL]);
   // Échange à plusieurs : une ligne cochée Supprime par un participant reste ici, cochée, pour
   // repartir vers les autres ; elle est effacée chez eux.
-  const tombstone = ctx.hub && isTrue(version.row[DELETE_COL]);
-  if (tombstone && !here) return LEFT;
-  if (isTrue(version.row[DELETE_COL]) && !tombstone) plan.gone.add(key);
-  if (plan.gone.has(key)) return here ? 'suppression' : LEFT;
+  if (deleted && ctx.hub) return !here ? LEFT : withoutEffect(ctx, version, here) ? '' : 'suppression';
+  if (deleted || gone.has(key)) return here ? 'suppression' : LEFT;
+  if (!here && ctx.matchFrom && (ctx.dest.unkeyed.get(version.row[ctx.matchFrom]) || []).length) return 'modif';
+  if (here && withoutEffect(ctx, version, here)) return '';
+  return here ? 'modif' : 'ajout';
+}
+
+// Note dans `plan` les lignes à écrire pour l'effet `state`, et rend l'effet écrit : une ligne sans
+// clé déjà prise par une version précédente fait d'un rattachement un ajout.
+function writeEffect(ctx, plan, key, version, state) {
+  const here = ctx.dest.byKey.get(key);
+  if (isTrue(version.row[DELETE_COL]) && !ctx.hub && (state === 'suppression' || state === LEFT)) plan.gone.add(key);
+  if (!state || state === LEFT || plan.gone.has(key)) return state;
   const candidates = !here && ctx.matchFrom ? ctx.dest.unkeyed.get(version.row[ctx.matchFrom]) : null;
   if (candidates && candidates.length) {
     const row = candidates.shift();
@@ -244,19 +270,38 @@ function versionState(ctx, plan, key, version) {
     noteReplaced(plan, ctx.copyCols, version, row);
     return 'modif';
   }
-  if (here && withoutEffect(ctx, version, here)) return '';
   plan.upserts.push(version);
   if (here) noteReplaced(plan, ctx.copyCols, version, here[0]);
-  if (tombstone) return 'suppression';
-  return here ? 'modif' : 'ajout';
+  return state === 'suppression' || here ? state : 'ajout';
+}
+
+// Changement d'un participant refusé : il reste dans le journal, noté REFUSED, avec ce qu'il
+// aurait remplacé ici et son type (`k`, pour l'historique). « Corriger » : la ligne d'ici repart
+// (voir fixActions).
+function refuseEffect(ctx, plan, key, version, state) {
+  const here = ctx.dest.byKey.get(key);
+  if (here) noteReplaced(plan, ctx.copyCols, version, here[0]);
+  plan.before.set(version.id, { ...(plan.before.get(version.id) || {}), k: state });
+  if (ctx.rules.refus === 'corriger') plan.fixes.push({ key, version, here });
+}
+
+// Changement d'un participant à valider : ce que la carte en montre (`cells` : [colonne du journal,
+// colonne d'ici, valeur d'ici, valeur proposée], les colonnes qui changent ; toutes pour un ajout
+// ou une suppression). La version reste dans le journal, non recopiée, jusqu'à la décision.
+function reviewItem(ctx, key, version, state) {
+  const here = (ctx.dest.byKey.get(key) || [])[0] || null;
+  const cells = ctx.copyCols.map(([from, to]) => [from, to, here ? here[to] ?? null : null, state === 'suppression' ? null : version.row[from] ?? null])
+    .filter(([from, to]) => state !== 'modif' || !here || !sameValue(version.row[from], here[to]));
+  if (state === 'modif' && here && deleteDiffers(ctx, version, here)) cells.push([DELETE_COL, DELETE_COL, isTrue(here[DELETE_COL]), isTrue(version.row[DELETE_COL])]);
+  return { id: version.id, key, state, row: version.row, cells };
 }
 
 // Le plan en actions Grist : ajouts et modifications par clé, rattachements, suppressions, puis
 // marques dans le journal et, pour l'historique, ce qui a été remplacé.
-function consolidationActions({ destTable, journalTable, copyCols, exchange, hub }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
+function consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
   const values = (versions) => {
     const out = Object.fromEntries(copyCols.map(([from, to]) => [to, versions.map(v => v.row[from] ?? null)]));
-    if (hub) out[DELETE_COL] = versions.map(v => isTrue(v.row[DELETE_COL]));
+    if (exchange && deleteCol) out[DELETE_COL] = versions.map(v => isTrue(v.row[DELETE_COL]));
     return exchange ? { ...out, [ORDER_COL]: versions.map(v => v.order ?? null) } : out;
   };
   return [
@@ -272,6 +317,45 @@ function consolidationActions({ destTable, journalTable, copyCols, exchange, hub
     ...chunk([...before]).map(part => ['BulkUpdateRecord', journalTable, part.map(([id]) => id),
       { [BEFORE_COL]: part.map(([, was]) => JSON.stringify(was)) }]),
   ];
+}
+
+// Refus « corriger » : la ligne d'ici repart vers les participants, datée juste après la version
+// refusée (FIX_STEP), et l'emporte donc chez celui qui l'a envoyée. Un ajout refusé laisse ici une
+// ligne cochée Supprime, qui efface la sienne (sans case Supprime ici, rien ne peut partir). Ces
+// écritures ne touchent pas la ligne 'echange' : la ligne doit repartir (voir le lot dans
+// formulas.js) ; le widget la demande aussi au lot (Synchro_Renvoi), qui l'envoie à coup sûr.
+const FIX_STEP = 0.001;
+export function fixActions(destTable, fixes, copyCols, deleteCol) {
+  const order = f => (typeof f.version.order === 'number' ? f.version.order : Date.now() / 1000) + FIX_STEP;
+  const kept = fixes.filter(f => f.here).flatMap(f => f.here.map(row => [row.id, order(f)]));
+  const added = deleteCol ? fixes.filter(f => !f.here) : [];
+  return [
+    ...chunk(kept).map(part => ['BulkUpdateRecord', destTable, part.map(([id]) => id), { [ORDER_COL]: part.map(([, at]) => at) }]),
+    ...chunk(added).map(part => ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(f => f.key) }, {
+      ...Object.fromEntries(copyCols.map(([from, to]) => [to, part.map(f => f.version.row[from] ?? null)])),
+      [DELETE_COL]: part.map(() => true), [ORDER_COL]: part.map(order),
+    }, { on_many: 'all' }]),
+  ];
+}
+
+// Écarts laissés par un refus : dernière version d'une clé refusée que la ligne d'ici n'a pas
+// remplacée depuis (aucune modification plus récente ici). Un refus corrigé n'en laisse pas (la
+// ligne d'ici est datée après). Rend [{ key, n, state, row, cells }] par numéro de ligne, comme
+// reviewItem (`state` : le changement refusé).
+export function refusedGaps({ journalRows, destRows, copyCols }) {
+  const dest = groupBy(destRows.filter(r => !isBlank(r[KEY_COL])), r => r[KEY_COL]);
+  const numbers = rowNumbers(destRows);
+  const gaps = [];
+  for (const [key, version] of latestByKey(journalRows)) {
+    const here = dest.get(key);
+    if (version.row[STATE_COL] !== REFUSED || (here && compareOrder(newest(here), version.order) > 0)) continue;
+    const row = (here || [])[0];
+    const cells = copyCols.map(([from, to]) => [from, to, row ? row[to] ?? null : null, version.row[from] ?? null])
+      .filter(([from, to]) => !row || !sameValue(version.row[from], row[to]));
+    const { k } = parseJson(version.row[BEFORE_COL]) || {};
+    gaps.push({ key, n: numbers.get(key) || null, state: STATES.includes(k) ? k : row ? 'modif' : 'ajout', row: version.row, cells });
+  }
+  return gaps.sort((a, b) => (a.n || Infinity) - (b.n || Infinity));
 }
 
 // Actions qui amènent la destination à l'état de la SOURCE, en un seul lot, pour une table
@@ -293,7 +377,14 @@ function consolidationActions({ destTable, journalTable, copyCols, exchange, hub
 // de la liste de l'autre document peut n'y être pas encore arrivée ; seule `Supprime` efface.
 // Échange à plusieurs, côté du document qui administre (`hub`) : `Supprime` n'efface pas ici, elle
 // est recopiée (la ligne cochée repart vers les autres participants, qui l'effacent).
-export function planConsolidation({ journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false }) {
+// Règles du document qui administre un Échange (`rules`, voir exchangeRules) : un changement à
+// valider reste dans le journal, sans marque (`pending`, voir reviewItem), jusqu'à une décision
+// (`decisions` : version du journal -> accepter ou refuser) ; un changement refusé est marqué
+// REFUSED et, à corriger, rend les écritures qui font repartir la ligne d'ici (`fix` : actions et
+// clés, voir fixActions), à appliquer à part.
+export function planConsolidation({
+  journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
+}) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
   const marks = new Map(); // ligne du journal -> effet ('' pour une liste ou une version sans effet)
@@ -301,14 +392,26 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, dest.byKey, marks);
   if (exchange) pending.forEach(({ row }) => marks.set(row.id, ''));
   const ctx = {
-    dest, copyCols, exchange, hub: exchange && hub,
+    // Le document qui administre un Échange à plusieurs a toujours la case Supprime.
+    dest, copyCols, exchange, hub: exchange && hub, deleteCol: exchange && (deleteCol || hub), rules: exchange ? rules : null,
     matchFrom: (copyCols.find(([, to]) => to === matchCol) || [])[0],
     applied: latestByKey(journalRows.filter(r => isTrue(r[APPLIED_COL]) && !isTrue(r[DELETE_COL]))),
   };
-  const plan = { gone, marks, upserts: [], attached: [], before: new Map(), stats: { added: 0, updated: 0, removed: 0 } };
+  const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], stats: { added: 0, updated: 0, removed: 0 } };
   for (const [key, version] of latest) {
     if (isTrue(version.row[APPLIED_COL])) continue;
-    const state = versionState(ctx, plan, key, version);
+    let state = versionEffect(ctx, key, version, gone);
+    const rule = ctx.rules && STATES.includes(state) ? decisions.get(version.id) || ctx.rules[state] : RULES[0];
+    if (rule === 'valider') {
+      plan.pending.push(reviewItem(ctx, key, version, state));
+      continue;
+    }
+    if (rule === 'refuser') {
+      refuseEffect(ctx, plan, key, version, state);
+      marks.set(version.id, REFUSED);
+      continue;
+    }
+    state = writeEffect(ctx, plan, key, version, state);
     marks.set(version.id, state);
     if (state === 'ajout') plan.stats.added++;
     if (state === 'modif') plan.stats.updated++;
@@ -317,9 +420,12 @@ export function planConsolidation({ journalRows, destRows, copyCols, destTable, 
   const removed = [...gone].filter(key => dest.byKey.has(key));
   plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
-  if (removed.length) {
-    const numbers = rowNumbers(destRows);
-    for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
-  }
-  return { actions: consolidationActions({ destTable, journalTable, copyCols, exchange, hub: ctx.hub }, { ...plan, removeIds, listGone, leftGone }), stats: plan.stats, gone };
+  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
+  for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
+  return {
+    actions: consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol }, { ...plan, removeIds, listGone, leftGone }),
+    stats: plan.stats, gone,
+    pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
+    fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol), keys: plan.fixes.map(f => f.key) },
+  };
 }

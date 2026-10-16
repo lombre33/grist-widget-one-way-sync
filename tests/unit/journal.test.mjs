@@ -291,3 +291,16 @@ test('historique : seuls les trois états connus sont montrés', () => {
   const rows = [{ id: 1, id_sync: 'a', MajLe: 5, Sync_Etat: '<img src=x>' }, { id: 2, id_sync: 'b', MajLe: 6, Sync_Etat: 'suppression' }, { id: 3, id_sync: 'c', MajLe: 7, Sync_Etat: '' }];
   assert.deepEqual(recentChanges(rows, null, 0, 10), [{ at: 6, key: 'b', label: '', state: 'suppression', n: null, detail: null }]);
 });
+
+test('historique : un changement refusé montre ce qui est gardé ici et ce qui était proposé', () => {
+  const rows = [
+    { id: 1, id_sync: 'a', MajLe: 30, Nom: 'A2', Sync_Etat: 'refus', Sync_Recu: 100, Sync_Avant: JSON.stringify({ v: { Nom: 'A' }, k: 'modif' }) },
+    { id: 2, id_sync: 'x', MajLe: 30, Nom: 'X', Sync_Etat: 'refus', Sync_Recu: 90, Sync_Avant: JSON.stringify({ k: 'ajout' }) },
+    { id: 3, id_sync: 'b', MajLe: 30, Nom: 'B', Sync_Etat: 'refus', Sync_Recu: 80, Sync_Avant: JSON.stringify({ k: 'suppression' }) },
+  ];
+  assert.deepEqual(recentChanges(rows, 'Nom', 0, Infinity, { copyCols: [['Nom', 'Nom']] }).map(c => [c.key, c.state, c.detail]), [
+    ['a', 'refus', { cols: [['Nom', 'Nom']], before: ['A'], after: ['A2'] }],
+    ['x', 'refus', { cols: [['Nom', 'Nom']], before: null, after: ['X'] }],
+    ['b', 'refus', null],
+  ]);
+});

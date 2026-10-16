@@ -440,6 +440,49 @@ try {
     await openWidget(a.url);
     await waitFor(async () => (await fiches(a.doc)).Céline.Ville === 'Tours', 'B et A continuent');
     step('Échange à plusieurs : ce que B envoie repart vers C par A, et inversement ; Supprime cochée chez C efface chez B, reste cochée chez A ; A retire C, B continue');
+
+    // --- Règles de A pour les changements des participants : les modifications de B sont à
+    // valider, ses ajouts refusés. Une modification acceptée est recopiée chez A ; refusée, B
+    // reprend la version de A. Un ajout refusé disparaît chez B et reste chez A, coché Supprime.
+    await openWidget(a.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByText('Changements reçus des participants').waitFor();
+    assert.ok(!(await dialog().getByText('En cas de refus').isVisible()), 'le refus ne se règle que si un changement n\'est pas accepté d\'office');
+    await pick('Ligne modifiée', 'À valider');
+    await pick('Ligne ajoutée', 'Refuser');
+    assert.ok(await dialog().getByRole('radio', { name: /reprend la ligne d’ici/ }).isChecked(), 'par défaut, le participant reprend la ligne de A');
+    await shot('23-echange-regles');
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText('Enregistré.').waitFor();
+    await dialogButton('Fermer').click();
+    await widget().getByText(/Changements des participants\s:\sLigne ajoutée \(Refuser\), Ligne modifiée \(À valider\)/).waitFor();
+    const receive = async () => widget().getByRole('tab', { name: 'Recevoir' }).click();
+    const review = name => widget().locator('.review-item', { hasText: name });
+
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Basile.id, { Ville: 'Quimper' }]]);
+    await openWidget(a.url);
+    await receive();
+    await review('Basile').waitFor({ timeout: 30000 });
+    await widget().getByText(/Fiches\s:\s1 changement à valider/).waitFor();
+    assert.equal((await fiches(a.doc)).Basile.Ville, 'Vannes', 'rien n\'est écrit chez A avant la décision');
+    await shot('24-echange-valider');
+    await review('Basile').getByRole('button', { name: 'Accepter', exact: true }).click();
+    await waitFor(async () => (await fiches(a.doc)).Basile.Ville === 'Quimper', 'acceptée : recopiée chez A');
+    await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Céline.id, { Ville: 'Angers' }]]);
+    await review('Céline').waitFor({ timeout: 30000 });
+    await review('Céline').getByRole('button', { name: 'Refuser', exact: true }).click();
+    await waitFor(async () => (await widget().locator('.chg-row.chg-refus', { hasText: 'Céline' }).count()) > 0, 'historique : modification refusée');
+    assert.equal((await fiches(a.doc)).Céline.Ville, 'Tours', 'refusée : A garde sa version');
+    await openWidget(b.url);
+    await waitFor(async () => (await fiches(b.doc)).Céline.Ville === 'Tours', 'refusée : B reprend la version de A');
+    await applyActions(b.doc, [['AddRecord', 'Fiches', null, { Nom: 'Fanny', Ville: 'Laval' }]]);
+    await openWidget(a.url);
+    await waitFor(async () => ((await fiches(a.doc)).Fanny || {}).Supprime === true, 'ajout refusé : la ligne reste chez A, cochée Supprime');
+    await openWidget(b.url);
+    await waitFor(async () => !(await fiches(b.doc)).Fanny, 'ajout refusé : effacé chez B');
+    step('Échange administré : modification à valider, acceptée puis refusée (B reprend la version de A) ; ajout refusé, effacé chez B');
   }
   if (process.env.ONLY_EXCHANGE) {
     await exchangeSteps();

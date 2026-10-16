@@ -3,6 +3,8 @@
 // ses destinataires.
 import { SYNC_TABLE, isUserTable, randomHex } from '../logic/common.js';
 import { exportableColumns, hookName } from '../logic/exports.js';
+import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
+import { STATES } from '../logic/journal.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
 import { apply, fetchRows, readSchema, renameWebhook } from '../grist.js';
 import { saveExport, updateSourceNote } from './synchro.js';
@@ -106,12 +108,35 @@ async function showColumns(ctx) {
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
 
+// Échange administré ici : ce que ce document fait de chaque type de changement reçu des
+// participants (`ctx.rules`, voir exchangeRules), et d'un refus. Le choix du refus ne se montre
+// que si un type n'est pas accepté d'office.
+function rulesBlock(ctx) {
+  const rules = exchangeRules(ctx.exp) || { ajout: RULES[0], modif: RULES[0], suppression: RULES[0], refus: REFUSALS[0] };
+  ctx.rules = { ...rules, ...ctx.rules };
+  const refusal = el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-refusal-title' },
+    el('p', { class: 'field-title', id: 'gristsync-refusal-title' }, t('send.refusal.title')),
+    REFUSALS.map(value => el('label', { class: 'check' },
+      el('input', { type: 'radio', name: 'gristsync-refusal', value, checked: ctx.rules.refus === value, onchange: () => { ctx.rules.refus = value; } }),
+      t(`send.refusal.${value}`))),
+    el('p', { class: 'muted small' }, t('send.refusal.help')));
+  const showRefusal = () => refusal.classList.toggle('hidden', STATES.every(st => ctx.rules[st] === RULES[0]));
+  const pickers = el('div', { class: 'rules-grid' }, STATES.map(st => [el('span', {}, t(`send.rules.${st}`)), pickField({
+    items: RULES.map(value => ({ value, label: t(`send.rules.${value}`) })), value: ctx.rules[st], label: t(`send.rules.${st}`),
+    onChange: (value) => { ctx.rules[st] = value; showRefusal(); },
+  })]));
+  showRefusal();
+  return el('div', { class: 'form table-block' }, el('h3', {}, t('send.rules.title')), el('p', { class: 'small' }, t('send.rules.help')), pickers, refusal);
+}
+
 // 3. Nom, puis création (ou enregistrement) : c'est ici seulement que le widget écrit.
 function showName(ctx) {
   const fallback = ctx.chosen.join(' + ');
   const nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-export-name', value: ctx.exp ? ctx.exp.name : fallback });
   const report = el('div', { class: 'report' });
-  ctx.wizard.show(2, [el('label', { for: 'gristsync-export-name' }, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')), report], [
+  const hub = ctx.exp && ctx.exp.echange && !ctx.exp.retour;
+  ctx.wizard.show(2, [el('label', { for: 'gristsync-export-name' }, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')),
+    hub ? rulesBlock(ctx) : null, report], [
     { label: t('common.back'), back: true, onClick: () => run(null, report, () => showColumns(ctx)) },
     { label: ctx.exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(ctx, nameInput.value.trim() || fallback, report)) }]);
 }
@@ -139,9 +164,13 @@ async function save(ctx, name, report) {
   const tables = await prepareTables(ctx);
   const id = exp ? exp.id : randomHex(8);
   const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public), swap: Boolean(exp && exp.echange) });
+  // Règles d'un Échange administré ici : notées seulement si elles ne sont pas toutes « Accepter ».
+  const rules = ctx.rules ? exchangeRules({ regles: ctx.rules, refus: ctx.rules.refus }) : undefined;
   await updateSourceNote((note) => {
     const others = note.exports.filter(e => e.id !== id);
-    note.exports = [...others, { ...(exp ? note.exports.find(e => e.id === id) : {}), id, name, at: exp ? exp.at : Date.now() / 1000 }];
+    const entry = { ...(exp ? note.exports.find(e => e.id === id) : {}), id, name, at: exp ? exp.at : Date.now() / 1000 };
+    if (ctx.rules) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules ? rules.refus : undefined });
+    note.exports = [...others, JSON.parse(JSON.stringify(entry))];
   });
   if (!exp) {
     const created = { id, name, tables, recipients: [], invitations: [], public: false, email: '' };

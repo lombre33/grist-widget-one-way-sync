@@ -4,7 +4,8 @@
 import { AUTHOR_COL, EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../logic/common.js';
 import { maskKey } from '../logic/codes.js';
 import { PUBLIC_MEMO, conditionExport, exportTables, exportableColumns, hooksOf, isPublicRule, publicAclActions, publicAclRules, ruleText } from '../logic/exports.js';
-import { parseLot } from '../logic/journal.js';
+import { STATES, parseLot } from '../logic/journal.js';
+import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, parseCharge } from '../logic/resend.js';
 import { apply, deleteWebhook, docIdentity, fetchRows, gristFetch, listWebhooks, readSchema, webhookConditions } from '../grist.js';
 import { ensureSyncTable, isCharge, legacyTables, readSourceNote, refreshMajLe, removeLegacy } from './synchro.js';
@@ -175,6 +176,14 @@ function exportStatus(exp) {
   return exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
 }
 
+// Échange administré ici : les types de changement des participants qui ne sont pas acceptés d'office.
+function rulesLine(exp) {
+  const rules = exchangeRules(exp);
+  if (!rules) return null;
+  const list = STATES.filter(st => rules[st] !== 'accepter').map(st => `${t(`send.rules.${st}`)} (${t(`send.rules.${rules[st]}`)})`);
+  return el('p', { class: 'muted small' }, t('send.exchange.rules', { rules: list.join(', ') }));
+}
+
 // Avis d'un export : tables perdues, colonnes changées, envoi incomplet, Échange.
 const exportNotes = exp => [
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
@@ -182,6 +191,7 @@ const exportNotes = exp => [
   exp.partial ? message('info', t('send.export.partial')) : null,
   exp.retour ? message('info', t('send.exchange.managed')) : null,
   exp.echange && !exp.retour ? el('p', { class: 'muted small' }, exp.recipients.length > 1 ? t('send.exchange.hub', { n: exp.recipients.length }) : t('send.exchange.with')) : null,
+  exp.echange && !exp.retour ? rulesLine(exp) : null,
 ];
 
 const tablesLine = exp => exp.tables.map(tb => t(tb.filter ? 'send.export.tableFiltered' : 'send.export.table',

@@ -66,8 +66,10 @@ sont signalées, avec un bouton qui les sépare.
   correctement : la carte de l'export le signale, et **Modifier** permet de cocher de nouveau les
   bonnes colonnes.
 - Une seule ligne plus grosse qu'un envoi de Grist (1 Mo) ne peut pas partir : la CIBLE le signale.
-- Un Échange est le seul destinataire de son export ; en cas de conflit, la version la plus
-  récente de la ligne entière l'emporte.
+- Un export en Échange n'a que des participants à l'Échange ; en cas de conflit, la version la plus
+  récente de la ligne entière l'emporte. À plusieurs, une modification d'un participant n'atteint
+  les autres que lorsque la page du widget du document qui administre est ouverte, et un
+  changement à valider attend sa décision.
 - En mode lien public, tout lecteur de la SOURCE ne voit plus que les instantanés publics, et les
   noms des tables des exports restent lisibles dans les formules de `Synchro`.
 - Les noms `Synchro`, `Synchro_…` et `Journal_…` sont réservés aux tables du widget.

@@ -2,12 +2,12 @@
 // les arrivées suspectes, les valeurs retouchées à la main et l'historique des changements. Un
 // journal encore vide attend son lien.
 import { isBlank } from '../logic/common.js';
-import { STATES, awaitingPartner } from '../logic/journal.js';
+import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
 import { fetchRows, isReadOnly, readSchema } from '../grist.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { endExchange } from '../exchange.js';
 import { legacyJournals, receivedJournals, updateJournalNote } from './journals.js';
-import { consolidateAll, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
 import { offerDialog } from './dest.js';
 import { receiveWizard } from './wizard.js';
 import { confirmDialog, el, errorText, icon, message, openModal, pickField, run } from '../ui.js';
@@ -16,6 +16,7 @@ import { LANG, dateText, t } from '../i18n.js';
 
 const HISTORY_MAX = 20;
 const DRIFT_MAX = 10;
+const REVIEW_MAX = 10;
 let container;
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
@@ -98,7 +99,9 @@ function cardStatus(group) {
   const { journal, note } = group;
   if (group.waiting) return ['waiting', 'pending'];
   if (note.ended) return ['ended', 'off'];
-  if ((state.results.get(journal) || {}).error || note.tables.some(tb => (state.results.get(tableKey(journal, tb.table)) || {}).error)) return ['error', 'err'];
+  const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
+  if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
+  if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
   return Object.keys({ ...note.missing, ...note.big }).length ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }
 
@@ -137,10 +140,10 @@ function syncCard(group) {
     el('div', { class: 'card-head' }, el('strong', {}, note.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
     from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
     group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
-    note.mode === 'echange' ? el('p', { class: 'muted small' }, t('recv.exchange')) : null,
+    note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
     note.tables.map(entry => tableLine(group, entry)),
     cardNotes(group),
-    note.tables.map(entry => driftBlock(group, entry)),
+    note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link', () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : ''),
@@ -263,14 +266,78 @@ async function correct(group, entry, { driftCount, driftGone = 0, droppedCols = 
 }
 
 // ---------------------------------------------------------------------------------------------
+// Échange administré ici : changements d'un participant à valider, puis écarts laissés par un refus.
+
+// Chaque changement à valider montre ce qu'il changerait ici (valeur d'ici, valeur proposée) et a
+// ses deux boutons ; « Tout accepter » et « Tout refuser » valent aussi pour ceux que la carte ne
+// montre pas, après confirmation. Rien n'est écrit ici avant la décision.
+function reviewBlock(group, entry) {
+  const result = state.results.get(tableKey(group.journal, entry.table)) || {};
+  const total = result.pendingCount || 0;
+  if (!total) return null;
+  const types = result.types || {};
+  const out = () => container.querySelector('.out');
+  const choose = async (e, ids, choice) => run(e.currentTarget, out(), async () => {
+    await decide(group.journal, ids, choice);
+    await renderTarget();
+  });
+  const all = async (e, choice) => {
+    const target = e.currentTarget;
+    const label = t(`recv.review.${choice}All`);
+    if (await confirmDialog({ title: label, body: t(`recv.review.${choice}AllBody`, { n: total }), confirmLabel: label })) await choose({ currentTarget: target }, result.pendingIds, choice);
+  };
+  const values = (kind, cells, at) => el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, t(`recv.review.${kind === 'before' ? 'here' : 'proposed'}`)),
+    cells.map(c => cell(c[at], types[c[0]])));
+  const items = result.pending.slice(0, REVIEW_MAX).map(p => el('li', { class: `review-item chg-${p.state}` },
+    el('div', { class: 'review-head' },
+      el('span', { class: 'chg-n' }, p.n ? String(p.n) : ''),
+      el('span', { class: 'chg-dot', title: t(`recv.history.${p.state}`) }, icon(STATE_ICON[p.state])),
+      el('span', { class: 'chg-label' }, p.label || '—'),
+      el('span', { class: 'chg-state' }, t(`recv.history.${p.state}`)),
+      el('span', { class: 'review-actions' },
+        button(t('recv.review.accept'), 'check', e => choose(e, [p.id], 'accepter')),
+        button(t('recv.review.refuse'), 'stop', e => choose(e, [p.id], 'refuser'), 'btn-danger-text'))),
+    p.cells.length ? miniGrid(['', ...p.cells.map(([, to]) => to)], [
+      p.state === 'ajout' ? null : values('before', p.cells, 2),
+      p.state === 'suppression' ? null : values('after', p.cells, 3)].filter(Boolean)) : null));
+  return el('div', { class: 'msg msg-info review', role: 'status' },
+    el('strong', {}, t('recv.review.title', { dest: entry.dest, n: total })),
+    el('p', { class: 'small' }, t('recv.review.body')),
+    el('ul', { class: 'review-rows' }, items),
+    total > items.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - items.length })) : null,
+    el('div', { class: 'card-actions' },
+      button(t('recv.review.accepterAll'), 'check', e => all(e, 'accepter')),
+      button(t('recv.review.refuserAll'), 'stop', e => all(e, 'refuser'), 'btn-danger-text')));
+}
+
+// Refus avec écart signalé : la ligne refusée reste différente chez le participant, jusqu'à la
+// prochaine modification de la ligne, ici ou chez lui.
+function gapBlock(group, entry) {
+  const result = state.results.get(tableKey(group.journal, entry.table)) || {};
+  const total = result.gapCount || 0;
+  if (!total) return null;
+  const types = result.types || {};
+  const said = (text, span) => el('td', { class: 'mg-here', colspan: String(span) }, text);
+  const head = g => [el('td', { class: 'mg-n' }, g.n ? String(g.n) : ''), el('td', { title: g.label }, g.label)];
+  const rows = result.gaps.flatMap(g => (g.state !== 'modif' || !g.cells.length
+    ? [el('tr', {}, head(g), said(t(`recv.gap.${g.state}`), 3))]
+    : g.cells.map(([from, to, here, theirs]) => el('tr', {}, head(g), el('td', {}, to), cell(here, types[from], 'mg-here'), cell(theirs, types[from], 'mg-source'))))).slice(0, DRIFT_MAX);
+  return el('div', { class: 'msg msg-warn drift', role: 'status' },
+    el('strong', {}, t('recv.gap.title', { dest: entry.dest, n: total })),
+    el('p', { class: 'small' }, t('recv.gap.body')),
+    miniGrid([t('recv.drift.row'), result.labelCol || '', t('recv.drift.col'), t('recv.drift.here'), t('recv.gap.theirs')], rows),
+    total > result.gaps.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - result.gaps.length })) : null);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Historique : lignes changées depuis la visite précédente, par table de destination : compteurs
 // par état (ajoutées, modifiées, supprimées, et colonnes ajoutées par la SOURCE), puis les plus
 // récentes (HISTORY_MAX par table),
 // numérotées comme dans la table et nommées par la colonne choisie pour chaque table. Chacune
 // s'ouvre au clic sur son avant et son après. Tout est replié par défaut.
 
-const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus', colonne: 'column' };
-const COUNTED = [...STATES, 'colonne'];
+const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus', colonne: 'column', [REFUSED]: 'stop' };
+const COUNTED = [...STATES, 'colonne', REFUSED];
 
 function stateCounts(items) {
   return el('span', { class: 'history-counts' }, COUNTED.map((st) => {
@@ -297,7 +364,9 @@ function historyRow(c, types, id) {
   const rowClass = `chg-row chg-${c.state}`;
   if (!c.detail) return el('li', { class: `chg-item chg-${c.state}` }, el('div', { class: rowClass }, line));
   const { cols, before, after } = c.detail;
-  const values = (kind, list) => list && el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, t(`recv.history.${kind}`)),
+  // Un refus montre ce qui est gardé ici et ce qui était proposé.
+  const heading = kind => (c.state === REFUSED ? t(`recv.review.${kind === 'before' ? 'here' : 'proposed'}`) : t(`recv.history.${kind}`));
+  const values = (kind, list) => list && el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, heading(kind)),
     list.map((v, i) => cell(v, types[cols[i][0]])));
   return el('li', { class: `chg-item chg-${c.state}` }, el('details', { open: opened.has(id), ontoggle: keepOpen(id) },
     el('summary', { class: rowClass }, line),

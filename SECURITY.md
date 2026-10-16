@@ -81,7 +81,10 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   colonnes qu'il envoie lui-même pour ces tables : une colonne de plus annoncée par l'autre côté,
   ou renommée vers une autre colonne, est ignorée. L'adresse de retour (clé d'écriture du journal
   du document qui invite) voyage dans le code d'invitation et n'est notée nulle part ailleurs que
-  dans le webhook de l'autre côté.
+  dans le webhook de l'autre côté. Les règles du document qui administre (accepter, refuser, à
+  valider) sont notées dans sa note d'exports, jamais dans un journal : un participant ne peut pas
+  faire passer un changement pour accepté. Un changement à valider n'est écrit qu'au clic sur
+  **Accepter** ; une ligne de journal forgée marquée « refusée » ne change que l'affichage.
 - **Lecteurs du document SOURCE** : `Synchro` contient les valeurs des colonnes exportées. Un
   document qui cache des colonnes à certains lecteurs doit aussi leur cacher `Synchro`.
 - **Mode lien public** : la SOURCE est partagée en lecture « toute personne ayant le lien », par

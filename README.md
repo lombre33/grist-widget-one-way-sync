@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.5.7 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.6.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -28,7 +28,8 @@ l'original.
 - **Chaque destinataire à part** : on en ajoute, on en met un en pause, on en révoque un sans
   toucher aux autres.
 - **Dans les deux sens si besoin** : en mode Échange, deux documents se tiennent à jour l'un
-  l'autre ; à plusieurs, un document administre et relaie entre les participants.
+  l'autre ; à plusieurs, un document administre, relaie entre les participants et peut garder
+  leurs changements à valider ou les refuser.
 
 ## Comment ça marche
 

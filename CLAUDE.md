@@ -24,6 +24,10 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   §1). Résumé de ce qu'elles imposent ici : `docs/03-proposition-ux-et-droits.md`, section 6.
 - Git : travail directement sur `main`, commit et push sans pull request ni confirmation, une
   fois le travail vérifié (tests verts).
+- Publication : l'Alpha (V0.5.7) est en ligne sur grist-factory. **Rien n'y part sans demande
+  explicite d'Antoine.** La branche `alpha` garde cette version : un bug de l'Alpha s'y corrige
+  (puis `main` le reprend), et seul un commit de `alpha` peut être transmis pour publication, s'il
+  le demande.
 - Avant de coder lourdement, se mettre d'accord avec Antoine sur le parcours et les
   fonctionnalités (proposition en cours : `docs/03-proposition-ux-et-droits.md`).
 
@@ -98,10 +102,10 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   sa description** de `GET /tables/Synchro/columns` en anonyme ; le filtre des lignes sur cette
   colonne et la règle de ligne marchent toujours (vérifié, lien public).
 
-## Branche `beta` (jamais publiée sur grist-factory)
+## Après l'Alpha (branche `beta` fusionnée dans `main` le 16 octobre)
 
-Plan : `/mnt/project-files/notes/beta-plan.md`. Les correctifs Alpha se font sur `main`, puis
-`beta` les reprend (avance rapide ou fusion).
+Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes proposées dans
+`/mnt/project-files/notes/beta-pieces-jointes.md` (rien de codé avant l'accord d'Antoine).
 - Échange à plusieurs (fait) : un export en Échange accepte plusieurs participants (« Ajouter un
   participant », mode Échange seul). Chaque participant a son journal de retour chez A, dont la note
   garde l'id de son webhook (`hook`, posé à l'approbation ; un Échange plus ancien est retrouvé par
@@ -114,6 +118,19 @@ Plan : `/mnt/project-files/notes/beta-plan.md`. Les correctifs Alpha se font sur
   (`removeParticipant`) n'enlève que son webhook (avec la ligne `fin`) et son journal ; chez lui,
   un journal `echange` qui voit `ended` arrête son envoi de retour (`stopReturn`, propriétaire),
   pour ne pas bloquer sa file. Testé de bout en bout (A, B, C) dans `exchangeSteps`.
+- Règles de A (fait) : dans « Modifier » d'un export en Échange (étape Nom, `rulesBlock`), chaque type
+  de changement des participants (ajout, modif, suppression) est Accepter, Refuser ou À valider, et
+  un refus « corriger » (défaut) ou « signaler », notés dans la note d'exports (`regles`, `refus` ;
+  `exchangeRules` rend null si tout est accepté). Chez A, `planConsolidation` classe d'abord
+  (`versionEffect`), puis écrit (`writeEffect`), refuse (`refuseEffect` : marque `refus`, `Sync_Avant`
+  `{v, k}`) ou laisse en attente (`reviewItem`, version non marquée, gardée par la purge). Décision
+  sur la carte (`decide`, par id de version, appliquée par un passage). Refus corrigé (`fixActions`) :
+  MajLe de la ligne d'ici = version refusée + 1 ms, ajout refusé = ligne cochée Supprime ici, dans un
+  lot d'écritures à part (sans toucher la ligne `echange`, sinon l'écho est tu à deux), puis
+  `Synchro_Renvoi` du lot = `refus<heure>:<ids>` (`askResend`), effacé après 60 s
+  (`clearFixMarks`). En Échange, Supprime est comparée et écrite partout où la destination l'a
+  (`deleteCol`) : une version plus récente non cochée fait revenir une ligne cochée. Écarts
+  (`refusedGaps`) : dernière version `refus` d'une clé que la ligne d'ici n'a pas dépassée.
 
 ## Le design préféré d'Antoine (design C)
 
@@ -130,7 +147,10 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.7 (16 octobre 2026)
+## État : V0.6.0 (16 octobre 2026)
+
+V0.6.0 : `main` reprend la Bêta (Échange à plusieurs, règles de A, voir « Après l'Alpha »). L'Alpha
+publiée est la V0.5.7 (branche `alpha`).
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;

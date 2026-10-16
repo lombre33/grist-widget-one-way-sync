@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.5.7 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.6.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -25,7 +25,8 @@ a row is added, changed or deleted in the original.
 - **You choose what leaves**: the tables, the columns and, optionally, the rows.
 - **Each recipient on their own**: add one, pause one, revoke one without touching the others.
 - **Both ways if needed**: in Exchange mode, two documents keep each other up to date; with more
-  participants, one document runs the Exchange and relays between them.
+  participants, one document runs the Exchange, relays between them and can hold their changes
+  for review or refuse them.
 
 ## How it works
 

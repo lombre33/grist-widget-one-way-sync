@@ -282,8 +282,11 @@ export function planPurge(journalRows, journalTable, { keep = [], drop = [] } = 
 // Historique : dernière version de chaque clé recopiée avec un effet connu, arrivée après `since`
 // (secondes), la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne ; `n` est son
 // numéro dans la destination (`numbers`, voir rowNumbers), celui qu'elle avait pour une ligne
-// supprimée ; `detail` montre avant et après sur les colonnes recopiées (`copyCols`).
+// supprimée ; `detail` montre avant et après sur les colonnes recopiées (`copyCols`). Échange, chez
+// le document qui l'administre : un changement refusé (REFUSED) y figure aussi.
 export const STATES = ['ajout', 'modif', 'suppression'];
+export const REFUSED = 'refus';
+const SHOWN = [...STATES, REFUSED];
 
 // Tables à relire parmi celles que Grist dit changées (`changed` ; null : on ne sait pas) : les
 // journaux et destinations suivis (`watched`), et le schéma (une table ou une colonne ajoutée,
@@ -294,7 +297,7 @@ export const touchedTables = (changed, watched) => (changed === null ? null
 export function recentChanges(journalRows, labelCol, since, max, { copyCols = [], numbers = new Map() } = {}) {
   return [...latestByKey(journalRows).values()]
     .map(v => ({ at: v.row[RECEIVED_COL] ?? v.order, state: v.row[STATE_COL], row: v.row }))
-    .filter(c => STATES.includes(c.state) && typeof c.at === 'number' && c.at > since)
+    .filter(c => SHOWN.includes(c.state) && typeof c.at === 'number' && c.at > since)
     .sort((a, b) => b.at - a.at).slice(0, max)
     .map((c) => {
       const was = parseJson(c.row[BEFORE_COL]) || {};
@@ -306,9 +309,11 @@ export function recentChanges(journalRows, labelCol, since, max, { copyCols = []
 
 // Avant et après d'un changement, sur des colonnes [colonne du journal, colonne d'ici] : un ajout
 // montre toutes les colonnes après, une suppression toutes avant (dernière version reçue), une
-// modification celles qu'elle a remplacées (`Sync_Avant`). null s'il n'y a rien à montrer.
+// modification celles qu'elle a remplacées (`Sync_Avant`). Un refus montre ce qui est gardé ici et
+// ce qui était proposé, selon le changement refusé (`k`). null s'il n'y a rien à montrer.
 function changeDetail(state, row, copyCols, was) {
   const values = cols => cols.map(([from]) => row[from] ?? null);
+  if (state === REFUSED) return was.k === 'suppression' ? null : changeDetail(was.k === 'ajout' ? 'ajout' : 'modif', row, copyCols, was);
   if (state !== 'modif') return copyCols.length ? { cols: copyCols, before: state === 'ajout' ? null : values(copyCols), after: state === 'ajout' ? values(copyCols) : null } : null;
   const v = was.v && typeof was.v === 'object' && !Array.isArray(was.v) ? was.v : {};
   const cols = copyCols.filter(([from]) => Object.hasOwn(v, from));

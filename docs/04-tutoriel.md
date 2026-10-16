@@ -306,6 +306,26 @@ Une ligne cochée `Supprime` par un participant reste chez celui qui administre,
 disparaît chez les autres. **Révoquer** ne retire qu'un participant : son journal de retour et sa
 clé sont effacés, et son propre widget arrête son envoi de retour.
 
+### Valider ou refuser les changements des participants
+
+Par défaut, tout changement d'un participant est accepté. Dans **Modifier**, à l'étape Nom, le
+document qui administre choisit pour chaque type de changement (ligne ajoutée, modifiée,
+supprimée) : **Accepter**, **Refuser** ou **À valider**.
+
+![Règles des changements reçus](images/23-echange-regles.png)
+
+Un changement **à valider** attend sur la carte du participant, dans l'onglet **Recevoir**, avec
+la valeur d'ici et la valeur proposée. Rien n'est écrit, ni transmis aux autres participants,
+avant **Accepter**. **Tout accepter** et **Tout refuser** valent pour toute la liste.
+
+![Changements à valider](images/24-echange-valider.png)
+
+En cas de refus, le participant reprend la ligne d'ici (réglage recommandé) : une modification
+refusée revient chez lui à la valeur d'ici, un ajout refusé est effacé chez lui (la ligne reste ici,
+cochée `Supprime`) et une ligne dont la suppression est refusée revient. Avec l'autre réglage, il
+garde sa version, et la carte signale l'écart jusqu'à la prochaine modification de la ligne.
+L'historique montre les changements refusés.
+
 ## Mode lien public
 
 À l'étape 4, choisir **Lien public**. Le widget pose des règles d'accès : toute personne qui n'est
