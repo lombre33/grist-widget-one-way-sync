@@ -118,6 +118,10 @@ appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
 colonnes ajoutées plus tard visibles dans la destination ; formulaires à la racine des pages.
+V0.5.2 : révoquer, supprimer l'export ou arrêter un Échange envoie d'abord une ligne `fin`
+(`KIND.end`, `endNotice`) directement à l'adresse du webhook (`deleteWebhookWithNotice`) ; la CIBLE
+la lit (`planUnpack` rend `ended`), la note (`ended` dans la note du journal) et la carte affiche
+« Coupé par la SOURCE ». Des données arrivées après effacent l'avis.
 
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,

@@ -104,6 +104,22 @@ test('CIBLE : lignes forgées par le lien du formulaire effacées et comptées, 
   assert.deepEqual(limited.actions.at(-1), ['BulkRemoveRecord', 'J', [1, 2]], 'les plus anciennes d\'abord');
 });
 
+test('CIBLE : fin d\'envoi annoncée par la SOURCE, effacée si des données arrivent ensuite', () => {
+  const lot = { id: 1, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: '[]', Synchro_Renvoi: '', Synchro_Lot: '{"lignes": [["k", 1, false, {}]], "total": 1}', Sync_Recu: 50 };
+  const end = { id: 2, Synchro_Export: 'e', Synchro_Type: KIND.end, Sync_Recu: 60 };
+  const plan = planUnpack([lot, end], 'J', { exportId: 'e' });
+  assert.deepEqual([plan.ended, plan.rejected], [{ at: 60 }, 0], 'la fin, arrivée après la dernière donnée');
+  assert.deepEqual(plan.arrived, { Contacts: ['k'] });
+  assert.deepEqual(plan.actions.at(-1), ['BulkRemoveRecord', 'J', [1, 2]], 'la ligne de fin est effacée aussi');
+  assert.equal(planUnpack([end, { ...lot, id: 3 }], 'J', { exportId: 'e' }).ended, null, 'des données après la fin : l\'envoi a repris');
+  assert.equal(planUnpack([lot], 'J', { exportId: 'e' }).ended, null, 'des données seules : l\'envoi est actif');
+  assert.deepEqual(planUnpack([{ ...end, Sync_Recu: null }], 'J', { exportId: 'e' }).ended, { at: null });
+  const other = planUnpack([{ ...end, Synchro_Export: 'autre' }], 'J', { exportId: 'e' });
+  assert.deepEqual([other.ended, other.rejected], [undefined, 1], 'la fin d\'un autre export est rejetée');
+  assert.equal(planUnpack([end], 'J').rejected, 1, 'sans export attendu (lien public), pas de fin');
+  assert.ok(!('ended' in planUnpack([], 'J', { exportId: 'e' })), 'rien reçu : rien sur la fin');
+});
+
 test('CIBLE : lignes manquantes et lignes trop grosses suivies d\'un dépliage à l\'autre', () => {
   const unpack = { missing: { A: 2 }, big: { A: ['k1'], B: ['k2'] }, arrived: { A: ['k9'] }, resent: [] };
   let gaps = nextGaps({}, unpack);

@@ -614,7 +614,12 @@ try {
   await moveAlice('Nancy', 'le premier reçoit toujours');
   await new Promise(r => setTimeout(r, 2000));
   assert.ok(!(await records(target2.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Nancy')), 'le second ne reçoit plus');
-  step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours');
+  await openWidget(target2.url);
+  await widget().getByText('Coupé par la SOURCE').waitFor({ timeout: 30000 });
+  await widget().getByText(/La SOURCE a coupé cet envoi le/).waitFor();
+  assert.ok(!(await rawRows(target2.doc, 'Journal_Annuaire')).length, 'la ligne de fin est dépliée, pas rejetée');
+  assert.ok(!(await widget().getByText('Arrivées suspectes').count()), 'la fin n\'est pas une arrivée suspecte');
+  step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours ; la carte du révoqué le dit');
 
   // --- Modifier l'export : une table et une colonne de plus ; la CIBLE range la table (fenêtre)
   await openWidget(source.url);
