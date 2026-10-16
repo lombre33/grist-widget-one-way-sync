@@ -1,7 +1,10 @@
 // Exports (SOURCE) : colonnes envoyables, lignes de Synchro, webhooks et leur condition, lien public.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addTrackRowsAction, conditionExport, exchangeColumns, exchangeTables, exportableColumns, exportCondition, exportRowsActions, exportTables, hookName, hooksOf, isPublicRule, publicAclActions, publicAclRules, rowFilter, ruleText } from '../../js/logic/exports.js';
+import {
+  addTrackRowsAction, conditionExport, exchangeColumns, exchangeTables, exportableColumns, exportCondition, exportRowsActions, exportTables, hookName, hooksOf, isFileColumn, isPublicRule,
+  publicAclActions, publicAclRules, rowFilter, ruleText,
+} from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { resendValue } from '../../js/logic/resend.js';
 import { EXPORT } from './fixtures.mjs';
@@ -22,7 +25,7 @@ test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'
   assert.deepEqual(sentColumns([{ id: 1, Synchro_Colonnes: '[{"id":"Nom","type":"Text","as":"a b"}]' }]), [], 'nom dans l\'autre document invalide');
 });
 
-test('colonnes envoyables : Référence en texte, pièces jointes bloquées, colonnes techniques exclues', () => {
+test('colonnes envoyables : Référence en texte, pièces jointes en liste de fichiers, colonnes techniques exclues', () => {
   const cols = [
     { colId: 'Nom', type: 'Text', label: 'Nom' },
     { colId: 'Ville', type: 'Ref:Villes', visible: 'Nom' },
@@ -33,8 +36,21 @@ test('colonnes envoyables : Référence en texte, pièces jointes bloquées, col
     { colId: 'id_sync', type: 'Text' }, { colId: 'MajLe', type: 'DateTime:UTC' }, { colId: 'Supprime', type: 'Bool' },
   ];
   const sendable = exportableColumns(cols);
-  assert.deepEqual(sendable.map(c => [c.id, c.type, c.blocked]), [['Nom', 'Text', false], ['Ville', 'Text', false], ['Tags', 'Text', false], ['Photo', 'Attachments', true]]);
-  assert.deepEqual(sendable[1], { id: 'Ville', label: 'Ville', type: 'Text', source: 'Ref:Villes', visible: 'Nom', blocked: false });
+  assert.deepEqual(sendable.map(c => [c.id, c.type, isFileColumn(c)]), [['Nom', 'Text', false], ['Ville', 'Text', false], ['Tags', 'Text', false], ['Photo', 'Attachments', true]]);
+  assert.deepEqual(sendable[1], { id: 'Ville', label: 'Ville', type: 'Text', source: 'Ref:Villes', visible: 'Nom' });
+});
+
+test('pièces jointes : une table qui en envoie a sa liste de fichiers, que le webhook n\'envoie pas', () => {
+  const E = '0123456789abcdef';
+  const columns = [{ id: 'Nom', type: 'Text', label: 'Nom', source: 'Text', visible: '' }, { id: 'Photo', type: 'Attachments', label: 'Photo', source: 'Attachments', visible: '' }];
+  const { actions, changed } = exportRowsActions([], E, [{ table: 'Contacts', columns }, { table: 'Villes', columns: columns.slice(0, 1) }]);
+  assert.deepEqual(actions[0][3].Synchro_Type, ['cles', 'lot', 'suivi', 'fichiers', 'cles', 'lot', 'suivi']);
+  assert.deepEqual(changed, ['Contacts', 'Villes']);
+  const rows = actions[0][3].Synchro_Type.map((type, i) => ({ id: i + 1, ...Object.fromEntries(Object.entries(actions[0][3]).map(([k, v]) => [k, v[i]])) }));
+  assert.deepEqual(exportTables(rows, E).map(tb => [tb.table, tb.columns.length]), [['Contacts', 2], ['Villes', 1]]);
+  const without = exportRowsActions(rows, E, [{ table: 'Contacts', columns: columns.slice(0, 1) }, { table: 'Villes', columns: columns.slice(0, 1) }]);
+  assert.deepEqual(without.actions.map(a => [a[0], a[2]]), [['BulkUpdateRecord', [1, 2, 3]], ['BulkRemoveRecord', [4]]], 'colonne retirée : la liste des fichiers part');
+  assert.ok(!exportCondition(E).includes('fichiers'));
 });
 
 test('table Synchro : lignes d\'un export (liste, lot, instantané public), tables ajoutées, changées ou retirées', () => {
@@ -141,9 +157,10 @@ test('condition d\'un webhook : rien d\'autre que la forme exacte', () => {
 
 test('Échange : colonnes renvoyées sous leur nom d\'origine, correspondance déduite', () => {
   const entries = [{ table: 'Contacts', dest: 'Fiches', columns: [{ id: 'Nom' }, { id: 'Ville' }], map: { Ville: 'Commune' } }, { table: 'Vide', dest: 'Rien', columns: [{ id: 'X' }] }];
-  const columnsOf = dest => (dest === 'Fiches' ? [{ id: 'Nom', type: 'Text' }, { id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }, { id: 'Photo', blocked: true }] : []);
+  entries[0].columns.push({ id: 'Photo' });
+  const columnsOf = dest => (dest === 'Fiches' ? [{ id: 'Nom', type: 'Text' }, { id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }, { id: 'Photo', type: 'Attachments' }] : []);
   assert.deepEqual(exchangeTables(entries, columnsOf), [{ table: 'Fiches', filter: null, columns: [{ id: 'Nom', type: 'Text', as: 'Nom' }, { id: 'Commune', type: 'Text', as: 'Ville' }] }],
-    'seules les colonnes reçues repartent ; une destination sans colonne ne part pas');
+    'seules les colonnes reçues repartent (pas les pièces jointes) ; une destination sans colonne ne part pas');
   const allowed = new Set(['Ville', 'Nom', 'Lieu']);
   assert.deepEqual(exchangeColumns([{ id: 'Commune', as: 'Ville' }, { id: 'Nom' }], allowed),
     { sent: [{ id: 'Commune', as: 'Ville' }, { id: 'Nom' }], map: { Commune: 'Ville', Nom: 'Nom' } });

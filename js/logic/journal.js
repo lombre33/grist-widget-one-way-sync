@@ -108,8 +108,9 @@ function unpackedRows(row, { table, text, lot }) {
 // `ended` : { at } (heure d'arrivée) si la dernière nouvelle de la SOURCE est la fin de cet envoi,
 // null si des données sont arrivées après, absent si ce passage n'en dit rien. Au plus `max` lignes
 // reçues par passage, les plus anciennes : les suivantes attendent le passage d'après (`left`).
+// Les morceaux de fichiers de l'export restent pour la réception des fichiers (voir files.js).
 export function planUnpack(journalRows, journalTable, { exportId = null, max = Infinity } = {}) {
-  const all = journalRows.filter(isRaw).sort((a, b) => a.id - b.id);
+  const all = journalRows.filter(r => isRaw(r) && !(exportId && r[TYPE_COL] === KIND.part && r[EXPORT_COL] === exportId)).sort((a, b) => a.id - b.id);
   const raw = all.slice(0, max);
   const added = [];
   const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set() };

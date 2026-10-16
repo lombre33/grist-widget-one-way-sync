@@ -9,6 +9,7 @@ import {
 } from '../logic/resend.js';
 import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, webhookConditions, withLock } from '../grist.js';
 import { chargeRow, isCharge, syncRows, writeSync } from './synchro.js';
+import { planFiles, sendFiles } from './files.js';
 import { message } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
@@ -170,6 +171,7 @@ async function sendList(exportId, table, hookIds) {
 //    effacées (un destinataire ajouté reçoit tout). Destinataires tous en pause : marque gardée
 //    pour après la reprise. File bloquée par un autre échec (lien de réception mort) : rien ne part
 //    tant que la carte le signale, renvoyer ne ferait qu'attendre.
+//  - Pièces jointes : les fichiers que les destinataires n'ont pas encore partent (voir files.js).
 // `onDone` est appelé quand quelque chose est parti.
 let catching = false;
 let notOwner = false;
@@ -210,9 +212,11 @@ async function catchUpLocked() {
   const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
   const swaps = swapExports(rows);
   const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)) && !swaps.has(r[EXPORT_COL]));
-  if (!late.length && !lists.length) return 0;
+  const files = rows.some(r => r[TYPE_COL] === KIND.files) ? await planFiles(hooks, conditions, h => h.fields.enabled && hookStatus(h)[0] !== 'error') : [];
+  if (!late.length && !lists.length && !files.length) return 0;
   const recipients = row => hooksOf(hooks, conditions, row[EXPORT_COL]);
   const active = row => recipients(row).filter(h => h.fields.enabled).map(h => h.id);
+  let sent = 0;
   await withCharge(async () => {
     for (const row of late) {
       if (!recipients(row).length) await writeSync([row.id], { [MISSING_COL]: 0 });
@@ -222,8 +226,9 @@ async function catchUpLocked() {
       if (!recipients(row).length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
       else if (active(row).length) await sendList(row[EXPORT_COL], row[TABLE_COL], active(row));
     }
+    sent = await sendFiles(files, spend);
   });
-  return late.length + lists.length;
+  return late.length + lists.length + sent + files.length;
 }
 
 // Lignes de Synchro utiles au rattrapage, sans les lots ni les listes (de grosses cellules), car

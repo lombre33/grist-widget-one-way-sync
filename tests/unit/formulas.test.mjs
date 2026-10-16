@@ -54,6 +54,11 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /lot\.update\(depuis=v\(cut\), renvoi=bool\(again\)\)/, 'un lot coupé dit depuis quand');
   assert.match(lot, /v\(getattr\(r, "Supprime", False\)\)/, 'Supprime part telle quelle : « Non » ne supprime pas');
   assert.match(syncFormulas([]).keys, /tables = \{\}\nsrc = tables\.get/);
+  assert.match(lot, /    if s == "Attachments": return \[\[y\.fileIdent, y\.fileName, y\.fileSize\] for y in x\] or None\n/, 'pièces jointes : la liste de leurs fichiers');
+  assert.match(lot, /^if \$Synchro_Type not in \("lot", "complet", "fichiers"\): return ""\n/);
+  assert.match(lot, /\nif \$Synchro_Type == "fichiers":\n  files = \{\}\n  for r in rows:\n    for c in cols:\n      if c\.get\("source"\) != "Attachments": continue\n/,
+    'liste des fichiers : toutes les lignes de l\'export (filtre compris)');
+  assert.match(lot, /for y in getattr\(r, c\["id"\]\): files\[y\.fileIdent\] = \[y\.id, y\.fileName, y\.fileSize\]/);
 });
 
 test('suivi des clés et envoi coupé : une colonne de déclenchement, nommée comme une colonne des journaux', () => {

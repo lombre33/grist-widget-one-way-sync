@@ -104,8 +104,8 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 
 ## Après l'Alpha (branche `beta` fusionnée dans `main` le 16 octobre)
 
-Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes proposées dans
-`/mnt/project-files/notes/beta-pieces-jointes.md` (rien de codé avant l'accord d'Antoine).
+Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
+`/mnt/project-files/notes/beta-pieces-jointes.md` (accord d'Antoine le 16 octobre, codé en V0.7.0).
 - Échange à plusieurs (fait) : un export en Échange accepte plusieurs participants (« Ajouter un
   participant », mode Échange seul). Chaque participant a son journal de retour chez A, dont la note
   garde l'id de son webhook (`hook`, posé à l'approbation ; un Échange plus ancien est retrouvé par
@@ -131,6 +131,29 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes proposées dans
   (`clearFixMarks`). En Échange, Supprime est comparée et écrite partout où la destination l'a
   (`deleteCol`) : une version plus récente non cochée fait revenir une ligne cochée. Écarts
   (`refusedGaps`) : dernière version `refus` d'une clé que la ligne d'ici n'a pas dépassée.
+- Pièces jointes (V0.7.0, `js/logic/files.js`, `js/source/files.js`, `js/target/files.js`) : une
+  colonne Pièces jointes ne part que cochée (décochée par défaut). Dans le lot, la cellule vaut
+  `[[fileIdent, nom, taille], ...]` (formule `g()`), que `expandRows` rend `['L', triplet...]`. Une
+  table qui envoie des fichiers a une ligne `fichiers` dans `Synchro` (`Synchro_Lot` : JSON
+  `fileIdent -> [n°, nom, taille]` des lignes de l'export, filtre compris ; le webhook ne l'envoie
+  pas). Le rattrapage SOURCE (`catchUp`, propriétaire, page ouverte) télécharge chaque fichier dû
+  (`/attachments/<n°>/download`) et poste ses morceaux (512 Kio bruts, environ 700 ko en base64)
+  directement à l'adresse du webhook de chaque destinataire (`postToHook`), en lignes `fichier`
+  (`Synchro_Colonnes` : sha, nom, taille, n, parts, envoi ; `Synchro_Lot` : le morceau), sous le
+  budget des renvois. Suivi par export dans la note SOURCE (`fichiers` : `{f, h, p}`, empreintes
+  abrégées à 16 caractères ; tout webhook de `h` a tous les fichiers de `f`, `p` garde ce qu'ont
+  reçu les autres), sans table de plus ; « Tout renvoyer » le vide (`forgetHooks`), un webhook en
+  échec attend 10 min. On reconnaît un fichier aux 40 premiers caractères de `fileIdent` (SHA-1 ;
+  l'extension peut être devinée du type). CIBLE : `planUnpack` laisse les morceaux de son export
+  (ceux d'un autre export sont suspects) ; `receiveFiles` garde l'envoi le plus récent de chaque
+  fichier, vérifie taille et SHA-1, dépose (`POST /attachments`) s'il n'est pas déjà là, efface les
+  morceaux (un envoi incomplet depuis un jour aussi) ; un dépôt refusé est retenté au bout de
+  10 min. La recopie ne met dans une cellule que les fichiers présents (`resolveRows`), note
+  `waiting` (empreintes abrégées) dans la note du journal, et complète une cellule quand un fichier
+  arrive si elle vaut encore la résolution partielle (`fillActions`). Carte : « N fichiers
+  attendus », fichiers de plus de 25 Mo, rien par lien public. En Échange, les colonnes Pièces
+  jointes ne sont pas proposées. Une CIBLE d'avant la 0.7 refuse un lot qui porte des fichiers.
+  Testé de bout en bout dans `filesSteps` (`ONLY_FILES=1`).
 
 ## Le design préféré d'Antoine (design C)
 
@@ -147,10 +170,10 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.6.0 (16 octobre 2026)
+## État : V0.7.0 (16 octobre 2026)
 
-V0.6.0 : `main` reprend la Bêta (Échange à plusieurs, règles de A, voir « Après l'Alpha »). L'Alpha
-publiée est la V0.5.7 (branche `alpha`).
+V0.7.0 : pièces jointes (voir « Après l'Alpha »). V0.6.0 : `main` reprend la Bêta (Échange à
+plusieurs, règles de A). L'Alpha publiée est la V0.5.7 (branche `alpha`).
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;

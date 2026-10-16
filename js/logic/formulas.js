@@ -29,7 +29,8 @@ const PART_KEYS = 5000;
 // Lecture d'une valeur (`g`) et filtre de lignes de la table dans l'export (`keep`), communs aux
 // formules : une ligne qui sort du filtre quitte les clés, la CIBLE l'efface. Une valeur est lue à
 // part : une cellule en erreur part vide sans bloquer les autres. Dates en secondes (format de
-// Grist), Référence par son texte affiché.
+// Grist), Référence par son texte affiché, Pièces jointes par la liste de leurs fichiers
+// ([empreinte, nom, taille] : le contenu part à part, voir files.js).
 const READ = [
   'import json, datetime',
   'def v(x):',
@@ -40,6 +41,7 @@ const READ = [
   'def g(r, c):',
   '  try:',
   '    x, s, w = getattr(r, c["id"]), c.get("source", ""), c.get("visible", "")',
+  '    if s == "Attachments": return [[y.fileIdent, y.fileName, y.fileSize] for y in x] or None',
   '    if s.startswith("RefList:"): return ", ".join(str(getattr(y, w) if w else y.id) for y in x)',
   '    if s.startswith("Ref:"): return v(getattr(x, w) if w else x.id)',
   '    return v(x)',
@@ -103,7 +105,9 @@ function keysFormula(pick) {
 // dans Synchro_Renvoi, avec les colonnes de l'export, plafonné (`total` dit combien il y en avait).
 // Un lot coupé dit depuis quand (`depuis`) : la marque MISSING_COL le retient, et le widget SOURCE
 // envoie le reste. Lignes 'complet' (lien public) : toutes les lignes, au plus PUBLIC_MAX octets
-// (au-delà, aucune : `trop`).
+// (au-delà, aucune : `trop`). Lignes 'fichiers' (jamais envoyées par le webhook) : les fichiers des
+// colonnes Pièces jointes de toutes les lignes, { empreinte: [numéro, nom, taille] }, que le widget
+// SOURCE envoie lui-même.
 // Une ligne annulée (Ctrl+Z : MajLe revenue en arrière, RECALC_COL recalculée à l'instant) part
 // avec l'heure de l'annulation, pour l'emporter sur la version qu'elle annule.
 // Échange : la consolidation écrit les lignes reçues avec MajLe à l'heure de leur version, et
@@ -118,10 +122,20 @@ function keysFormula(pick) {
 // `Supprime` part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
 function lotFormula(pick) {
   return [
-    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}"): return ""`, pick, 'if src is None: return ""', ...READ,
+    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...READ,
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
     `again = set(int(i) for i in ($${RESEND_COL} or "").split(":")[-1].split(",") if i.strip().isdigit())`,
     `rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
+    `if $${TYPE_COL} == "${KIND.files}":`,
+    '  files = {}',
+    '  for r in rows:',
+    '    for c in cols:',
+    '      if c.get("source") != "Attachments": continue',
+    '      try:',
+    '        for y in getattr(r, c["id"]): files[y.fileIdent] = [y.id, y.fileName, y.fileSize]',
+    '      except Exception:',
+    '        pass',
+    '  return json.dumps(files, ensure_ascii=False)',
     'undone = set()',
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}")`,

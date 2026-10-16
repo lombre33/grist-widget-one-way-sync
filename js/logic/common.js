@@ -30,10 +30,15 @@ export const STATE_COL = 'Sync_Etat'; // CIBLE : effet de la version recopiée (
 export const MISSING_COL = STATE_COL;
 export const TRACK_COL = STATE_COL;
 // Types de ligne. Les webhooks n'envoient que les listes et les lots ('cles', 'lot') ; le suivi des
-// clés, le filtre de lignes et la ligne d'un export en Échange restent dans la SOURCE ; 'complet' et
-// son empreinte ne sont lus que par le lien public. Une seule ligne 'charge', d'aucun export, suit
-// les renvois du document (voir resend.js).
-export const KIND = { keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge', end: 'fin' };
+// clés, le filtre de lignes, la liste des fichiers d'une table ('fichiers') et la ligne d'un export
+// en Échange restent dans la SOURCE ; 'complet' et son empreinte ne sont lus que par le lien public.
+// Une seule ligne 'charge', d'aucun export, suit les renvois du document (voir resend.js). Le widget
+// SOURCE envoie lui-même au journal de la CIBLE la fin d'un envoi ('fin') et les morceaux des
+// fichiers ('fichier', voir files.js).
+export const KIND = {
+  keys: 'cles', lot: 'lot', full: 'complet', mark: 'empreinte', filter: 'filtre', track: 'suivi', swap: 'echange', load: 'charge', end: 'fin',
+  files: 'fichiers', part: 'fichier',
+};
 // Échange à plusieurs : marque de la ligne 'echange' (dans Synchro_Colonnes, que le webhook n'envoie
 // pas) quand l'export a au moins deux participants. Le document qui administre renvoie alors aux
 // autres ce que chacun lui envoie (voir lotFormula).
@@ -90,7 +95,7 @@ export function parseJson(text, fallback = null) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
 
-const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+export const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 export const randomHex = n => toHex(crypto.getRandomValues(new Uint8Array(n)));
 export const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
 

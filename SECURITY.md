@@ -51,7 +51,9 @@ ailleurs).
 | `GET/POST/PATCH/DELETE <document>/webhooks…` | onglet Envoyer et Échange : lister, créer, renommer, suspendre, supprimer un webhook, vider la file ; page ouverte par un propriétaire, toutes les 10 s (60 s onglet caché) : état des envois | jeton court du document (`getAccessToken`) en paramètre `auth=` ; Grist réserve ces appels aux propriétaires |
 | `GET <document>/sql?q=select …` | lectures légères répétées (colonnes de `Synchro`, ligne de test d'un journal) | jeton court en lecture seule |
 | `GET <document>/compare?left=<état>&right=HEAD&maxRows=1` | onglet Recevoir, toutes les 10 s page ouverte : quelles tables ont changé depuis le coup d'œil précédent (seuls leurs noms servent ; Grist renvoie aussi au plus une valeur par colonne changée, que le widget ignore) | jeton court en lecture seule ; Grist le réserve à qui peut lire tout le document, sinon le widget relit comme avant |
-| `POST <instance>/api/s/<clé>/tables/<journal>/records?flat=1` | bouton « Tester le lien » : une ligne marquée d'un nombre au hasard | aucune (clé du formulaire) |
+| `POST <instance>/api/s/<clé>/tables/<journal>/records?flat=1` | bouton « Tester le lien » : une ligne marquée d'un nombre au hasard ; SOURCE, page ouverte par un propriétaire : morceaux des pièces jointes (adresse lue dans le webhook du destinataire), ligne « fin » | aucune (clé du formulaire) |
+| `GET <document SOURCE>/attachments/<n°>/download` | SOURCE, page ouverte par un propriétaire : contenu d'un fichier d'une colonne Pièces jointes cochée, à envoyer | jeton court en lecture seule |
+| `POST <document CIBLE>/attachments` | CIBLE, page ouverte par un éditeur : dépôt d'un fichier reçu en entier et vérifié | jeton court du document |
 | `GET <document SOURCE>` | onglet Envoyer : le document est-il lisible par lien public ? | aucune (requête anonyme) |
 | `GET <document SOURCE>/tables/Synchro/records?filter=…` | CIBLE en mode lien public, page ouverte : les lignes `empreinte`, puis `complet` si elles ont changé | aucune (requête anonyme) |
 
@@ -85,6 +87,16 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   valider) sont notées dans sa note d'exports, jamais dans un journal : un participant ne peut pas
   faire passer un changement pour accepté. Un changement à valider n'est écrit qu'au clic sur
   **Accepter** ; une ligne de journal forgée marquée « refusée » ne change que l'affichage.
+- **Pièces jointes** : une colonne Pièces jointes ne part que cochée. Le lot ne porte que la liste
+  de ses fichiers (empreinte, nom, taille). Le contenu ne passe pas par le webhook : le widget
+  SOURCE, page ouverte par un propriétaire, télécharge chaque fichier cité par une ligne de
+  l'export (filtre compris) avec son jeton, et le poste à l'adresse du webhook de chaque
+  destinataire (la clé de son formulaire), en morceaux. La CIBLE ne dépose un fichier qu'arrivé en
+  entier, de la taille annoncée et dont le SHA-1 est l'empreinte annoncée (25 Mo au plus, 50
+  morceaux, nom sans chemin ni caractère de contrôle) ; un morceau illisible ou un fichier altéré
+  est effacé et compté parmi les « Arrivées suspectes ». Le fichier n'est montré dans une cellule
+  que si une version reçue le cite. Les fichiers ne vont jamais de la CIBLE vers la SOURCE, ni par
+  lien public.
 - **Lecteurs du document SOURCE** : `Synchro` contient les valeurs des colonnes exportées. Un
   document qui cache des colonnes à certains lecteurs doit aussi leur cacher `Synchro`.
 - **Mode lien public** : la SOURCE est partagée en lecture « toute personne ayant le lien », par
@@ -191,10 +203,10 @@ la seule personne concernée.
   la fiche), visibles par les propriétaires dans les paramètres du document.
 - SOURCE : `id_sync` et `MajLe` dans chaque table envoyée (et la case `Supprime` en Échange), la
   table `Synchro`, et une note (exports, invitations en attente avec l'empreinte de leur secret,
-  pauses) dans la description de `Synchro_Export`.
-- CIBLE : les tables de destination (plus `id_sync`, masquée), un journal par export reçu avec sa
-  note (destinations, colonnes, tables refusées, secret) dans la description de `Synchro_Ids`, et
-  le formulaire de réception sur sa page.
+  pauses, empreintes abrégées des fichiers déjà envoyés) dans la description de `Synchro_Export`.
+- CIBLE : les tables de destination (plus `id_sync`, masquée), les pièces jointes reçues, un
+  journal par export reçu avec sa note (destinations, colonnes, tables refusées, fichiers attendus,
+  secret) dans la description de `Synchro_Ids`, et le formulaire de réception sur sa page.
 - Un renvoi ne modifie jamais les tables de la personne : il n'écrit que dans `Synchro`.
 
 ## Chaîne d'approvisionnement
@@ -220,7 +232,10 @@ Pour un usage en production :
 
 - L'expéditeur d'un export, ou qui a obtenu la clé de sa réception, peut écrire dans les tables de
   destination de cette réception ce que l'export pourrait y écrire (versions datées du futur,
-  suppressions) : c'est le principe de la synchro. Couper le lien y met fin.
+  suppressions) : c'est le principe de la synchro. Couper le lien y met fin. Pour un export qui
+  envoie des pièces jointes, il peut aussi y faire déposer des fichiers (25 Mo chacun au plus),
+  comme la SOURCE y dépose les siens : un fichier reçu s'ouvre avec la même prudence qu'une pièce
+  jointe de courriel.
 - Un envoi en échec bloque la file de tous les webhooks du document SOURCE environ 15 minutes
   (comportement de Grist) : un destinataire qui refuse ses envois retarde les autres. Le widget
   le signale et propose de débloquer la file.

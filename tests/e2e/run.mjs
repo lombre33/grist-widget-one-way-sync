@@ -8,6 +8,7 @@
 // d'être copié depuis le bouton « Partager » de Grist (hors du widget).
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname, dirname } from 'node:path';
@@ -484,8 +485,101 @@ try {
     await waitFor(async () => !(await fiches(b.doc)).Fanny, 'ajout refusé : effacé chez B');
     step('Échange administré : modification à valider, acceptée puis refusée (B reprend la version de A) ; ajout refusé, effacé chez B');
   }
+  // --- Pièces jointes : la liste des fichiers part avec les lignes, leur contenu quand la page
+  // SOURCE est ouverte, une fois par destinataire, en morceaux ; la CIBLE dépose chaque fichier une
+  // seule fois et remplit les cellules dès son arrivée.
+  async function filesSteps() {
+    const auth = { Authorization: `Bearer ${env.apiKey}` };
+    const upload = async (doc, name, bytes) => {
+      const form = new FormData();
+      form.append('upload', new Blob([bytes]), name);
+      return (await (await fetch(`${TEAM}/api/docs/${doc}/attachments`, { method: 'POST', headers: auth, body: form })).json())[0];
+    };
+    const download = async (doc, id) => new Uint8Array(await (await fetch(`${TEAM}/api/docs/${doc}/attachments/${id}/download`, { headers: auth })).arrayBuffer());
+    const sha = bytes => createHash('sha1').update(bytes).digest('hex').slice(0, 16);
+    const small = new TextEncoder().encode('bonjour');
+    const big = Uint8Array.from({ length: 1300000 }, (_, i) => (i * 31 + (i >> 8)) % 251); // trois morceaux
+    const src = await newDocWithWidget('Fichiers SOURCE', [
+      ['AddTable', 'Dossiers', [{ id: 'Nom', type: 'Text' }, { id: 'Piece', type: 'Attachments' }]],
+      ['BulkAddRecord', 'Dossiers', [null, null, null], { Nom: ['Un', 'Deux', 'Trois'] }],
+    ]);
+    const dst = await newDocWithWidget('Fichiers CIBLE');
+    const dst2 = await newDocWithWidget('Fichiers CIBLE 2');
+    // Trois ne cite pas le même dépôt que Un, mais le même contenu : un seul fichier part.
+    const ids = [await upload(src.doc, 'bonjour.txt', small), await upload(src.doc, 'gros.bin', big), await upload(src.doc, 'copie.txt', small)];
+    await applyActions(src.doc, [['BulkUpdateRecord', 'Dossiers', [1, 2, 3], { Piece: ids.map(id => ['L', id]) }]]);
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Dossiers' }).check();
+    await dialogButton('Continuer').click();
+    await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
+    await dialog().getByRole('checkbox', { name: /Piece/ }).check();
+    await shot('25-source-pieces-jointes', 'modal');
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Dossiers');
+    await dialogButton('Créer l’export').click();
+    await dialogButton('Ajouter un destinataire').waitFor();
+    const exportId = (await records(src.doc, 'Synchro'))[0].Synchro_Export;
+    assert.deepEqual((await records(src.doc, 'Synchro')).map(r => r.Synchro_Type), ['cles', 'lot', 'suivi', 'fichiers'], 'une liste des fichiers, dans Synchro');
+    const invite = async () => {
+      await dialogButton('Créer l’invitation').click();
+      await dialog().getByText('Transmettez ce code').waitFor();
+      const code = await dialog().locator('textarea.code').first().inputValue();
+      await dialogButton('Plus tard').click();
+      return code;
+    };
+    await dialogButton('Ajouter un destinataire').click();
+    const answer = await accept(dst.doc, dst.url, await invite(), '« Dossiers » : table Dossiers.');
+    await approve(answer, { url: src.url });
+    const sent = async () => (JSON.parse((await records(src.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export').description).fichiers || {})[exportId] || { f: '', h: [] };
+    await waitFor(async () => { const s = await sent(); return s.f === [sha(small), sha(big)].sort().join(' ') && s.h.length === 1; }, 'fichiers envoyés, page SOURCE ouverte', 60000);
+    const piece = async (doc, nom) => (await records(doc, 'Dossiers')).find(r => r.Nom === nom).Piece;
+    await openWidget(dst.url);
+    await waitFor(async () => { const rows = await records(dst.doc, 'Dossiers'); return rows.length === 3 && rows.every(r => Array.isArray(r.Piece) && r.Piece.length === 2); }, 'cellules remplies', 60000);
+    assert.equal((await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Piece').type, 'Attachments', 'une vraie colonne Pièces jointes');
+    assert.equal((await records(dst.doc, '_grist_Attachments')).length, 2, 'un même contenu déposé une seule fois');
+    assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Deux'))[1]), big, 'gros fichier reconstitué à l\'identique');
+    assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Trois'))[1]), small);
+    assert.equal((await rawRows(dst.doc, 'Journal_Dossiers')).length, 0, 'morceaux effacés du journal');
+    step('Pièces jointes : liste des fichiers avec les lignes, contenu envoyé page SOURCE ouverte (gros fichier en trois morceaux), déposé une fois, cellules remplies');
+
+    // Page SOURCE fermée : un fichier remplacé est attendu, un fichier retiré l'est aussi ici.
+    const later = new TextEncoder().encode('bonsoir');
+    const laterId = await upload(src.doc, 'bonsoir.txt', later);
+    await applyActions(src.doc, [['UpdateRecord', 'Dossiers', 1, { Piece: ['L', laterId] }], ['UpdateRecord', 'Dossiers', 2, { Piece: null }]]);
+    await widget().getByText(/1 fichier attendu dans Dossiers/).waitFor({ timeout: 30000 });
+    await widget().getByText('Incomplet', { exact: true }).waitFor();
+    assert.equal(await piece(dst.doc, 'Deux'), null, 'fichier retiré dans la SOURCE : retiré ici');
+    assert.equal(await piece(dst.doc, 'Un'), null, 'fichier remplacé, pas encore arrivé');
+    await shot('26-cible-fichiers-attendus', 'card');
+    await openWidget(src.url);
+    await waitFor(async () => (await sent()).f.includes(sha(later)), 'fichier envoyé à l\'ouverture de la page SOURCE', 60000);
+    await openWidget(dst.url);
+    await waitFor(async () => { const p = await piece(dst.doc, 'Un'); return Array.isArray(p) && p.length === 2; }, 'cellule complétée à l\'arrivée du fichier', 60000);
+    assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Un'))[1]), later);
+    await widget().getByText(/fichier attendu/).waitFor({ state: 'detached' });
+    step('Pièces jointes : page SOURCE fermée, fichier remplacé attendu (signalé), retiré ici ; envoyé à l\'ouverture, cellule complétée');
+
+    // Nouveau destinataire : il reçoit tous les fichiers, le premier rien de plus.
+    await openWidget(src.url);
+    await button('Ajouter un destinataire').click();
+    const answer2 = await accept(dst2.doc, dst2.url, await invite(), '« Dossiers » : table Dossiers.');
+    await approve(answer2, { url: src.url });
+    await waitFor(async () => (await sent()).h.length === 2, 'second destinataire servi', 60000);
+    await openWidget(dst2.url);
+    await waitFor(async () => { const rows = await records(dst2.doc, 'Dossiers'); return rows.length === 3 && rows.filter(r => Array.isArray(r.Piece)).length === 2; }, 'second destinataire : fichiers reçus', 60000);
+    assert.deepEqual(await download(dst2.doc, (await piece(dst2.doc, 'Un'))[1]), later);
+    assert.equal((await records(dst.doc, '_grist_Attachments')).length, 3, 'le premier destinataire ne reçoit rien de plus');
+    step('Pièces jointes : un nouveau destinataire reçoit tous les fichiers');
+  }
   if (process.env.ONLY_EXCHANGE) {
     await exchangeSteps();
+    assert.deepEqual(errors, [], 'aucune erreur dans la console');
+    process.exit(0);
+  }
+  if (process.env.ONLY_FILES) {
+    await filesSteps();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
     process.exit(0);
   }
@@ -1160,6 +1254,7 @@ try {
   step('Lien public coupé, export supprimé : plus rien de lisible');
 
   await exchangeSteps();
+  await filesSteps();
 
   // --- Montages d'avant la version 0.4 : signalés, effacés d'un clic
   const idSyncRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'id_sync' && c.parentId === contactsRefId).id;

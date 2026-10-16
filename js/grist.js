@@ -1,9 +1,9 @@
 // Accès au document courant, avec les droits de la personne qui a ouvert la page.
 // Deux canaux seulement :
 //  - l'API des widgets (`grist.docApi`) : lecture des tables, écritures groupées ;
-//  - l'API REST de la même instance pour les webhooks, que l'API des widgets n'expose pas, et
-//    pour des lectures légères en SQL, avec un jeton d'accès court (`getAccessToken`) passé en
-//    paramètre `auth=`.
+//  - l'API REST de la même instance pour les webhooks et les pièces jointes, que l'API des widgets
+//    n'expose pas, et pour des lectures légères en SQL, avec un jeton d'accès court
+//    (`getAccessToken`) passé en paramètre `auth=`.
 // Toute requête réseau du widget passe par gristFetch.
 import { GRIST_ORIGINS } from './config.js';
 import { maskKey, parseDocBaseUrl } from './logic/codes.js';
@@ -65,16 +65,38 @@ export const isOwner = () => listWebhooks().then(() => true, () => false);
 
 // Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
 // léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture
-// répétée. Null si Grist refuse (droits, table absente) : lire alors la table entière.
-export async function selectRows(tableId, colIds) {
+// répétée. `where` : { colonne: valeur } (des noms du widget, pas des valeurs lues ailleurs). Null
+// si Grist refuse (droits, table absente) : lire alors la table entière.
+export async function selectRows(tableId, colIds, where = {}) {
   try {
     const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
-    const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"`;
+    const test = Object.entries(where).map(([c, v]) => `"${c}" = '${String(v).replace(/'/g, "''")}'`).join(' and ');
+    const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"${test ? ` where ${test}` : ''}`;
     const response = await gristFetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
   } catch (e) {
     return null;
   }
+}
+
+// Contenu d'une pièce jointe du document (numéro dans _grist_Attachments).
+export async function downloadAttachment(id) {
+  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+  const response = await gristFetch(`${baseUrl}/attachments/${Number(id)}/download?auth=${encodeURIComponent(token)}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+// Dépose un fichier dans le document, avec les droits de la personne ; rend son numéro.
+export async function uploadAttachment(name, bytes) {
+  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
+  const form = new FormData();
+  form.append('upload', new Blob([bytes]), name);
+  const response = await gristFetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`, {
+    method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: form,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
+  return (await response.json())[0];
 }
 
 // Ce qui a changé dans le document depuis l'état `since` (empreinte d'une action de son
@@ -166,11 +188,18 @@ export const setWebhookEnabled = (id, enabled) => rest('PATCH', `/webhooks/${enc
 export const renameWebhook = (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name });
 export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
 
-// Webhook effacé après un dernier envoi direct à son adresse (`rows`, comme le webhook les
-// enverrait). Un lien déjà mort ou trop lent ne retient pas l'effacement.
+// Envoi direct à l'adresse d'un webhook (`rows`, comme le webhook les enverrait) : le lien du
+// formulaire du destinataire n'accepte qu'un ajout de lignes, sans identifiant. Une erreur ne cite
+// jamais la clé.
+export async function postToHook(h, rows, timeout = 60000) {
+  const response = await gristFetch(h.fields.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows), signal: AbortSignal.timeout(timeout) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+// Webhook effacé après un dernier envoi direct à son adresse. Un lien déjà mort ou trop lent ne
+// retient pas l'effacement.
 export async function deleteWebhookWithNotice(h, rows) {
-  const body = JSON.stringify(rows);
-  await gristFetch(h.fields.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(10000) }).catch(() => {});
+  await postToHook(h, rows, 10000).catch(() => {});
   await deleteWebhook(h.id);
 }
 export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');

@@ -10,6 +10,7 @@ import { listDue, parseCharge } from '../logic/resend.js';
 import { apply, deleteWebhook, docIdentity, fetchRows, gristFetch, listWebhooks, readSchema, webhookConditions } from '../grist.js';
 import { ensureSyncTable, isCharge, legacyTables, readSourceNote, refreshMajLe, removeLegacy } from './synchro.js';
 import { catchUp, chargeNotice, hookStatus, resendTables } from './resend.js';
+import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { recipientWizard } from './recipient-wizard.js';
@@ -184,11 +185,12 @@ function rulesLine(exp) {
   return el('p', { class: 'muted small' }, t('send.exchange.rules', { rules: list.join(', ') }));
 }
 
-// Avis d'un export : tables perdues, colonnes changées, envoi incomplet, Échange.
+// Avis d'un export : tables perdues, colonnes changées, envoi incomplet, fichiers à envoyer, Échange.
 const exportNotes = exp => [
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
   exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
   exp.partial ? message('info', t('send.export.partial')) : null,
+  filesPending(exp.id) ? message('info', t('send.files.pending', { n: filesPending(exp.id) })) : null,
   exp.retour ? message('info', t('send.exchange.managed')) : null,
   exp.echange && !exp.retour ? el('p', { class: 'muted small' }, exp.recipients.length > 1 ? t('send.exchange.hub', { n: exp.recipients.length }) : t('send.exchange.with')) : null,
   exp.echange && !exp.retour ? rulesLine(exp) : null,
@@ -207,6 +209,7 @@ function exportCard(exp, state, open, out) {
     exp.public ? publicRow(exp, open, ownerOnly, out) : null,
   ].filter(Boolean);
   const load = async () => {
+    await resendFiles(exp.id);
     const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
     notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
   };

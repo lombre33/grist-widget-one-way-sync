@@ -31,6 +31,17 @@ Villes  ──┤ formules ─▶ Synchro ── un webhook par ─────�
   dans sa destination et nettoie le journal. Toutes les 10 secondes, il demande à Grist quelles
   tables ont changé (`docChanges`, comparaison de deux états du document) et ne passe que si un
   journal, une destination ou le schéma a bougé, et au moins une fois par minute.
+- Les **pièces jointes** : une formule ne lit pas le contenu d'un fichier. Le lot porte la liste des
+  fichiers de chaque cellule (`fileIdent`, nom, taille) ; une ligne `fichiers` de `Synchro` (que le
+  webhook n'envoie pas) liste tous ceux d'une table. Le widget SOURCE, page ouverte par un
+  propriétaire, télécharge chaque fichier et le poste en morceaux de 512 Ko (700 Ko en base64) à
+  l'adresse du webhook de chaque destinataire qui ne l'a pas (lignes `fichier` du journal) ; ce qui
+  est parti est noté dans la note de `Synchro` (`fichiers` : par export, les fichiers que tous les
+  destinataires à jour ont, et ce qu'ont les autres). Le widget CIBLE rassemble les morceaux,
+  vérifie taille et SHA-1, dépose le fichier (sauf s'il a déjà ce contenu) et écrit dans les
+  cellules les fichiers présents ; un fichier arrivé ensuite complète la cellule si elle est
+  restée telle que la recopie l'a laissée (`fillActions`, fichiers attendus notés par table).
+  Code : `js/logic/files.js`, `js/source/files.js`, `js/target/files.js`.
 
 L'étude de départ, avec les preuves dans le code de Grist, est dans
 [`01-etude-faisabilite.md`](01-etude-faisabilite.md).
@@ -42,8 +53,8 @@ table de réglages.
 
 | Document | Ajouts |
 |---|---|
-| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte (ajoutée en Échange). La table `Synchro` : par table d'un export, une ligne `cles`, une ligne `lot`, une ligne de suivi, et pour un export public `complet` et `empreinte`. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret) et les pauses sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
-| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Avant` (ce que la recopie a remplacé, pour l'historique), `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, à la racine de la liste des pages, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal. |
+| SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte (ajoutée en Échange). La table `Synchro` : par table d'un export, une ligne `cles`, une ligne `lot`, une ligne de suivi, une ligne `fichiers` si elle envoie des pièces jointes, et pour un export public `complet` et `empreinte`. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret), les pauses et les fichiers déjà envoyés (empreintes abrégées) sont notés dans la description de la colonne `Synchro_Export`. En mode lien public : des règles d'accès marquées « Synchro : lecture limitée aux exports publics ». |
+| CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page. Les pièces jointes reçues, déposées une fois chacune. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées ; morceaux de fichiers, effacés une fois le fichier déposé), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Avant` (ce que la recopie a remplacé, pour l'historique), `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, à la racine de la liste des pages, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal, avec les fichiers attendus. |
 
 Les envois créés avant la version 0.4 sont signalés « à refaire », avec un bouton qui efface
 l'ancien montage. Les réceptions d'avant la 0.5 dont le formulaire partage sa page avec un autre
@@ -66,6 +77,16 @@ sont signalées, avec un bouton qui les sépare.
   correctement : la carte de l'export le signale, et **Modifier** permet de cocher de nouveau les
   bonnes colonnes.
 - Une seule ligne plus grosse qu'un envoi de Grist (1 Mo) ne peut pas partir : la CIBLE le signale.
+- Le **contenu des pièces jointes** ne part que lorsqu'un propriétaire de la SOURCE a la page du
+  widget ouverte ; 25 Mo par fichier au plus (la CIBLE nomme les fichiers trop gros), au rythme du
+  budget des renvois (20 Mo par dix minutes et par document). Chaque morceau passe par le journal
+  de la CIBLE : son historique d'actions (1 000 actions au plus chez Grist) garde un temps environ
+  deux fois la taille des fichiers reçus. Une cellule retouchée à la main pendant qu'un fichier est
+  attendu n'est pas complétée (la carte la signale, **Corriger** la remet). Un fichier que la CIBLE
+  aurait perdu (pièce jointe purgée) ne revient qu'avec **Tout renvoyer**. Pas de pièces jointes
+  par lien public, ni de la CIBLE vers la SOURCE dans un Échange.
+- Tous les documents d'un export doivent avoir la version 0.7 ou plus pour qu'une colonne Pièces
+  jointes y soit cochée : une version plus ancienne rejette ses lots.
 - Un export en Échange n'a que des participants à l'Échange ; en cas de conflit, la version la plus
   récente de la ligne entière l'emporte. À plusieurs, une modification d'un participant n'atteint
   les autres que lorsque la page du widget du document qui administre est ouverte, et un
@@ -88,9 +109,9 @@ règles et se lit sans navigateur.
 | `js/pages.js` | Formulaires de réception, un par page, et ménage des pages |
 | `js/form-link.js` | Lien du formulaire : où le trouver, images d'aide, test sur son journal |
 | `js/exchange.js` | Échange : export de retour, webhook vers l'autre document, arrêt |
-| `js/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks, règles du lien public), `resend.js` (renvois, budget), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie) |
-| `js/source/` | Onglet Envoyer : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `actions.js` (pause, reprise, révocation, file), `tab.js` (cartes), `export-wizard.js`, `recipient-wizard.js` |
-| `js/target/` | Onglet Recevoir : `journals.js` (journaux et leur note), `loop.js` (recopie automatique), `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `wizard.js` (assistant de réception) |
+| `js/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks, règles du lien public), `resend.js` (renvois, budget), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie), `files.js` (pièces jointes : suivi des envois, morceaux, réception, cellules) |
+| `js/source/` | Onglet Envoyer : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `files.js` (envoi des pièces jointes), `actions.js` (pause, reprise, révocation, file), `tab.js` (cartes), `export-wizard.js`, `recipient-wizard.js` |
+| `js/target/` | Onglet Recevoir : `journals.js` (journaux et leur note), `loop.js` (recopie automatique), `files.js` (réception des pièces jointes), `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `wizard.js` (assistant de réception) |
 | `js/guide.js`, `js/tutorial.js` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images |
 | `js/ui.js`, `js/i18n.js`, `i18n/*.json`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
 

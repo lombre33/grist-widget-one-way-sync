@@ -2,7 +2,7 @@
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
 import { SYNC_TABLE, isUserTable, randomHex } from '../logic/common.js';
-import { exportableColumns, hookName } from '../logic/exports.js';
+import { exportableColumns, hookName, isFileColumn } from '../logic/exports.js';
 import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
 import { STATES } from '../logic/journal.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
@@ -50,12 +50,12 @@ async function showTables(ctx) {
 
 // Bloc d'une table à l'étape Colonnes : par défaut toutes ses colonnes et toutes ses lignes, dit
 // en une ligne ; deux boutons ouvrent le choix des colonnes et le filtre des lignes (ouverts
-// d'emblée quand l'export modifié les précise déjà).
+// d'emblée quand l'export modifié les précise déjà). Une colonne Pièces jointes ne part que cochée
+// (ses fichiers partent page ouverte, et peuvent peser lourd) : le choix des colonnes est alors ouvert.
 function columnsBlock(ctx, schema, table, relayed) {
-  const all = exportableColumns(schema.columns(table));
-  const usable = all.filter(c => !c.blocked);
-  if (!ctx.selected.has(table)) ctx.selected.set(table, usable.map(c => c.id));
-  const blocked = all.filter(c => c.blocked).map(c => c.id);
+  const usable = exportableColumns(schema.columns(table));
+  if (!ctx.selected.has(table)) ctx.selected.set(table, usable.filter(c => !isFileColumn(c)).map(c => c.id));
+  const files = usable.filter(isFileColumn).map(c => c.label);
   const summary = el('p', { class: 'small' });
   const describe = () => {
     const n = ctx.selected.get(table).length;
@@ -66,8 +66,8 @@ function columnsBlock(ctx, schema, table, relayed) {
   const columns = el('div', { class: 'form' },
     checkList({ items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source) })),
       checked: ctx.selected.get(table), label: table, onChange: (values) => { ctx.selected.set(table, values); describe(); } }),
-    blocked.length ? el('p', { class: 'muted small' }, t('send.columns.blocked', { cols: blocked.join(', ') })) : null);
-  const rows = el('div', {}, filterField(table, usable, ctx.filters.get(table), (filter) => { ctx.filters.set(table, filter); describe(); }));
+    files.length ? el('p', { class: 'muted small' }, t('send.columns.files', { cols: files.join(', ') })) : null);
+  const rows = el('div', {}, filterField(table, usable.filter(c => !isFileColumn(c)), ctx.filters.get(table), (filter) => { ctx.filters.set(table, filter); describe(); }));
   describe();
   return el('div', { class: 'form table-block' }, el('h3', {}, table),
     relayed ? message('info', t('send.columns.relay')) : null, summary,
@@ -153,7 +153,7 @@ async function prepareTables(ctx) {
   for (const table of ctx.chosen) {
     await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
     if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
-    const columns = exportableColumns(schema.columns(table)).filter(c => !c.blocked && ctx.selected.get(table).includes(c.id));
+    const columns = exportableColumns(schema.columns(table)).filter(c => ctx.selected.get(table).includes(c.id));
     tables.push({ table, columns, filter: ctx.filters.get(table) || null });
   }
   return tables;

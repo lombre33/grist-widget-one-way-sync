@@ -40,10 +40,10 @@ const SECTIONS = [
   { id: 's-columns', role: 'source',
     title: ['Choisir les colonnes, nommer l’export', 'Pick the columns, name the export'],
     text: [[
-      'Cocher les colonnes qui partent (toutes par défaut). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export.',
+      'Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export.',
       'À la création, le widget ajoute id_sync (identifiant stable) et MajLe (date de modification) aux tables, et la table technique Synchro, une seule pour tout le document. Une colonne Supprime déjà présente est prise en compte : une ligne cochée est retirée de la CIBLE.',
     ], [
-      'Tick the columns to send (all by default). The rest never leaves the document. Columns apply to all recipients of the export.',
+      'Tick the columns to send (all by default, except attachments, to tick). The rest never leaves the document. Columns apply to all recipients of the export.',
       'On creation, the widget adds id_sync (stable key) and MajLe (last change) to the tables, and the Synchro technical table, one for the whole document. An existing Supprime column is honoured: a ticked row is removed from the TARGET.',
     ]],
     images: ['03-source-colonnes', '03b-source-nom'] },
@@ -157,6 +157,18 @@ const SECTIONS = [
       'A large table leaves like a small one: its key list fits in 256 fingerprints, and the widget sends the full list in parts when needed. If waiting deliveries together exceed the size Grist allows, the SOURCE widget clears the queue and resends everything, on its own.',
     ]],
     images: ['19-cible-envoi-coupe'] },
+  { id: 'files', role: 'both',
+    title: ['Pièces jointes', 'Attachments'],
+    text: [[
+      'Une colonne Pièces jointes part si on la coche dans l’export. La CIBLE la reçoit comme une vraie colonne Pièces jointes : les fichiers s’ouvrent, se téléchargent et se prévisualisent comme les siens.',
+      'La liste des fichiers part avec la ligne, tout de suite ; leur contenu part quand un propriétaire de la SOURCE a la page du widget ouverte (même repliée), une fois par destinataire, en morceaux. En attendant, la carte de la CIBLE dit combien de fichiers sont attendus, et la cellule se remplit dès leur arrivée. Un fichier que la CIBLE a déjà n’est pas déposé deux fois.',
+      'Un fichier de plus de 25 Mo ne part pas : la CIBLE le signale. Les fichiers ne passent pas par le lien public, et ne vont que de la SOURCE vers la CIBLE dans un Échange.',
+    ], [
+      'An Attachments column is sent if you tick it in the export. The TARGET receives it as a real Attachments column: files open, download and preview like its own.',
+      'The list of files leaves with the row, right away; their content leaves while an owner of the SOURCE has the widget page open (even collapsed), once per recipient, in parts. Meanwhile, the TARGET card says how many files are expected, and the cell fills as soon as they arrive. A file the TARGET already has is not stored twice.',
+      'A file over 25 MB is not sent: the TARGET says so. Files do not travel through the public link, and only go from SOURCE to TARGET in an Exchange.',
+    ]],
+    images: ['25-source-pieces-jointes', '26-cible-fichiers-attendus'] },
   { id: 'exchange', role: 'both',
     title: ['Variante : Échange, dans les deux sens', 'Variant: Exchange, both ways'],
     text: [[

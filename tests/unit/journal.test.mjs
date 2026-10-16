@@ -124,6 +124,11 @@ test('CIBLE : lignes forgées par le lien du formulaire effacées et comptées, 
   const limited = planUnpack([...forged, ok], 'J', { exportId: 'e', max: 2 });
   assert.deepEqual([limited.rejected, limited.left], [1, 5]);
   assert.deepEqual(limited.actions.at(-1), ['BulkRemoveRecord', 'J', [1, 2]], 'les plus anciennes d\'abord');
+  // Morceaux de fichiers : ceux de l'export attendent leur réception (files.js), les autres sont rejetés.
+  const parts = [{ id: 8, Synchro_Export: 'e', Synchro_Type: 'fichier' }, { id: 9, Synchro_Export: 'autre', Synchro_Type: 'fichier' }];
+  const withParts = planUnpack([ok, ...parts], 'J', { exportId: 'e' });
+  assert.equal(withParts.rejected, 1);
+  assert.deepEqual(withParts.actions.at(-1), ['BulkRemoveRecord', 'J', [1, 9]]);
 });
 
 test('CIBLE : fin d\'envoi annoncée par la SOURCE, effacée si des données arrivent ensuite', () => {

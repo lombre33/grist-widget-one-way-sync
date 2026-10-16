@@ -5,8 +5,9 @@ import { HEX16, is, isSafeId, parseJson } from './common.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;
-// Types de colonnes qu'un export envoie (une Référence part en texte, une pièce jointe ne part pas).
-const SENT_TYPE = /^(Any|Bool|Choice|ChoiceList|Date|DateTime(:[A-Za-z0-9_/+-]+)?|Int|Numeric|Text)$/;
+// Types de colonnes qu'un export envoie (une Référence part en texte, une pièce jointe en liste de
+// fichiers, voir files.js).
+const SENT_TYPE = /^(Any|Attachments|Bool|Choice|ChoiceList|Date|DateTime(:[A-Za-z0-9_/+-]+)?|Int|Numeric|Text)$/;
 const MAX_COLUMNS = 400; // colonnes par table, au plus
 const TEAM = '(?:/o/[A-Za-z0-9_-]+)?'; // équipe dans le chemin : /o/<équipe>
 

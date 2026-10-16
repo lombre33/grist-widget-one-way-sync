@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.6.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.7.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -93,6 +93,9 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   *lien public* (un seul code, la CIBLE lit ce que la SOURCE publie).
 - **Recopie fidèle** : ajouts, modifications, suppressions, valeurs venues d'une autre table
   (Référence, formule), annulation (Ctrl+Z).
+- **Pièces jointes** : une colonne cochée arrive comme une vraie colonne Pièces jointes ; chaque
+  fichier part une fois par destinataire, quand la page SOURCE est ouverte, et n'est déposé
+  qu'une fois.
 - **Destinations au choix** : table nouvelle ou existante, colonnes mises en correspondance,
   lignes déjà présentes rattachées. Une table ajoutée plus tard à l'export est proposée dans une
   fenêtre.
@@ -167,8 +170,9 @@ L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
 
 - La recopie dans la CIBLE se fait quand un éditeur a la page du widget ouverte (même repliée) ;
   entre-temps, les changements attendent dans le journal.
-- Le reste d'un très gros changement, et le rattrapage après une pause, ne partent que lorsqu'un
-  propriétaire de la SOURCE ouvre la page du widget.
+- Le reste d'un très gros changement, le rattrapage après une pause et le contenu des pièces
+  jointes (25 Mo par fichier au plus) ne partent que lorsqu'un propriétaire de la SOURCE ouvre la
+  page du widget.
 - Un envoi en échec bloque la file de tous les webhooks du document SOURCE pendant environ
   15 minutes (comportement de Grist) ; **Débloquer la file** la vide puis renvoie.
 - Une table ou une colonne renommée dans la SOURCE ne part plus correctement : la carte de

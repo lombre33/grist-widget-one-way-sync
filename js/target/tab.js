@@ -3,11 +3,13 @@
 // journal encore vide attend son lien.
 import { isBlank } from '../logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
+import { fileList } from '../logic/files.js';
 import { fetchRows, isReadOnly, readSchema } from '../grist.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { endExchange } from '../exchange.js';
 import { legacyJournals, receivedJournals, updateJournalNote } from './journals.js';
 import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { receiveWizard } from './wizard.js';
 import { confirmDialog, el, errorText, icon, message, openModal, pickField, run } from '../ui.js';
@@ -102,7 +104,22 @@ function cardStatus(group) {
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
   if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
-  return Object.keys({ ...note.missing, ...note.big }).length ? ['incomplete', 'pending'] : ['ok', 'ok'];
+  const incomplete = Object.keys({ ...note.missing, ...note.big }).length || tables.some(r => r.files && r.files.waiting);
+  return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
+}
+
+// Pièces jointes d'une table reçue : fichiers attendus (ils partent quand un propriétaire de la
+// SOURCE ouvre la page du widget), trop gros pour partir, refusés par Grist ici ; aucun par lien public.
+const megabytes = bytes => (bytes / 1048576).toLocaleString(LANG, { maximumFractionDigits: 1 });
+function filesNotes(group, entry) {
+  const { files } = state.results.get(tableKey(group.journal, entry.table)) || {};
+  if (!files) return null;
+  const named = list => list.map(f => t('recv.files.named', { name: f.name, size: megabytes(f.size) })).join(', ');
+  return [
+    files.public ? message('info', t('recv.files.public', { dest: entry.dest })) : null,
+    files.waiting ? message('info', t('recv.files.waiting', { n: files.waiting, dest: entry.dest })) : null,
+    files.big.length ? message('warn', t('recv.files.big', { files: named(files.big), max: 25 })) : null,
+  ];
 }
 
 // Une table reçue : origine → destination, heure du dernier passage, ou l'erreur. Le détail des
@@ -143,6 +160,8 @@ function syncCard(group) {
     note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
     note.tables.map(entry => tableLine(group, entry)),
     cardNotes(group),
+    note.tables.map(entry => filesNotes(group, entry)),
+    uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
     note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
@@ -209,8 +228,13 @@ async function stopReceiving(group) {
 // ---------------------------------------------------------------------------------------------
 // Valeurs en petit tableau, comme dans une vue Grist.
 
-// Texte d'une valeur reçue ou lue dans la destination : liste de choix, date, case à cocher.
+// Texte d'une valeur reçue ou lue dans la destination : liste de choix, date, case à cocher,
+// pièces jointes (noms des fichiers reçus, ou nombre de fichiers ici).
 function cellText(value, type = '') {
+  if (type === 'Attachments' && Array.isArray(value)) {
+    const files = fileList(value);
+    return files.length ? files.map(f => f.name).join(', ') : t('recv.files.count', { n: value.length - (value[0] === 'L' ? 1 : 0) });
+  }
   if (Array.isArray(value)) return value[0] === 'L' ? value.slice(1).join(', ') : JSON.stringify(value);
   if (typeof value === 'boolean') return t(value ? 'common.yes' : 'common.no');
   if (typeof value === 'number' && /^Date/.test(type)) {

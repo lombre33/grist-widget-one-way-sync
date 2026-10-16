@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.6.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.7.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -91,6 +91,8 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   code, the TARGET reads what the SOURCE publishes).
 - **Faithful copy**: additions, changes, deletions, values coming from another table (Reference,
   formula), undo (Ctrl+Z).
+- **Attachments**: a ticked column arrives as a real Attachments column; each file is sent once
+  per recipient, while the SOURCE page is open, and stored only once.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET
@@ -162,8 +164,8 @@ Full analysis (in French): [`SECURITY.md`](SECURITY.md).
 
 - Copying into the TARGET happens while an editor has the widget's page open (even collapsed);
   meanwhile, changes wait in the journal.
-- The rest of a very large change, and catching up after a pause, are only sent when an owner of
-  the SOURCE opens the widget's page.
+- The rest of a very large change, catching up after a pause and the content of attachments
+  (25 MB per file at most) are only sent when an owner of the SOURCE opens the widget's page.
 - A failed delivery blocks the queue of every webhook of the SOURCE document for about
   15 minutes (Grist behaviour); **Unblock the queue** clears it, then resends.
 - A table or column renamed in the SOURCE is no longer sent correctly: the export card says so,

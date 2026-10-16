@@ -59,8 +59,9 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 
 ### 2. Choisir les colonnes
 
-Cocher les colonnes qui partent (toutes par défaut). Le reste ne sort jamais du document. Une
-Référence part comme le texte qu'elle affiche ; les pièces jointes ne partent pas. Les colonnes
+Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher : voir
+[Pièces jointes](#pièces-jointes)). Le reste ne sort jamais du document. Une
+Référence part comme le texte qu'elle affiche. Les colonnes
 valent pour toutes les personnes qui reçoivent l'export. En option, un **filtre de lignes** par
 table : seules partent les lignes où une colonne vaut un texte donné ; une ligne qui en sort est
 effacée chez les destinataires.
@@ -258,6 +259,32 @@ seules celles qui changent partent, et le widget envoie la liste complète par m
 le faut (vérifié avec 21 000 lignes). Si des envois en attente dépassent ensemble la taille
 permise par Grist, 1 Mo (la CIBLE a refusé un moment), le widget SOURCE vide la file et renvoie
 tout, seul, dès qu'un propriétaire ouvre sa page.
+
+### Pièces jointes
+
+Une colonne **Pièces jointes** part si on la coche dans l'export (elle ne l'est pas d'office : ses
+fichiers peuvent peser lourd). La CIBLE la reçoit comme une vraie colonne Pièces jointes : les
+fichiers s'ouvrent, se téléchargent et se prévisualisent comme ceux du document.
+
+![Colonne Pièces jointes cochée dans l'export](images/25-source-pieces-jointes.png)
+
+Une formule de Grist ne lit pas le contenu d'un fichier : la **liste des fichiers** de chaque
+cellule (nom, taille, empreinte) part avec la ligne, tout de suite, même page fermée ; leur
+**contenu** part quand un propriétaire de la SOURCE a la page du widget ouverte (même repliée),
+une fois par destinataire, en morceaux de 700 Ko, par le même lien que les données. En attendant,
+la carte de la CIBLE dit combien de fichiers sont attendus, et la cellule se remplit dès leur
+arrivée :
+
+![Fichier attendu, signalé par la CIBLE](images/26-cible-fichiers-attendus.png)
+
+- Un fichier remplacé ou retiré dans la SOURCE l'est aussi dans la CIBLE, comme une valeur.
+- Un fichier que la CIBLE a déjà (même contenu) n'est ni renvoyé ni déposé deux fois.
+- Un nouveau destinataire reçoit tous les fichiers ; **Tout renvoyer** les renvoie à chacun.
+- Un fichier de plus de **25 Mo** ne part pas : la CIBLE le nomme sur sa carte. Les envois de
+  fichiers suivent le même budget que les renvois (20 Mo par dix minutes et par document), pour ne
+  pas charger l'instance ; les modifications ordinaires, elles, partent toujours.
+- Les fichiers ne passent pas par le **lien public**, et ne vont, dans un **Échange**, que du
+  document qui invite vers les autres.
 
 ### Arrivées suspectes, couper le lien
 

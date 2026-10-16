@@ -9,15 +9,17 @@ import { COL_ID, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC
 export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND.end }];
 
 // Colonnes qu'une table SOURCE peut envoyer : toutes ses colonnes de données et formules, hors
-// colonnes de la synchro et colonnes internes de Grist. Les pièces jointes ne peuvent pas partir
-// (`blocked`). Une Référence part comme le texte qu'elle affiche.
+// colonnes de la synchro et colonnes internes de Grist. Une Référence part comme le texte qu'elle
+// affiche ; une colonne Pièces jointes, comme la liste de ses fichiers (voir files.js).
 export function exportableColumns(cols) {
   const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
   return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map(c => ({
-    id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type,
-    visible: c.visible || '', blocked: c.type === 'Attachments',
+    id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type, visible: c.visible || '',
   }));
 }
+
+// Colonne Pièces jointes (envoyée ou reçue).
+export const isFileColumn = c => c.type === 'Attachments';
 
 // Filtre de lignes d'une table : n'envoyer que les lignes dont la colonne `id` vaut `value` (texte
 // affiché, sans tenir compte des majuscules ; une case à cocher vaut « oui » ou « non »). Rend le
@@ -52,17 +54,18 @@ function tableChanged(here, values) {
 }
 
 // Lignes Synchro d'un export : par table, sa liste des clés, son lot, son suivi des clés, son
-// filtre s'il en a un, et son instantané complet avec son empreinte s'il est partagé par lien
-// public ; un export en Échange (`swap`) a en plus sa ligne 'echange' (sans table). `rows` : lignes
-// Synchro existantes. Rend les actions qui amènent l'export à `tables` ([{ table, columns, filter }],
-// colonnes de `exportableColumns`) et `changed`, les tables dont les lignes sont à renvoyer.
+// filtre s'il en a un, la liste de ses fichiers si elle envoie des pièces jointes, et son
+// instantané complet avec son empreinte s'il est partagé par lien public ; un export en Échange
+// (`swap`) a en plus sa ligne 'echange' (sans table). `rows` : lignes Synchro existantes. Rend les
+// actions qui amènent l'export à `tables` ([{ table, columns, filter }], colonnes de
+// `exportableColumns`) et `changed`, les tables dont les lignes sont à renvoyer.
 export function exportRowsActions(rows, exportId, tables, { isPublic = false, swap = false } = {}) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId);
   const kinds = [KIND.keys, KIND.lot, KIND.track, ...(isPublic ? [KIND.full, KIND.mark] : [])];
   const wanted = [];
   const changed = [];
   for (const tb of tables) {
-    const values = wantedValues(tb, kinds);
+    const values = wantedValues(tb, tb.columns.some(isFileColumn) ? [...kinds, KIND.files] : kinds);
     const here = mine.filter(r => r[TABLE_COL] === tb.table);
     if (tableChanged(here, values)) changed.push(tb.table);
     for (const [kind, value] of values) wanted.push({ table: tb.table, kind, value, row: here.find(r => r[TYPE_COL] === kind) });
@@ -144,7 +147,8 @@ export function exchangeTables(entries, columnsOf) {
   return entries.map((entry) => {
     const map = entry.map || {};
     const back = new Map([...new Set([...(entry.columns || []).map(c => c.id), ...Object.keys(map)])].map(id => [map[id] || id, id]));
-    const columns = (columnsOf(entry.dest) || []).filter(c => !c.blocked && back.has(c.id)).map(c => ({ ...c, as: back.get(c.id) }));
+    // Les fichiers ne vont, pour l'instant, que de la SOURCE vers la CIBLE.
+    const columns = (columnsOf(entry.dest) || []).filter(c => !isFileColumn(c) && back.has(c.id)).map(c => ({ ...c, as: back.get(c.id) }));
     return { table: entry.dest, columns, filter: null };
   }).filter(tb => tb.columns.length);
 }
