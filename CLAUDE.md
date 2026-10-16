@@ -113,7 +113,7 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.5 (16 octobre 2026)
+## État : V0.5.6 (16 octobre 2026)
 
 V0.5.1, correctifs de l'Alpha signalés par Antoine (le reste est gelé, voir la mémoire) : fenêtre
 d'envoi de l'existant fermable pendant l'envoi, qui continue (l'onglet se redessine à la fin) ;
@@ -142,6 +142,15 @@ V0.5.5 (Antoine : « Synchroniser ne corrige pas une retouche ») : bouton « Co
 avec confirmation (`restoreSource` : relit journal et destination, `restoreActions` remet la valeur
 de la dernière version reçue dans chaque cellule retouchée, et seulement elles). « Synchroniser »
 garde les retouches, par choix.
+V0.5.6 (Antoine : « l'historique doit être replié par défaut », « la suppression d'une ligne côté
+cible », « aussi pour une colonne supprimée ») : historique et chacune de ses lignes repliés, ce
+qu'on ouvre le reste d'un dessin à l'autre (`opened`, événement `toggle`). Une ligne reçue effacée
+ici est un écart (`gone`) tant que sa clé reste dans la SOURCE ; une clé partie de la SOURCE alors
+qu'elle n'était plus ici prend l'état `partie` (`LEFT`, non montré dans l'historique) et n'est plus
+signalée. Une colonne reçue effacée ici (`droppedColumns` : dans `refs.cols` ou `dropped` de la note,
+absente de la destination) n'est plus recréée vide à chaque passage : elle est notée (`dropped`),
+signalée, et « Corriger » la recrée (`AddVisibleColumn`) puis remet lignes et valeurs de la SOURCE.
+L'Échange recrée toujours seul une colonne effacée.
 
 
 V0.5 (backlog d'Antoine du 15 octobre au soir, puis feuille de route de la nuit : tests,

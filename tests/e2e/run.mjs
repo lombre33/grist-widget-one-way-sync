@@ -586,13 +586,21 @@ try {
   await historyHas('Alice', 'modif');
   await historyHas('Chloé', 'suppression');
   await historyHas('Dora', 'suppression');
-  // Avant et après en petit tableau, numéros de ligne de la table d'ici ; la modification est
-  // ouverte, l'ajout et les suppressions s'ouvrent au clic.
+  // Avant et après en petit tableau, numéros de ligne de la table d'ici. L'historique et chacune
+  // de ses lignes sont repliés par défaut ; ce qu'on ouvre le reste quand l'onglet se redessine.
   const item = label => widget().locator('.chg-item', { has: widget().locator('.chg-label', { hasText: label }) });
+  const isOpen = details => details.evaluate(d => d.open);
+  const history = widget().locator('details.history');
+  assert.ok(!(await isOpen(history)), 'historique replié par défaut');
+  assert.ok(!(await isOpen(item('Alice').locator('details'))) && !(await isOpen(item('Denis').locator('details'))), 'chaque changement est replié');
+  await history.locator(':scope > summary').click();
+  await item('Alice').locator('summary').click();
+  await widget().getByRole('tab', { name: 'Tutoriel' }).click();
+  await widget().getByRole('tab', { name: 'Recevoir' }).click();
+  assert.ok(await isOpen(history) && await isOpen(item('Alice').locator('details')), 'ouverts, ils le restent quand l\'onglet se redessine');
+  assert.ok(!(await isOpen(item('Denis').locator('details'))), 'les autres restent repliés');
   const gridOf = async label => item(label).locator('.mini-grid tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent)));
   assert.deepEqual(await gridOf('Alice'), [['Avant', 'Lyon'], ['Après', 'Marseille']], 'Alice : Ville avant et après');
-  assert.ok(await item('Alice').locator('details').evaluate(d => d.open), 'une modification montre son avant et son après');
-  assert.ok(!(await item('Denis').locator('details').evaluate(d => d.open)), 'un ajout s\'ouvre au clic');
   assert.deepEqual((await gridOf('Denis'))[0].slice(0, 2), ['Après', 'Denis'], 'ajout : ses valeurs après');
   assert.deepEqual((await gridOf('Dora'))[0].slice(0, 3), ['Avant', 'Dora', 'Brest'], 'suppression : ses valeurs avant');
   const numberOf = async label => Number(await item(label).locator('.chg-n').textContent());
@@ -603,9 +611,9 @@ try {
   assert.ok(await numberOf('Dora') > 0, 'une ligne supprimée garde le numéro qu\'elle avait');
   // La retouche de Bob est signalée, avec son numéro de ligne, la valeur d'ici et celle de la SOURCE.
   const drift = widget().locator('.drift');
-  await drift.getByText(/Contacts\s:\s1 valeur modifiée à la main ici/).waitFor({ timeout: 30000 });
-  assert.deepEqual(await drift.locator('tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent))),
-    [[String(destOrder.indexOf('Bob') + 1), 'Bob', 'Ville', 'retouche', 'Paris']], 'écart : ligne, nom, colonne, ici, SOURCE');
+  await drift.getByText(/Contacts\s:\s1 modification faite à la main ici/).waitFor({ timeout: 30000 });
+  const driftRows = () => drift.locator('tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent)));
+  assert.deepEqual(await driftRows(), [[String(destOrder.indexOf('Bob') + 1), 'Bob', 'Ville', 'retouche', 'Paris']], 'écart : ligne, nom, colonne, ici, SOURCE');
   await shot('14-cible-historique');
   await waitFor(async () => {
     const rows = await records(target.doc, 'Journal_Annuaire');
@@ -631,13 +639,21 @@ try {
   await openWidget(target.url);
   await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
   assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
-  // « Corriger », sous l'alerte : la cellule retouchée reprend la valeur de la SOURCE.
-  await widget().locator('.drift').getByRole('button', { name: 'Corriger' }).click();
-  await dialog().getByText(/1 valeur modifiée à la main reprend exactement la valeur de la SOURCE/).waitFor();
+  // Une ligne et une colonne reçues, effacées ici, sont signalées aussi (destination relue sur
+  // « Synchroniser ») ; « Corriger » remet alors l'état exact de la SOURCE.
+  const denis = (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Denis');
+  await applyActions(target.doc, [['RemoveRecord', 'Contacts', denis.id], ['RemoveColumn', 'Contacts', 'Lieu']]);
+  await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
+  await drift.getByText(/Contacts\s:\s3 modifications faites à la main ici/).waitFor({ timeout: 30000 });
+  assert.deepEqual((await driftRows()).map(r => r.slice(1)), [['', 'Lieu', 'Colonne supprimée ici, toujours envoyée par la SOURCE'],
+    ['Bob', 'Ville', 'retouche', 'Paris'], ['Denis', 'Ligne supprimée ici, toujours dans la SOURCE']], 'écarts : colonne, valeur, ligne');
+  await drift.getByRole('button', { name: 'Corriger' }).click();
+  await dialog().getByText(/3 modifications faites à la main ici sont remplacées par l’état exact de la SOURCE\. 1 ligne supprimée ici revient, en fin de table\. 1 colonne supprimée ici est recréée\./).waitFor();
   await dialogButton('Corriger').click();
-  await widget().locator('.drift').waitFor({ state: 'detached', timeout: 30000 });
-  assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'Paris', 'Corriger : la valeur de la SOURCE revient');
-  step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer ; « Corriger » remet la valeur de la SOURCE');
+  await drift.waitFor({ state: 'detached', timeout: 30000 });
+  assert.deepEqual((await records(target.doc, 'Contacts')).map(r => `${r.Nom}:${r.Ville}:${r.Lieu}`).sort(), ['Alice:Marseille:Lyon', 'Bob:Paris:Paris', 'Denis::'],
+    'Corriger : valeur, ligne et colonne de la SOURCE reviennent');
+  step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer ; ligne, colonne et valeur retouchées ici signalées, « Corriger » remet la SOURCE');
 
   // --- Révoquer le second seulement : le premier continue
   await openWidget(source.url);

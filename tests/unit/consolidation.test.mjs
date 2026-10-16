@@ -1,7 +1,7 @@
 // Recopie des versions reçues dans les tables de destination (CIBLE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyColumns, destRefs, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
+import { copyColumns, destRefs, droppedColumns, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
@@ -106,7 +106,7 @@ test('consolidation : clés parties d\'un seau effacées, sauf version plus réc
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['c'] }, { Nom: ['n3'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [2]],
-    marked([5, 3, 4], ['', 'ajout', '']),
+    marked([5, 3, 4], ['', 'ajout', 'partie']),
     ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [60] }],
     replaced([[2, { n: 2 }]]),
   ]);
@@ -169,12 +169,37 @@ test('écarts : valeurs retouchées ici, par numéro de ligne ; rien en Échange
   assert.deepEqual(manualEdits({ journalRows, destRows, copyCols, exchange: true }), []);
 });
 
+test('lignes effacées ici : signalées tant que la SOURCE les a ; une clé partie de la SOURCE est notée, plus signalée', () => {
+  const copyCols = [['Nom', 'Nom']];
+  const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, { ...done, Sync_Etat: 'suppression' }), j(3, 'c', 10, { ...done, Sync_Etat: 'partie' }),
+    j(4, 'd', 10, { Supprime: true, ...done }), j(5, 'e', 10, done), j(6, 'f', 10, done)];
+  const destRows = [{ id: 1, id_sync: 'f', Nom: 'n6' }];
+  const edits = manualEdits({ journalRows, destRows, copyCols, except: new Set(['e']) });
+  assert.deepEqual(edits.map(e => [e.key, e.gone, e.n]), [['a', true, null]], 'b, c, d parties de la SOURCE ; e partie à ce passage');
+  assert.deepEqual(restoreActions(edits, 'Dest', copyCols), [['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a'] }, { Nom: ['n1'] }, { on_many: 'all' }]],
+    'Corriger fait revenir la ligne');
+  // a, effacée ici, part ensuite de la SOURCE : la liste de son seau la note partie, sans rien effacer.
+  const { actions, stats } = plan([...journalRows, gone(7, 20, ['a'], { Sync_Recu: 30 })], destRows);
+  assert.equal(stats.removed, 0);
+  assert.deepEqual(actions, [marked([7], ['']), ['BulkUpdateRecord', 'J', [1], { Sync_Etat: ['partie'] }]]);
+  assert.deepEqual(plan([j(1, 'a', 10, { ...done, Sync_Etat: 'partie' }), gone(7, 20, ['a'])], destRows).actions, [marked([7], [''])], 'déjà notée : rien de plus');
+});
+
+test('colonnes effacées ici : notées, jamais une colonne nouvelle de l\'export ni la clé', () => {
+  const sent = ['id_sync', 'MajLe', 'Nom', 'Ville', 'Tel', 'Note'].map(id => ({ id }));
+  const entry = { map: { Ville: 'Commune' }, refs: { table: 1, cols: { id_sync: 1, Nom: 2, Commune: 3, Tel: 4 } } };
+  assert.deepEqual(droppedColumns(entry, sent, ['Nom', 'Tel']), [['Ville', 'Commune']], 'Note, nouvelle, sera créée ; id_sync toujours recréée');
+  assert.deepEqual(droppedColumns({ ...entry, refs: { cols: { Nom: 2 } }, dropped: ['Commune'] }, sent, ['Nom', 'Tel']), [['Ville', 'Commune']], 'déjà notée : le reste');
+  assert.deepEqual(droppedColumns({ ...entry, dropped: ['Commune'] }, sent, ['Nom', 'Tel', 'Commune']), [], 'revenue');
+  assert.deepEqual(droppedColumns({ ...entry, dropped: ['Commune'] }, sent.filter(c => c.id !== 'Ville'), ['Nom', 'Tel']), [], 'plus envoyée');
+});
+
 test('Corriger : les cellules retouchées reprennent la valeur de la SOURCE, et seulement elles', () => {
   const copyCols = [['Nom', 'Nom'], ['Ville', 'Commune'], ['Tags', 'Tags']];
   const journalRows = [j(1, 'a', 10, { Ville: 'Lyon', Tags: ['L', 'x'], ...done }), j(2, 'b', 10, { Ville: 'Nice', ...done }), j(3, 'c', 10, { Ville: 'Metz', ...done })];
   const destRows = [{ id: 7, id_sync: 'a', Nom: 'n1', Commune: 'Paris', Tags: ['L', 'y'] }, { id: 8, id_sync: 'b', Nom: 'n2', Commune: 'Nantes' },
     { id: 9, id_sync: 'c', Nom: 'n3', Commune: 'Metz' }];
-  const actions = restoreActions(manualEdits({ journalRows, destRows, copyCols }), 'Dest');
+  const actions = restoreActions(manualEdits({ journalRows, destRows, copyCols }), 'Dest', copyCols);
   assert.deepEqual(actions, [
     ['BulkUpdateRecord', 'Dest', [7], { Commune: ['Lyon'], Tags: [['L', 'x']] }],
     ['BulkUpdateRecord', 'Dest', [8], { Commune: ['Nice'] }],
@@ -226,7 +251,7 @@ test('consolidation : clés en double dans la destination, version supprimée d\
   const { actions, stats } = planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'D', journalTable: 'J' });
   assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 });
   assert.deepEqual(actions[0], ['BulkAddOrUpdateRecord', 'D', { id_sync: ['a'] }, { Nom: ['A2'] }, { on_many: 'all' }], 'les deux lignes de la clé suivent');
-  assert.deepEqual(actions[1][3].Sync_Etat, ['modif', ''], 'suppression d\'une clé jamais reçue : sans effet');
+  assert.deepEqual(actions[1][3].Sync_Etat, ['modif', 'partie'], 'suppression d\'une clé jamais reçue : sans effet, notée partie');
 });
 
 test('Échange : suppression plus ancienne que la ligne d\'ici sans effet, plus récente appliquée', () => {

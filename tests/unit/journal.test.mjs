@@ -53,9 +53,9 @@ test('historique : numéro de ligne d\'ici, avant et après sur les colonnes rec
   ];
   const numbers = new Map([['a', 4], ['b', 2], ['c', 9], ['e', 5]]);
   const byKey = Object.fromEntries(recentChanges(rows, 'Nom', 0, 10, { copyCols, numbers }).map(c => [c.label, c]));
-  assert.deepEqual(byKey.n1, { at: 11, label: 'n1', state: 'ajout', n: 4, detail: { cols: copyCols, before: null, after: ['n1', 'Lyon'] } });
-  assert.deepEqual(byKey.n2, { at: 21, label: 'n2', state: 'modif', n: 2, detail: { cols: [['Ville', 'Commune']], before: ['Paris'], after: ['Nice'] } });
-  assert.deepEqual(byKey.n3, { at: 31, label: 'n3', state: 'suppression', n: 7, detail: { cols: copyCols, before: ['n3', 'Metz'], after: null } },
+  assert.deepEqual(byKey.n1, { at: 11, key: 'a', label: 'n1', state: 'ajout', n: 4, detail: { cols: copyCols, before: null, after: ['n1', 'Lyon'] } });
+  assert.deepEqual(byKey.n2, { at: 21, key: 'b', label: 'n2', state: 'modif', n: 2, detail: { cols: [['Ville', 'Commune']], before: ['Paris'], after: ['Nice'] } });
+  assert.deepEqual(byKey.n3, { at: 31, key: 'c', label: 'n3', state: 'suppression', n: 7, detail: { cols: copyCols, before: ['n3', 'Metz'], after: null } },
     'une ligne supprimée garde le numéro qu\'elle avait');
   assert.equal(byKey.n4.detail, null, 'modification sans valeurs d\'avant notées (version plus ancienne) : pas de détail');
   assert.deepEqual([byKey.n5.n, byKey.n5.detail], [5, null], 'seules les colonnes recopiées sont lues');
@@ -251,7 +251,7 @@ test('purge : journal vide, tables refusées effacées', () => {
 
 test('historique : dates illisibles écartées', () => {
   const rows = [{ id: 1, id_sync: 'a', MajLe: 'hier', Sync_Etat: 'ajout' }, { id: 2, id_sync: 'b', MajLe: 5, Sync_Etat: 'modif', Sync_Recu: 9, Nom: null }];
-  assert.deepEqual(recentChanges(rows, 'Nom', 0, 10), [{ at: 9, label: '', state: 'modif', n: null, detail: null }]);
+  assert.deepEqual(recentChanges(rows, 'Nom', 0, 10), [{ at: 9, key: 'b', label: '', state: 'modif', n: null, detail: null }]);
 });
 
 test('noms reçus : aucune table ne peut viser une propriété des objets JavaScript', () => {
@@ -281,5 +281,5 @@ test('lots démesurés : trop de lignes refusées, clés trop grosses plafonnée
 
 test('historique : seuls les trois états connus sont montrés', () => {
   const rows = [{ id: 1, id_sync: 'a', MajLe: 5, Sync_Etat: '<img src=x>' }, { id: 2, id_sync: 'b', MajLe: 6, Sync_Etat: 'suppression' }, { id: 3, id_sync: 'c', MajLe: 7, Sync_Etat: '' }];
-  assert.deepEqual(recentChanges(rows, null, 0, 10), [{ at: 6, label: '', state: 'suppression', n: null, detail: null }]);
+  assert.deepEqual(recentChanges(rows, null, 0, 10), [{ at: 6, key: 'b', label: '', state: 'suppression', n: null, detail: null }]);
 });
