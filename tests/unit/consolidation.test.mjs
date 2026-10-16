@@ -1,7 +1,7 @@
 // Recopie des versions reçues dans les tables de destination (CIBLE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyColumns, destRefs, followRenames, manualEdits, newColumnsMap, planConsolidation, rowNumbers } from '../../js/logic/consolidation.js';
+import { copyColumns, destRefs, followRenames, manualEdits, newColumnsMap, planConsolidation, restoreActions, rowNumbers } from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
@@ -167,6 +167,20 @@ test('écarts : valeurs retouchées ici, par numéro de ligne ; rien en Échange
     'b suit sa dernière version, c est supprimée, une ligne locale sans clé et un vide égal à vide ne comptent pas');
   assert.equal(edits[0].row.Nom, 'n1', 'la version reçue nomme la ligne');
   assert.deepEqual(manualEdits({ journalRows, destRows, copyCols, exchange: true }), []);
+});
+
+test('Corriger : les cellules retouchées reprennent la valeur de la SOURCE, et seulement elles', () => {
+  const copyCols = [['Nom', 'Nom'], ['Ville', 'Commune'], ['Tags', 'Tags']];
+  const journalRows = [j(1, 'a', 10, { Ville: 'Lyon', Tags: ['L', 'x'], ...done }), j(2, 'b', 10, { Ville: 'Nice', ...done }), j(3, 'c', 10, { Ville: 'Metz', ...done })];
+  const destRows = [{ id: 7, id_sync: 'a', Nom: 'n1', Commune: 'Paris', Tags: ['L', 'y'] }, { id: 8, id_sync: 'b', Nom: 'n2', Commune: 'Nantes' },
+    { id: 9, id_sync: 'c', Nom: 'n3', Commune: 'Metz' }];
+  const actions = restoreActions(manualEdits({ journalRows, destRows, copyCols }), 'Dest');
+  assert.deepEqual(actions, [
+    ['BulkUpdateRecord', 'Dest', [7], { Commune: ['Lyon'], Tags: [['L', 'x']] }],
+    ['BulkUpdateRecord', 'Dest', [8], { Commune: ['Nice'] }],
+  ]);
+  const fixed = destRows.map(r => ({ ...r, ...(r.id === 7 ? { Commune: 'Lyon', Tags: ['L', 'x'] } : r.id === 8 ? { Commune: 'Nice' } : {}) }));
+  assert.deepEqual(manualEdits({ journalRows, destRows: fixed, copyCols }), [], 'plus rien à corriger');
 });
 
 test('consolidation idempotente : rejouer après application ne fait rien', () => {

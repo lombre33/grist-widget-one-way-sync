@@ -631,7 +631,13 @@ try {
   await openWidget(target.url);
   await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
   assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
-  step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer');
+  // « Corriger », sous l'alerte : la cellule retouchée reprend la valeur de la SOURCE.
+  await widget().locator('.drift').getByRole('button', { name: 'Corriger' }).click();
+  await dialog().getByText(/1 valeur modifiée à la main reprend exactement la valeur de la SOURCE/).waitFor();
+  await dialogButton('Corriger').click();
+  await widget().locator('.drift').waitFor({ state: 'detached', timeout: 30000 });
+  assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'Paris', 'Corriger : la valeur de la SOURCE revient');
+  step('SOURCE : second destinataire ajouté et servi ; le premier ne voit rien changer ; « Corriger » remet la valeur de la SOURCE');
 
   // --- Révoquer le second seulement : le premier continue
   await openWidget(source.url);
