@@ -24,10 +24,12 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   §1). Résumé de ce qu'elles imposent ici : `docs/03-proposition-ux-et-droits.md`, section 6.
 - Git : travail directement sur `main`, commit et push sans pull request ni confirmation, une
   fois le travail vérifié (tests verts).
-- Publication : l'Alpha (V0.5.7) est en ligne sur grist-factory. **Rien n'y part sans demande
-  explicite d'Antoine.** La branche `alpha` garde cette version : un bug de l'Alpha s'y corrige
-  (puis `main` le reprend), et seul un commit de `alpha` peut être transmis pour publication, s'il
-  le demande.
+- Publication : l'Alpha est en ligne sur grist-factory (V0.5.8 transmise le 16 octobre). Seule la
+  branche `alpha` y part : un bug de l'Alpha s'y corrige (puis `main` le reprend). Depuis le
+  16 octobre (Antoine : « si les correctifs sont prêts pour l'alpha ils peuvent être publiés
+  directement sur le dépôt live »), un correctif prêt et testé sur `alpha` est transmis pour
+  publication sans lui redemander (le commit au fil coordinateur du projet). **`main` (V0.6 et
+  plus) n'y part pas sans demande explicite d'Antoine.**
 - Avant de coder lourdement, se mettre d'accord avec Antoine sur le parcours et les
   fonctionnalités (proposition en cours : `docs/03-proposition-ux-et-droits.md`).
 
