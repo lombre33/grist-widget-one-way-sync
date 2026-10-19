@@ -166,14 +166,9 @@ function cardNotes(group) {
 function syncCard(group) {
   const { note } = group;
   const [status, tone] = cardStatus(group);
-  const from = (note.from || {}).email;
-  // Le nom du document vérifié chez Grist (Échange), sinon son identifiant.
-  const fromDoc = (note.from || {}).docName || (note.from || {}).docId || '';
   return el('article', { class: 'card', 'data-journal': group.journal },
     el('div', { class: 'card-head' }, el('strong', {}, note.name), pill(t(`recv.status.${status}`), tone)),
-    from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
-    group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
-    note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
+    cardOrigin(group),
     note.tables.map(entry => tableLine(group, entry)),
     cardNotes(group),
     note.tables.map(entry => filesNotes(group, entry)),
@@ -181,9 +176,25 @@ function syncCard(group) {
     note.tables.map(entry => [waveBlock(group, entry), reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
-      group.public || note.retour ? null : button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link', () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : ''),
+      group.public || note.retour ? null : linkButton(group),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
+
+// D'où vient la réception : la personne et son document (le nom vérifié chez Grist en Échange,
+// sinon l'identifiant), lien public, sens de l'Échange.
+function cardOrigin({ note, public: isPublic }) {
+  const { email: from, docName, docId } = note.from || {};
+  const fromDoc = docName || docId || '';
+  return [
+    from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
+    isPublic ? el('p', { class: 'muted small' }, t('recv.public')) : null,
+    note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
+  ];
+}
+
+// « Coller le lien » de la réception, ou « Continuer » tant qu'il manque.
+const linkButton = group => button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link',
+  () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : '');
 
 // Une carte qui ne peut pas se dessiner (journal abîmé) n'empêche pas les autres de l'être : elle
 // garde son nom, l'erreur, et de quoi couper le lien ou arrêter la réception.
@@ -250,20 +261,29 @@ async function stopReceiving(group) {
 // Texte d'une valeur reçue ou lue dans la destination : liste de choix, date, case à cocher,
 // pièces jointes (noms des fichiers reçus, ou nombre de fichiers ici).
 function cellText(value, type = '') {
-  if (type === 'Attachments' && Array.isArray(value)) {
-    const files = fileList(value);
-    return files.length ? files.map(f => f.name).join(', ') : t('recv.files.count', { n: value.length - (value[0] === 'L' ? 1 : 0) });
-  }
+  if (type === 'Attachments' && Array.isArray(value)) return filesText(value);
   if (Array.isArray(value)) return value[0] === 'L' ? value.slice(1).join(', ') : JSON.stringify(value);
   if (typeof value === 'boolean') return t(value ? 'common.yes' : 'common.no');
-  if (typeof value === 'number' && /^Date/.test(type)) {
-    const zone = type.startsWith('DateTime:') ? type.slice(9) : 'UTC';
-    try {
-      const date = new Date(value * 1000);
-      return type.startsWith('DateTime') ? date.toLocaleString(LANG, { timeZone: zone }) : date.toLocaleDateString(LANG, { timeZone: 'UTC' });
-    } catch (e) { /* fuseau inconnu : la valeur brute */ }
-  }
+  if (typeof value === 'number' && /^Date/.test(type)) return dateCell(value, type);
   return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+// Pièces jointes : noms des fichiers reçus, ou nombre de fichiers ici.
+function filesText(value) {
+  const files = fileList(value);
+  return files.length ? files.map(file => file.name).join(', ') : t('recv.files.count', { n: value.length - (value[0] === 'L' ? 1 : 0) });
+}
+
+// Date (en UTC, comme Grist la garde) ou date et heure dans le fuseau de la colonne ; un fuseau
+// inconnu donne la valeur brute.
+function dateCell(value, type) {
+  const zone = type.startsWith('DateTime:') ? type.slice(9) : 'UTC';
+  try {
+    const date = new Date(value * 1000);
+    return type.startsWith('DateTime') ? date.toLocaleString(LANG, { timeZone: zone }) : date.toLocaleDateString(LANG, { timeZone: 'UTC' });
+  } catch (e) {
+    return String(value);
+  }
 }
 
 const cell = (value, type, kind = '') => {

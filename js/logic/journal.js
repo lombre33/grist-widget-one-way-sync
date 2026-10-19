@@ -80,18 +80,26 @@ const listTime = list => Math.max(list.buckets ? list.buckets.t : 0, list.part ?
 // illisibles, liste datée du futur (après `limit`).
 function readRaw(row, exportId, limit) {
   const table = row[TABLE_COL];
-  const cols = isBlank(row[SCHEMA_COL]) ? [] : parseJson(row[SCHEMA_COL]);
-  const columnsOk = Array.isArray(cols) && (!cols.length || validColumns(cols));
   if (exportId && row[EXPORT_COL] !== exportId) return null;
   if (row[TYPE_COL] === KIND.end && exportId) return { end: true };
-  if (!isSafeId(table) || !columnsOk) return null;
-  if (row[TYPE_COL] === KIND.keys) {
-    const text = String(row[LIST_COL] || '');
-    const list = text ? parseList(text) : null;
-    return !text || (list && !(listTime(list) > limit)) ? { table, text } : null;
-  }
+  if (!isSafeId(table) || !readableColumns(row[SCHEMA_COL])) return null;
+  if (row[TYPE_COL] === KIND.keys) return readKeys(table, row[LIST_COL], limit);
   const lot = row[TYPE_COL] === KIND.lot ? parseLot(row[LOT_COL]) : null;
   return lot ? { table, lot } : null;
+}
+
+// Colonnes annoncées par une ligne brute : aucune, ou une liste valide (voir validColumns).
+function readableColumns(value) {
+  if (isBlank(value)) return true;
+  const cols = parseJson(value);
+  return Array.isArray(cols) && (!cols.length || validColumns(cols));
+}
+
+// Liste des clés d'une ligne brute : vide, ou lisible et pas datée du futur (après `limit`).
+function readKeys(table, value, limit) {
+  const text = String(value || '');
+  const list = text ? parseList(text) : null;
+  return !text || (list && !(listTime(list) > limit)) ? { table, text } : null;
 }
 
 // Lignes à ajouter au journal pour une ligne brute lue (`lines` : celles du lot gardées).

@@ -93,15 +93,7 @@ export async function refreshSource() {
 
 export async function renderSource(root = container, { periodic = false } = {}) {
   container = root;
-  let state = await loadState();
-  // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
-  // rattrapage d'un envoi coupé.
-  if (!state.ownerOnly && state.schema.has(SYNC_TABLE)) {
-    // Les lectures de loadState servent aux deux ; on ne relit qu'après une écriture.
-    if (await ensureSyncTable(state.schema, state.rows)) state = await loadState();
-    if (await refreshMajLe(state.schema, state.rows)) state = await loadState();
-    catchUp(refreshSource);
-  }
+  const state = await upgradeSource(await loadState());
   // Règles d'accès du widget (voir syncRules) : Synchro réservée aux propriétaires, et lien public
   // accordé aux exports partagés. Document lisible par lien public ? Vérifié à chaque affichage :
   // tant qu'il l'est, le refus général posé par le widget reste en place, même sans export public ;
@@ -114,6 +106,26 @@ export async function renderSource(root = container, { periodic = false } = {}) 
     reloading(container, renderSource);
     return;
   }
+  container.replaceChildren(...sourceView(state, access, open));
+  if (state.ownerOnly) return;
+  resumeExchange(state);
+  if (await checkHooks(state.exports.flatMap(exp => exp.recipients))) await renderSource(root, { periodic });
+}
+
+// Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
+// rattrapage d'un envoi coupé. Les lectures de loadState servent aux deux : l'état n'est relu
+// qu'après une écriture.
+async function upgradeSource(state) {
+  if (state.ownerOnly || !state.schema.has(SYNC_TABLE)) return state;
+  let current = state;
+  if (await ensureSyncTable(current.schema, current.rows)) current = await loadState();
+  if (await refreshMajLe(current.schema, current.rows)) current = await loadState();
+  catchUp(refreshSource);
+  return current;
+}
+
+// Contenu de l'onglet : « Nouvel export », avertissements, avis de la dernière action, cartes.
+function sourceView(state, access, open) {
   const out = el('div', { class: 'out' }, notice);
   notice = null;
   const toolbar = el('div', { class: 'toolbar' },
@@ -121,18 +133,20 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
   const cards = state.ownerOnly ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
   if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
-  container.replaceChildren(...[toolbar,
+  return [toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
     chargeNotice(state.charge),
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t(state.ownerOnly && state.exports.length ? 'send.ownersOnly' : 'send.empty')),
-    roleGuide({ you: 'source' })].filter(Boolean));
-  // Échange qui attend le lien de son formulaire de retour (page fermée en route) : l'assistant
-  // reprend à cette étape, une fois par chargement.
+    roleGuide({ you: 'source' })].filter(Boolean);
+}
+
+// Échange qui attend le lien de son formulaire de retour (page fermée en route) : l'assistant
+// reprend à cette étape, une fois par chargement.
+function resumeExchange(state) {
   const pending = state.exports.flatMap(exp => exp.invitations.filter(inv => inv.journal && !inv.ready).map(inv => [exp, inv]))[0];
-  if (pending && !resumed && !state.ownerOnly && !document.querySelector('.scrim')) openRecipient(...pending);
-  if (!state.ownerOnly && await checkHooks(state.exports.flatMap(exp => exp.recipients))) await renderSource(root, { periodic });
+  if (pending && !resumed && !document.querySelector('.scrim')) openRecipient(...pending);
 }
 
 // Chaque destinataire est revérifié chez Grist au plus une fois par heure (voir shareInfo) : la clé

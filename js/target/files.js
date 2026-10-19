@@ -16,9 +16,9 @@ export const uploadErrors = journal => [...(refused.get(journal) || new Map()).v
 // Fichiers du document : empreinte -> numéro dans _grist_Attachments.
 export async function attachments() {
   const present = new Map();
-  for (const a of await fetchRows('_grist_Attachments')) {
-    const sha = shaOf(a.fileIdent);
-    if (sha && !present.has(sha)) present.set(sha, a.id);
+  for (const attachment of await fetchRows('_grist_Attachments')) {
+    const sha = shaOf(attachment.fileIdent);
+    if (sha && !present.has(sha)) present.set(sha, attachment.id);
   }
   return present;
 }
@@ -40,28 +40,10 @@ export async function receiveFiles(journal, exportId, rows, files, cited, settle
   const present = await files();
   const parked = [...partial];
   for (const file of ready) {
-    if (!present.has(file.sha) && !cited.has(short(file.sha))) {
-      if (file.old) done.push(...file.ids);
-      else parked.push(file);
-      continue;
-    }
-    if (!present.has(file.sha)) {
-      if (Date.now() - ((errors.get(file.sha) || {}).at || 0) < RETRY_MS) continue;
-      const bytes = joinParts(file.data);
-      if (bytes.length !== file.size || await sha1(bytes) !== file.sha) {
-        bad++;
-        done.push(...file.ids);
-        continue;
-      }
-      try {
-        present.set(file.sha, await uploadAttachment(file.name, bytes));
-        errors.delete(file.sha);
-      } catch (e) {
-        errors.set(file.sha, { name: file.name, error: e.message, at: Date.now() });
-        continue;
-      }
-    }
-    done.push(...file.ids);
+    const outcome = await receiveFile(file, { present, cited, errors });
+    if (outcome === 'park') parked.push(file);
+    else if (outcome !== 'wait') done.push(...file.ids);
+    if (outcome === 'bad') bad++;
   }
   if (settled) {
     // Seuls les envois incomplets en trop sont suspects : des fichiers entiers peuvent venir d'une
@@ -73,4 +55,23 @@ export async function receiveFiles(journal, exportId, rows, files, cited, settle
   await apply(chunk(done).map(part => ['BulkRemoveRecord', journal, part]));
   const gone = new Set(done);
   return { rows: rows.filter(r => !gone.has(r.id)), rejected: bad };
+}
+
+// Sort d'un fichier arrivé en entier (ses morceaux sont effacés sauf pour 'park' et 'wait') :
+// déjà là ou déposé ('done'), altéré ('bad'), cité par aucune version ('park' ; 'done' au bout
+// d'un jour), dépôt à retenter plus tard ('wait').
+async function receiveFile(file, { present, cited, errors }) {
+  if (present.has(file.sha)) return 'done';
+  if (!cited.has(short(file.sha))) return file.old ? 'done' : 'park';
+  if (Date.now() - (errors.get(file.sha)?.at || 0) < RETRY_MS) return 'wait';
+  const bytes = joinParts(file.data);
+  if (bytes.length !== file.size || await sha1(bytes) !== file.sha) return 'bad';
+  try {
+    present.set(file.sha, await uploadAttachment(file.name, bytes));
+    errors.delete(file.sha);
+    return 'done';
+  } catch (e) {
+    errors.set(file.sha, { name: file.name, error: e.message, at: Date.now() });
+    return 'wait';
+  }
 }

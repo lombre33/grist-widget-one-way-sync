@@ -210,8 +210,7 @@ async function trusted(journal, note, rows, seal) {
 // flot anormal) et la fin de l'envoi annoncée par la SOURCE (`ended`, heure ; effacée si des
 // données arrivent ensuite). Avec la clé de signature, les lignes mal signées sont rejetées. Rend
 // la note à jour, les lignes du journal, et s'il reste des lignes reçues pour le passage suivant.
-async function unpack(journal, { key, seal, note: noteBefore }) {
-  let note = noteBefore;
+async function unpack(journal, { key, seal, note }) {
   let rows = await fetchRows(journal);
   const raw = rows.filter(isRaw);
   const flood = flooded(journal, raw);
@@ -226,15 +225,21 @@ async function unpack(journal, { key, seal, note: noteBefore }) {
   rows = checked.rows;
   if (checked.forged.length) await apply(chunk(checked.forged).map(ids => ['BulkRemoveRecord', journal, ids]));
   if (!plan.actions.length && !checked.forged.length) return { note, rows, left: 0 };
-  const rejected = plan.rejected + checked.forged.length;
+  return { note: await noteArrivals(journal, note, { plan, forged: checked.forged.length, flood }), rows, left: plan.left };
+}
+
+// Fin de l'envoi annoncée par la SOURCE (heure), gardée tant que rien d'autre n'arrive.
+const endedAt = (note, plan) => (plan.ended === undefined ? note.ended : plan.ended && (plan.ended.at || Math.floor(nowS()))) || undefined;
+
+// Ce que le dépliage note dans le journal (voir unpack) ; rend la note à jour.
+async function noteArrivals(journal, note, { plan, forged, flood }) {
+  const rejected = plan.rejected + forged;
   const gaps = nextGaps(note, plan);
   if (rejected || flood) gaps.suspect = nextSuspect(note.suspect, rejected, flood);
-  const ended = (plan.ended === undefined ? note.ended : plan.ended && (plan.ended.at || Math.floor(nowS()))) || undefined;
-  if (gaps.suspect || ended !== note.ended || JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
-    note = { ...note, ...gaps, ended };
-    await updateJournalNote(journal, n => ({ ...n, ...gaps, ended }));
-  }
-  return { note, rows, left: plan.left };
+  const ended = endedAt(note, plan);
+  if (!gaps.suspect && ended === note.ended && JSON.stringify(gaps) === JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) return note;
+  await updateJournalNote(journal, n => ({ ...n, ...gaps, ended }));
+  return { ...note, ...gaps, ended };
 }
 
 // Tables que la SOURCE a ajoutées à l'export, pas encore rangées ni refusées (`pending`), et
@@ -274,56 +279,76 @@ async function prepareColumns(ctx, noted, tableRows) {
 // recopiées et leurs types, les numéros de ligne et les retouches faites à la main (lus après la
 // recopie).
 async function copyTable(ctx, noted) {
-  const { journal, groups, exchange, hub, swap, rules, decisions } = ctx;
   const renamed = followRenames(noted, ctx.schema);
   if (!ctx.schema.has(renamed.dest)) return { entry: renamed, error: failure('destMissing', { dest: renamed.dest }) };
-  const tableRows = groups.get(renamed.table) || [];
-  const prepared = await prepareColumns(ctx, renamed, tableRows);
-  const { copyCols, types, dropped, fileCols } = prepared;
-  let { entry } = prepared;
+  const tableRows = ctx.groups.get(renamed.table) || [];
+  const { entry, copyCols, types, dropped, fileCols } = await prepareColumns(ctx, renamed, tableRows);
   const present = fileCols.length ? await ctx.files() : new Map();
-  // La destination n'est relue que si le journal de cette table a changé depuis le dernier
-  // passage resté sans effet (ou qu'un fichier est arrivé), ou pour y revoir les retouches (REREAD_MS).
-  const key = tableKey(journal, entry.table);
+  const key = tableKey(ctx.journal, entry.table);
   const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest, present.size]);
-  const was = settled.get(key);
-  if (was && was.signature === signature && Date.now() - was.at < REREAD_MS && lastRead.has(key)) {
-    return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, ...lastRead.get(key) };
-  }
+  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, ...lastRead.get(key) };
   // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent
   // ensuite complètent les cellules (fillActions).
   const rows = resolveRows(tableRows, fileCols.map(([from]) => from), present);
   const destRows = await fetchRows(entry.dest);
-  const deleteCol = ctx.schema.columns(entry.dest).some(c => c.colId === DELETE_COL);
-  const { actions, stats, gone, pending, fix, held } = planConsolidation({
-    journalRows: rows, destRows, copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '', exchange, hub, deleteCol, rules, decisions,
-    hold: exchange ? null : ctx.renforce ? WAVE_STRICT : WAVE, wave: ctx.waves.get(entry.table) || '', now: nowS(),
-  });
+  const plan = planTable(ctx, entry, { rows, destRows, copyCols });
   const presentKeys = new Set([...present.keys()].map(short));
   const fill = fillActions({
     journalRows: tableRows, destRows, copyCols: fileCols, present, destTable: entry.dest, arrived: new Set((entry.waiting || []).filter(k => presentKeys.has(k))),
   });
-  // Échange : la ligne 'echange' de l'export est touchée dans le même lot (voir syncFormulas) :
-  // les lignes reçues ne repartent pas vers l'autre document. Un refus corrigé, au contraire, fait
-  // repartir la ligne d'ici : à part, puis demandé au lot.
+  const destChanged = await writeTable(ctx, entry, plan, fill);
+  if (plan.actions.length || destChanged) settled.delete(key);
+  else settled.set(key, { signature, at: Date.now(), dest: entry.dest });
+  const after = destChanged ? await fetchRows(entry.dest) : destRows;
+  const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public');
+  lastRead.set(key, {
+    numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
+    pending: plan.pending, held: plan.held, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
+  });
+  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, ...lastRead.get(key) };
+}
+
+// La destination n'est relue que si le journal de cette table a changé depuis le dernier passage
+// resté sans effet (ou qu'un fichier est arrivé), ou pour y revoir les retouches (REREAD_MS).
+function unchanged(key, signature) {
+  const was = settled.get(key);
+  return Boolean(was && was.signature === signature && Date.now() - was.at < REREAD_MS && lastRead.has(key));
+}
+
+// Recopie d'une table, planifiée (voir planConsolidation) : vague de suppressions retenue selon
+// le niveau Renforcé, jamais en Échange.
+function planTable(ctx, entry, { rows, destRows, copyCols }) {
+  return planConsolidation({
+    journalRows: rows, destRows, copyCols, destTable: entry.dest, journalTable: ctx.journal, matchCol: entry.match || '',
+    exchange: ctx.exchange, hub: ctx.hub, rules: ctx.rules, decisions: ctx.decisions,
+    deleteCol: ctx.schema.columns(entry.dest).some(c => c.colId === DELETE_COL),
+    hold: ctx.exchange ? null : ctx.renforce ? WAVE_STRICT : WAVE, wave: ctx.waves.get(entry.table) || '', now: nowS(),
+  });
+}
+
+// Écrit la recopie d'une table et les cellules complétées par un fichier arrivé ; rend vrai si la
+// destination a changé. Échange : la ligne 'echange' de l'export est touchée dans le même lot (voir
+// syncFormulas) : les lignes reçues ne repartent pas vers l'autre document. Un refus corrigé, au
+// contraire, fait repartir la ligne d'ici : à part, puis demandé au lot.
+async function writeTable(ctx, entry, { actions, stats, fix }, fill) {
   const written = stats.added + stats.updated + stats.removed > 0;
-  await apply([...(swap && written ? [['UpdateRecord', SYNC_TABLE, swap.id, { [RESEND_COL]: randomHex(4) }]] : []), ...actions, ...fill]);
+  await apply([...(ctx.swap && written ? [['UpdateRecord', SYNC_TABLE, ctx.swap.id, { [RESEND_COL]: randomHex(4) }]] : []), ...actions, ...fill]);
   if (fix.actions.length) {
     await apply(fix.actions);
     await askResend(ctx.lots.get(entry.dest), entry.dest, fix.keys);
   }
-  if (actions.length || fix.actions.length || fill.length) settled.delete(key);
-  else settled.set(key, { signature, at: Date.now(), dest: entry.dest });
-  const after = written || fix.actions.length || fill.length ? await fetchRows(entry.dest) : destRows;
+  return written || fix.actions.length > 0 || fill.length > 0;
+}
+
+// Pièces jointes d'une table : pour la note, les fichiers attendus (`waiting`, empreintes abrégées) ;
+// pour la carte, leur nombre et les fichiers trop gros. Un lien public n'attend aucun fichier.
+function filesSummary(tableRows, fileCols, present, isPublic) {
+  if (!fileCols.length) return { waiting: undefined, card: undefined };
   const files = filesState(tableRows, fileCols.map(([from]) => from), present);
-  const isPublic = ctx.mode === 'public';
-  entry = { ...entry, waiting: files.waiting.length && !isPublic ? files.waiting.map(short).slice(0, WAITING_KEPT) : undefined };
-  lastRead.set(key, {
-    numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange, except: gone }),
-    pending, held, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [],
-    files: fileCols.length ? { waiting: isPublic ? 0 : files.waiting.length, big: files.big.slice(0, BIG_KEPT), public: isPublic } : undefined,
-  });
-  return { entry, stats, copyCols, types, dropped, ...lastRead.get(key) };
+  return {
+    waiting: files.waiting.length && !isPublic ? files.waiting.map(short).slice(0, WAITING_KEPT) : undefined,
+    card: { waiting: isPublic ? 0 : files.waiting.length, big: files.big.slice(0, BIG_KEPT), public: isPublic },
+  };
 }
 
 // Refus corrigé : le lot de la table (`lot`, ligne de Synchro) envoie les lignes corrigées, quoi
@@ -500,16 +525,23 @@ function notePass(journal, pass, before, offersBefore, at) {
   // Ce que la carte montre du journal : lignes manquantes, trop grosses, arrivées suspectes, fin.
   const gaps = JSON.stringify([pass.note.missing, pass.note.big, pass.note.suspect, pass.note.ended]);
   state.results.set(journal, { at, rows: pass.rows, gaps });
-  let changed = !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== gaps || offersBefore !== JSON.stringify(state.offers.get(journal) || []);
-  for (const tb of pass.tables) {
-    const key = tableKey(journal, tb.table);
-    const was = state.results.get(key);
-    state.results.set(key, tb.error ? { at, error: true, text: errorText(tb.error) } : { at, text: summary(tb.stats), ...tb });
-    changed ||= Boolean(tb.error) !== Boolean(was && was.error) || Boolean(tb.stats && tb.stats.added + tb.stats.updated + tb.stats.removed)
-      || JSON.stringify([(was && was.drift) || [], (was && was.driftCount) || 0, (was && was.pendingIds) || [], (was && was.gapCount) || 0, (was && was.files) || null, (was && was.held) || null])
-        !== JSON.stringify([tb.drift || [], tb.driftCount || 0, tb.pendingIds || [], tb.gapCount || 0, tb.files || null, tb.held || null]);
-  }
-  return changed;
+  const tablesChanged = pass.tables.map(tb => noteTable(journal, tb, at)).some(Boolean);
+  return tablesChanged || !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== gaps
+    || offersBefore !== JSON.stringify(state.offers.get(journal) || []);
+}
+
+// Ce que la carte d'une table montre en plus des compteurs.
+const cardShape = (result = {}) => JSON.stringify([
+  result.drift || [], result.driftCount || 0, result.pendingIds || [], result.gapCount || 0, result.files || null, result.held || null,
+]);
+const wrote = stats => Boolean(stats && stats.added + stats.updated + stats.removed);
+
+// Résultat d'une table noté pour l'onglet ; rend vrai si sa carte change.
+function noteTable(journal, tb, at) {
+  const key = tableKey(journal, tb.table);
+  const was = state.results.get(key);
+  state.results.set(key, tb.error ? { at, error: true, text: errorText(tb.error) } : { at, text: summary(tb.stats), ...tb });
+  return Boolean(tb.error) !== Boolean(was?.error) || wrote(tb.stats) || cardShape(was) !== cardShape(tb);
 }
 
 async function passAll() {

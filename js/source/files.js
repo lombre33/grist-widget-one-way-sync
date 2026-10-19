@@ -56,24 +56,7 @@ export async function sendFiles(plans, spend) {
   for (const plan of plans) {
     let { tracking } = plan;
     for (const { sha, hooks: ids } of plan.sends) {
-      const sent = [];
-      if (ids.length) {
-        await spend(0);
-        const file = plan.needed.get(sha);
-        const bytes = await downloadAttachment(file.id);
-        const parts = encodeParts(bytes);
-        const info = { sha, name: file.name, size: bytes.length };
-        const send = randomHex(4);
-        for (const h of plan.hooks.filter(x => ids.includes(x.id))) {
-          try {
-            for (let n = 0; n < parts.length; n++) await postToHook(h, [partRow(plan.exportId, info, send, n, parts.length, parts[n])]);
-            sent.push(h.id);
-          } catch (e) {
-            failed.set(h.id, Date.now());
-          }
-          await spend(parts.reduce((total, p) => total + p.length, 0));
-        }
-      }
+      const sent = ids.length ? await sendFile(plan, sha, ids, spend) : [];
       tracking = recordSent(tracking, sha, sent);
       const noted = trackingNote(tracking);
       await saveTracking(all => ({ ...all, [plan.exportId]: noted }));
@@ -82,6 +65,30 @@ export async function sendFiles(plans, spend) {
     }
   }
   return done;
+}
+
+// Un fichier, téléchargé une fois, envoyé en entier à chaque webhook de `ids` ; rend ceux qui l'ont
+// reçu. Un webhook en échec attend (voir failed).
+async function sendFile(plan, sha, ids, spend) {
+  await spend(0);
+  const file = plan.needed.get(sha);
+  const bytes = await downloadAttachment(file.id);
+  const parts = encodeParts(bytes);
+  const info = { sha, name: file.name, size: bytes.length };
+  const send = randomHex(4);
+  const rows = parts.map((part, n) => partRow(plan.exportId, info, send, n, parts.length, part));
+  const size = parts.reduce((total, part) => total + part.length, 0);
+  const sent = [];
+  for (const h of plan.hooks.filter(x => ids.includes(x.id))) {
+    try {
+      for (const row of rows) await postToHook(h, [row]);
+      sent.push(h.id);
+    } catch (e) {
+      failed.set(h.id, Date.now());
+    }
+    await spend(size);
+  }
+  return sent;
 }
 
 // « Tout renvoyer » : les destinataires de l'export reçoivent de nouveau tous ses fichiers.

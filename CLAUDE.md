@@ -266,6 +266,9 @@ montages d'avant la 0.5 retirés sur décision d'Antoine), puis sécurité (scea
 sur la clé de partage, Échange, voir « Après l'Alpha »). Format changé : un code de contrôle
 calculé par la 0.8 ne correspond plus ; un onglet 0.8 resté ouvert déplierait sans sceau (lignes
 effacées comme suspectes, la SOURCE renvoie).
+Puis gwaudit (88/100) : les 13 fonctions trop complexes ou trop imbriquées sont découpées (axe A à
+100, complexité de 15 au plus) ; restent, structurels et expliqués dans `SECURITY.md` : C-GRIST-03,
+C-EXFIL-02, C-STOCK-01, et B-VERB-01 (plus de 4 000 lignes ; carte dans `docs/06-architecture.md`).
 
 V0.8.0 : corrections de sécurité 1 à 13 (voir « Après l'Alpha »). Piège vu au test : au chargement
 du document SOURCE (Grist décharge un document inactif), une petite table (20 lignes au plus) part

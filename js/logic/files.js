@@ -135,18 +135,24 @@ export const partRow = (exportId, { sha, name, size }, send, n, parts, data) => 
 // ---------------------------------------------------------------------------------------------
 // CIBLE
 
+// Annonce d'un morceau (Synchro_Colonnes) : empreinte, nom, taille, rang et nombre de morceaux,
+// envoi, chacun dans ses bornes.
+const inRange = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+const validMeta = meta => Boolean(meta) && typeof meta === 'object' && is(SHA, meta.sha) && typeof meta.nom === 'string'
+  && inRange(meta.taille, 0, FILE_MAX) && inRange(meta.parts, 1, MAX_PARTS) && inRange(meta.n, 0, meta.parts - 1) && is(SEND, meta.envoi);
+const validChunk = text => typeof text === 'string' && text.length <= PART_TEXT_MAX && BASE64.test(text);
+
+// Nom d'un fichier reçu, sans séparateurs de chemin, caractères de contrôle, ni caractères
+// invisibles ou de sens d'écriture (« facture\u202Efdp.exe » s'afficherait « facture exe.pdf »).
+const safeName = name => name.replace(/[\\/\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '_').slice(0, 255) || 'fichier';
+
 // Morceau reçu : { sha, name, size, n, parts, send, data } ; null s'il ne peut pas venir de la
-// SOURCE de cet export. Le nom ne garde ni chemin ni caractère de contrôle.
+// SOURCE de cet export.
 export function readPart(row, exportId) {
-  const m = parseJson(row[SCHEMA_COL]);
-  const data = row[LOT_COL];
-  if (row[EXPORT_COL] !== exportId || row[TYPE_COL] !== KIND.part || !m || typeof m !== 'object' || !is(SHA, m.sha) || typeof m.nom !== 'string') return null;
-  if (!Number.isInteger(m.taille) || m.taille < 0 || m.taille > FILE_MAX || !Number.isInteger(m.parts) || m.parts < 1 || m.parts > MAX_PARTS) return null;
-  if (!Number.isInteger(m.n) || m.n < 0 || m.n >= m.parts || !is(SEND, m.envoi) || typeof data !== 'string' || data.length > PART_TEXT_MAX || !BASE64.test(data)) return null;
-  // Séparateurs de chemin, caractères de contrôle, et caractères invisibles ou de sens d'écriture
-  // (« facture\u202Efdp.exe » s'afficherait « facture exe.pdf »).
-  const name = m.nom.replace(/[\\/\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '_').slice(0, 255) || 'fichier';
-  return { sha: m.sha, name, size: m.taille, n: m.n, parts: m.parts, send: m.envoi, data };
+  const meta = parseJson(row[SCHEMA_COL]);
+  const encoded = row[LOT_COL];
+  if (row[EXPORT_COL] !== exportId || row[TYPE_COL] !== KIND.part || !validMeta(meta) || !validChunk(encoded)) return null;
+  return { sha: meta.sha, name: safeName(meta.nom), size: meta.taille, n: meta.n, parts: meta.parts, send: meta.envoi, data: encoded };
 }
 
 // Fichiers arrivés : pour chaque empreinte, l'envoi le plus récent (celui de la dernière ligne
@@ -202,7 +208,7 @@ export function parkedOverflow(groups, max = PARKED_MAX) {
 export function citedFiles(rows, waiting = []) {
   const cited = new Set(waiting);
   for (const row of expandRows(rows)) {
-    for (const value of Object.values(row)) for (const f of fileList(value)) cited.add(short(f.sha));
+    for (const value of Object.values(row)) for (const file of fileList(value)) cited.add(short(file.sha));
   }
   return cited;
 }
@@ -253,10 +259,10 @@ export function filesState(rows, cols, present) {
   if (!cols.length) return { waiting: [], big: [] };
   for (const { row } of latestByKey(rows).values()) {
     if (isTrue(row[DELETE_COL])) continue;
-    for (const f of cols.flatMap(c => fileList(row[c]))) {
-      if (present.has(f.sha)) continue;
-      if (f.size > FILE_MAX) big.set(f.sha, f);
-      else waiting.add(f.sha);
+    for (const file of cols.flatMap(c => fileList(row[c]))) {
+      if (present.has(file.sha)) continue;
+      if (file.size > FILE_MAX) big.set(file.sha, file);
+      else waiting.add(file.sha);
     }
   }
   return { waiting: [...waiting], big: [...big.values()] };

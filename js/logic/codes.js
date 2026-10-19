@@ -120,15 +120,19 @@ function validRetour(back) {
   return Array.isArray(back) && back.length > 0 && back.every(b => b && isSafeId(b.table) && isSafeId(b.dest)) && unique('table') && unique('dest');
 }
 
+// Champs d'une réponse : identifiant, secret, fiche du destinataire ; en Échange, tables de retour
+// et clé de signature.
+function validReply({ id, secret, recipient, retour, cle }) {
+  return is(HEX16, id) && (!secret || is(SECRET, secret)) && Boolean(recipient) && typeof recipient === 'object'
+    && (retour === undefined || validRetour(retour)) && (cle === undefined || is(SIG_KEY, cle));
+}
+
 // `sourceOrigin` : origine de l'instance du document SOURCE. Le webhook ne part que vers la même
 // instance, à une adresse d'écriture par clé de formulaire, rien d'autre.
 export function parseReply(text, sourceOrigin) {
   const reply = decodeCode(text, 'reponse');
   const target = parseWebhookUrl(reply.url);
-  const ok = is(HEX16, reply.id) && (!reply.secret || is(SECRET, reply.secret)) && target && target.flat
-    && reply.recipient && typeof reply.recipient === 'object' && (reply.retour === undefined || validRetour(reply.retour))
-    && (reply.cle === undefined || is(SIG_KEY, reply.cle));
-  if (!ok) throw new Error('codeInvalid');
+  if (!validReply(reply) || !target?.flat) throw new Error('codeInvalid');
   if (target.origin !== sourceOrigin) throw new Error('otherInstance');
   const out = { id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url };
   return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })), cle: reply.cle || '' };

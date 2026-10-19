@@ -54,6 +54,14 @@ async function api(method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 const applyActions = (doc, actions) => api('POST', `/docs/${doc}/apply`, actions);
+
+// Règle d'accès qui cache une colonne aux lecteurs ; rend de quoi la retirer.
+async function hideColumn(doc, tableId, colIds) {
+  const resource = (await applyActions(doc, [['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]])).retValues[0];
+  const rule = (await applyActions(doc, [['AddRecord', '_grist_ACLRules', null,
+    { resource, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 100, memo: 'e2e' }]])).retValues[0];
+  return () => applyActions(doc, [['RemoveRecord', '_grist_ACLRules', rule], ['RemoveRecord', '_grist_ACLResources', resource]]);
+}
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
 const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
 // Colonnes affichées sur la page d'une table (ses vues en grille).
@@ -365,6 +373,8 @@ try {
     assert.equal(bHooks.length, 1, 'B renvoie vers A par un webhook');
     await approve(answer, { url: a.url });
     const fiches = async doc => Object.fromEntries((await records(doc, 'Fiches')).map(r => [r.Nom, r]));
+    // Ouvre le widget du document `w` et attend que ses fiches (par nom) vérifient `ok`.
+    const seenIn = async (w, ok, what) => { await openWidget(w.url); return waitFor(async () => ok(await fiches(w.doc)), what); };
     const aRows = await fiches(a.doc);
     assert.ok(Object.values(aRows).every(r => r.Supprime === false), 'A : case Supprime ajoutée');
     await openWidget(b.url);
@@ -402,8 +412,7 @@ try {
 
     // A modifie : B reçoit.
     await applyActions(a.doc, [['UpdateRecord', 'Fiches', aRows.Anna.id, { Ville: 'Lille' }]]);
-    await openWidget(b.url);
-    await waitFor(async () => (await fiches(b.doc)).Anna.Ville === 'Lille', 'B reçoit la modification de A');
+    await seenIn(b, r => r.Anna.Ville === 'Lille', 'B reçoit la modification de A');
 
     // Les deux modifient Céline, B d'abord : la version de A, plus récente, l'emporte des deux côtés.
     await applyActions(b.doc, [['UpdateRecord', 'Fiches', bRows.Céline.id, { Ville: 'Rennes' }]]);
@@ -412,13 +421,11 @@ try {
     await openWidget(a.url);
     await waitFor(async () => !(await sentLines(a.doc, aJournal)).length, 'A a lu la version de B');
     assert.equal((await fiches(a.doc)).Céline.Ville, 'Dijon', 'A garde sa version, plus récente');
-    await openWidget(b.url);
-    await waitFor(async () => (await fiches(b.doc)).Céline.Ville === 'Dijon', 'B prend la version de A, plus récente');
+    await seenIn(b, r => r.Céline.Ville === 'Dijon', 'B prend la version de A, plus récente');
 
     // B coche Supprime : la ligne disparaît chez A, reste cochée chez B.
     await applyActions(b.doc, [['UpdateRecord', 'Fiches', bRows.Anna.id, { Supprime: true }]]);
-    await openWidget(a.url);
-    await waitFor(async () => !(await fiches(a.doc)).Anna, 'Supprime cochée chez B : ligne effacée chez A');
+    await seenIn(a, r => !r.Anna, 'Supprime cochée chez B : ligne effacée chez A');
     assert.equal((await fiches(b.doc)).Anna.Supprime, true);
     step('Échange : modifications dans les deux sens, sans écho, la plus récente l\'emporte, Supprime efface des deux côtés');
 
@@ -447,20 +454,14 @@ try {
 
     const bNow = await fiches(b.doc);
     await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Basile.id, { Ville: 'Vannes' }]]);
-    await openWidget(a.url);
-    await waitFor(async () => (await fiches(a.doc)).Basile.Ville === 'Vannes', 'A reçoit la modification de B');
-    await openWidget(c.url);
-    await waitFor(async () => (await fiches(c.doc)).Basile.Ville === 'Vannes', 'C reçoit, par A, la modification de B');
+    await seenIn(a, r => r.Basile.Ville === 'Vannes', 'A reçoit la modification de B');
+    await seenIn(c, r => r.Basile.Ville === 'Vannes', 'C reçoit, par A, la modification de B');
     await applyActions(c.doc, [['AddRecord', 'Fiches', null, { Nom: 'Élise', Ville: 'Caen' }]]);
-    await openWidget(a.url);
-    await waitFor(async () => ((await fiches(a.doc)).Élise || {}).Ville === 'Caen', 'A reçoit l\'ajout de C');
-    await openWidget(b.url);
-    await waitFor(async () => ((await fiches(b.doc)).Élise || {}).Ville === 'Caen', 'B reçoit, par A, l\'ajout de C');
+    await seenIn(a, r => (r.Élise || {}).Ville === 'Caen', 'A reçoit l\'ajout de C');
+    await seenIn(b, r => (r.Élise || {}).Ville === 'Caen', 'B reçoit, par A, l\'ajout de C');
     await applyActions(c.doc, [['UpdateRecord', 'Fiches', (await fiches(c.doc)).Damien.id, { Supprime: true }]]);
-    await openWidget(a.url);
-    await waitFor(async () => ((await fiches(a.doc)).Damien || {}).Supprime === true, 'A garde Damien, cochée Supprime');
-    await openWidget(b.url);
-    await waitFor(async () => !(await fiches(b.doc)).Damien, 'B efface Damien');
+    await seenIn(a, r => (r.Damien || {}).Supprime === true, 'A garde Damien, cochée Supprime');
+    await seenIn(b, r => !r.Damien, 'B efface Damien');
 
     await openWidget(a.url);
     await revoke(widget().locator('.person', { hasText: c.doc.slice(0, 10) }));
@@ -471,8 +472,7 @@ try {
     await widget().getByText('Coupé par la SOURCE').waitFor({ timeout: 30000 });
     await waitFor(async () => !(await api('GET', `/docs/${c.doc}/webhooks`)).webhooks.length, 'C : envoi de retour arrêté');
     await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Céline.id, { Ville: 'Tours' }]]);
-    await openWidget(a.url);
-    await waitFor(async () => (await fiches(a.doc)).Céline.Ville === 'Tours', 'B et A continuent');
+    await seenIn(a, r => r.Céline.Ville === 'Tours', 'B et A continuent');
     step('Échange à plusieurs : ce que B envoie repart vers C par A, et inversement ; Supprime cochée chez C efface chez B, reste cochée chez A ; A retire C, B continue');
 
     // --- Règles de A pour les changements des participants : les modifications de B sont à
@@ -509,13 +509,10 @@ try {
     await review('Céline').getByRole('button', { name: 'Refuser', exact: true }).click();
     await waitFor(async () => (await widget().locator('.chg-row.chg-refus', { hasText: 'Céline' }).count()) > 0, 'historique : modification refusée');
     assert.equal((await fiches(a.doc)).Céline.Ville, 'Tours', 'refusée : A garde sa version');
-    await openWidget(b.url);
-    await waitFor(async () => (await fiches(b.doc)).Céline.Ville === 'Tours', 'refusée : B reprend la version de A');
+    await seenIn(b, r => r.Céline.Ville === 'Tours', 'refusée : B reprend la version de A');
     await applyActions(b.doc, [['AddRecord', 'Fiches', null, { Nom: 'Fanny', Ville: 'Laval' }]]);
-    await openWidget(a.url);
-    await waitFor(async () => ((await fiches(a.doc)).Fanny || {}).Supprime === true, 'ajout refusé : la ligne reste chez A, cochée Supprime');
-    await openWidget(b.url);
-    await waitFor(async () => !(await fiches(b.doc)).Fanny, 'ajout refusé : effacé chez B');
+    await seenIn(a, r => (r.Fanny || {}).Supprime === true, 'ajout refusé : la ligne reste chez A, cochée Supprime');
+    await seenIn(b, r => !r.Fanny, 'ajout refusé : effacé chez B');
     step('Échange administré : modification à valider, acceptée puis refusée (B reprend la version de A) ; ajout refusé, effacé chez B');
   }
   // --- Pièces jointes : la liste des fichiers part avec les lignes, leur contenu quand la page
@@ -1327,9 +1324,7 @@ try {
 
   // --- Lien public : un seul code, la CIBLE lit les instantanés de l'export sans identifiant. Refusé
   // tant qu'une règle d'accès cache une partie d'une table de l'export (le lien public la montrerait).
-  const hiding = (await applyActions(source.doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Contacts', colIds: 'Interne' }]])).retValues[0];
-  const hidingRule = (await applyActions(source.doc, [['AddRecord', '_grist_ACLRules', null,
-    { resource: hiding, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 100, memo: 'e2e' }]])).retValues[0];
+  const unhide = await hideColumn(source.doc, 'Contacts', 'Interne');
   await openWidget(source.url);
   await home().click();
   await newExport('Contacts', 'Annuaire');
@@ -1339,7 +1334,7 @@ try {
   await dialogButton('Créer l’invitation').click();
   await dialog().getByText(/Lien public refusé\s:\sune règle d’accès cache une partie de Contacts/).waitFor();
   await dialogButton('Annuler').click();
-  await applyActions(source.doc, [['RemoveRecord', '_grist_ACLRules', hidingRule], ['RemoveRecord', '_grist_ACLResources', hiding]]);
+  await unhide();
   await openWidget(source.url);
   await button('Ajouter un destinataire').click();
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
@@ -1364,12 +1359,10 @@ try {
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
   // Une règle d'accès posée après coup sur une table de l'export public est signalée sur sa carte.
-  const later = (await applyActions(source.doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Contacts', colIds: 'Interne' }]])).retValues[0];
-  const laterRule = (await applyActions(source.doc, [['AddRecord', '_grist_ACLRules', null,
-    { resource: later, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 100, memo: 'e2e' }]])).retValues[0];
+  const unhideLater = await hideColumn(source.doc, 'Contacts', 'Interne');
   await openWidget(source.url);
   await widget().getByText(/Une règle d’accès cache maintenant une partie de Contacts/).waitFor();
-  await applyActions(source.doc, [['RemoveRecord', '_grist_ACLRules', laterRule], ['RemoveRecord', '_grist_ACLResources', later]]);
+  await unhideLater();
   // Lien public réglé sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus.
   await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'editors' } } });
   await openWidget(source.url);

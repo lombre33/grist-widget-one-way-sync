@@ -162,35 +162,48 @@ async function prepareTables(ctx) {
 }
 
 async function save(ctx, name, report) {
-  const { exp, wizard } = ctx;
+  const { exp } = ctx;
   const tables = await prepareTables(ctx);
-  // Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
-  if (exp && exp.public) {
-    const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-    const hidden = hiddenTables(resources, rules, readTables(tables));
-    if (hidden.length) throw failure('publicHiddenEdit', { tables: hidden.join(', ') });
-  }
+  if (exp?.public) await refuseHidden(tables);
   const id = exp ? exp.id : randomHex(8);
-  const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public), swap: Boolean(exp && exp.echange) });
-  // Règles d'un Échange administré ici : notées seulement si elles ne sont pas toutes « Accepter ».
-  const rules = ctx.rules ? exchangeRules({ regles: ctx.rules, refus: ctx.rules.refus }) : undefined;
+  const changed = await saveExport(id, tables, { isPublic: Boolean(exp?.public), swap: Boolean(exp?.echange) });
+  await noteExport(ctx, id, name);
+  return exp ? showEdited(ctx, { name, changed, report }) : showCreated(ctx, { id, name, tables });
+}
+
+// Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
+async function refuseHidden(tables) {
+  const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
+  const hidden = hiddenTables(resources, rules, readTables(tables));
+  if (hidden.length) throw failure('publicHiddenEdit', { tables: hidden.join(', ') });
+}
+
+// Nom et date de l'export dans la note SOURCE. Règles d'un Échange administré ici : notées
+// seulement si elles ne sont pas toutes « Accepter ».
+async function noteExport({ exp, rules: chosen }, id, name) {
+  const rules = chosen ? exchangeRules({ regles: chosen, refus: chosen.refus }) : undefined;
   await updateSourceNote((note) => {
     const entry = { ...note.exports.find(e => e.id === id), id, name, at: exp ? exp.at : nowS() };
-    if (ctx.rules) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules ? rules.refus : undefined });
+    if (chosen) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules?.refus });
     return putExport(note, JSON.parse(JSON.stringify(entry)));
   });
-  if (!exp) {
-    const created = { id, name, tables, recipients: [], invitations: [], public: false, email: exportEmail(await syncRows(), id) };
-    wizard.show(3, [message('ok', t('send.created', { name })), el('p', {}, t('send.created.next'))], [
-      { label: t('common.later') },
-      { label: t('send.action.addPerson'), kind: 'btn-primary', onClick: () => { wizard.close(); recipientWizard(created, null, ctx.onClose); } }]);
-    return;
-  }
-  if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, id));
-  // Fenêtre fermée pendant le renvoi, qui continue : l'onglet se redessine à la fin.
+}
+
+// Export créé : la fenêtre propose d'ajouter tout de suite une personne.
+async function showCreated({ wizard, onClose }, { id, name, tables }) {
+  const created = { id, name, tables, recipients: [], invitations: [], public: false, email: exportEmail(await syncRows(), id) };
+  wizard.show(3, [message('ok', t('send.created', { name })), el('p', {}, t('send.created.next'))], [
+    { label: t('common.later') },
+    { label: t('send.action.addPerson'), kind: 'btn-primary', onClick: () => { wizard.close(); recipientWizard(created, null, onClose); } }]);
+}
+
+// Export modifié : webhooks renommés, tables changées renvoyées. Fenêtre fermée pendant le
+// renvoi, qui continue : l'onglet se redessine à la fin.
+async function showEdited({ exp, wizard, onClose }, { name, changed, report }) {
+  if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, exp.id));
   if (changed.length) wizard.show(3, [report, el('p', { class: 'muted small' }, t('send.load.background'))], [{ label: t('common.close'), kind: 'btn-primary' }]);
-  const n = changed.length ? await resendTables(id, changed, report) : 0;
-  if (changed.length && !report.isConnected) return ctx.onClose && ctx.onClose();
+  const n = changed.length ? await resendTables(exp.id, changed, report) : 0;
+  if (changed.length && !report.isConnected) return onClose && onClose();
   const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
   return wizard.show(3, saved, [{ label: t('common.close'), kind: 'btn-primary' }]);
 }

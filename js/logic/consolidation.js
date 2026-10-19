@@ -248,14 +248,18 @@ function versionEffect(ctx, key, version, gone) {
   const here = ctx.dest.byKey.get(key);
   // Échange : la version reçue n'a d'effet que si elle est plus récente que la ligne d'ici.
   if (ctx.exchange && here && compareOrder(version.order, newest(here)) <= 0) return '';
-  const deleted = isTrue(version.row[DELETE_COL]);
-  // Échange à plusieurs : une ligne cochée Supprime par un participant reste ici, cochée, pour
-  // repartir vers les autres ; elle est effacée chez eux.
-  if (deleted && ctx.hub) return !here ? LEFT : withoutEffect(ctx, version, here) ? '' : 'suppression';
-  if (deleted || gone.has(key)) return here ? 'suppression' : LEFT;
-  if (!here && ctx.matchFrom && (ctx.dest.unkeyed.get(version.row[ctx.matchFrom]) || []).length) return 'modif';
-  if (here && withoutEffect(ctx, version, here)) return '';
-  return here ? 'modif' : 'ajout';
+  if (isTrue(version.row[DELETE_COL]) || gone.has(key)) return deletionEffect(ctx, version, here);
+  // Sans clé ici : un ajout, ou le rattachement d'une ligne sans clé (colonne commune).
+  if (!here) return ctx.matchFrom && ctx.dest.unkeyed.get(version.row[ctx.matchFrom])?.length ? 'modif' : 'ajout';
+  return withoutEffect(ctx, version, here) ? '' : 'modif';
+}
+
+// Effet d'une version qui supprime (case Supprime, ou clé absente de la dernière liste). Échange à
+// plusieurs : une ligne cochée Supprime par un participant reste ici, cochée, pour repartir vers
+// les autres ; elle est effacée chez eux.
+function deletionEffect(ctx, version, here) {
+  if (!here) return LEFT;
+  return ctx.hub && withoutEffect(ctx, version, here) ? '' : 'suppression';
 }
 
 // Note dans `plan` les lignes à écrire pour l'effet `state`, et rend l'effet écrit : une ligne sans
@@ -424,50 +428,66 @@ export function planConsolidation({
   const pending = pendingLists(journalRows);
   const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, dest.byKey, marks);
   if (exchange) pending.forEach(({ row }) => marks.set(row.id, ''));
-  const ctx = {
-    // Le document qui administre un Échange à plusieurs a toujours la case Supprime.
-    dest, copyCols, exchange, hub: exchange && hub, deleteCol: exchange && (deleteCol || hub), rules: exchange ? rules : null,
-    matchFrom: (copyCols.find(([, to]) => to === matchCol) || [])[0],
-    applied: latestByKey(journalRows.filter(r => isTrue(r[APPLIED_COL]) && !isTrue(r[DELETE_COL]))),
-  };
+  const ctx = consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest);
   const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], stats: { added: 0, updated: 0, removed: 0 } };
-  for (const [key, version] of latest) {
-    if (isTrue(version.row[APPLIED_COL])) continue;
-    let state = versionEffect(ctx, key, version, gone);
-    const rule = ctx.rules && STATES.includes(state) ? decisions.get(version.id) || ctx.rules[state] : RULES[0];
-    if (rule === 'valider') {
-      plan.pending.push(reviewItem(ctx, key, version, state));
-      continue;
-    }
-    if (rule === 'refuser') {
-      refuseEffect(ctx, plan, key, version, state);
-      marks.set(version.id, REFUSED);
-      continue;
-    }
-    state = writeEffect(ctx, plan, key, version, state);
-    marks.set(version.id, state);
-    if (state === 'ajout') plan.stats.added++;
-    if (state === 'modif') plan.stats.updated++;
-    if (state === 'suppression' && ctx.hub) plan.stats.removed++;
-  }
-  let removed = [...gone].filter(key => dest.byKey.has(key));
-  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
-  const waved = hold && wave !== 'appliquer' && removed.length >= hold.min && removed.length > hold.share * dest.byKey.size
-    ? holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, numbers, wave }) : null;
-  if (waved) removed = [];
+  planVersions(ctx, plan, latest, decisions);
+  const { removed, numbers, waved } = planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone });
   plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
   for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
-  const detach = waved ? waved.detach : [];
   return {
     actions: [
       ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol }, { ...plan, removeIds, ...(waved || { listGone, leftGone }) }),
-      ...chunk(detach).map(part => ['BulkUpdateRecord', destTable, part, { [KEY_COL]: part.map(() => '') }]),
+      ...chunk(waved?.detach || []).map(part => ['BulkUpdateRecord', destTable, part, { [KEY_COL]: part.map(() => '') }]),
     ],
-    stats: plan.stats, gone, held: (waved && waved.held) || null,
+    stats: plan.stats, gone, held: waved?.held || null,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol, now), keys: plan.fixes.map(f => f.key) },
   };
+}
+
+// Ce que la recopie d'une table sait d'elle (voir planConsolidation). Le document qui administre
+// un Échange à plusieurs a toujours la case Supprime.
+function consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest) {
+  return {
+    dest, copyCols, exchange, hub: exchange && hub, deleteCol: exchange && (deleteCol || hub), rules: exchange ? rules : null,
+    matchFrom: copyCols.find(([, to]) => to === matchCol)?.[0],
+    applied: latestByKey(journalRows.filter(r => isTrue(r[APPLIED_COL]) && !isTrue(r[DELETE_COL]))),
+  };
+}
+
+// Effet de la dernière version de chaque clé pas encore recopiée, noté dans `plan` : écrit,
+// refusé, ou en attente d'une décision (règles d'un Échange, `decisions` d'abord).
+const STATS = { ajout: 'added', modif: 'updated' };
+function planVersions(ctx, plan, latest, decisions) {
+  for (const [key, version] of latest) {
+    if (isTrue(version.row[APPLIED_COL])) continue;
+    const state = versionEffect(ctx, key, version, plan.gone);
+    const rule = ctx.rules && STATES.includes(state) ? decisions.get(version.id) || ctx.rules[state] : RULES[0];
+    if (rule === 'valider') {
+      plan.pending.push(reviewItem(ctx, key, version, state));
+    } else if (rule === 'refuser') {
+      refuseEffect(ctx, plan, key, version, state);
+      plan.marks.set(version.id, REFUSED);
+    } else {
+      const written = writeEffect(ctx, plan, key, version, state);
+      plan.marks.set(version.id, written);
+      // Les suppressions comptent à part (voir planRemovals), sauf celles que garde le document
+      // qui administre un Échange à plusieurs.
+      const stat = written === 'suppression' && ctx.hub ? 'removed' : STATS[written];
+      if (stat) plan.stats[stat]++;
+    }
+  }
+}
+
+// Suppressions du passage (clés de `plan.gone` encore ici), ou rien si elles forment une vague
+// retenue (`waved`, voir holdWave) ; `numbers` : numéros des lignes d'ici, s'il en faut.
+function planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone }) {
+  const removed = [...plan.gone].filter(key => dest.byKey.has(key));
+  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
+  const isWave = hold && wave !== 'appliquer' && removed.length >= hold.min && removed.length > hold.share * dest.byKey.size;
+  if (!isWave) return { removed, numbers, waved: null };
+  return { removed: [], numbers, waved: holdWave({ removed, latest, marks: plan.marks, pending, listGone, leftGone, dest, numbers, wave }) };
 }
 
 // Colonnes reçues pour une table, et la correspondance. Échange, côté du document qui a invité
