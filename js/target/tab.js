@@ -15,7 +15,7 @@ import { offerDialog } from './dest.js';
 import { receiveWizard } from './wizard.js';
 import { confirmDialog, el, errorText, icon, message, openModal, pickField, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
-import { LANG, dateText, t } from '../i18n.js';
+import { LANG, dateText, t, timeText } from '../i18n.js';
 
 const HISTORY_MAX = 20;
 const DRIFT_MAX = 10;
@@ -137,7 +137,7 @@ function filesNotes(group, entry) {
 function tableLine(group, entry) {
   const journalResult = state.results.get(group.journal) || {};
   const result = state.results.get(tableKey(group.journal, entry.table)) || (journalResult.error ? journalResult : null);
-  const detail = result && !group.waiting ? ` · ${new Date(result.at * 1000).toLocaleTimeString(LANG)}${result.error ? ` · ${result.text}` : ''}` : '';
+  const detail = result && !group.waiting ? ` · ${timeText(result.at)}${result.error ? ` · ${result.text}` : ''}` : '';
   return el('p', { class: `small ${result && result.error ? 'text-danger' : 'muted'}` }, `${entry.table} → ${entry.dest}${detail}`);
 }
 
@@ -162,7 +162,8 @@ function syncCard(group) {
   const { note } = group;
   const [status, tone] = cardStatus(group);
   const from = (note.from || {}).email;
-  const fromDoc = (note.from || {}).docId || '';
+  // Le nom du document vérifié chez Grist (Échange), sinon son identifiant.
+  const fromDoc = (note.from || {}).docName || (note.from || {}).docId || '';
   return el('article', { class: 'card', 'data-journal': group.journal },
     el('div', { class: 'card-head' }, el('strong', {}, note.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
     from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
@@ -195,7 +196,7 @@ function suspectBlock(group) {
     n ? t('recv.suspect.rejected', { n, at: dateText(at * 1000) }) : null,
     flood ? t('recv.suspect.flood', { at: dateText(flood * 1000) }) : null,
     t('recv.suspect.help'),
-  ], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text'), button(t('recv.suspect.dismiss'), 'check', dismiss)]);
+  ], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text'), button(t('recv.suspect.dismiss'), 'ignore', dismiss)]);
 }
 
 // Couper le lien : le formulaire de cette réception prend une nouvelle clé, sur sa propre page. La
@@ -287,7 +288,7 @@ function driftBlock(group, entry) {
     el('p', { class: 'small' }, t('recv.drift.body', { n: total })),
     miniGrid([t('recv.drift.row'), result.labelCol || '', t('recv.drift.col'), t('recv.drift.here'), t('recv.drift.source')], rows),
     total > rows.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - rows.length })) : null,
-    el('div', { class: 'card-actions' }, button(t('recv.drift.fix'), 'check', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))));
+    el('div', { class: 'card-actions' }, button(t('recv.drift.fix'), 'undo', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))));
 }
 
 // « Corriger » : la table reprend l'état exact de la SOURCE, après confirmation.
@@ -324,7 +325,7 @@ function waveBlock(group, entry) {
     held.numbers.length ? el('p', { class: 'small' }, t('recv.wave.rows', { rows: held.numbers.join(', ') })) : null,
     el('div', { class: 'card-actions' },
       button(t('recv.wave.apply'), 'trash', e => choose(e, 'appliquer'), 'btn-danger-text'),
-      button(t('recv.wave.ignore'), 'stop', e => choose(e, 'ignorer'))));
+      button(t('recv.wave.ignore'), 'ignore', e => choose(e, 'ignorer'))));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -358,7 +359,7 @@ function reviewBlock(group, entry) {
       el('span', { class: 'chg-state' }, t(`recv.history.${p.state}`)),
       el('span', { class: 'review-actions' },
         button(t('recv.review.accept'), 'check', e => choose(e, [p.id], 'accepter')),
-        button(t('recv.review.refuse'), 'stop', e => choose(e, [p.id], 'refuser'), 'btn-danger-text'))),
+        button(t('recv.review.refuse'), 'refuse', e => choose(e, [p.id], 'refuser'), 'btn-danger-text'))),
     p.cells.length ? miniGrid(['', ...p.cells.map(([, to]) => to)], [
       p.state === 'ajout' ? null : values('before', p.cells, 2),
       p.state === 'suppression' ? null : values('after', p.cells, 3)].filter(Boolean)) : null));
@@ -369,7 +370,7 @@ function reviewBlock(group, entry) {
     total > items.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - items.length })) : null,
     el('div', { class: 'card-actions' },
       button(t('recv.review.accepterAll'), 'check', e => all(e, 'accepter')),
-      button(t('recv.review.refuserAll'), 'stop', e => all(e, 'refuser'), 'btn-danger-text')));
+      button(t('recv.review.refuserAll'), 'refuse', e => all(e, 'refuser'), 'btn-danger-text')));
 }
 
 // Refus avec écart signalé : la ligne refusée reste différente chez le participant, jusqu'à la
@@ -398,7 +399,7 @@ function gapBlock(group, entry) {
 // numérotées comme dans la table et nommées par la colonne choisie pour chaque table. Chacune
 // s'ouvre au clic sur son avant et son après. Tout est replié par défaut.
 
-const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus', colonne: 'column', [REFUSED]: 'stop' };
+const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus', colonne: 'column', [REFUSED]: 'refuse' };
 const COUNTED = [...STATES, 'colonne', REFUSED];
 
 function stateCounts(items) {

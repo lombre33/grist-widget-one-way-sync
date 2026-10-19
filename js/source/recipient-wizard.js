@@ -106,7 +106,7 @@ async function invitePublic({ exp, wizard, steps }) {
   const code = await publicCode(exp);
   wizard.setSteps(steps.slice(0, 2));
   wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code),
-    message('warn', t('send.public.turnOn')), roleGuide({ you: 'source', mode: 'public', current: 1 }), stepHelp(['public'])], closeButton());
+    message('warn', t('send.public.turnOn')), stepHelp(['public']), roleGuide({ you: 'source', mode: 'public', current: 1 })], closeButton());
 }
 
 async function showInvitation(ctx, entry, secret, retour = '') {
@@ -124,7 +124,7 @@ async function showInvitation(ctx, entry, secret, retour = '') {
   const backCode = retour ? controlLine(t('send.invite.backCode'), await controlCode(retour, secret)) : null;
   ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), codeField(code),
     el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expiresAt(entry.at) * 1000) })), backCode, handoff(mode, code), report,
-    roleGuide({ you: 'source', mode, current: 1 }), stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply'])],
+    stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply']), roleGuide({ you: 'source', mode, current: 1 })],
   [back(() => run(null, report, () => backToOptions(ctx, entry))), later, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(ctx, entry) }]);
 }
 
@@ -202,7 +202,7 @@ function showReply(ctx, inv) {
     const reply = await checkReply(ctx.exp, inv, area.value);
     const compared = el('input', { type: 'checkbox' });
     fiche.replaceChildren(...replyFiche(reply, (await docIdentity()).docId),
-      inv.renforce ? el('label', { class: 'check' }, compared, t('send.reply.compared')) : null);
+      ...(inv.renforce ? [el('label', { class: 'check' }, compared, t('send.reply.compared'))] : []));
     const go = () => {
       if (inv.renforce && !compared.checked) throw new Error('codeNotCompared');
       return approve(ctx, inv, reply);
@@ -233,6 +233,12 @@ async function checkReply(exp, inv, text) {
   };
 }
 
+// Date de la réponse : écrite en UTC par la CIBLE (« AAAA-MM-JJ HH:MM »), montrée à l'heure d'ici.
+const replyDate = (at) => {
+  const ms = Date.parse(`${String(at).replace(' ', 'T')}:00Z`);
+  return Number.isNaN(ms) ? at : dateText(ms);
+};
+
 // Fiche de la personne qui répond, à vérifier avant d'approuver : le document, son dossier et son
 // équipe sont dits par Grist ; l'e-mail et la date, par le code collé.
 function replyFiche(reply, docId) {
@@ -240,7 +246,7 @@ function replyFiche(reply, docId) {
   const { share } = reply;
   const doc = `${share.name} (${share.folder || '—'}${share.personal ? '' : ` · ${share.teamName || share.team}`})`;
   const fiche = [[t('send.reply.tables'), reply.tables], [t('send.reply.doc'), r.docId === docId ? `${doc} · ${t('send.reply.sameDoc')}` : doc],
-    [t('send.reply.team'), share.personal ? t('send.reply.personalSpace') : share.teamName || share.team], [t('send.reply.email'), r.email], [t('send.reply.at'), r.at]];
+    [t('send.reply.team'), share.personal ? t('send.reply.personalSpace') : share.teamName || share.team], [t('send.reply.email'), r.email], [t('send.reply.at'), replyDate(r.at)]];
   return [el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
     el('p', { class: 'muted small' }, t('send.reply.verified')),
     share.personal ? message('warn', t('send.reply.personal')) : null,

@@ -1,7 +1,7 @@
 // Tutoriel intégré : le mode d'emploi pas à pas, avec les captures du test d'intégration
 // (docs/images, refaites par `CAPTURES=1 npm run test:e2e`). Affiché en entier dans l'onglet
 // Tutoriel, et par morceaux (`stepHelp`) en bas des étapes des assistants.
-import { LANG, t } from './i18n.js';
+import { LANG, frenchSpaces, t } from './i18n.js';
 import { el, openModal } from './ui.js';
 
 const IMG = name => (name.startsWith('img/') ? name : `docs/images/${name}.png`);
@@ -18,13 +18,13 @@ const SECTIONS = [
       'Il faut un propriétaire du document SOURCE et un éditeur du document CIBLE, sur la même instance Grist. Chacun installe le widget dans son document :',
       '1. Ajouter, puis Ajouter une page.',
       '2. Choisir la vue Personnalisée, avec n’importe quelle table, puis Ajouter une page.',
-      '3. Cliquer « URL personnalisée », coller l’adresse du widget (onglet Tutoriel, en bas), puis Ajouter un widget. Grist peut demander de confirmer que vous faites confiance au widget.',
+      '3. Choisir Synchro Grist dans la galerie de widgets de l’instance s’il y figure. Sinon : cliquer « URL personnalisée », coller l’adresse officielle du widget (en bas de cet onglet), jamais une adresse reçue par courriel, puis Ajouter un widget. Grist peut demander de confirmer que vous faites confiance au widget.',
       '4. Dans le panneau de droite, accepter l’accès complet au document. Renommer la page, par exemple « Synchro ». Les tables techniques n’ont pas de page : elles sont dans « Données source ».',
     ], [
       'You need an owner of the SOURCE document and an editor of the TARGET document, on the same Grist instance. Each installs the widget in their document:',
       '1. Add, then Add page.',
       '2. Pick the Custom view, with any table, then Add page.',
-      '3. Click “Custom URL”, paste the widget address (Tutorial tab, at the bottom), then Add widget. Grist may ask you to confirm you trust the widget.',
+      '3. Pick Synchro Grist in the instance’s widget gallery if it is there. Otherwise: click “Custom URL”, paste the official widget address (at the bottom of this tab), never an address received by email, then Add widget. Grist may ask you to confirm you trust the widget.',
       '4. In the right panel, accept full access to the document. Rename the page, for example “Sync”. Technical tables have no page: they are in “Raw data”.',
     ]],
     images: ['00a-installer-ajouter', '00b-installer-page', '00c-installer-url', '00d-installer-acces', '01-accueil'] },
@@ -50,9 +50,9 @@ const SECTIONS = [
   { id: 's-options', role: 'source',
     title: ['Ajouter un destinataire', 'Add a recipient'],
     text: [[
-      'Sur la carte de l’export, Ajouter un destinataire. Mode « dans un seul sens » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas.',
+      'Sur la carte de l’export, Ajouter un destinataire. Mode « dans un seul sens » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas. La case Sécurité renforcée impose de comparer le code de contrôle avec la personne avant de brancher.',
     ], [
-      'On the export card, Add a recipient. “One way” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below.',
+      'On the export card, Add a recipient. “One way” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below. The Enhanced security box requires comparing the control code with the person before connecting.',
     ]],
     images: ['04-source-options'] },
   { id: 's-invite', role: 'source',
@@ -225,7 +225,9 @@ const SECTIONS = [
     images: [] },
 ];
 
-const pick = pair => pair[LANG === 'en' ? 1 : 0];
+// Texte de la langue en cours ; en français, avec ses espaces insécables (voir i18n.js).
+const pick = pair => (LANG === 'en' ? pair[1] : [pair[0]].flat().map(frenchSpaces));
+const pickText = pair => (LANG === 'en' ? pair[1] : frenchSpaces(pair[0]));
 
 // Une capture, agrandie au clic dans une fenêtre.
 function figure(name) {
@@ -237,7 +239,7 @@ function figure(name) {
 
 function section(s, number) {
   return el('section', { class: 'tuto-section', id: `tuto-${s.id}`, 'data-role': s.role },
-    el('h2', {}, number ? `${number}. ` : '', pick(s.title),
+    el('h2', {}, number ? `${number}. ` : '', pickText(s.title),
       s.role === 'both' ? null : el('span', { class: `role-badge role-${s.role}` }, t(`guide.role.${s.role}`))),
     pick(s.text).map(p => el('p', {}, p)),
     s.images.length ? el('div', { class: 'tuto-shots' }, s.images.map(figure)) : null);

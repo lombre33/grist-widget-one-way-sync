@@ -195,6 +195,7 @@ function hookError(u) {
 
 function exportStatus(exp) {
   if (exp.recipients.some(h => hookStatus(h)[0] === 'error')) return ['error', 'err'];
+  if (exp.recipients.length && exp.echange && !exp.retour) return ['participants', 'ok'];
   if (exp.recipients.length || exp.public) return ['people', 'ok'];
   return exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
 }
@@ -236,13 +237,15 @@ function exportCard(exp, state, open, out) {
     notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
   };
   // L'export de retour d'un Échange (reçu d'un autre document) se règle depuis l'onglet Recevoir.
+  // Un seul bouton principal par carte, l'étape suivante : ajouter un premier destinataire, ou
+  // celui d'une invitation en attente.
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
     exportNotes(exp),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     el('div', { class: 'card-actions' },
-      exp.retour ? null : wizardButton(t(exp.echange ? 'send.action.addParticipant' : 'send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: true, ownerOnly }),
+      exp.retour ? null : wizardButton(t(exp.echange ? 'send.action.addParticipant' : 'send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: !rows.length, ownerOnly }),
       exp.retour ? null : wizardButton(t('send.action.edit'), 'edit', () => exportWizard(exp, renderSource), { ownerOnly }),
       actionButton(t('send.action.load'), 'send', load, ownerOnly, out, { reason: n ? '' : t('send.load.nobody') }),
       actionButton(t('send.action.delete'), 'trash', () => deleteExport(exp), ownerOnly, out, { kind: 'btn-danger-text' })));

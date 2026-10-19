@@ -216,7 +216,7 @@ async function showReply(ctx, { journal, note }, link) {
   ctx.wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), codeField(code),
     controlLine(t('recv.reply.code'), await controlCode(url, note.secret)),
     el('div', { class: 'handoff' }, copyButton(() => handoffText('source', flow, 3, code), t('guide.copyHandoff')), el('span', { class: 'muted small' }, t('guide.copyHandoff.help'))),
-    roleGuide({ you: 'target', mode: flow, current: 3 }), stepHelp(['t-reply', 's-reply', 's-load', 't-daily'])],
+    stepHelp(['t-reply', 's-reply', 's-load', 't-daily']), roleGuide({ you: 'target', mode: flow, current: 3 })],
   [back(() => showLink(ctx, { journal, note })), { label: t('common.close'), kind: 'btn-primary' }]);
 }
 

@@ -309,6 +309,7 @@ try {
     await dialog().getByText(env.email).waitFor();
     await dialog().getByText('Document, dossier et équipe sont donnés par Grist').waitFor();
     assert.equal(await dialog().locator('.control-code strong').textContent(), shownControl, 'même code de contrôle des deux côtés');
+    assert.ok(!/\bnull\b/.test(await dialog().innerText()), 'aucun « null » écrit dans la fiche');
     if (shots) await shot('11-source-fiche', 'modal');
     if (compare) {
       await dialogButton('Approuver et brancher').click();
