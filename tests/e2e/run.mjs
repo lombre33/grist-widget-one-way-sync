@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { partRow } from '../../js/logic/files.js';
 import { decodeCode } from '../../js/logic/codes.js';
-import { signText } from '../../js/logic/trust.js';
-import { bucketOf } from '../../js/logic/common.js';
+import { linkKeys, newKeyPair, readKeys, signText } from '../../js/logic/trust.js';
+import { PUBLIC_KEY, bucketOf } from '../../js/logic/common.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
@@ -64,6 +64,12 @@ async function hideColumn(doc, tableId, colIds) {
 }
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
 const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
+// Clé de signature reçue par une destination (description de sa colonne id_sync, voir storeKey).
+const receivedKeyOf = async (doc, table, slot) => {
+  const ref = await tableRef(doc, table);
+  const col = (await records(doc, '_grist_Tables_column')).find(c => c.parentId === ref && c.colId === 'id_sync');
+  return (JSON.parse(col.description || '{}').signature || {})[slot];
+};
 // Colonnes affichées sur la page d'une table (ses vues en grille).
 async function pageColumns(doc, tableId) {
   const table = (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId);
@@ -398,15 +404,18 @@ try {
     const damien = (await fiches(b.doc)).Damien.id_sync;
     assert.match(damien, /^[0-9a-f-]{36}$/, 'B : clé posée à la création');
     assert.equal((await fiches(a.doc)).Damien.id_sync, damien, 'même clé des deux côtés');
-    // Qui a vu l'invitation a l'adresse de retour et la clé de signature de A, pas celle de B : un
-    // lot signé avec la clé de l'invitation est rejeté par A.
+    // Qui a vu l'invitation a l'adresse de retour et la clé publique de A, aucune clé de
+    // signature : les clés qu'il en tire avec une paire à lui ne sont pas celles de B, et son lot
+    // est rejeté par A.
     const invitation = decodeCode(code, 'invitation');
-    assert.match(invitation.cle, /^[0-9a-f]{32}$/);
+    assert.equal(invitation.cle, undefined, 'aucune clé de signature dans l\'invitation');
+    assert.match(invitation.pub, PUBLIC_KEY);
+    const intruder = await linkKeys((await newKeyPair()).priv, invitation.pub, invitation.export, invitation.id);
     const row = { Synchro_Export: invitation.export, Synchro_Table: 'Fiches', Synchro_Type: 'lot', Synchro_Colonnes: '' };
-    const lot = await signText(invitation.cle, row, JSON.stringify({ lignes: [['intrus', Date.now() / 1000, false, { Nom: 'Intrus', Ville: 'Nulle part' }]], total: 1 }));
+    const lot = await signText(intruder.up, row, JSON.stringify({ lignes: [['intrus', Date.now() / 1000, false, { Nom: 'Intrus', Ville: 'Nulle part' }]], total: 1 }));
     assert.ok((await fetch(invitation.retour, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([{ ...row, Synchro_Lot: lot }]) })).ok);
     await waitFor(async () => !(await rawRows(a.doc, aJournal)).some(r => r.Synchro_Lot === lot), 'lot forgé lu par A');
-    assert.ok(!(await fiches(a.doc)).Intrus, 'lot signé avec la clé de l\'invitation : rejeté');
+    assert.ok(!(await fiches(a.doc)).Intrus, 'lot signé avec une clé tirée de l\'invitation seule : rejeté');
     await new Promise(r => setTimeout(r, 3000));
     assert.ok(!(await sentLines(b.doc, bJournal)).some(l => ['Brest', 'Metz'].includes(l[3].Ville)), 'pas d\'écho vers B');
 
@@ -869,6 +878,14 @@ try {
   await shot('13-source-actif', 'card');
   await openWidget(target2.url);
   await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'second destinataire servi');
+  // Une clé de signature par destinataire, tirée des clés publiques des deux codes.
+  const signExport = (await records(source.doc, 'Synchro')).find(r => r.Synchro_Export).Synchro_Export;
+  const key1 = await receivedKeyOf(target.doc, 'Contacts', signExport);
+  const key2 = await receivedKeyOf(target2.doc, 'Contacts', signExport);
+  assert.match(key2, /^[0-9a-f]{32}$/);
+  assert.notEqual(key1, key2, 'une clé par destinataire');
+  const sourceKeys = async () => Object.values(readKeys((await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'signature').Synchro_Colonnes));
+  assert.deepEqual((await sourceKeys()).sort(), [key1, key2].sort(), 'la SOURCE signe pour chacun, rien d\'autre');
   // Sécurité renforcée : une ligne effacée dans la SOURCE attend la décision ici ; « Ignorer » la
   // garde, détachée de la SOURCE.
   const ulysse = (await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Ulysse' }]])).retValues[0];
@@ -916,6 +933,7 @@ try {
   assert.equal(await widget().getByText(/envoie maintenant vers un autre document|n’est plus celle d’un formulaire/).count(), 0);
   await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
+  await waitFor(async () => (await sourceKeys()).join() === key1, 'clé du révoqué retirée : plus rien n\'est signé pour lui');
   await moveAlice('Nancy', 'le premier reçoit toujours');
   await new Promise(r => setTimeout(r, 2000));
   assert.ok(!(await records(target2.doc, 'Journal_Annuaire')).some(r => (r.Synchro_Lot || r.Synchro_Donnees || '').includes('Nancy')), 'le second ne reçoit plus');
@@ -1203,6 +1221,7 @@ try {
   const forge = rows => fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
   const pirate = JSON.stringify({ lignes: [['pirate', 9e9, false, { Nom: 'Pirate' }]], total: 1 });
   const unsigned = JSON.stringify({ lignes: [['pirate2', Date.now() / 1000, false, { Nom: 'Pirate' }]], total: 1 });
+  const revokedRow = { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot' && r.Synchro_Table === 'Contacts').Synchro_Colonnes };
   // Versions « déjà dépliées » (sans Synchro_Type), postées par la clé du formulaire : elles ne
   // passent pas par le dépliage, donc ni par la signature ; sans le sceau du widget, rejetées.
   const victim = (await records(target.doc, 'Contacts')).find(r => r.id_sync);
@@ -1219,8 +1238,10 @@ try {
     { Synchro_Export: 'ffffffffffffffff', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: pirate },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: 'pas du JSON' },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
-    // Bien formées, du bon export, mais sans la signature de la SOURCE : un lot, un avis de fin.
+    // Bien formées, du bon export, mais sans la signature de la SOURCE : un lot, un avis de fin ;
+    // un lot signé avec la clé du destinataire révoqué (qui a reçu le même export).
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: unsigned },
+    { ...revokedRow, Synchro_Lot: await signText(key2, revokedRow, unsigned) },
     { Synchro_Export: exportId, Synchro_Type: 'fin', Synchro_Lot: '{"fin": true}' },
     // Un fichier complet et intègre, mais qu'aucune version signée ne cite : il attend, sans dépôt.
     partRow(exportId, { sha: forgedSha, name: 'pirate.txt', size: 6 }, '0000abcd', 0, 1, Buffer.from('pirate').toString('base64')),
@@ -1229,8 +1250,8 @@ try {
   // Rien n'est arrivé depuis plus d'une minute : le passage suivant viendrait dans une minute.
   await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await widget().getByText('Arrivées suspectes').waitFor();
-  // Exactement 10 (« 11 010 lignes » contient aussi « 10 lignes ») : aucune ligne légitime écartée.
-  await widget().getByText(/(?<!\d\s?)10\s+lignes rejetées/).waitFor();
+  // Exactement 11 (« 11 011 lignes » contient aussi « 11 lignes ») : aucune ligne légitime écartée.
+  await widget().getByText(/(?<!\d\s?)11\s+lignes rejetées/).waitFor();
   assert.equal(await widget().getByText('Coupé par la SOURCE').count(), 0, 'un avis de fin forgé ne coupe pas la réception');
   await widget().getByText('Lien commun à d’autres formulaires').waitFor();
   const contactsAfter = await records(target.doc, 'Contacts');

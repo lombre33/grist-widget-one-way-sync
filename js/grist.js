@@ -211,7 +211,12 @@ export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponen
 // Envoi direct de lignes à une adresse d'écriture (clé d'un formulaire publié : elle n'accepte
 // qu'un ajout de lignes, sans identifiant), comme le webhook les enverrait. Écriture anonyme en
 // JSON : l'en-tête Content-Type suffit à Grist. Une erreur cite le début de la réponse, jamais la clé.
+// Seulement vers l'instance du document, comme le webhook : une adresse d'une autre instance de la
+// liste (lien collé, webhook changé à la main) est refusée.
+let ownOrigin = '';
 export async function postRows(url, rows, timeout = 60000) {
+  ownOrigin ||= (await docIdentity()).origin;
+  if (new URL(url).origin !== ownOrigin) throw new Error('otherInstance');
   const response = await gristFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows), signal: AbortSignal.timeout(timeout) });
   if (!response.ok) throw new Error(maskKey(`HTTP ${response.status} ${(await response.text()).slice(0, 120)}`));
 }

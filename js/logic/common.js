@@ -60,8 +60,10 @@ export const BEFORE_COL = 'Sync_Avant';
 // comme les colonnes ci-dessus : jamais dans Synchro.
 export const SEAL_COL = 'Sync_Sceau';
 
-// Clé de signature d'un export (voir trust.js) : 32 caractères hexadécimaux.
+// Clé de signature d'un destinataire (voir trust.js) : 32 caractères hexadécimaux. Clé publique
+// ECDH P-256 d'une invitation ou d'une réponse : point non compressé de 65 octets, en base64url.
 export const SIG_KEY = /^[0-9a-f]{32}$/;
+export const PUBLIC_KEY = /^[A-Za-z0-9_-]{87}$/;
 
 // Les clés d'une table sont réparties en BUCKETS seaux selon leur CRC-32 (voir formulas.js).
 export const BUCKETS = 256;

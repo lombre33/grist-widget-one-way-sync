@@ -1,7 +1,7 @@
 // Codes échangés entre SOURCE et CIBLE (préfixe + JSON en base64url, sur une ligne) et adresses
 // Grist qu'ils portent. Tout ce qui vient d'un code collé est contrôlé ici : identifiants, colonnes,
 // adresses réécrites à partir de leurs seuls éléments reconnus.
-import { HEX16, SIG_KEY, is, isSafeId, parseJson } from './common.js';
+import { HEX16, PUBLIC_KEY, SIG_KEY, is, isSafeId, parseJson } from './common.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;
@@ -60,15 +60,16 @@ const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from
 // `id` la désigne dans la réponse ; `secret`, tiré à la création, prouve que la réponse vient de
 // quelqu'un qui l'a reçue (la SOURCE n'en garde que l'empreinte). `expire` : heure (en secondes) où
 // elle ne vaut plus ; `renforce` : sécurité renforcée (code de contrôle comparé, suppressions à
-// valider) ; `cle` : clé de signature des envois de l'export (voir trust.js).
+// valider) ; `pub` : clé publique de la SOURCE pour cette invitation, d'où chaque côté tire les
+// clés qui signent les envois (voir linkKeys, trust.js).
 // Mode « lien public » (`base` : adresse REST du document SOURCE) : pas de réponse, la CIBLE lit
 // les instantanés de l'export elle-même, sans identifiant. Mode « Échange » (`retour` : adresse
 // d'écriture du journal de retour de la SOURCE) : la CIBLE renvoie ses modifications à cette
 // adresse, par un webhook à elle. Ce code-là est donc un droit d'écriture.
-export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '', expire = 0, renforce = false, cle = '' }) {
+export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '', expire = 0, renforce = false, pub = '' }) {
   return encodeCode({
     kind: 'invitation', id, export: exportId, name, origin, secret, from,
-    ...(expire ? { expire } : {}), ...(renforce ? { renforce: true } : {}), ...(cle ? { cle } : {}),
+    ...(expire ? { expire } : {}), ...(renforce ? { renforce: true } : {}), ...(pub ? { pub } : {}),
     ...(base ? { mode: 'public', base } : retour ? { mode: 'echange', retour } : {}),
     tables: tables.map(({ table, columns }) => ({ table, columns: exportSchema(columns) })),
   });
@@ -76,7 +77,7 @@ export function buildInvitation({ id, exportId, name, origin, secret = '', from 
 
 function validInvitation(inv) {
   return is(HEX16, inv.id) && is(HEX16, inv.export) && typeof inv.name === 'string' && (!inv.secret || is(SECRET, inv.secret))
-    && (inv.expire === undefined || Number.isFinite(inv.expire)) && (inv.cle === undefined || is(SIG_KEY, inv.cle))
+    && (inv.expire === undefined || Number.isFinite(inv.expire)) && (inv.pub === undefined || is(PUBLIC_KEY, inv.pub))
     && Array.isArray(inv.tables) && inv.tables.length > 0 && inv.tables.every(tb => tb && isSafeId(tb.table) && validColumns(tb.columns))
     && new Set(inv.tables.map(tb => tb.table)).size === inv.tables.length;
 }
@@ -94,14 +95,17 @@ function invitationMode(inv) {
   return { mode: 'reponse', base: '' };
 }
 
+// Une invitation à réponse ou d'Échange porte la clé publique de la SOURCE ; avant la 0.10, elle
+// portait la clé de signature de l'export (`cle`) : à refaire.
 export function parseInvitation(text) {
   const inv = decodeCode(text, 'invitation');
   const mode = validInvitation(inv) ? invitationMode(inv) : null;
   if (!mode) throw new Error('codeInvalid');
+  if (mode.mode !== 'public' && !inv.pub) throw new Error(is(SIG_KEY, inv.cle) ? 'codeOld' : 'codeInvalid');
   const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
   return {
     id: inv.id, export: inv.export, name: inv.name.slice(0, 200), secret: inv.secret || '', origin: String(inv.origin || ''), ...mode,
-    expire: inv.expire || 0, renforce: inv.renforce === true, cle: inv.cle || '',
+    expire: inv.expire || 0, renforce: inv.renforce === true, pub: inv.pub || '',
     from: text200(from, ['email', 'docId']),
     tables: inv.tables.map(tb => ({ table: tb.table, columns: exportSchema(tb.columns) })),
   };
@@ -109,9 +113,9 @@ export function parseInvitation(text) {
 
 // `url` : l'adresse d'écriture du journal de l'export dans la CIBLE. Échange : `retour` dit où la
 // CIBLE a rangé chaque table ([{ table: table de la CIBLE, dest: table de la SOURCE }]).
-// `cle` (Échange) : clé qui signe l'envoi de retour de ce document (voir trust.js).
-export function buildReply({ id, secret = '', recipient, url, retour = null, cle = '' }) {
-  return encodeCode({ kind: 'reponse', id, secret, recipient, url, ...(retour ? { retour } : {}), ...(cle ? { cle } : {}) });
+// `pub` : clé publique de la CIBLE pour cette invitation (voir linkKeys, trust.js).
+export function buildReply({ id, secret = '', recipient, url, retour = null, pub = '' }) {
+  return encodeCode({ kind: 'reponse', id, secret, recipient, url, pub, ...(retour ? { retour } : {}) });
 }
 
 // Tables d'un Échange dans la réponse : chacune nommée, une seule fois de chaque côté.
@@ -120,22 +124,24 @@ function validRetour(back) {
   return Array.isArray(back) && back.length > 0 && back.every(b => b && isSafeId(b.table) && isSafeId(b.dest)) && unique('table') && unique('dest');
 }
 
-// Champs d'une réponse : identifiant, secret, fiche du destinataire ; en Échange, tables de retour
-// et clé de signature.
-function validReply({ id, secret, recipient, retour, cle }) {
+// Champs d'une réponse : identifiant, secret, fiche du destinataire, clé publique ; en Échange,
+// tables de retour.
+function validReply({ id, secret, recipient, retour, pub }) {
   return is(HEX16, id) && (!secret || is(SECRET, secret)) && Boolean(recipient) && typeof recipient === 'object'
-    && (retour === undefined || validRetour(retour)) && (cle === undefined || is(SIG_KEY, cle));
+    && (retour === undefined || validRetour(retour)) && is(PUBLIC_KEY, pub);
 }
 
 // `sourceOrigin` : origine de l'instance du document SOURCE. Le webhook ne part que vers la même
 // instance, à une adresse d'écriture par clé de formulaire, rien d'autre.
+// Une réponse sans clé publique répond à une invitation d'avant la 0.10, à refaire.
 export function parseReply(text, sourceOrigin) {
   const reply = decodeCode(text, 'reponse');
+  if (reply.pub === undefined) throw new Error('inviteOld');
   const target = parseWebhookUrl(reply.url);
   if (!validReply(reply) || !target?.flat) throw new Error('codeInvalid');
   if (target.origin !== sourceOrigin) throw new Error('otherInstance');
-  const out = { id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url };
-  return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })), cle: reply.cle || '' };
+  const out = { id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url, pub: reply.pub };
+  return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })) };
 }
 
 // ---------------------------------------------------------------------------------------------

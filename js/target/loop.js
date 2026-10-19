@@ -286,7 +286,7 @@ async function copyTable(ctx, noted) {
   const present = fileCols.length ? await ctx.files() : new Map();
   const key = tableKey(ctx.journal, entry.table);
   const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest, present.size]);
-  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, ...lastRead.get(key) };
+  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, wrote: false, ...lastRead.get(key) };
   // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent
   // ensuite complètent les cellules (fillActions).
   const rows = resolveRows(tableRows, fileCols.map(([from]) => from), present);
@@ -305,7 +305,7 @@ async function copyTable(ctx, noted) {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, held: plan.held, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
-  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, ...lastRead.get(key) };
+  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
 
 // La destination n'est relue que si le journal de cette table a changé depuis le dernier passage
@@ -507,7 +507,9 @@ async function consolidate(schema, { journal, note: noteBefore }) {
     tables.push({ ...done, changed: !done.error && JSON.stringify(done.entry) !== JSON.stringify(noted) });
   }
   await saveEntries(journal, new Map(tables.filter(tb => tb.changed).map(tb => [tb.entry.table, tb.entry])));
-  const after = (await trusted(journal, note, await fetchRows(journal), trust.seal)).rows;
+  // Le journal n'est relu que si la recopie y a écrit (marques des versions) : sinon, ses lignes
+  // sont celles du dépliage, et une ligne arrivée depuis attend le passage suivant.
+  const after = tables.some(tb => tb.wrote) ? (await trusted(journal, note, await fetchRows(journal), trust.seal)).rows : rows;
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
   // Lignes reçues laissées pour le passage suivant : il vient sans attendre la minute.
   if (unpacked.left) lastArrival = Date.now();

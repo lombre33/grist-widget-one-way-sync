@@ -101,7 +101,9 @@ export async function prepareDest({ dest, columns, map = {} }) {
 // Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
 //   docName }, mode (absent : réponse ; 'echange', 'public' avec base, l'adresse de la SOURCE),
-//   renforce, reserve (journal réservé aux éditeurs, voir acl.js), reserved (règle posée) ;
+//   renforce, reserve (journal réservé aux éditeurs, voir acl.js), reserved (règle posée), pub et
+//   pubSource (clés publiques de la réponse et de l'invitation, pour le code de la réponse et son
+//   code de contrôle ; jamais de clé privée, voir linkKeys) ;
 // - Échange : retour (journal de retour, chez qui a invité), hook (webhook du participant) ;
 // - par table : tables [{ table, dest, columns, map, match, label, refs, dropped, addedCols,
 //   waiting }] (voir loop.js), refused (tables refusées) ;

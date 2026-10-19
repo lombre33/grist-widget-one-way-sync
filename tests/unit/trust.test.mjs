@@ -3,10 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INVITE_DAYS, checkSeals, checkSigned, controlCode, expiresAt, hmac, isExpired, isUnpacked, memoMatches, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText,
-  signature,
+  INVITE_DAYS, checkSeals, checkSigned, codeFacts, controlCode, expiresAt, hmac, isExpired, isPrivateKey, isUnpacked, keptKeys, linkKeys,
+  memoMatches, newKeyPair, readKeys, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText, signature,
 } from '../../js/logic/trust.js';
 import { planUnpack, unpackActions } from '../../js/logic/journal.js';
+import { PUBLIC_KEY } from '../../js/logic/common.js';
 
 const FULL = 'hX3ab9Kq2LmZ7pRtVw8yNc';
 
@@ -41,6 +42,51 @@ test('code de contrôle : six caractères lisibles, tirés de la clé de l\'adre
   // une adresse à soi qui donne le même code.
   assert.equal(await controlCode('https://g.fr/o/equipe/api/s/abc/tables/Journal_B/records?flat=1', 'secret'), code);
   assert.notEqual(await controlCode('https://g.fr/o/equipe/api/s/abd/tables/Journal_A/records?flat=1', 'secret'), code);
+  // Ce que chaque côté a vu (empreinte de l'invitation reçue, clé publique de la réponse) : changé
+  // en route, le code diffère.
+  assert.equal(await controlCode(url, 'secret', []), code);
+  const seen = await controlCode(url, 'secret', ['aa', 'bb']);
+  assert.notEqual(seen, code);
+  assert.notEqual(await controlCode(url, 'secret', ['aa', 'bc']), seen);
+});
+
+test('code de contrôle : sécurité renforcée et clés publiques lues de chaque côté', async () => {
+  const url = 'https://g.fr/api/s/abc/tables/Journal_A/records?flat=1';
+  const inv = { renforce: true, pub: 'P'.repeat(87) };
+  const code = await controlCode(url, 's', codeFacts(inv, 'Q'.repeat(87)));
+  assert.equal(await controlCode(url, 's', codeFacts({ ...inv }, 'Q'.repeat(87))), code);
+  assert.notEqual(await controlCode(url, 's', codeFacts({ ...inv, renforce: false }, 'Q'.repeat(87))), code, 'sécurité renforcée retirée en route');
+  assert.notEqual(await controlCode(url, 's', codeFacts({ ...inv, pub: 'R'.repeat(87) }, 'Q'.repeat(87))), code, 'clé de l\'invitation remplacée');
+  assert.notEqual(await controlCode(url, 's', codeFacts(inv, 'R'.repeat(87))), code, 'clé de la réponse remplacée');
+  assert.deepEqual(codeFacts({}), ['standard', '']);
+});
+
+test('clés par destinataire : les deux côtés tirent les mêmes, propres à l\'invitation', async () => {
+  const a = await newKeyPair();
+  const b = await newKeyPair();
+  assert.match(a.pub, PUBLIC_KEY);
+  assert.ok(isPrivateKey(a.priv) && !isPrivateKey({ ...a.priv, d: 'x' }) && !isPrivateKey(null));
+  assert.ok(!JSON.stringify(a.pub).includes(a.priv.d), 'la clé privée ne part pas');
+  const atA = await linkKeys(a.priv, b.pub, 'e1', 'i1');
+  const atB = await linkKeys(b.priv, a.pub, 'e1', 'i1');
+  assert.deepEqual(atA, atB);
+  assert.match(atA.down, /^[0-9a-f]{32}$/);
+  assert.notEqual(atA.down, atA.up, 'une clé par sens');
+  assert.notDeepEqual(await linkKeys(a.priv, b.pub, 'e1', 'i2'), atA, 'autre invitation : autres clés');
+  const c = await newKeyPair();
+  assert.notDeepEqual(await linkKeys(c.priv, a.pub, 'e1', 'i1'), atA, 'un tiers qui a lu les deux codes n\'en tire rien');
+  await assert.rejects(linkKeys(a.priv, 'A'.repeat(87), 'e1', 'i1'), /codeInvalid/, 'pas un point de la courbe');
+  await assert.rejects(linkKeys({ x: 'a', y: 'b', d: 'c' }, b.pub, 'e1', 'i1'), /codeInvalid/);
+});
+
+test('clés d\'un export : lues dans la ligne signature, gardées pour les webhooks et invitations en cours', () => {
+  const k = n => String(n).repeat(32);
+  assert.deepEqual(readKeys(k(1)), { '*': k(1) }, 'clé unique d\'avant la 0.10');
+  assert.deepEqual(readKeys(JSON.stringify({ h1: k(1), h2: 'court', h3: k(3) })), { h1: k(1), h3: k(3) });
+  for (const bad of ['', null, '{', '[1]', 'abc']) assert.deepEqual(readKeys(bad), {});
+  const keys = { '*': k(0), h1: k(1), i9: k(9), old: k(5) };
+  assert.deepEqual(keptKeys(keys, ['h1', 'h2'], ['i9']), { '*': k(0), h1: k(1), i9: k(9) }, 'h2 n\'a pas sa clé : la commune reste');
+  assert.deepEqual(keptKeys(keys, ['h1'], []), { h1: k(1) }, 'tous les webhooks ont la leur : la commune part');
 });
 
 test('invitation : valable 7 jours', () => {
@@ -51,23 +97,33 @@ test('invitation : valable 7 jours', () => {
   assert.ok(isExpired(undefined, 7 * 86400 + 1), 'sans date : expirée');
 });
 
-// Vecteur calculé par la formule de Synchro (Python : hmac.new(clé, message, sha256)).
+// Vecteurs calculés par la formule de Synchro (Python), pour deux destinataires (KEY, KEY2) et,
+// avant la 0.10, pour une seule clé d'export.
 const KEY = '0123456789abcdef0123456789abcdef';
+const KEY2 = 'fedcba9876543210fedcba9876543210';
 const COLS = '[{"id": "Nom", "type": "Text"}]';
-const SIGNED = '{"lignes": [["k1", 1760000000.5, false, {"Nom": "Élise"}]], "total": 1, "sig": "00aa7f6715718866efcfccdf325244bcd192f91e8d4776857bce39ba1c51f25e"}';
+const BODY = '{"lignes": [["k1", 1760000000.5, false, {"Nom": "Élise"}]], "total": 1}';
+const SIGNED = `${BODY.slice(0, -1)}, "sigs": {"3eb1bd43": "e77d06e209f976145f1c6baa8d58fa50", "4ba68aa8": "c0a7d20bfd20a535d003416de5b40d11"}}`;
+const SIGNED_ONE = `${BODY.slice(0, -1)}, "sigs": {"3eb1bd43": "e77d06e209f976145f1c6baa8d58fa50"}}`;
+const LEGACY = `${BODY.slice(0, -1)}, "sig": "00aa7f6715718866efcfccdf325244bcd192f91e8d4776857bce39ba1c51f25e"}`;
 const row = (fields = {}) => ({ id: 1, Synchro_Export: '00112233aabbccdd', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: COLS, Synchro_Lot: SIGNED, ...fields });
 
 test('signature : la même en Python (formule) et ici, sur l\'export, la table, le type, les colonnes et le texte', async () => {
   assert.equal(await signature(row(), KEY), 'ok');
+  assert.equal(await signature(row(), KEY2), 'ok', 'chaque destinataire lit la sienne');
   assert.equal(await signature(row(), KEY.replace('0', '1')), 'bad', 'autre clé');
   for (const changed of [{ Synchro_Export: 'ffffffffffffffff' }, { Synchro_Table: 'Villes' }, { Synchro_Colonnes: '[]' },
-    { Synchro_Lot: SIGNED.replace('Élise', 'Elise') }, { Synchro_Lot: SIGNED.replace(', "sig"', ',"sig"') }]) {
+    { Synchro_Lot: SIGNED.replace('Élise', 'Elise') }, { Synchro_Lot: SIGNED.replace(', "sigs"', ',"sigs"') },
+    { Synchro_Lot: SIGNED.replace('e77d', 'e77e') }]) {
     assert.equal(await signature(row(changed), KEY), 'bad', JSON.stringify(changed));
   }
-  assert.equal(await signature(row({ Synchro_Lot: '{"lignes": [], "total": 0}' }), KEY), 'bad', 'non signé');
+  assert.equal(await signature(row({ Synchro_Lot: SIGNED_ONE }), KEY2), 'bad', 'pas de signature pour cette clé');
+  assert.equal(await signature(row({ Synchro_Lot: BODY }), KEY), 'bad', 'non signé');
   assert.equal(await signature(row({ Synchro_Lot: '' }), KEY), 'bad', 'lot vide');
-  const body = SIGNED.replace(/, "sig": "[0-9a-f]{64}"\}$/, '}');
-  assert.equal(await signText(KEY, row(), body), SIGNED, 'le widget signe comme la formule');
+  assert.equal(await signature(row({ Synchro_Lot: `${BODY.slice(0, -1)}, "sigs": {"3eb1bd43": 1}}` }), KEY), 'bad');
+  assert.equal(await signText(KEY, row(), BODY), SIGNED_ONE, 'le widget signe comme la formule');
+  assert.equal(await signature(row({ Synchro_Lot: LEGACY }), KEY), 'ok', 'format d\'avant la 0.10 : une clé par export');
+  assert.equal(await signature(row({ Synchro_Lot: LEGACY }), KEY2), 'bad');
   assert.match(await hmac(KEY, 'x'), /^[0-9a-f]{64}$/);
 });
 
@@ -83,6 +139,7 @@ test('signature : liste des clés, avis de fin, types non signés', async () => 
   assert.equal(await signature(end, KEY), 'bad', 'avis de fin non signé : un lien volé ne coupe pas la réception');
   assert.equal(await signature({ id: 4, Synchro_Type: 'morceau', Synchro_Lot: 'x' }, KEY), 'ok', 'morceau de fichier : protégé par son empreinte');
   const rows = [row(), { ...row(), id: 2, Synchro_Lot: '{"lignes": [], "total": 0}' }, { ...keys, id: 5 }, { ...row(), id: 6, Synchro_Export: 'ffffffffffffffff', Synchro_Lot: 'x' }];
+  assert.deepEqual([...(await checkSigned([row({ Synchro_Lot: SIGNED_ONE })], KEY2, '00112233aabbccdd')).bad], [1], 'signé pour un autre destinataire');
   const { bad, bare } = await checkSigned(rows, KEY, '00112233aabbccdd');
   assert.deepEqual([...bad], [2]);
   assert.deepEqual([...bare], [5]);

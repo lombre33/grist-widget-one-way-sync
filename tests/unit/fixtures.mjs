@@ -19,6 +19,8 @@ export const part = (id, n, t, keys, last, mark = 'm1') => ({ id, id_sync: '', S
 export const ID = '0123456789abcdef';
 export const EXPORT = 'fedcba9876543210';
 export const COLUMNS = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
-export const invitation = (fields = {}) => buildInvitation({ id: ID, exportId: EXPORT, name: 'Annuaire', origin: 'https://g.fr', tables: [{ table: 'Contacts', columns: COLUMNS }], ...fields });
+// Clé publique d'une invitation ou d'une réponse : seule sa forme compte ici (voir trust.test.mjs).
+export const PUB = `B${'x'.repeat(85)}A`;
+export const invitation = (fields = {}) => buildInvitation({ id: ID, exportId: EXPORT, name: 'Annuaire', origin: 'https://g.fr', tables: [{ table: 'Contacts', columns: COLUMNS }], pub: PUB, ...fields });
 // Code forgé à la main : préfixe et JSON en base64url, sans passer par buildInvitation.
 export const forge = payload => `GRISTSYNC2.${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;

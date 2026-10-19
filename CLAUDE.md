@@ -170,18 +170,34 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
     invitation d'Échange (CIBLE), et toutes les heures par webhook (`checkHooks`, onglet Envoyer ;
     depuis la 0.9, une adresse qui n'est plus `…/api/s/<clé>/tables/<T>/records?flat=1` sur l'instance
     du document est signalée, `send.person.badAddress`).
-  - Code de contrôle (`controlCode`) : 6 caractères de SHA-256(`<clé de partage>\nsecret`) depuis
+  - Code de contrôle (`controlCode`) : 6 caractères de SHA-256(`<clé de partage>\nsecret\n…`) depuis
     la 0.9 (avant : l'adresse entière, dont le préfixe `/o/<équipe>` que Grist ne contrôle pas pour
-    une clé de partage : forgeable par essais), « XXX-XXX ». Secret
+    une clé de partage : forgeable par essais), « XXX-XXX ». Depuis la 0.10, ce que chaque côté a
+    lu y entre (`codeFacts` : niveau, clé publique de l'invitation, et pour le code de la réponse
+    celle de la réponse) : une clé publique remplacée en route ou une sécurité renforcée retirée
+    (N12) change le code, que A compare obligatoirement en Renforcé. Secret
     toujours ; invitation valable 7 jours (`expire`, `isExpired`, « Refaire le code » remet `at`).
-  - Signatures : clé par export dans la ligne `signature` de `Synchro` (`Synchro_Colonnes`,
-    `signingKey`) ; les formules (`signed()` de `formulas.js`) ajoutent `, "sig": "<hex>"}` à la liste
-    et au lot (HMAC-SHA256 de `export|table|type|colonnes|texte`), `endRows` signe la ligne `fin`.
+  - Signatures (clé par destinataire depuis la 0.10, N4) : aucune clé secrète dans les codes.
+    L'invitation porte `pub` (ECDH P-256, `newKeyPair` ; la privée reste dans l'entrée de la note
+    SOURCE, champ `prive`, jusqu'à l'approbation), la réponse aussi (paire tirée par la CIBLE,
+    privée jamais gardée ; `pub` et `pubSource` dans la note du journal pour refaire la réponse) ;
+    `linkKeys` (ECDH puis HKDF-SHA256, sel `export|invitation`) rend `down` (envois de la SOURCE) et
+    `up` (retour d'un Échange). SOURCE : ligne `signature` de `Synchro` = JSON `{ webhook : clé }`
+    (`readKeys` ; une clé hexadécimale seule = clé commune d'avant la 0.10, `'*'`, gardée par
+    `keptKeys` tant qu'un webhook n'a pas la sienne), posée sous l'id de l'invitation avant
+    `createWebhook` puis sous l'id du webhook (`putRecipientKey`), effacée à la révocation
+    (`pruneKeys`). Côté CIBLE d'un Échange : `setOnlyKey` (étiquette `retour`, puis le webhook). Les
+    formules (`signed()` de `formulas.js`) ajoutent `, "sigs": {<8 hex de SHA-256(clé)>: <32 hex>}}`
+    (HMAC de SHA-256(`export|table|type|colonnes|texte`), une par clé, triées) ; `endRows(export,
+    hook)` signe la ligne `fin` pour ce seul webhook. Le format `"sig"` d'avant la 0.10 est encore lu.
+    Écrire la ligne `signature` recalcule tous les lots de l'export : `updateKeys` n'écrit que si les
+    clés changent (un renommage d'étiquette ne change pas le texte signé, donc rien ne part).
     CIBLE : clé dans la description de `id_sync` des destinations (`{"signature": {<place>: clé}}`,
     `storeKey`, `receivedKey`) ; place = export, ou le journal pour un journal de retour d'Échange
-    (`keySlot`) : en Échange, chaque côté signe avec sa clé, donnée dans son propre code (`cle` de
-    l'invitation, `cle` de la réponse ; vérifié qu'un lot signé avec la clé de l'invitation est
-    rejeté). `checkSigned` : 'bad' rejeté (suspect), 'bare' (liste vide non signée : colonnes non
+    (`keySlot`). Un code d'invitation 0.9 (`cle` sans `pub`) : `codeOld` ; une réponse sans `pub` :
+    `inviteOld` (refaire le code). Vérifié (e2e) : clés différentes pour deux destinataires, clé du
+    révoqué retirée, lot signé avec la clé du révoqué rejeté par l'autre, lot signé avec une clé
+    tirée de l'invitation seule rejeté en Échange. `checkSigned` : 'bad' rejeté (suspect), 'bare' (liste vide non signée : colonnes non
     lues), morceaux de fichiers non signés. Une réception sans clé accepte tout (branchée avant ;
     sa carte le dit, `recv.unsigned`). Versions et listes de plus de 600 s dans le futur rejetées
     (`planUnpack`, `now`). `SIG_KEY` est dans `logic/common.js` (trust.js et codes.js s'importent).
@@ -195,12 +211,13 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
     effacée et comptée suspecte. Note du journal : `sceau` = empreinte de la clé (8 hex) ; si elle
     change (première fois, nouvelle invitation), les lignes dépliées présentes sont rescellées ;
     `sceau` noté sans clé trouvée : `failure('keyLost')`, le journal n'est plus recopié. Testé
-    dans l'étape « lignes forgées » de l'e2e (10 lignes rejetées). Les colonnes d'état
+    dans l'étape « lignes forgées » de l'e2e (11 lignes rejetées). Les colonnes d'état
     (`Sync_Applique`, `Sync_Etat`, `Sync_Avant`, `Sync_Recu`) restent hors sceau : la clé ne peut
     que créer. Toute colonne qu'une recopie récrit sur une version doit rester hors sceau.
   - Échange (0.9) : une invitation dont l'export est un export local (note SOURCE ou `Synchro`)
     est refusée (`exportTaken`, dans `readInvitation` et `wireExchange`), sauf reprise du même
-    Échange. Une reprise (`showRelink`) qui change la clé de signature le dit (`recv.relink.newKey`).
+    Échange. Une reprise (`showRelink`) tire toujours de nouvelles clés (0.10) : elle se confirme,
+    fiche affichée.
   - Règles d'accès du widget (mémos dans `logic/acl.js`) : lien public, puis `Synchro` réservée aux
     propriétaires (5 règles, exception éditeur pour la recopie d'un Échange, limitée depuis la 0.9
     aux exports en Échange : `ownerAclRules(exchangeIds)`), puis journaux réservés aux éditeurs
@@ -257,7 +274,17 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.9.0 (19 octobre 2026)
+## État : V0.10.0 (19 octobre 2026)
+
+V0.10.0 (Antoine, 19 octobre : « corriger les failles de sécurité et défauts d'UX restants ») :
+clé de signature par destinataire (N4, voir « Signatures »), code de contrôle qui couvre niveau et
+clés publiques (N12), CSP limitée à `grist-plugin-api.js` des instances et envois directs
+(`postRows`) limités à l'instance du document (N13), journal relu une seule fois par passage quand
+la recopie n'y écrit rien (N7, `wrote` de `copyTable`). Correction 9 (vague cumulée) : fermée par le
+sceau et la clé par destinataire, seule la SOURCE peut encore effacer. Format changé : toute
+invitation en attente faite par la 0.9 est à refaire (`codeOld` côté CIBLE, `inviteOld` côté
+SOURCE) ; les réceptions déjà branchées gardent la clé commune de leur export jusqu'à une nouvelle
+invitation ; un onglet CIBLE 0.9 resté ouvert rejette les lots signés par la 0.10.
 
 V0.9.0 (demande d'Antoine du 19 octobre : audits UI/UX, code, sécurité, gwaudit ; comptes rendus
 dans `/mnt/project-files/notes/audits-v0.8/`) : parcours harmonisés (43641ec), refacto (b112bb0 :

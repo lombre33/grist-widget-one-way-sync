@@ -10,14 +10,19 @@ import { exportCondition, exportTables, hookMemo, hookName, ownJournal, returnEx
 import { clearExport, dropExport, putExport, setExport, setPause } from './logic/notes.js';
 import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from './grist.js';
 import { removeTechnicalTables } from './pages.js';
-import { endRows, exportHooks, readSourceNote, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
+import {
+  endRows, exportHooks, pruneKeys, putRecipientKey, readSourceNote, removeExport, saveExport, setOnlyKey, syncRows, updateSourceNote,
+} from './source/synchro.js';
 import { receivedJournals } from './target/journals.js';
+
+const PENDING_LABEL = 'retour'; // clé de retour, le temps de créer son webhook
 
 // Côté CIBLE : l'export de retour (identifiant et nom de l'export reçu) envoie les destinations à
 // la SOURCE. Elles reçoivent MajLe et RecalculLe, et une clé à chaque ligne nouvelle ; les lignes
 // déjà là sans clé restent à ce document. Avec `retour` (adresse d'écriture du journal de retour,
-// lue dans l'invitation, jamais notée), le webhook vers la SOURCE est (re)créé.
-export async function wireExchange(note, retour = '') {
+// lue dans l'invitation, jamais notée), le webhook vers la SOURCE est (re)créé ; `key` signe ses
+// envois (clé de retour tirée de l'échange de clés publiques, voir linkKeys).
+export async function wireExchange(note, retour = '', key = '') {
   let schema = await readSchema();
   for (const { dest } of note.tables) {
     const cols = schema.columns(dest) || [];
@@ -28,20 +33,22 @@ export async function wireExchange(note, retour = '') {
   const local = readSourceNote(schema).exports.find(e => e.id === note.export);
   if (local && !local.retour) throw new Error('exportTaken');
   await saveExport(note.export, returnExportTables(note, schema), { swap: true });
-  // L'envoi de retour est signé par une clé propre à ce document, donnée dans la réponse, et ce
-  // que l'autre côté en déplie est scellé avec elle (voir trust.js) : l'invitation seule, qui porte
-  // l'adresse de retour, ne suffit pas pour y faire recopier quoi que ce soit.
-  await signingKey(note.export, { create: true });
   await updateSourceNote((n) => {
     const was = n.exports.find(e => e.id === note.export) || { at: nowS() };
     return putExport(n, { ...was, id: note.export, name: note.name, echange: true, retour: true });
   });
   if (!retour) return;
   for (const h of await exportHooks(note.export)) await deleteWebhook(h.id);
-  await createWebhook({
+  // L'envoi de retour est signé par une clé que seuls ce document et l'autre côté tirent de leurs
+  // clés publiques, et ce que l'autre côté en déplie est scellé avec elle (voir trust.js) :
+  // l'invitation seule, qui porte l'adresse de retour, ne suffit pas pour y faire recopier quoi que
+  // ce soit. Posée avant le webhook, qui ne part donc jamais sans elle.
+  await setOnlyKey(note.export, PENDING_LABEL, key);
+  const hookId = await createWebhook({
     name: hookName(note.name, note.export), memo: hookMemo(note.from || {}), url: retour,
     tableId: SYNC_TABLE, condition: exportCondition(note.export),
   });
+  await putRecipientKey(note.export, hookId, key, PENDING_LABEL);
 }
 
 // Échange à plusieurs : la ligne 'echange' de l'export est marquée dès deux participants (webhooks
@@ -58,7 +65,8 @@ export async function markHub(exportId) {
 // l'avis de fin, qui arrête aussi l'envoi de retour d'un participant, voir stopReturn), puis son
 // journal de retour et sa clé ; les autres continuent.
 export async function removeRecipient(exportId, hook) {
-  await deleteWebhookWithNotice(hook, await endRows(exportId));
+  await deleteWebhookWithNotice(hook, await endRows(exportId, hook.id));
+  await pruneKeys(exportId);
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.retour).filter(ownJournal(hook));
   await removeTechnicalTables(journals.map(r => r.journal));
   await updateSourceNote(note => setPause(note, hook.id));
@@ -83,8 +91,8 @@ export async function addDeleteColumns(tables) {
 // invité) : l'export reste, sans destinataire ni Échange ; sinon il disparaît (export supprimé,
 // export de retour d'un Échange).
 export async function closeExport(exportId, { keepExport }) {
-  const notice = await endRows(exportId);
-  for (const h of await exportHooks(exportId)) await deleteWebhookWithNotice(h, notice);
+  for (const h of await exportHooks(exportId)) await deleteWebhookWithNotice(h, await endRows(exportId, h.id));
+  if (keepExport) await pruneKeys(exportId);
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.mode === 'echange');
   await removeTechnicalTables(journals.map(r => r.journal));
   if (keepExport) await saveExport(exportId, exportTables(await syncRows(), exportId));

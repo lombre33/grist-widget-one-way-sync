@@ -2,31 +2,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildInvitation, buildReply, buildWebhookUrl, decodeCode, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/logic/codes.js';
-import { SECRET, ID, EXPORT, COLUMNS, invitation, forge } from './fixtures.mjs';
+import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
   const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
   const id = '0123456789abcdef';
   const exportId = 'fedcba9876543210';
   const retour = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Annuaire/records?flat=1';
-  const inv = parseInvitation(buildInvitation({ id, exportId, name: 'Annuaire', origin: 'https://g.fr', secret: SECRET, retour, tables: [{ table: 'Contacts', columns }] }));
+  const inv = parseInvitation(buildInvitation({ pub: PUB, id, exportId, name: 'Annuaire', origin: 'https://g.fr', secret: SECRET, retour, tables: [{ table: 'Contacts', columns }] }));
   assert.equal(inv.mode, 'echange');
   assert.equal(inv.retour, retour);
   assert.equal(inv.retourOrigin, 'https://g.fr');
   for (const wrong of ['https://g.fr/api/docs/d/tables/T/records?flat=1', retour.replace('?flat=1', ''), 'javascript:alert(1)']) {
-    assert.throws(() => parseInvitation(buildInvitation({ id, exportId, name: 'x', origin: '', retour: wrong, tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, wrong);
+    assert.throws(() => parseInvitation(buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', retour: wrong, tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, wrong);
   }
   const url = 'https://g.fr/o/eq/api/s/Xyz789/tables/Journal_Annuaire/records?flat=1';
   const recipient = { email: 'b@c.fr', docId: 'doc2' };
-  const reply = parseReply(buildReply({ id, recipient, url, retour: [{ table: 'Contacts_2', dest: 'Contacts', extra: 1 }] }), 'https://g.fr');
+  const reply = parseReply(buildReply({ pub: PUB, id, recipient, url, retour: [{ table: 'Contacts_2', dest: 'Contacts', extra: 1 }] }), 'https://g.fr');
   assert.deepEqual(reply.retour, [{ table: 'Contacts_2', dest: 'Contacts' }]);
-  assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').retour, undefined, 'réponse ordinaire');
-  assert.equal(reply.cle, '', 'Échange sans clé de signature (version précédente)');
-  const cle = '0123456789abcdef0123456789abcdef';
-  assert.equal(parseReply(buildReply({ id, recipient, url, retour: [{ table: 'A', dest: 'B' }], cle }), 'https://g.fr').cle, cle, 'clé de l\'envoi de retour');
-  assert.throws(() => parseReply(buildReply({ id, recipient, url, retour: [{ table: 'A', dest: 'B' }], cle: 'xyz' }), 'https://g.fr'), /codeInvalid/);
+  assert.equal(parseReply(buildReply({ pub: PUB, id, recipient, url }), 'https://g.fr').retour, undefined, 'réponse ordinaire');
+  assert.equal(reply.pub, PUB, 'clé publique de la CIBLE');
+  assert.throws(() => parseReply(buildReply({ pub: 'xyz', id, recipient, url }), 'https://g.fr'), /codeInvalid/);
+  assert.throws(() => parseReply(buildReply({ pub: [PUB], id, recipient, url }), 'https://g.fr'), /codeInvalid/);
+  const old = forge({ kind: 'reponse', id, recipient, url, cle: '0123456789abcdef0123456789abcdef' });
+  assert.throws(() => parseReply(old, 'https://g.fr'), /inviteOld/, 'réponse d\'avant la 0.10 : invitation à refaire');
   for (const wrong of [[], [{ table: 'a;b', dest: 'Contacts' }], [{ table: 'A', dest: 'C' }, { table: 'B', dest: 'C' }], 'Contacts']) {
-    assert.throws(() => parseReply(buildReply({ id, recipient, url, retour: wrong }), 'https://g.fr'), /codeInvalid/, JSON.stringify(wrong));
+    assert.throws(() => parseReply(buildReply({ pub: PUB, id, recipient, url, retour: wrong }), 'https://g.fr'), /codeInvalid/, JSON.stringify(wrong));
   }
 });
 
@@ -34,42 +35,47 @@ test('invitation : aller-retour, plusieurs tables, refus des codes invalides', (
   const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville é' }, { id: 'Vu', type: 'DateTime:Europe/Paris', label: 'Vu' }];
   const id = '0123456789abcdef';
   const exportId = 'fedcba9876543210';
-  const code = buildInvitation({ id, exportId, name: 'Annuaire', secret: SECRET, origin: 'https://g.fr', tables: [{ table: 'Contacts', columns }, { table: 'Villes', columns }] });
+  const code = buildInvitation({ pub: PUB, id, exportId, name: 'Annuaire', secret: SECRET, origin: 'https://g.fr', tables: [{ table: 'Contacts', columns }, { table: 'Villes', columns }] });
   assert.ok(code.startsWith('GRISTSYNC2.'));
   const inv = parseInvitation(code);
   assert.equal(inv.export, exportId);
   assert.deepEqual(inv.tables.map(tb => tb.table), ['Contacts', 'Villes']);
   assert.deepEqual(inv.tables[0].columns[1], { id: 'Ville', type: 'Text', label: 'Ville é' });
   assert.equal(inv.tables[0].columns[2].type, 'DateTime:Europe/Paris', 'une date à fuseau passe');
-  assert.equal(parseInvitation(buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).secret, '');
-  assert.throws(() => parseInvitation(buildInvitation({ id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, 'sans export');
+  assert.equal(parseInvitation(buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).secret, '');
+  assert.throws(() => parseInvitation(buildInvitation({ pub: PUB, id, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })), /codeInvalid/, 'sans export');
   assert.throws(() => parseInvitation('bonjour'), /codeFormat/);
   assert.throws(() => parseInvitation('GRISTSYNC1.eyJ9'), /codeOld/);
   assert.throws(() => decodeCode(code, 'reponse'), /notReply/);
-  const bad = buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns: [{ id: 'a;b', type: 'Text' }] }] });
+  const bad = buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns: [{ id: 'a;b', type: 'Text' }] }] });
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
-  const twice = buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }, { table: 'Contacts', columns }] });
+  const twice = buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }, { table: 'Contacts', columns }] });
   assert.throws(() => parseInvitation(twice), /codeInvalid/);
-  // Durée de vie, sécurité renforcée et clé de signature des envois voyagent avec l'invitation.
-  const strong = parseInvitation(buildInvitation({ id, exportId, name: 'x', secret: SECRET, origin: '', tables: [{ table: 'Contacts', columns }], expire: 1760604800, renforce: true, cle: SECRET }));
-  assert.deepEqual([strong.expire, strong.renforce, strong.cle], [1760604800, true, SECRET]);
-  assert.deepEqual([inv.expire, inv.renforce, inv.cle], [0, false, ''], 'une invitation d\'avant la 0.8 : ni date, ni clé');
+  // Durée de vie, sécurité renforcée et clé publique de la SOURCE voyagent avec l'invitation.
+  const strong = parseInvitation(buildInvitation({ pub: PUB, id, exportId, name: 'x', secret: SECRET, origin: '', tables: [{ table: 'Contacts', columns }], expire: 1760604800, renforce: true }));
+  assert.deepEqual([strong.expire, strong.renforce, strong.pub], [1760604800, true, PUB]);
+  assert.deepEqual([inv.expire, inv.renforce], [0, false]);
+  // Sans clé publique : une invitation d'avant la 0.10 (clé de l'export) est à refaire.
+  const plain = { kind: 'invitation', id, export: exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] };
+  assert.throws(() => parseInvitation(forge({ ...plain, cle: SECRET })), /codeOld/);
+  assert.throws(() => parseInvitation(forge(plain)), /codeInvalid/);
+  assert.equal(parseInvitation(forge({ ...plain, mode: 'public', base: 'https://g.fr/api/docs/abc' })).pub, '', 'lien public : pas de clé');
 });
 
 test('réponse : même instance, une adresse par clé de formulaire seulement', () => {
   const url = 'https://g.fr/o/eq/api/s/Abc123/tables/Journal_Annuaire/records?flat=1';
   const id = '0123456789abcdef';
   const recipient = { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14', extra: 'x' };
-  const reply = parseReply(buildReply({ id, secret: SECRET, recipient, url }), 'https://g.fr');
+  const reply = parseReply(buildReply({ pub: PUB, id, secret: SECRET, recipient, url }), 'https://g.fr');
   assert.equal(reply.url, url);
   assert.deepEqual({ ...reply.recipient }, { email: 'a@b.fr', docId: 'doc1', team: 'eq', at: '2026-10-14' }, 'seulement les champs connus');
   assert.equal(reply.secret, SECRET);
   assert.equal(reply.recipient.extra, undefined);
-  assert.equal(parseReply(buildReply({ id, recipient, url }), 'https://g.fr').secret, '');
-  assert.throws(() => parseReply(buildReply({ id, secret: 'court', recipient, url }), 'https://g.fr'), /codeInvalid/);
-  assert.throws(() => parseReply(buildReply({ id, recipient, url }), 'https://autre.fr'), /otherInstance/);
-  assert.throws(() => parseReply(buildReply({ id, recipient, url: url.replace('?flat=1', '') }), 'https://g.fr'), /codeInvalid/);
-  assert.throws(() => parseReply(buildReply({ id, recipient, url: 'https://g.fr/api/docs/doc1/tables/T/records?flat=1' }), 'https://g.fr'), /codeInvalid/);
+  assert.equal(parseReply(buildReply({ pub: PUB, id, recipient, url }), 'https://g.fr').secret, '');
+  assert.throws(() => parseReply(buildReply({ pub: PUB, id, secret: 'court', recipient, url }), 'https://g.fr'), /codeInvalid/);
+  assert.throws(() => parseReply(buildReply({ pub: PUB, id, recipient, url }), 'https://autre.fr'), /otherInstance/);
+  assert.throws(() => parseReply(buildReply({ pub: PUB, id, recipient, url: url.replace('?flat=1', '') }), 'https://g.fr'), /codeInvalid/);
+  assert.throws(() => parseReply(buildReply({ pub: PUB, id, recipient, url: 'https://g.fr/api/docs/doc1/tables/T/records?flat=1' }), 'https://g.fr'), /codeInvalid/);
 });
 
 test('adresses : lien de formulaire, webhook, masque, baseUrl', () => {
@@ -89,13 +95,13 @@ test('invitation par lien public : adresse du document réécrite, sinon refusé
   const columns = [{ id: 'Nom', type: 'Text', label: 'Nom' }];
   const id = '0123456789abcdef';
   const exportId = id;
-  const code = buildInvitation({ id, exportId, name: 'x', origin: 'https://g.fr', base: 'https://g.fr/o/eq/api/docs/abcDEF12', tables: [{ table: 'Contacts', columns }] });
+  const code = buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: 'https://g.fr', base: 'https://g.fr/o/eq/api/docs/abcDEF12', tables: [{ table: 'Contacts', columns }] });
   const inv = parseInvitation(code);
   assert.equal(inv.mode, 'public');
   assert.equal(inv.base, 'https://g.fr/o/eq/api/docs/abcDEF12');
-  const bad = buildInvitation({ id, exportId, name: 'x', origin: '', base: 'https://g.fr/api/docs/abc?x=1', tables: [{ table: 'Contacts', columns }] });
+  const bad = buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', base: 'https://g.fr/api/docs/abc?x=1', tables: [{ table: 'Contacts', columns }] });
   assert.throws(() => parseInvitation(bad), /codeInvalid/);
-  assert.equal(parseInvitation(buildInvitation({ id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).mode, 'reponse');
+  assert.equal(parseInvitation(buildInvitation({ pub: PUB, id, exportId, name: 'x', origin: '', tables: [{ table: 'Contacts', columns }] })).mode, 'reponse');
 });
 
 test('boucles : retour vers le document d’origine refusé, relais et copie dans le même document permis', () => {
@@ -123,7 +129,7 @@ test('codes : coupés en plusieurs lignes (courriel), ou abîmés', () => {
 });
 
 test('invitation forgée : chaque champ est contrôlé', () => {
-  const base = { kind: 'invitation', id: ID, export: EXPORT, name: 'A', origin: 'https://g.fr', tables: [{ table: 'Contacts', columns: COLUMNS }] };
+  const base = { kind: 'invitation', id: ID, export: EXPORT, name: 'A', origin: 'https://g.fr', pub: PUB, tables: [{ table: 'Contacts', columns: COLUMNS }] };
   assert.equal(parseInvitation(forge(base)).mode, 'reponse');
   const refused = {
     'identifiant court': { id: 'abc' },
@@ -146,8 +152,9 @@ test('invitation forgée : chaque champ est contrôlé', () => {
     'Échange vers une adresse de lecture': { mode: 'echange', retour: 'https://g.fr/api/docs/abc/tables/T/records' },
     'Échange vers une adresse sans ?flat=1': { mode: 'echange', retour: 'https://g.fr/api/s/Key1/tables/Journal_A/records' },
     'date d\'expiration qui n\'est pas un nombre': { expire: '2026-10-23' },
-    'clé de signature mal formée': { cle: 'zz' },
-    'clé de signature dans un tableau': { cle: ['0123456789abcdef0123456789abcdef'] },
+    'clé publique mal formée': { pub: 'zz' },
+    'clé publique dans un tableau': { pub: [PUB] },
+    'clé publique trop longue': { pub: `${PUB}A` },
   };
   for (const [why, change] of Object.entries(refused)) assert.throws(() => parseInvitation(forge({ ...base, ...change })), /codeInvalid/, why);
   const long = parseInvitation(forge({ ...base, name: 'x'.repeat(500), from: { email: 7, docId: { a: 1 }, extra: 'x' } }));
@@ -159,7 +166,7 @@ test('invitation forgée : chaque champ est contrôlé', () => {
 
 test('réponse forgée : adresse, secret et tables de l\'Échange contrôlés', () => {
   const url = 'https://g.fr/api/s/Key1/tables/Journal_A/records?flat=1';
-  const reply = fields => buildReply({ id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, ...fields });
+  const reply = fields => buildReply({ pub: PUB, id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, ...fields });
   assert.equal(parseReply(`\n${reply()}\n`, 'https://g.fr').url, url);
   assert.throws(() => parseReply(reply({ recipient: null }), 'https://g.fr'), /codeInvalid/);
   assert.throws(() => parseReply(reply({ url: `${url}&x=1` }), 'https://g.fr'), /codeInvalid/, 'paramètre de plus');

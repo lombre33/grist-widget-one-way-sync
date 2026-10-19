@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.9.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.10.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -162,12 +162,13 @@ the widget's instructions give.
   a new invitation resumes the same reception, with its tables.
 - The receiving document is checked with Grist (name, workspace, team) at approval, then every
   hour; a six-character control code can be compared over the phone.
-- Sends are signed: a reception's write key alone cannot get anything copied. A wave of
-  deletions waits for a decision on the card.
+- Sends are signed, with a key specific to each recipient that both documents derive from their
+  codes without ever sending it: a reception's write key alone cannot get anything copied, and a
+  recipient cannot sign for another one. A wave of deletions waits for a decision on the card.
 - The technical table is reserved to the SOURCE's owners, the journals to the TARGET's editors
   (access rules set by the widget).
 - The codes only hold table and column names, the recipient's details, a write address, a secret
-  and a signing key: send them only to the person concerned, like a password; an invitation is
+  and a public key: send them only to the person concerned, like a password; an invitation is
   valid for 7 days.
 - An **Enhanced security** box, when inviting, makes comparing the code mandatory, has every
   received deletion validated and forbids the public link for that export.

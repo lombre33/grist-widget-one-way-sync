@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.9.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.10.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -168,12 +168,14 @@ publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_UR
   lien, et une nouvelle invitation fait reprendre la même réception, avec ses tables.
 - Le document qui recevra est vérifié auprès de Grist (nom, dossier, équipe) à l'approbation,
   puis toutes les heures ; un code de contrôle de six caractères se compare par téléphone.
-- Les envois sont signés : la clé d'écriture d'une réception ne suffit pas pour y faire recopier
-  quoi que ce soit. Une vague de suppressions attend une décision sur la carte.
+- Les envois sont signés, avec une clé propre à chaque destinataire que les deux documents tirent
+  de leurs codes sans jamais la transmettre : la clé d'écriture d'une réception ne suffit pas pour
+  y faire recopier quoi que ce soit, et un destinataire ne peut pas signer pour un autre. Une vague
+  de suppressions attend une décision sur la carte.
 - La table technique est réservée aux propriétaires de la SOURCE, les journaux aux éditeurs de la
   CIBLE (règles d'accès posées par le widget).
 - Les codes ne contiennent que des noms de tables et de colonnes, une fiche, une adresse
-  d'écriture, un secret et une clé de signature : ils se transmettent à la seule personne
+  d'écriture, un secret et une clé publique : ils se transmettent à la seule personne
   concernée, comme un mot de passe, et une invitation vaut 7 jours.
 - Une case **Sécurité renforcée**, à l'invitation, rend la comparaison du code obligatoire, fait
   valider toute suppression reçue et interdit le lien public pour cet export.

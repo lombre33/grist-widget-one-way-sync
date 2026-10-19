@@ -1,6 +1,6 @@
 // Note SOURCE (description de la colonne Synchro_Export, voir source/synchro.js) :
 // { exports: [{ id, name, at, public, renforce, echange, retour, regles, refus }],
-//   invitations: [{ id, export, hash, at, renforce, journal, ready }],
+//   invitations: [{ id, export, hash, at, renforce, journal, ready, pub, prive }],
 //   pauses: [{ hook, export, at, columns }], fichiers: { <export>: { f, h, p } } }.
 // Chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 

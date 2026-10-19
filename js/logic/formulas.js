@@ -57,10 +57,11 @@ const READ = [
   'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
 ];
 
-// Signature d'un lot ou d'une liste des clés (`kind`) par la clé de l'export (ligne 'signature' de
-// Synchro, que seuls les propriétaires lisent) : HMAC-SHA256 de l'export, de la table, du type, des
-// colonnes et du texte, ajouté en dernier champ du JSON (voir trust.js). Sans clé (export d'avant la 0.8 pas
-// encore réinvité), le texte part tel quel.
+// Signature d'un lot ou d'une liste des clés (`kind`) par chacune des clés des destinataires de
+// l'export (ligne 'signature' de Synchro, que seuls les propriétaires lisent : { webhook : clé }, ou
+// une seule clé avant la 0.10) : HMAC-SHA256 de l'empreinte de l'export, de la table, du type, des
+// colonnes et du texte, rangé sous l'empreinte de la clé dans un dernier champ du JSON (voir
+// trust.js). Sans clé, le texte part tel quel.
 function signed(lines, kind) {
   return [
     'def body():', ...lines.join('\n').split('\n').map(line => `  ${line}`),
@@ -68,9 +69,15 @@ function signed(lines, kind) {
     `if $${TYPE_COL} != "${kind}" or not isinstance(text, str) or not text.startswith("{"): return text`,
     `k = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.sign}").${SCHEMA_COL}`,
     'if not k: return text',
-    'import hmac, hashlib',
-    `m = "|".join([$${EXPORT_COL} or "", $${TABLE_COL} or "", $${TYPE_COL} or "", $${SCHEMA_COL} or "", text])`,
-    'return text[:-1] + \', "sig": "%s"}\' % hmac.new(k.encode(), m.encode("utf-8"), hashlib.sha256).hexdigest()',
+    'import hmac, hashlib, json',
+    'try:',
+    '  keys = list(json.loads(k).values()) if k.startswith("{") else [k]',
+    'except Exception:',
+    '  keys = []',
+    `d = hashlib.sha256("|".join([$${EXPORT_COL} or "", $${TABLE_COL} or "", $${TYPE_COL} or "", $${SCHEMA_COL} or "", text]).encode("utf-8")).hexdigest().encode()`,
+    'sigs = dict((hashlib.sha256(x.encode()).hexdigest()[:8], hmac.new(x.encode(), d, hashlib.sha256).hexdigest()[:32]) for x in keys if isinstance(x, str) and x)',
+    'if not sigs: return text',
+    'return text[:-1] + \', "sigs": %s}\' % json.dumps(sigs, sort_keys=True)',
   ];
 }
 

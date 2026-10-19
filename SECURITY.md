@@ -22,9 +22,10 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   invitation vaut 7 jours et porte toujours un secret.
 - Le document qui recevra est lu **chez Grist** (nom, dossier, équipe) à l'approbation, puis
   revérifié toutes les heures ; un code de contrôle court se compare de vive voix.
-- Les envois sont **signés** (HMAC-SHA256, une clé par export), et ce que la CIBLE en déplie est
+- Les envois sont **signés** (HMAC-SHA256, une clé par destinataire, tirée d'un échange de clés
+  publiques : aucune clé secrète ne voyage dans les codes), et ce que la CIBLE en déplie est
   **scellé** avec la même clé : la clé d'écriture d'une réception ne suffit plus pour y faire
-  recopier des données.
+  recopier des données, et un destinataire ne peut pas signer pour un autre.
 - Règles d'accès posées par le widget : `Synchro` réservée aux propriétaires de la SOURCE, journaux
   de la CIBLE réservés à ses éditeurs (case cochée par défaut).
 - Niveau **Renforcé**, au choix à l'invitation : code de contrôle à comparer obligatoirement,
@@ -36,11 +37,13 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   build. Le seul script externe est `grist-plugin-api.js`, chargé depuis l'instance qui affiche le
   widget si elle est dans la liste de `js/config.js`, sinon depuis la première de la liste.
 - Politique de sécurité du contenu (`index.html`) : `default-src 'none'` ; scripts du widget et
-  des instances listées ; requêtes réseau vers le widget lui-même (textes `i18n/*.json`) et ces
+  `grist-plugin-api.js` des instances listées, rien d'autre de ces instances ; requêtes réseau vers le widget lui-même (textes `i18n/*.json`) et ces
   instances ; styles et images du widget seulement ; aucun script ni style en ligne ;
   `base-uri` et `form-action` à `'none'` ; pas de référent envoyé.
 - Toute requête réseau passe par `gristFetch` (`js/grist.js`), qui refuse une adresse hors des
-  instances listées et n'envoie jamais de cookie (`credentials: 'omit'`).
+  instances listées et n'envoie jamais de cookie (`credentials: 'omit'`). Les envois directs à une
+  adresse d'écriture (test du lien, ligne « fin », morceaux de fichiers) ne partent que vers
+  l'instance du document, comme le webhook.
 - Aucun texte venu d'un document ou d'un code collé n'est inséré comme HTML : l'interface est
   construite avec des nœuds texte (`js/ui.js`, fonction `el`). Aucun `innerHTML`, `eval` ou
   `Function`. Les classes CSS ne viennent que du code (l'état d'une ligne d'historique est l'un de
@@ -116,7 +119,7 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   (« facture\u202Efdp.exe »). Les fichiers ne vont jamais de la CIBLE vers la SOURCE, ni par lien
   public.
 - **`Synchro` réservée aux propriétaires** : ses formules lisent les tables sans les règles
-  d'accès, et elle porte la clé de signature des exports. À l'ouverture de l'onglet Envoyer par un
+  d'accès, et elle porte les clés de signature des destinataires. À l'ouverture de l'onglet Envoyer par un
   propriétaire, le widget pose des règles de mémo « Synchro : réservée aux propriétaires », avant
   les autres : un lecteur ne la voit pas, un éditeur ne voit ni ne modifie ses lignes. Seule
   exception, pour la recopie d'un Échange par un éditeur : les lignes `echange` et `lot` des
@@ -154,13 +157,21 @@ IA, ni dans un ticket, ni dans un salon de discussion.
 - **Invitation** : identifiants de l'invitation et de l'export, nom de l'export, instance,
   e-mail de la personne qui l'a créée et identifiant du document SOURCE (affichés à la CIBLE avant
   d'accepter, et utiles pour refuser une boucle), tables et colonnes envoyées, un secret aléatoire
-  de 128 bits, la date d'expiration, le niveau (Renforcé ou non) et la **clé de signature** de
-  l'export (128 bits). En mode lien public : l'adresse REST du document, réécrite et contrôlée
+  de 128 bits, la date d'expiration, le niveau (Renforcé ou non) et la **clé publique** d'une paire
+  tirée pour cette invitation (ECDH P-256). En mode lien public : l'adresse REST du document, réécrite et contrôlée
   (même instance que la CIBLE). En Échange : l'adresse d'écriture du journal de retour, c'est-à-dire
   **une clé d'écriture**.
 - **Réponse** : adresse d'écriture du journal de la CIBLE (**une clé d'écriture**), fiche du
   destinataire (e-mail calculé par le serveur Grist de la CIBLE, `user.Email`, identifiant du
-  document, équipe, date), le secret, et en Échange la clé qui signe l'envoi de retour de la CIBLE.
+  document, équipe, date), le secret, la clé publique d'une paire tirée par la CIBLE, et en
+  Échange les tables de retour.
+- **Aucune clé secrète dans les codes** : de sa clé privée et de la clé publique de l'autre côté,
+  chacun tire le même secret (ECDH P-256), puis deux clés de 128 bits propres à cette invitation
+  (HKDF-SHA256 sur l'export et l'invitation) : l'une signe les envois de la SOURCE vers ce
+  destinataire, l'autre l'envoi de retour d'un Échange. Qui lit les deux codes (un fil de
+  courriel) n'en tire rien (vérifié). La clé privée de la SOURCE reste dans la note de `Synchro`
+  jusqu'à l'approbation ; celle de la CIBLE n'est gardée nulle part. Un code d'avant la 0.10
+  (clé de signature de l'export en clair) est refusé : l'invitation est à refaire.
 - La SOURCE ne garde que l'empreinte SHA-256 du secret ; la CIBLE garde le secret dans la note de
   son journal, utile seulement tant que l'invitation est en attente. Le secret est obligatoire
   depuis la 0.8 ; une invitation en attente créée avant, sans secret, est encore acceptée une fois.
@@ -176,12 +187,14 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   réglages de Grist ; la carte signale un autre document que celui de la fiche, et une adresse qui
   n'est plus celle d'un formulaire de cette instance. Ce contrôle protège de l'erreur, pas d'un
   co-propriétaire décidé, qui peut aussi réécrire la fiche (le mémo du webhook).
-- **Code de contrôle** : 6 caractères tirés de SHA-256(clé de partage, secret), montrés des deux
-  côtés (sans 0, 1, I, L, O). La clé de partage est tirée par Grist : le reste de l'adresse (le
-  préfixe d'équipe, que Grist ne contrôle pas pour une clé de partage) n'entre pas dans le calcul,
-  sinon un intermédiaire pourrait le faire varier jusqu'à retomber sur le même code. Ils ne
-  coïncident que si la réponse vient de qui a reçu l'invitation et désigne ce formulaire : à
-  comparer par téléphone, ce qui ferme le cas d'un attaquant dans la même équipe. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
+- **Code de contrôle** : 6 caractères tirés de SHA-256(clé de partage, secret, niveau, clés
+  publiques de l'invitation et de la réponse), montrés des deux côtés (sans 0, 1, I, L, O). La clé
+  de partage est tirée par Grist : le reste de l'adresse (le préfixe d'équipe, que Grist ne
+  contrôle pas pour une clé de partage) n'entre pas dans le calcul, sinon un intermédiaire
+  pourrait le faire varier jusqu'à retomber sur le même code. Ils ne coïncident que si la réponse
+  vient de qui a reçu l'invitation, désigne ce formulaire, et si personne n'a remplacé une clé
+  publique ni retiré la sécurité renforcée en route (vérifié par les tests) : à comparer par
+  téléphone, ce qui ferme le cas d'un attaquant dans la même équipe ou placé entre les deux. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
   d'approuver (et, en Échange, côté CIBLE avant de répondre).
 - Contrôles à la lecture (`js/logic/codes.js`) : préfixe et version, identifiants, secret,
   colonnes (noms Grist, types connus, 400 au plus), textes coupés à 200 caractères, adresses de la
@@ -207,32 +220,35 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   webhook), et, en Échange, quiconque a vu le code d'invitation. Le widget ne l'écrit dans aucune
   table ni note, et la masque partout à l'écran, messages d'erreur de Grist compris
   (`…/api/s/Ab12…/…`).
-- **Signatures** : chaque export a sa clé de signature, tirée au hasard, dans la ligne `signature`
-  de `Synchro` côté SOURCE (réservée aux propriétaires) ; elle voyage dans le code d'invitation, et
-  la CIBLE la garde dans la description de la colonne `id_sync` de ses destinations, **pas** dans
-  la note du journal, que la clé du formulaire lit. Les formules de `Synchro` signent chaque liste
-  de clés, chaque lot et la ligne « fin » (HMAC-SHA256 sur l'export, la table, le type, les colonnes
-  et le contenu). La CIBLE efface sans effet, et compte parmi les « Arrivées suspectes », toute
-  ligne mal signée ou non signée (vérifié) ; une liste de clés vide non signée n'est lue que comme
-  vide, sans les colonnes qu'elle annonce. Une réception branchée avant la 0.8 ne connaît pas la
-  clé : elle accepte les envois non signés jusqu'à une nouvelle invitation, et sa carte le dit.
-  Qui a la clé du formulaire **et** la clé de signature (un lecteur de la CIBLE peut lire cette
-  dernière) peut encore forger : couper le lien y met fin. **Une seule clé par export**, la même
-  pour tous ses destinataires, en clair dans chaque invitation : une réponse envoyée en citant
-  l'invitation réunit les deux clés dans le même message ; mieux vaut répondre dans un nouveau
-  message. En Échange, chaque côté signe avec sa propre clé,
-  donnée dans son propre code : l'invitation porte l'adresse de retour mais pas la clé du retour,
-  la réponse l'inverse ; il faut les deux codes pour forger un envoi (vérifié : un lot signé avec
-  la clé de l'invitation est rejeté par le document qui invite).
+- **Signatures** : chaque destinataire a sa clé de signature (tirée des clés publiques des deux
+  codes, voir plus haut). Côté SOURCE, elle est dans la ligne `signature` de `Synchro` (réservée
+  aux propriétaires), rangée sous l'identifiant du webhook ; la CIBLE la garde dans la
+  description de la colonne `id_sync` de ses destinations, **pas** dans la note du journal, que
+  la clé du formulaire lit. Les formules de `Synchro` signent chaque liste de clés et chaque lot
+  pour chaque destinataire de l'export (HMAC-SHA256 de l'empreinte de l'export, de la table, du
+  type, des colonnes et du contenu, rangé sous l'empreinte de sa clé) ; le widget signe la ligne
+  « fin » pour le seul destinataire concerné. La CIBLE efface sans effet, et compte parmi les
+  « Arrivées suspectes », toute ligne sans signature valide pour sa clé (vérifié, y compris un lot
+  signé avec la clé d'un autre destinataire du même export) ; une liste de clés vide non signée
+  n'est lue que comme vide, sans les colonnes qu'elle annonce. Révoquer un destinataire efface sa
+  clé : plus rien n'est signé pour lui (vérifié). Une réception branchée avant la 0.8 ne connaît
+  pas de clé : elle accepte les envois non signés jusqu'à une nouvelle invitation, et sa carte le
+  dit ; une réception de la 0.8 ou de la 0.9 garde la clé commune de son export (la SOURCE la
+  garde tant qu'un de ses webhooks n'a pas la sienne) jusqu'à une nouvelle invitation. Qui a la
+  clé du formulaire **et** la clé de signature de cette réception (un lecteur de la CIBLE peut
+  lire cette dernière) peut encore forger pour elle seule : couper le lien y met fin. En Échange,
+  chaque côté signe son envoi de retour avec la clé de retour, tirée de même (vérifié : un lot
+  signé avec une clé tirée de l'invitation seule est rejeté par le document qui invite).
 - **Sceau des lignes dépliées** : la clé du formulaire peut créer une ligne avec n'importe quelles
   colonnes, donc une ligne qui ressemble à une version déjà dépliée, qui n'aurait jamais été
   contrôlée. La CIBLE scelle donc chaque version et chaque liste qu'elle déplie (colonne
-  `Sync_Sceau` du journal : HMAC-SHA256, avec la clé de signature de l'export, de l'export, de la
+  `Sync_Sceau` du journal : HMAC-SHA256, avec la clé de signature de la réception, de l'export, de la
   table, de la clé, de l'horodatage, de `Supprime` et du contenu). Une ligne dépliée au sceau
   faux ou absent est effacée sans effet et comptée parmi les « Arrivées suspectes » (vérifié). L'empreinte de la clé est notée dans la note du journal : à la première
   fois, ou quand une nouvelle invitation change la clé, les lignes dépliées déjà là sont scellées ;
   ensuite, une clé introuvable (destination effacée, description vidée) arrête la recopie de ce
-  journal au lieu de tout accepter. Une reprise qui change la clé le dit avant de confirmer.
+  journal au lieu de tout accepter. Une reprise (nouvelle invitation pour la même réception) tire
+  toujours une nouvelle clé : elle se confirme, fiche de la SOURCE affichée.
 - **Dates du futur** : une version ou une liste datée de plus de 10 minutes après l'heure de la
   CIBLE est rejetée (même instance, même horloge) : elle l'emporterait sur toutes les vraies.
 - **Vague de suppressions** : quand un passage effacerait plus de 10 lignes et plus de 20 % des
@@ -299,14 +315,16 @@ IA, ni dans un ticket, ni dans un salon de discussion.
 - Pas de table de réglages. Les destinataires branchés sont les webhooks eux-mêmes (le mémo garde
   la fiche), visibles par les propriétaires dans les paramètres du document.
 - SOURCE : `id_sync` et `MajLe` dans chaque table envoyée (et la case `Supprime` en Échange), la
-  table `Synchro` (dont une ligne `signature` par export, qui garde sa clé), une note (exports,
-  invitations en attente avec l'empreinte de leur secret et leur date, pauses, empreintes abrégées
-  des fichiers déjà envoyés) dans la description de `Synchro_Export`, et ses règles d'accès,
-  reconnues à leur mémo. En Échange, la clé de signature de chaque participant est dans la
-  description de la colonne `id_sync` des tables envoyées, une par journal de retour.
+  table `Synchro` (dont une ligne `signature` par export, qui garde la clé de chaque
+  destinataire), une note (exports, invitations en attente avec l'empreinte de leur secret, leur
+  date et leur paire de clés, pauses, empreintes abrégées des fichiers déjà envoyés) dans la
+  description de `Synchro_Export`, et ses règles d'accès, reconnues à leur mémo. En Échange, la
+  clé de retour de chaque participant est dans la description de la colonne `id_sync` des tables
+  envoyées, une par journal de retour.
 - CIBLE : les tables de destination (plus `id_sync`, masquée, dont la description garde la clé de
   signature), les pièces jointes reçues, un journal par export reçu avec sa note (destinations,
-  colonnes, tables refusées, fichiers attendus, vagues de suppressions en attente, secret) dans la
+  colonnes, tables refusées, fichiers attendus, vagues de suppressions en attente, secret, clés
+  publiques des deux côtés) dans la
   description de `Synchro_Ids`, le formulaire de réception sur sa page, et la règle des journaux.
 - Un renvoi ne modifie jamais les tables de la personne : il n'écrit que dans `Synchro`.
 
@@ -323,7 +341,7 @@ Pour un usage en production :
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et
   la politique de `index.html` que les instances Grist utilisées ;
-- relire le code à chaque mise à jour : environ 6 900 lignes de JavaScript commenté, sans dépendance.
+- relire le code à chaque mise à jour : environ 7 200 lignes de JavaScript commenté, sans dépendance.
 
 ## Ce que le widget ne fait pas
 
@@ -337,15 +355,23 @@ Pour un usage en production :
 - L'expéditeur d'un export peut écrire dans les tables de destination ce que l'export pourrait y
   écrire : c'est le principe de la synchro (une vague de suppressions attend une décision, une date
   du futur est refusée). La vague se compte par passage : une SOURCE qui efface peu à la fois n'est
-  pas retenue (en Renforcé, toute suppression l'est). Qui a obtenu la clé d'une réception ne le
-  peut plus sans la clé de signature (signature et sceau), sauf pour une réception branchée avant
-  la 0.8. Couper le lien y met fin. Pour un export qui envoie des pièces jointes, la SOURCE dépose
+  pas retenue (en Renforcé, toute suppression l'est). Seule la SOURCE peut le faire : qui a obtenu
+  la clé d'une réception ne le peut plus sans la clé de signature de cette réception (signature et
+  sceau), ni un autre destinataire du même export, sauf pour une réception branchée avant la 0.8. Couper le lien y met fin. Pour un export qui envoie des pièces jointes, la SOURCE dépose
   ses fichiers (25 Mo chacun au plus) : un fichier reçu s'ouvre avec la même prudence qu'une pièce
   jointe de courriel. Qui n'a que la clé du formulaire peut faire attendre des morceaux de fichier
   dans le journal (50 Mo au plus, un jour au plus), sans dépôt.
 - Les lignes dépliées présentes quand la CIBLE pose son sceau pour la première fois (ou pour une
   nouvelle clé) sont tenues pour bonnes. Un onglet resté ouvert sur une version d'avant la 0.9
-  déplierait sans sceau : ces lignes seraient effacées comme suspectes, et la SOURCE renverra.
+  déplierait sans sceau : ces lignes seraient effacées comme suspectes, et la SOURCE renverra. Un
+  onglet CIBLE resté ouvert sur la 0.9 ne lit pas les signatures de la 0.10 : les lots arrivés
+  pendant ce temps sont rejetés ; recharger la page, puis « Tout renvoyer » côté SOURCE.
+- La clé privée d'une invitation en attente est gardée dans la note de `Synchro` jusqu'à
+  l'approbation : qui peut lire cette note (propriétaires, éditeurs qui ont le droit de
+  structure) et voit la réponse pourrait tirer la clé de ce destinataire. Chaque destinataire voit
+  combien de signatures porte un lot, donc combien de destinataires a l'export.
+- Chaque passage de la CIBLE relit son journal en entier, morceaux de fichiers en attente compris
+  (50 Mo au plus) ; une seconde fois seulement si la recopie y a écrit.
 - La clé du formulaire lit la note de son journal, dont le secret de l'invitation, et le nom du
   document : le secret ne sert plus une fois l'invitation acceptée.
 - Un envoi en échec bloque la file de tous les webhooks du document SOURCE environ 15 minutes

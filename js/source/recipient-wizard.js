@@ -2,21 +2,23 @@
 // Envoi ; Options et Invitation seulement pour le lien public). Une invitation en attente le
 // rouvre à l'étape Réponse (`pending`), ou à l'étape Invitation pour un Échange qui attend le lien
 // de son formulaire de retour.
-// Une invitation porte toujours un secret, vaut 7 jours, et transmet la clé qui signe les envois
-// de l'export (voir trust.js). La réponse est contrôlée chez Grist : la clé de son formulaire doit
-// désigner le document que dit la fiche. Un code de contrôle, tiré de l'adresse et du secret,
-// s'affiche des deux côtés ; en sécurité renforcée (`renforce`), il faut l'avoir comparé.
+// Une invitation porte toujours un secret, vaut 7 jours, et la clé publique d'une paire tirée pour
+// elle ; la réponse porte celle de la CIBLE, et chaque côté en tire la clé qui signe les envois vers
+// ce destinataire (voir linkKeys, trust.js). La réponse est contrôlée chez Grist : la clé de son
+// formulaire doit désigner le document que dit la fiche. Un code de contrôle, tiré de l'adresse, du
+// secret, des clés publiques et du niveau de sécurité, s'affiche des deux côtés ; en sécurité
+// renforcée (`renforce`), il faut l'avoir comparé.
 import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
 import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../logic/codes.js';
 import { exportCondition, exportEmail, hookMemo, hookName, readTables } from '../logic/exports.js';
 import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
-import { controlCode, expiresAt, isExpired, sameDoc } from '../logic/trust.js';
+import { codeFacts, controlCode, expiresAt, isExpired, isPrivateKey, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
 import { hiddenTables } from '../logic/acl.js';
 import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo } from '../grist.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
-import { saveExport, signingKey, syncRows, updateSourceNote } from './synchro.js';
+import { pruneKeys, putRecipientKey, saveExport, syncRows, updateSourceNote } from './synchro.js';
 import { createJournal, receivedDests, storeKey, updateJournalNote } from '../target/journals.js';
 import { resendTables } from './resend.js';
 import { publicCode } from './actions.js';
@@ -92,7 +94,7 @@ async function invite(ctx, mode, renforce) {
   }
   if (mode === 'echange') return openBack(ctx, renforce);
   const secret = randomHex(16);
-  const entry = { id: randomHex(8), export: ctx.exp.id, hash: await sha256(secret), at: nowS(), ...(renforce ? { renforce: true } : {}) };
+  const entry = await withKeys({ id: randomHex(8), export: ctx.exp.id, hash: await sha256(secret), at: nowS(), ...(renforce ? { renforce: true } : {}) });
   await updateSourceNote(note => putInvitation(note, entry));
   return showInvitation(ctx, entry, secret);
 }
@@ -112,19 +114,28 @@ async function invitePublic({ exp, wizard, steps }) {
     message('warn', t('send.public.turnOn')), stepHelp(['public']), roleGuide({ you: 'source', mode: 'public', current: 1 })], closeButtons());
 }
 
+// Paire de clés d'une invitation (voir linkKeys) : la publique part dans le code, la privée reste
+// dans la note jusqu'à l'approbation de la réponse. Une invitation d'avant la 0.10 en reçoit une
+// quand son code est refait.
+async function withKeys(entry) {
+  if (isPrivateKey(entry.prive) && entry.pub) return entry;
+  const { pub, priv } = await newKeyPair();
+  return { ...entry, pub, prive: priv };
+}
+
 async function showInvitation(ctx, entry, secret, retour = '') {
   const { exp } = ctx;
   const mode = retour ? 'echange' : 'reponse';
-  const [{ origin, docId }, rows, cle] = await Promise.all([docIdentity(), syncRows(), signingKey(exp.id, { create: true })]);
+  const [{ origin, docId }, rows] = await Promise.all([docIdentity(), syncRows()]);
   const email = exportEmail(rows, exp.id);
   const code = buildInvitation({
     id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId }, tables: exp.tables, retour,
-    expire: expiresAt(entry.at), renforce: Boolean(entry.renforce), cle,
+    expire: expiresAt(entry.at), renforce: Boolean(entry.renforce), pub: entry.pub,
   });
   ctx.codes.set(entry.id, { secret, retour });
   const report = el('div', { class: 'report' });
   // Échange : le code de contrôle de l'envoi de retour, que la CIBLE voit en lisant l'invitation.
-  const backCode = retour ? controlLine(t('send.invite.backCode'), await controlCode(retour, secret)) : null;
+  const backCode = retour ? controlLine(t('send.invite.backCode'), await controlCode(retour, secret, codeFacts(entry))) : null;
   ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), codeField(code),
     el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expiresAt(entry.at) * 1000) })), backCode, handoffButton('target', mode, 1, code), report,
     stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply']), roleGuide({ you: 'source', mode, current: 1 })],
@@ -156,7 +167,7 @@ const confirmNewCode = () => confirmDialog({ title: t('send.newCode.title'), bod
 async function renew(ctx, inv) {
   if (inv.journal) return showBack(ctx, inv);
   const secret = randomHex(16);
-  const entry = { ...inv, hash: await sha256(secret), at: nowS() };
+  const entry = await withKeys({ ...inv, hash: await sha256(secret), at: nowS() });
   await updateSourceNote(note => putInvitation(note, entry));
   return showInvitation(ctx, entry, secret);
 }
@@ -167,7 +178,7 @@ async function renew(ctx, inv) {
 async function openBack(ctx, renforce) {
   const { exp } = ctx;
   const journal = journalId(exp.name, (await readSchema()).tableIds);
-  const entry = { id: randomHex(8), export: exp.id, hash: '', at: nowS(), journal, ...(renforce ? { renforce: true } : {}) };
+  const entry = await withKeys({ id: randomHex(8), export: exp.id, hash: '', at: nowS(), journal, ...(renforce ? { renforce: true } : {}) });
   await createJournal(journal, {
     id: entry.id, export: exp.id, name: exp.name, secret: '', from: {}, mode: 'echange', retour: true, reserve: true, tables: [], refused: [], missing: {},
   });
@@ -184,7 +195,7 @@ async function showBack(ctx, inv) {
     const retour = buildWebhookUrl(input.value, inv.journal);
     await testUrl(retour, inv.journal);
     const secret = randomHex(16);
-    const entry = { ...inv, hash: await sha256(secret), at: nowS(), ready: true };
+    const entry = await withKeys({ ...inv, hash: await sha256(secret), at: nowS(), ready: true });
     await updateSourceNote(note => putInvitation(note, entry));
     await showInvitation(ctx, entry, secret, retour);
   };
@@ -220,10 +231,13 @@ function showReply(ctx, inv) {
 // Réponse lue et contrôlée : même instance, cette invitation, encore valable, même secret, pas de
 // boucle ; la clé de son formulaire désigne bien le document de la fiche (demandé à Grist, voir
 // shareInfo) ; un Échange dit où la CIBLE a rangé chaque table de l'export. Une invitation en
-// attente d'avant le secret obligatoire (sans empreinte) est acceptée sans secret.
+// attente d'avant le secret obligatoire (sans empreinte) est acceptée sans secret. Les clés de ce
+// destinataire sont tirées ici (`keys`) : une clé publique qui n'en est pas une rend la réponse
+// invalide avant toute approbation.
 async function checkReply(exp, inv, text) {
   const reply = parseReply(text, (await docIdentity()).origin);
   if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
+  if (!isPrivateKey(inv.prive)) throw new Error('inviteOld');
   if (isExpired(inv.at, nowS())) throw new Error('invitationExpired');
   if (loopingTables(exp.tables.map(tb => tb.table), reply.recipient.docId, receivedDests(await readSchema())).length) throw new Error('loop');
   if (Boolean(inv.journal) !== Boolean(reply.retour) || (reply.retour || []).some(b => !exp.tables.some(tb => tb.table === b.dest))) throw new Error('codeInvalid');
@@ -231,7 +245,7 @@ async function checkReply(exp, inv, text) {
   if (!share) throw new Error('shareUnknown');
   if (!sameDoc(share.docId, reply.recipient.docId)) throw new Error('shareOtherDoc');
   return {
-    ...reply, share, code: await controlCode(reply.url, reply.secret),
+    ...reply, share, keys: await linkKeys(inv.prive, reply.pub, exp.id, inv.id), code: await controlCode(reply.url, reply.secret, codeFacts(inv, reply.pub)),
     tables: reply.retour ? reply.retour.map(b => t('send.exchange.map', b)).join(', ') : exp.tables.map(tb => tb.table).join(', '),
   };
 }
@@ -258,23 +272,27 @@ function replyFiche(reply, docId) {
     el('p', { class: 'muted small' }, maskKey(reply.url))].filter(Boolean);
 }
 
-// Un webhook sur Synchro, filtré sur l'export, vers le journal de la CIBLE. Échange : l'export
-// reçoit sa ligne 'echange', le journal de retour sait d'où viennent ses tables (il commence à
-// recopier) et quel webhook est celui de ce participant ; dès deux participants, l'Échange est à
-// plusieurs (markHub).
+// Un webhook sur Synchro, filtré sur l'export, vers le journal de la CIBLE ; la clé de ce
+// destinataire est posée avant (rangée sous l'invitation, puis sous le webhook) : rien ne part vers
+// lui sans sa signature. Échange : l'export reçoit sa ligne 'echange', le journal de retour sait
+// d'où viennent ses tables (il commence à recopier) et quel webhook est celui de ce participant ;
+// dès deux participants, l'Échange est à plusieurs (markHub).
 async function approve(ctx, inv, reply) {
   const { exp } = ctx;
   const r = reply.recipient;
+  await putRecipientKey(exp.id, inv.id, reply.keys.down);
   const hook = await createWebhook({
     name: hookName(exp.name, exp.id), memo: hookMemo(r), url: reply.url,
     tableId: SYNC_TABLE, condition: exportCondition(exp.id),
   });
+  await putRecipientKey(exp.id, hook, reply.keys.down, inv.id);
   if (inv.journal) {
     await addDeleteColumns(exp.tables.map(tb => tb.table));
     await saveExport(exp.id, exp.tables, { swap: true });
-    // Le journal de retour vérifie la signature des envois du participant, avec la clé de sa
-    // réponse : elle est rangée dans ses destinations, les tables de l'export (voir receivedKey).
-    await storeKey(exp.tables.map(tb => tb.table), inv.journal, reply.cle);
+    // Le journal de retour vérifie la signature des envois du participant, avec la clé de retour
+    // tirée de sa réponse : elle est rangée dans ses destinations, les tables de l'export (voir
+    // receivedKey).
+    await storeKey(exp.tables.map(tb => tb.table), inv.journal, reply.keys.up);
     await updateJournalNote(inv.journal, n => ({
       ...n, from: { email: r.email, docId: r.docId, docName: reply.share.name }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
     }));
@@ -284,6 +302,7 @@ async function approve(ctx, inv, reply) {
     const rest = dropInvitation(note, inv.id);
     return inv.journal ? setExport(rest, exp.id, { echange: true }) : rest;
   });
+  await pruneKeys(exp.id);
   await showLoad(ctx);
 }
 

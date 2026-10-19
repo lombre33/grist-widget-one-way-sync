@@ -5,11 +5,11 @@
 // notés dans la description de sa colonne Synchro_Export : des métadonnées, que le webhook
 // n'envoie pas. Synchro n'a pas de page : elle reste dans « Données source ».
 import {
-  EXPORT_COL, KIND, SIG_KEY, LIST_COL, LOT_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction, randomHex,
+  EXPORT_COL, KIND, LIST_COL, LOT_COL, SIG_KEY, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction,
 } from '../logic/common.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf } from '../logic/exports.js';
-import { signText } from '../logic/trust.js';
+import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { apply, fetchRows, listWebhooks, readSchema, webhookConditions } from '../grist.js';
 import { dropPages, removeTechnicalTables } from '../pages.js';
 
@@ -150,25 +150,53 @@ export async function removeExport(exportId) {
   await refreshFormulas(await readSchema(), left);
 }
 
-// Clé qui signe les envois d'un export (ligne 'signature' de Synchro, réservée aux propriétaires),
-// tirée au besoin (`create`, ou la clé reçue dans l'invitation d'un Échange) ; '' sans clé. Les
-// formules signent dès qu'elle est là (voir formulas.js).
-export async function signingKey(exportId, { create = false, key = '' } = {}) {
+// Clés qui signent les envois d'un export, une par destinataire (ligne 'signature' de Synchro,
+// réservée aux propriétaires : { webhook : clé }, voir readKeys). Les formules signent pour chacune
+// dès qu'elle est là (voir formulas.js). `change` rend les nouvelles clés ; rien n'est écrit si
+// elles n'ont pas changé (sinon tous les lots de l'export seraient recalculés et renvoyés).
+async function updateKeys(exportId, change) {
   const row = (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.sign);
-  const have = row && SIG_KEY.test(row[SCHEMA_COL] || '') ? row[SCHEMA_COL] : '';
-  const want = SIG_KEY.test(key) ? key : have || (create ? randomHex(16) : '');
-  if (!want || want === have) return have;
-  await apply([row ? ['UpdateRecord', SYNC_TABLE, row.id, { [SCHEMA_COL]: want }]
-    : ['AddRecord', SYNC_TABLE, null, { [EXPORT_COL]: exportId, [TABLE_COL]: '', [TYPE_COL]: KIND.sign, [SCHEMA_COL]: want, [RESEND_COL]: '' }]]);
-  return want;
+  const before = readKeys(row ? row[SCHEMA_COL] : '');
+  const after = change(before);
+  if (JSON.stringify(after) === JSON.stringify(before)) return;
+  const value = JSON.stringify(after);
+  await apply([row ? ['UpdateRecord', SYNC_TABLE, row.id, { [SCHEMA_COL]: value }]
+    : ['AddRecord', SYNC_TABLE, null, { [EXPORT_COL]: exportId, [TABLE_COL]: '', [TYPE_COL]: KIND.sign, [SCHEMA_COL]: value, [RESEND_COL]: '' }]]);
 }
 
-// Avis de fin d'un export (voir endNotice), signé s'il a une clé. Une clé illisible (réseau) arrête
-// l'action en cours : un avis non signé serait rejeté par la CIBLE, qui ne saurait jamais la fin.
-export async function endRows(exportId) {
-  const key = await signingKey(exportId);
+// Clé d'un destinataire, rangée sous `label` (l'invitation, le temps de créer son webhook, puis le
+// webhook) ; `was` : l'étiquette qu'elle remplace.
+export async function putRecipientKey(exportId, label, key, was = '') {
+  if (!SIG_KEY.test(key || '')) throw new Error('codeInvalid');
+  await updateKeys(exportId, (keys) => {
+    const rest = Object.fromEntries(Object.entries(keys).filter(([k]) => k !== was));
+    return { ...rest, [label]: key };
+  });
+}
+
+// Seule clé d'un export : celle de l'envoi de retour d'un Échange, côté CIBLE (un seul webhook).
+export async function setOnlyKey(exportId, label, key) {
+  if (!SIG_KEY.test(key || '')) throw new Error('codeInvalid');
+  await updateKeys(exportId, () => ({ [label]: key }));
+}
+
+// Clés des destinataires partis effacées (voir keptKeys) : un webhook révoqué ne reçoit plus de
+// lot signé pour lui, et une ancienne clé ne signe plus rien.
+export async function pruneKeys(exportId) {
+  const [hooks, schema] = await Promise.all([exportHooks(exportId), readSchema()]);
+  const pending = readSourceNote(schema).invitations.filter(inv => inv.export === exportId).map(inv => inv.id);
+  await updateKeys(exportId, keys => keptKeys(keys, hooks.map(h => h.id), pending));
+}
+
+// Avis de fin d'un export pour le webhook `hookId` (voir endNotice), signé avec la clé de ce
+// destinataire. Une clé illisible (réseau) arrête l'action en cours : un avis non signé serait
+// rejeté par la CIBLE, qui ne saurait jamais la fin.
+export async function endRows(exportId, hookId) {
+  const row = (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.sign);
+  const keys = readKeys(row ? row[SCHEMA_COL] : '');
+  const key = keys[hookId] || keys['*'];
   const rows = endNotice(exportId);
-  return key ? Promise.all(rows.map(async row => ({ ...row, [LOT_COL]: await signText(key, row, '{"fin": true}') }))) : rows;
+  return key ? Promise.all(rows.map(async r => ({ ...r, [LOT_COL]: await signText(key, r, '{"fin": true}') }))) : rows;
 }
 
 // Écrit les mêmes champs dans des lignes de Synchro (renvoi, marque d'envoi coupé).
