@@ -1,22 +1,23 @@
 // SOURCE : assistant d'export, en trois étapes (Tables, Colonnes, Nom). Crée l'export, ou le
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
-import { SYNC_TABLE, isUserTable, randomHex } from '../logic/common.js';
-import { exportableColumns, hookName, isFileColumn } from '../logic/exports.js';
+import { SYNC_TABLE, isUserTable, nowS, randomHex } from '../logic/common.js';
+import { exportEmail, exportableColumns, hookName, isFileColumn } from '../logic/exports.js';
+import { putExport } from '../logic/notes.js';
 import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
 import { STATES } from '../logic/journal.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
 import { apply, fetchRows, readSchema, renameWebhook } from '../grist.js';
-import { saveExport, updateSourceNote } from './synchro.js';
+import { saveExport, syncRows, updateSourceNote } from './synchro.js';
 import { receivedDests } from '../target/journals.js';
 import { resendTables } from './resend.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { checkList, el, message, openWizard, pickField, run } from '../ui.js';
+import { cancelButton, checkList, el, message, openWizard, pickField, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
 
-const cancel = { label: t('common.cancel') };
+const cancel = cancelButton();
 const columnLabel = c => (c.label === c.id ? c.id : `${c.label} (${c.id})`);
 
 // `onClose` : appelé à la fermeture (l'onglet se redessine).
@@ -26,12 +27,12 @@ export function exportWizard(exp, onClose) {
     steps: ['send.step.tables', 'send.step.columns', 'send.step.name'].map(k => t(k)),
     onClose,
   });
-  showTables({
+  wizard.start(() => showTables({
     exp, wizard, onClose,
     chosen: exp ? exp.tables.map(tb => tb.table) : [],
     selected: new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []), // table -> colonnes cochées
     filters: new Map(exp ? exp.tables.map(tb => [tb.table, tb.filter]) : []), // table -> filtre de lignes, ou null
-  });
+  }));
 }
 
 // 1. Tables de l'export. Une table introuvable (renommée, effacée) en sort.
@@ -167,13 +168,12 @@ async function save(ctx, name, report) {
   // Règles d'un Échange administré ici : notées seulement si elles ne sont pas toutes « Accepter ».
   const rules = ctx.rules ? exchangeRules({ regles: ctx.rules, refus: ctx.rules.refus }) : undefined;
   await updateSourceNote((note) => {
-    const others = note.exports.filter(e => e.id !== id);
-    const entry = { ...(exp ? note.exports.find(e => e.id === id) : {}), id, name, at: exp ? exp.at : Date.now() / 1000 };
+    const entry = { ...note.exports.find(e => e.id === id), id, name, at: exp ? exp.at : nowS() };
     if (ctx.rules) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules ? rules.refus : undefined });
-    note.exports = [...others, JSON.parse(JSON.stringify(entry))];
+    return putExport(note, JSON.parse(JSON.stringify(entry)));
   });
   if (!exp) {
-    const created = { id, name, tables, recipients: [], invitations: [], public: false, email: '' };
+    const created = { id, name, tables, recipients: [], invitations: [], public: false, email: exportEmail(await syncRows(), id) };
     wizard.show(3, [message('ok', t('send.created', { name })), el('p', {}, t('send.created.next'))], [
       { label: t('common.later') },
       { label: t('send.action.addPerson'), kind: 'btn-primary', onClick: () => { wizard.close(); recipientWizard(created, null, ctx.onClose); } }]);

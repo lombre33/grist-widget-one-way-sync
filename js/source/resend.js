@@ -1,44 +1,39 @@
 // SOURCE : renvois de lignes et de listes des clés, et rattrapage automatique tant qu'un
 // propriétaire a la page du widget ouverte. Rien n'est modifié dans les tables : le widget écrit
 // les lignes voulues dans Synchro_Renvoi et Grist recalcule le lot.
-import { EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, RESEND_ALL, RESEND_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, chunk, randomHex } from '../logic/common.js';
-import { hooksOf, swapExports } from '../logic/exports.js';
+import { EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, RESEND_ALL, RESEND_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, chunk, nowS, randomHex, sleep } from '../logic/common.js';
+import { hookStatus, swapExports, tooLarge } from '../logic/exports.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
   RESEND_CHUNK, addSpent, budgetWait, chargeBusy, chunkMark, listDue, listRequest, parseCharge, resendValue, rowsSince, trackState,
 } from '../logic/resend.js';
-import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, webhookConditions, withLock } from '../grist.js';
-import { chargeRow, isCharge, syncRows, writeSync } from './synchro.js';
+import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../grist.js';
+import { chargeRow, isCharge, readHooks, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
 import { message } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
 
-const now = () => Date.now() / 1000;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Rythmes : file d'envoi relue (60 fois au plus, rapprochées au début : un envoi met en général
+// moins d'une seconde) ; rattrapage toutes les 10 s, la minute quand l'onglet est caché ; file
+// bloquée par un envoi trop gros vidée au plus une fois en 10 minutes ; signe de vie d'un renvoi
+// toutes les 20 s ; attente du budget par pas de 30 s au plus.
+const QUEUE_READS = 60;
+const QUEUE_FIRST_MS = 500;
+const QUEUE_MS = 1500;
+const CATCHUP_MS = 10000;
+const HIDDEN_MS = 60000;
+const REPAIR_MS = 600000;
+const BEAT_S = 20;
+const WAIT_STEP_S = 30;
 
-// État d'un destinataire : [état, ton de la pastille].
-export function hookStatus(h) {
-  if (!h.fields.enabled) return ['paused', 'off'];
-  const u = h.usage || {};
-  return ['retrying', 'error'].includes(u.status) || u.lastHttpStatus >= 400 ? ['error', 'err'] : ['active', 'ok'];
-}
-
-// Lot refusé pour sa taille. L'état d'un webhook est remis à zéro quand la file est vidée, mais un
-// envoi en vol peut encore y écrire son échec : seul compte l'envoi que Grist retente.
-function tooLarge(h) {
-  const u = h.usage || {};
-  return ['retrying', 'postponed'].includes(u.status) && (u.lastEventBatch || {}).httpStatus === 413;
-}
-
-// Un envoi met en général moins d'une seconde : les premières lectures sont rapprochées.
 async function waitForQueue(hookIds) {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < QUEUE_READS; i++) {
     const hooks = (await listWebhooks()).filter(h => hookIds.includes(h.id));
     if (hooks.some(tooLarge)) throw new Error('tooLarge');
     if (!hooks.some(h => h.usage && h.usage.numWaiting)) return;
     await beat();
-    await sleep(i < 3 ? 500 : 1500);
+    await sleep(i < 3 ? QUEUE_FIRST_MS : QUEUE_MS);
   }
   throw new Error('queueStuck');
 }
@@ -47,8 +42,8 @@ async function waitForQueue(hookIds) {
 // servis : le rattrapage les renvoie ensuite.
 export async function clearAndMark() {
   await clearWebhookQueue();
-  const [rows, hooks, conditions] = await Promise.all([syncRows(), listWebhooks(), webhookConditions()]);
-  const lots = rows.filter(r => r[TYPE_COL] === KIND.lot && hooksOf(hooks, conditions, r[EXPORT_COL]).some(h => h.fields.enabled)).map(r => r.id);
+  const [rows, hooks] = await Promise.all([syncRows(), readHooks()]);
+  const lots = rows.filter(r => r[TYPE_COL] === KIND.lot && hooks.of(r[EXPORT_COL]).some(h => h.fields.enabled)).map(r => r.id);
   await writeSync(lots, { [MISSING_COL]: RESEND_ALL });
 }
 
@@ -79,8 +74,7 @@ export function resendTables(exportId, tables, out, since = RESEND_ALL) {
 }
 
 async function resendLocked(exportId, tables, out, since) {
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  const hookIds = hooksOf(hooks, conditions, exportId).filter(h => h.fields.enabled).map(h => h.id);
+  const hookIds = (await readHooks()).of(exportId).filter(h => h.fields.enabled).map(h => h.id);
   if (!hookIds.length) return 0;
   const plans = await markLots(exportId, tables, since);
   const total = plans.reduce((n, p) => n + p.rows.length, 0);
@@ -193,16 +187,22 @@ export async function catchUp(onDone = () => {}) {
 }
 
 export function startAutoCatchUp(onDone) {
+  writePref('browser', BROWSER);
+  // Page fermée en plein renvoi : elle rend la main si Grist reçoit encore son écriture (sinon une
+  // autre page de ce navigateur la reprend aussitôt, une autre personne après LEASE_S secondes).
+  window.addEventListener('pagehide', () => {
+    if (charge) apply([['UpdateRecord', SYNC_TABLE, charge.id, { [RESEND_COL]: JSON.stringify({ ...charge.state, par: '', reprise: 0 }) }]]).catch(() => {});
+  });
   setInterval(() => {
-    if (!document.hidden || Date.now() - caughtAt > 60000) catchUp(onDone);
-  }, 10000);
+    if (!document.hidden || Date.now() - caughtAt > HIDDEN_MS) catchUp(onDone);
+  }, CATCHUP_MS);
 }
 
 async function catchUpLocked() {
   let rows = await lightRows();
   if (!rows) return 0;
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  if (hooks.some(tooLarge) && Date.now() - repairedAt > 600000) {
+  const { hooks, conditions, of: recipients } = await readHooks();
+  if (hooks.some(tooLarge) && Date.now() - repairedAt > REPAIR_MS) {
     repairedAt = Date.now();
     await clearAndMark();
     rows = await lightRows();
@@ -214,16 +214,15 @@ async function catchUpLocked() {
   const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)) && !swaps.has(r[EXPORT_COL]));
   const files = rows.some(r => r[TYPE_COL] === KIND.files) ? await planFiles(hooks, conditions, h => h.fields.enabled && hookStatus(h)[0] !== 'error') : [];
   if (!late.length && !lists.length && !files.length) return 0;
-  const recipients = row => hooksOf(hooks, conditions, row[EXPORT_COL]);
-  const active = row => recipients(row).filter(h => h.fields.enabled).map(h => h.id);
+  const active = row => recipients(row[EXPORT_COL]).filter(h => h.fields.enabled).map(h => h.id);
   let sent = 0;
   await withCharge(async () => {
     for (const row of late) {
-      if (!recipients(row).length) await writeSync([row.id], { [MISSING_COL]: 0 });
+      if (!recipients(row[EXPORT_COL]).length) await writeSync([row.id], { [MISSING_COL]: 0 });
       else if (active(row).length) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
     }
     for (const row of lists) {
-      if (!recipients(row).length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
+      if (!recipients(row[EXPORT_COL]).length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
       else if (active(row).length) await sendList(row[EXPORT_COL], row[TABLE_COL], active(row));
     }
     sent = await sendFiles(files, spend);
@@ -244,15 +243,8 @@ async function lightRows() {
 // qui est parti ces dix dernières minutes. Une page qui dépasse le budget attend, en donnant signe
 // de vie ; une autre page (autre personne, autre navigateur) ne lance rien pendant ce temps.
 const BROWSER = readPref('browser') || randomHex(4);
-writePref('browser', BROWSER);
 const PAGE = `${BROWSER}.${randomHex(4)}`;
 let charge = null; // { id, state, saved, out } pendant un renvoi de cette page
-
-// Page fermée en plein renvoi : elle rend la main si Grist reçoit encore son écriture (sinon une
-// autre page de ce navigateur la reprend aussitôt, une autre personne après LEASE_S secondes).
-window.addEventListener('pagehide', () => {
-  if (charge) apply([['UpdateRecord', SYNC_TABLE, charge.id, { [RESEND_COL]: JSON.stringify({ ...charge.state, par: '', reprise: 0 }) }]]);
-});
 
 async function readCharge() {
   const rows = await selectRows(SYNC_TABLE, [TYPE_COL, RESEND_COL]);
@@ -262,7 +254,7 @@ async function readCharge() {
 async function withCharge(fn, out = null) {
   const row = await readCharge();
   const state = parseCharge(row[RESEND_COL]);
-  if (chargeBusy(state, PAGE, now())) throw new Error('resendBusy');
+  if (chargeBusy(state, PAGE, nowS())) throw new Error('resendBusy');
   charge = { id: row.id, state: { ...state, par: PAGE, reprise: 0 }, saved: 0, out };
   await saveCharge();
   try {
@@ -279,28 +271,28 @@ async function withCharge(fn, out = null) {
 // rattrapage.
 async function saveCharge() {
   const current = parseCharge((await readCharge())[RESEND_COL]);
-  if (charge.state.par && chargeBusy(current, PAGE, now())) throw new Error('resendBusy');
+  if (charge.state.par && chargeBusy(current, PAGE, nowS())) throw new Error('resendBusy');
   if (!charge.state.par && current.par && current.par !== PAGE) return;
-  charge.state.le = now();
-  charge.saved = now();
+  charge.state.le = nowS();
+  charge.saved = nowS();
   await writeSync([charge.id], { [RESEND_COL]: JSON.stringify(charge.state) });
 }
 
 // Signe de vie pendant une longue attente (file d'envoi, budget).
 async function beat() {
-  if (charge && now() - charge.saved > 20) await saveCharge();
+  if (charge && nowS() - charge.saved > BEAT_S) await saveCharge();
 }
 
 // Octets partis (une copie par destinataire). Au-delà du budget, attendre que la fenêtre se vide.
 async function spend(bytes) {
-  charge.state = addSpent(charge.state, now(), bytes);
-  const wait = budgetWait(charge.state, now());
+  charge.state = addSpent(charge.state, nowS(), bytes);
+  const wait = budgetWait(charge.state, nowS());
   if (wait > 0) {
-    charge.state.reprise = now() + wait;
+    charge.state.reprise = nowS() + wait;
     await saveCharge();
     if (charge.out) charge.out.replaceChildren(message('info', t('send.charge.wait', { at: timeText(charge.state.reprise) })));
-    while (now() < charge.state.reprise) {
-      await sleep(Math.min(30, charge.state.reprise - now()) * 1000);
+    while (nowS() < charge.state.reprise) {
+      await sleep(Math.min(WAIT_STEP_S, charge.state.reprise - nowS()) * 1000);
       await saveCharge();
     }
     charge.state.reprise = 0;
@@ -309,6 +301,6 @@ async function spend(bytes) {
 }
 
 export function chargeNotice(state) {
-  if (state.reprise > now()) return message('info', t('send.charge.wait', { at: timeText(state.reprise) }));
-  return chargeBusy(state, PAGE, now()) ? message('info', t('send.charge.busy')) : null;
+  if (state.reprise > nowS()) return message('info', t('send.charge.wait', { at: timeText(state.reprise) }));
+  return chargeBusy(state, PAGE, nowS()) ? message('info', t('send.charge.busy')) : null;
 }

@@ -4,12 +4,13 @@
 // la réponse (`from` encore vide) avant de recopier quoi que ce soit.
 // Échange à plusieurs : le document qui invite en administre plusieurs à la fois, chacun avec son
 // webhook et son journal de retour ; les participants ne se connaissent pas (voir markHub).
-import { EXPORT_COL, HUB, KIND, SCHEMA_COL, SYNC_TABLE, TYPE_COL } from './logic/common.js';
+import { EXPORT_COL, HUB, KIND, SCHEMA_COL, SYNC_TABLE, TYPE_COL, nowS } from './logic/common.js';
 import { deleteColumnAction, keyTriggerAction, missingSyncColumns, prepareSourceActions } from './logic/formulas.js';
-import { exchangeTables, exportCondition, exportTables, exportableColumns, hookName, hooksOf } from './logic/exports.js';
-import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, listWebhooks, readSchema, webhookConditions } from './grist.js';
+import { exportCondition, exportTables, hookMemo, hookName, ownJournal, returnExportTables } from './logic/exports.js';
+import { clearExport, dropExport, putExport, setExport, setPause } from './logic/notes.js';
+import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from './grist.js';
 import { removeTechnicalTables } from './pages.js';
-import { endRows, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
+import { endRows, exportHooks, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
 import { receivedJournals } from './target/journals.js';
 
 // Côté CIBLE : l'export de retour (identifiant et nom de l'export reçu) envoie les destinations à
@@ -23,20 +24,18 @@ export async function wireExchange(note, retour = '') {
     await apply([...prepareSourceActions(dest, missingSyncColumns(cols)), keyTriggerAction(dest, cols), deleteColumnAction(dest, cols)].filter(Boolean));
   }
   schema = await readSchema();
-  await saveExport(note.export, exchangeTables(note.tables, dest => exportableColumns(schema.columns(dest) || [])), { swap: true });
+  await saveExport(note.export, returnExportTables(note, schema), { swap: true });
   // L'envoi de retour est signé par une clé propre à ce document, donnée dans la réponse (voir
   // trust.js) : l'invitation seule, qui porte l'adresse de retour, ne suffit pas pour la forger.
   await signingKey(note.export, { create: true });
   await updateSourceNote((n) => {
-    const was = n.exports.find(e => e.id === note.export) || { at: Date.now() / 1000 };
-    n.exports = [...n.exports.filter(e => e.id !== note.export), { ...was, id: note.export, name: note.name, echange: true, retour: true }];
+    const was = n.exports.find(e => e.id === note.export) || { at: nowS() };
+    return putExport(n, { ...was, id: note.export, name: note.name, echange: true, retour: true });
   });
   if (!retour) return;
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  for (const h of hooksOf(hooks, conditions, note.export)) await deleteWebhook(h.id);
-  const from = note.from || {};
+  for (const h of await exportHooks(note.export)) await deleteWebhook(h.id);
   await createWebhook({
-    name: hookName(note.name, note.export), memo: [from.email, from.docId].filter(Boolean).join(' · '), url: retour,
+    name: hookName(note.name, note.export), memo: hookMemo(note.from || {}), url: retour,
     tableId: SYNC_TABLE, condition: exportCondition(note.export),
   });
 }
@@ -45,25 +44,20 @@ export async function wireExchange(note, retour = '') {
 // de l'export) ; la formule du lot renvoie alors aux autres ce que chacun envoie. Un seul : l'Échange
 // à deux, sans écho.
 export async function markHub(exportId) {
-  const [hooks, conditions, rows] = await Promise.all([listWebhooks(), webhookConditions(), syncRows()]);
-  const value = hooksOf(hooks, conditions, exportId).length >= 2 ? HUB : '';
+  const [hooks, rows] = await Promise.all([exportHooks(exportId), syncRows()]);
+  const value = hooks.length >= 2 ? HUB : '';
   const row = rows.find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.swap);
   if (row && (row[SCHEMA_COL] || '') !== value) await apply([['UpdateRecord', SYNC_TABLE, row.id, { [SCHEMA_COL]: value }]]);
 }
 
-// Journal de retour d'un participant (webhook `hook`) : noté à l'approbation (`hook`) ; pour un
-// Échange branché avant, retrouvé par le document de la fiche, cité dans le mémo du webhook.
-const ownJournal = hook => ({ note }) => note.hook === hook.id
-  || (!note.hook && Boolean((note.from || {}).docId) && (hook.fields.memo || '').split(' · ').includes(note.from.docId));
-
-// Retirer un participant d'un Échange à plusieurs : son webhook part (avec l'avis de fin, qui
-// arrête aussi son envoi de retour, voir stopReturn), puis son journal de retour et sa clé ; les
-// autres continuent.
-export async function removeParticipant(exportId, hook) {
+// Retirer un destinataire, ou un participant d'un Échange à plusieurs : son webhook part (avec
+// l'avis de fin, qui arrête aussi l'envoi de retour d'un participant, voir stopReturn), puis son
+// journal de retour et sa clé ; les autres continuent.
+export async function removeRecipient(exportId, hook) {
   await deleteWebhookWithNotice(hook, await endRows(exportId));
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.retour).filter(ownJournal(hook));
   await removeTechnicalTables(journals.map(r => r.journal));
-  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== hook.id); });
+  await updateSourceNote(note => setPause(note, hook.id));
   await markHub(exportId);
 }
 
@@ -71,8 +65,7 @@ export async function removeParticipant(exportId, hook) {
 // échouerait et bloquerait la file de ce document. L'envoi de retour s'arrête donc ici aussi
 // (propriétaire seulement ; sinon, au premier passage d'un propriétaire).
 export async function stopReturn(exportId) {
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  for (const h of hooksOf(hooks, conditions, exportId)) await deleteWebhook(h.id);
+  for (const h of await exportHooks(exportId)) await deleteWebhook(h.id);
 }
 
 // Échange, côté du document qui invite : ses tables reçoivent la case Supprime.
@@ -81,19 +74,16 @@ export async function addDeleteColumns(tables) {
   await apply(tables.map(table => deleteColumnAction(table, schema.columns(table) || [])).filter(Boolean));
 }
 
-// Fin d'un Échange, de ce côté : ses webhooks et son journal sont effacés, les tables gardent
-// leurs lignes. `keepExport` (document qui a invité) : l'export reste, sans destinataire ; sinon
-// (export de retour) il disparaît aussi.
-export async function endExchange(exportId, { keepExport }) {
-  const [hooks, conditions] = await Promise.all([listWebhooks(), webhookConditions()]);
-  for (const h of hooksOf(hooks, conditions, exportId)) await deleteWebhookWithNotice(h, await endRows(exportId));
+// Fin d'un export ou d'un Échange, de ce côté : ses webhooks (après l'avis de fin) et ses journaux
+// de retour sont effacés, les tables gardent leurs lignes. `keepExport` (Échange, document qui a
+// invité) : l'export reste, sans destinataire ni Échange ; sinon il disparaît (export supprimé,
+// export de retour d'un Échange).
+export async function closeExport(exportId, { keepExport }) {
+  const notice = await endRows(exportId);
+  for (const h of await exportHooks(exportId)) await deleteWebhookWithNotice(h, notice);
   const journals = receivedJournals(await readSchema()).filter(r => r.note.export === exportId && r.note.mode === 'echange');
   await removeTechnicalTables(journals.map(r => r.journal));
   if (keepExport) await saveExport(exportId, exportTables(await syncRows(), exportId));
   else await removeExport(exportId);
-  await updateSourceNote((note) => {
-    note.exports = keepExport ? note.exports.map(e => (e.id === exportId ? { ...e, echange: false } : e)) : note.exports.filter(e => e.id !== exportId);
-    note.invitations = note.invitations.filter(i => i.export !== exportId);
-    note.pauses = note.pauses.filter(p => p.export !== exportId);
-  });
+  await updateSourceNote(note => (keepExport ? setExport(clearExport(note, exportId), exportId, { echange: false }) : dropExport(note, exportId)));
 }

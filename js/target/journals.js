@@ -4,8 +4,10 @@
 // l'écrire. Le journal n'a pas de page : seul son formulaire en a une (voir pages.js).
 import {
   APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, MISSING_COL, ORDER_COL, RECEIVED_COL, STATE_COL,
+  columnNote, noteAction,
 } from '../logic/common.js';
 import { syncColumns } from '../logic/formulas.js';
+import { destColumns } from '../logic/journal.js';
 import { SIG_KEY } from '../logic/trust.js';
 import { apply, readSchema } from '../grist.js';
 import { dropPages, hideColumn } from '../pages.js';
@@ -27,20 +29,13 @@ const JOURNAL_COLUMNS = [
   { id: RECEIVED_COL, type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 0 },
 ];
 
-// Journaux d'exports reçus : leur note dit d'où ils viennent et où va chaque table.
-// { journal, note: { id, export, name, secret, from, mode, base, tables: [{ table, dest, columns,
-// map, match, label }], refused: [], missing: {} } }
+// Journaux d'exports reçus : { journal, note } (note : voir readNote), dont la note dit d'où ils
+// viennent et où va chaque table.
 export function receivedJournals(schema) {
   return schema.tableIds.filter(id => id.startsWith(JOURNAL_PREFIX)).map((journal) => {
     const note = readNote(schema, journal);
     return note && note.export && Array.isArray(note.tables) ? { journal, note: { refused: [], missing: {}, ...note } } : null;
   }).filter(Boolean);
-}
-
-// Journaux d'avant la version 0.4 (un par table reçue) : à refaire.
-export function legacyJournals(schema) {
-  const current = new Set(receivedJournals(schema).map(r => r.journal));
-  return schema.tableIds.filter(id => id.startsWith(JOURNAL_PREFIX) && !current.has(id) && (schema.columns(id) || []).some(c => c.colId === LIST_COL));
 }
 
 // Tables reçues ici, avec le document qui les envoie : pour refuser les boucles et repérer un relais.
@@ -55,9 +50,6 @@ export async function upgradeJournal(schema, journal) {
   await apply(missing.map(({ id, ...info }) => ['AddColumn', journal, id, info]));
   return missing.length > 0;
 }
-
-// Colonnes que la destination reçoit : les colonnes de données.
-export const destColumns = columns => columns.filter(c => ![KEY_COL, ORDER_COL, DELETE_COL].includes(c.id));
 
 // CIBLE : colonnes envoyées qui manquent à la destination, sous le nom choisi dans `map`
 // (colonne envoyée -> colonne de la destination). La clé `id_sync` en fait partie. Les colonnes de
@@ -78,10 +70,8 @@ export function addDestColumnsActions(schema, dest, columns, map = {}) {
 export const keySlot = (journal, note) => (note.retour ? journal : note.export);
 const keyColumn = (schema, table) => (schema.columns(table) || []).find(c => c.colId === KEY_COL);
 function keysOf(column) {
-  try {
-    const value = JSON.parse((column && column.description) || 'null');
-    return value && value.signature && typeof value.signature === 'object' ? value.signature : {};
-  } catch (e) { return {}; }
+  const { signature } = columnNote(column) || {};
+  return signature && typeof signature === 'object' ? signature : {};
 }
 export function receivedKey(schema, journal, note) {
   const slot = keySlot(journal, note);
@@ -91,7 +81,7 @@ export async function storeKey(tables, slot, key) {
   if (!SIG_KEY.test(key || '')) return;
   const schema = await readSchema();
   await apply(tables.map(table => keyColumn(schema, table)).filter(c => c && keysOf(c)[slot] !== key)
-    .map(c => ['UpdateRecord', '_grist_Tables_column', c.id, { description: JSON.stringify({ signature: { ...keysOf(c), [slot]: key } }) }]));
+    .map(c => noteAction(c, { signature: { ...keysOf(c), [slot]: key } })));
 }
 
 export async function createJournal(journal, note) {
@@ -108,20 +98,25 @@ export async function prepareDest({ dest, columns, map = {} }) {
   await hideColumn(dest, KEY_COL);
 }
 
-// Note JSON dans la description de la colonne Synchro_Ids d'un journal.
+// Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
+// - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
+//   docName }, mode (absent : réponse ; 'echange', 'public' avec base, l'adresse de la SOURCE),
+//   renforce, reserve (journal réservé aux éditeurs, voir acl.js) ;
+// - Échange : retour (journal de retour, chez qui a invité), hook (webhook du participant) ;
+// - par table : tables [{ table, dest, columns, map, match, label, refs, dropped, addedCols,
+//   waiting }] (voir loop.js), refused (tables refusées) ;
+// - état des arrivées : missing { table: lignes manquantes }, big { table: clés trop grosses },
+//   tooBig (lien public), suspect (arrivées suspectes), ended (heure de l'avis de fin).
 const listColumn = (schema, tableId) => (schema.columns(tableId) || []).find(c => c.colId === LIST_COL);
 
-function readNote(schema, tableId) {
-  const column = listColumn(schema, tableId);
-  try { return JSON.parse((column && column.description) || 'null'); } catch (e) { return null; }
-}
+const readNote = (schema, tableId) => columnNote(listColumn(schema, tableId));
+const writeNote = (schema, tableId, note) => apply([noteAction(listColumn(schema, tableId), note)]);
 
-async function writeNote(schema, tableId, value) {
-  await apply([['UpdateRecord', '_grist_Tables_column', listColumn(schema, tableId).id, { description: value == null ? '' : JSON.stringify(value) }]]);
-}
-
-// Note d'un journal relue, changée par `change` (qui rend la nouvelle note), puis écrite.
+// Note d'un journal relue, changée par `change` (qui rend la nouvelle note), puis écrite. Rend la
+// note écrite.
 export async function updateJournalNote(journal, change) {
   const schema = await readSchema();
-  await writeNote(schema, journal, change(readNote(schema, journal)));
+  const note = change(readNote(schema, journal));
+  await writeNote(schema, journal, note);
+  return note;
 }

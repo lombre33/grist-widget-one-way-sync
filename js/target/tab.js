@@ -3,25 +3,22 @@
 // journal encore vide attend son lien.
 import { isBlank } from '../logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
-import { fileList } from '../logic/files.js';
+import { FILE_MAX, fileList } from '../logic/files.js';
 import { fetchRows, isOwner, isReadOnly, readSchema } from '../grist.js';
 import { reloading, syncRules } from '../acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
-import { endExchange } from '../exchange.js';
-import { legacyJournals, receivedJournals, updateJournalNote } from './journals.js';
-import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { closeExport } from '../exchange.js';
+import { receivedJournals, updateJournalNote } from './journals.js';
+import { SHOWN, consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
 import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { receiveWizard } from './wizard.js';
-import { confirmDialog, el, errorText, icon, message, openModal, pickField, run } from '../ui.js';
+import { confirmDialog, el, errorText, icon, message, openModal, pickField, pill, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 
 const HISTORY_MAX = 20;
-const DRIFT_MAX = 10;
-const REVIEW_MAX = 10;
 let container;
-let owner = null; // propriétaire du document (lu une fois par chargement)
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
 // Historiques et lignes d'historique ouverts : repliés par défaut, ils le restent d'un dessin à
@@ -58,7 +55,7 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   state.readOnly ||= state.viewer;
   // Règles d'accès du widget (journaux cachés aux lecteurs, Synchro d'un Échange réservée aux
   // propriétaires) : seul un propriétaire peut les poser.
-  if (!periodic && !state.readOnly && (owner ??= await isOwner()) && await syncRules()) {
+  if (!periodic && !state.readOnly && await isOwner() && await syncRules()) {
     reloading(container, renderTarget);
     return;
   }
@@ -72,13 +69,11 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
     if (isAccessError(e)) state.readOnly = true; // un lecteur ne peut pas publier le formulaire
     else out.append(message('err', errorText(e)));
   }
-  const legacy = legacyJournals(schema);
   const sync = async () => { if ((await consolidateAll({ reread: true })) === false) out.replaceChildren(message('ok', t('recv.sync.none'))); };
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
     el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
   const cards = groups.map(syncCard);
-  if (legacy.length) cards.push(legacyCard(legacy, out));
   container.replaceChildren(...[toolbar,
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
@@ -120,7 +115,8 @@ function cardStatus(group) {
 
 // Pièces jointes d'une table reçue : fichiers attendus (ils partent quand un propriétaire de la
 // SOURCE ouvre la page du widget), trop gros pour partir, refusés par Grist ici ; aucun par lien public.
-const megabytes = bytes => (bytes / 1048576).toLocaleString(LANG, { maximumFractionDigits: 1 });
+const MB = 1024 * 1024;
+const megabytes = bytes => (bytes / MB).toLocaleString(LANG, { maximumFractionDigits: 1 });
 function filesNotes(group, entry) {
   const { files } = state.results.get(tableKey(group.journal, entry.table)) || {};
   if (!files) return null;
@@ -128,7 +124,7 @@ function filesNotes(group, entry) {
   return [
     files.public ? message('info', t('recv.files.public', { dest: entry.dest })) : null,
     files.waiting ? message('info', t('recv.files.waiting', { n: files.waiting, dest: entry.dest })) : null,
-    files.big.length ? message('warn', t('recv.files.big', { files: named(files.big), max: 25 })) : null,
+    files.big.length ? message('warn', t('recv.files.big', { files: named(files.big), max: FILE_MAX / MB })) : null,
   ];
 }
 
@@ -165,7 +161,7 @@ function syncCard(group) {
   // Le nom du document vérifié chez Grist (Échange), sinon son identifiant.
   const fromDoc = (note.from || {}).docName || (note.from || {}).docId || '';
   return el('article', { class: 'card', 'data-journal': group.journal },
-    el('div', { class: 'card-head' }, el('strong', {}, note.name), el('span', { class: `pill pill-${tone}` }, t(`recv.status.${status}`))),
+    el('div', { class: 'card-head' }, el('strong', {}, note.name), pill(t(`recv.status.${status}`), tone)),
     from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
     group.public ? el('p', { class: 'muted small' }, t('recv.public')) : null,
     note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
@@ -210,27 +206,14 @@ async function cutLink(group) {
   container.querySelector('.out').replaceChildren(message('ok', t('recv.cut.done')));
 }
 
-// Réceptions d'avant la version 0.4 (un journal par table) : à refaire avec la SOURCE.
-function legacyCard(journals, out) {
-  const clean = async () => {
-    if (!(await confirmDialog({ title: t('recv.legacy.title'), body: t('recv.legacy.confirm'), confirmLabel: t('recv.legacy.clean') }))) return;
-    await removeTechnicalTables(journals);
-    await renderTarget();
-  };
-  return el('article', { class: 'card' },
-    el('div', { class: 'card-head' }, el('strong', {}, t('recv.legacy.title')), el('span', { class: 'pill pill-pending' }, t('send.status.legacy'))),
-    el('p', { class: 'small' }, t('recv.legacy.body', { tables: journals.join(', ') })),
-    el('div', { class: 'card-actions' }, button(t('recv.legacy.clean'), 'trash', e => run(e.currentTarget, out, clean), 'btn-danger-text')));
-}
-
 // Arrêter de recevoir : efface le journal (et son formulaire, donc la clé d'écriture) ; les tables
-// de destination et leurs lignes restent. Un Échange s'arrête dans les deux sens (voir endExchange).
+// de destination et leurs lignes restent. Un Échange s'arrête dans les deux sens (voir closeExport).
 async function stopReceiving(group) {
   const { note } = group;
   const exchange = note.mode === 'echange';
   const body = t(exchange ? 'send.revoke.exchange' : 'recv.stop.body', { journal: group.journal });
   if (!(await confirmDialog({ title: t('recv.stop.title', { name: note.name }), body, confirmLabel: t('recv.action.stop') }))) return;
-  if (exchange) await endExchange(note.export, { keepExport: Boolean(note.retour) });
+  if (exchange) await closeExport(note.export, { keepExport: Boolean(note.retour) });
   else await removeTechnicalTables([group.journal]);
   forgetJournal(group.journal);
   await renderTarget();
@@ -264,30 +247,57 @@ const cell = (value, type, kind = '') => {
   return el('td', { class: kind, title: text }, text);
 };
 
+// Valeurs d'une ligne avant ou après un changement (`kind`), sous l'intitulé `heading`.
+const valuesRow = (kind, heading, values, typesOf) => el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, heading),
+  values.map((v, i) => cell(v, typesOf(i))));
+
+// Tête d'un changement (historique, changement à valider) : numéro de ligne, icône, nom, état.
+const changeHead = ({ n, state: change, label }, nTitle = null) => [
+  el('span', { class: 'chg-n', title: nTitle }, n ? String(n) : ''),
+  el('span', { class: 'chg-dot', title: t(`recv.history.${change}`) }, icon(STATE_ICON[change])),
+  el('span', { class: 'chg-label' }, label || '—'),
+  el('span', { class: 'chg-state' }, t(`recv.history.${change}`))];
+
 const miniGrid = (head, rows) => el('div', { class: 'mini-grid-wrap' }, el('table', { class: 'mini-grid' },
   el('thead', {}, el('tr', {}, head.map(h => el('th', { scope: 'col' }, h)))), el('tbody', {}, rows)));
 
+// Écarts en petit tableau (retouches faites ici, écarts laissés par un refus), une ligne de tableau
+// par cellule, SHOWN au plus. `lines` : [{ n, label, cells: [[colonne reçue, colonne d'ici,
+// valeur d'ici, autre valeur]] }], ou une phrase (`said`) pour une ligne entière, ou pour une
+// colonne entière (`col`). Rend le tableau et ce qu'il montre : lignes de tableau (`rows`) et
+// lignes d'écart (`lines`), pour dire combien restent.
+function diffGrid(lines, { types = {}, labelCol = '', otherHead }) {
+  const said = (text, span) => el('td', { class: 'mg-here', colspan: String(span) }, text);
+  const head = l => [el('td', { class: 'mg-n' }, l.n ? String(l.n) : ''), el('td', { title: l.label }, l.label)];
+  const all = lines.flatMap((l, i) => {
+    if (l.col) return [[i, el('tr', {}, el('td', {}), el('td', {}), el('td', {}, l.col), said(l.said, 2))]];
+    if (l.said) return [[i, el('tr', {}, head(l), said(l.said, 3))]];
+    return l.cells.map(([from, to, here, other]) => [i, el('tr', {}, head(l), el('td', {}, to), cell(here, types[from], 'mg-here'), cell(other, types[from], 'mg-source'))]);
+  });
+  const shown = all.slice(0, SHOWN);
+  const columns = [t('recv.drift.row'), labelCol, t('recv.drift.col'), t('recv.drift.here'), otherHead];
+  return { grid: miniGrid(columns, shown.map(([, tr]) => tr)), rows: shown.length, lines: new Set(shown.map(([i]) => i)).size };
+}
+
+const more = n => (n > 0 ? el('p', { class: 'small' }, t('recv.history.more', { n })) : null);
+
 // Retouches faites à la main dans une destination : colonnes reçues effacées, cellules qui
 // diffèrent de la dernière version reçue (avec leur numéro de ligne), lignes reçues effacées. Elles
-// restent jusqu'à ce que la SOURCE change leur ligne, ou que l'on clique sur « Corriger ».
+// restent jusqu'à ce que la SOURCE change leur ligne, ou que l'on clique sur « Corriger ». Le
+// compte est celui des retouches (une par cellule, ligne ou colonne).
 function driftBlock(group, entry) {
   const result = state.results.get(tableKey(group.journal, entry.table)) || {};
   const total = result.driftCount || 0;
   if (!total) return null;
-  const types = result.types || {};
-  const said = (text, span) => el('td', { class: 'mg-here', colspan: String(span) }, text);
-  const rows = [
-    ...(result.droppedCols || []).map(([, to]) => el('tr', {}, el('td', {}), el('td', {}), el('td', {}, to), said(t('recv.drift.colGone'), 2))),
-    ...(result.drift || []).flatMap(d => (d.gone
-      ? [el('tr', {}, el('td', { class: 'mg-n' }), el('td', { title: d.label }, d.label), said(t('recv.drift.rowGone'), 3))]
-      : d.cells.map(([from, to, here, source]) => el('tr', {}, el('td', { class: 'mg-n' }, d.n ? String(d.n) : ''), el('td', { title: d.label }, d.label),
-        el('td', {}, to), cell(here, types[from], 'mg-here'), cell(source, types[from], 'mg-source'))))),
-  ].slice(0, DRIFT_MAX);
+  const lines = [
+    ...(result.droppedCols || []).map(([, to]) => ({ col: to, said: t('recv.drift.colGone') })),
+    ...(result.drift || []).map(d => (d.gone ? { label: d.label, said: t('recv.drift.rowGone') } : d)),
+  ];
+  const { grid, rows } = diffGrid(lines, { types: result.types, labelCol: result.labelCol, otherHead: t('recv.drift.source') });
   return el('div', { class: 'msg msg-warn drift', role: 'status' },
     el('strong', {}, t('recv.drift.title', { dest: entry.dest, n: total })),
     el('p', { class: 'small' }, t('recv.drift.body', { n: total })),
-    miniGrid([t('recv.drift.row'), result.labelCol || '', t('recv.drift.col'), t('recv.drift.here'), t('recv.drift.source')], rows),
-    total > rows.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - rows.length })) : null,
+    grid, more(total - rows),
     el('div', { class: 'card-actions' }, button(t('recv.drift.fix'), 'undo', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))));
 }
 
@@ -349,14 +359,10 @@ function reviewBlock(group, entry) {
     const label = t(`recv.review.${choice}All`);
     if (await confirmDialog({ title: label, body: t(`recv.review.${choice}AllBody`, { n: total }), confirmLabel: label })) await choose({ currentTarget: target }, result.pendingIds, choice);
   };
-  const values = (kind, cells, at) => el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, t(`recv.review.${kind === 'before' ? 'here' : 'proposed'}`)),
-    cells.map(c => cell(c[at], types[c[0]])));
-  const items = result.pending.slice(0, REVIEW_MAX).map(p => el('li', { class: `review-item chg-${p.state}` },
+  const values = (kind, cells, at) => valuesRow(kind, t(`recv.review.${kind === 'before' ? 'here' : 'proposed'}`), cells.map(c => c[at]), i => types[cells[i][0]]);
+  const items = result.pending.slice(0, SHOWN).map(p => el('li', { class: `review-item chg-${p.state}` },
     el('div', { class: 'review-head' },
-      el('span', { class: 'chg-n' }, p.n ? String(p.n) : ''),
-      el('span', { class: 'chg-dot', title: t(`recv.history.${p.state}`) }, icon(STATE_ICON[p.state])),
-      el('span', { class: 'chg-label' }, p.label || '—'),
-      el('span', { class: 'chg-state' }, t(`recv.history.${p.state}`)),
+      changeHead(p),
       el('span', { class: 'review-actions' },
         button(t('recv.review.accept'), 'check', e => choose(e, [p.id], 'accepter')),
         button(t('recv.review.refuse'), 'refuse', e => choose(e, [p.id], 'refuser'), 'btn-danger-text'))),
@@ -367,7 +373,7 @@ function reviewBlock(group, entry) {
     el('strong', {}, t('recv.review.title', { dest: entry.dest, n: total })),
     el('p', { class: 'small' }, t('recv.review.body')),
     el('ul', { class: 'review-rows' }, items),
-    total > items.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - items.length })) : null,
+    more(total - items.length),
     el('div', { class: 'card-actions' },
       button(t('recv.review.accepterAll'), 'check', e => all(e, 'accepter')),
       button(t('recv.review.refuserAll'), 'refuse', e => all(e, 'refuser'), 'btn-danger-text')));
@@ -375,29 +381,25 @@ function reviewBlock(group, entry) {
 
 // Refus avec écart signalé : la ligne refusée reste différente chez le participant, jusqu'à la
 // prochaine modification de la ligne, ici ou chez lui.
+// Le compte est celui des lignes refusées.
 function gapBlock(group, entry) {
   const result = state.results.get(tableKey(group.journal, entry.table)) || {};
   const total = result.gapCount || 0;
   if (!total) return null;
-  const types = result.types || {};
-  const said = (text, span) => el('td', { class: 'mg-here', colspan: String(span) }, text);
-  const head = g => [el('td', { class: 'mg-n' }, g.n ? String(g.n) : ''), el('td', { title: g.label }, g.label)];
-  const rows = result.gaps.flatMap(g => (g.state !== 'modif' || !g.cells.length
-    ? [el('tr', {}, head(g), said(t(`recv.gap.${g.state}`), 3))]
-    : g.cells.map(([from, to, here, theirs]) => el('tr', {}, head(g), el('td', {}, to), cell(here, types[from], 'mg-here'), cell(theirs, types[from], 'mg-source'))))).slice(0, DRIFT_MAX);
+  const lines = result.gaps.map(g => (g.state !== 'modif' || !g.cells.length ? { n: g.n, label: g.label, said: t(`recv.gap.${g.state}`) } : g));
+  const { grid, lines: shown } = diffGrid(lines, { types: result.types, labelCol: result.labelCol, otherHead: t('recv.gap.theirs') });
   return el('div', { class: 'msg msg-warn drift', role: 'status' },
     el('strong', {}, t('recv.gap.title', { dest: entry.dest, n: total })),
     el('p', { class: 'small' }, t('recv.gap.body')),
-    miniGrid([t('recv.drift.row'), result.labelCol || '', t('recv.drift.col'), t('recv.drift.here'), t('recv.gap.theirs')], rows),
-    total > result.gaps.length ? el('p', { class: 'small' }, t('recv.history.more', { n: total - result.gaps.length })) : null);
+    grid, more(total - shown));
 }
 
 // ---------------------------------------------------------------------------------------------
 // Historique : lignes changées depuis la visite précédente, par table de destination : compteurs
 // par état (ajoutées, modifiées, supprimées, et colonnes ajoutées par la SOURCE), puis les plus
-// récentes (HISTORY_MAX par table),
-// numérotées comme dans la table et nommées par la colonne choisie pour chaque table. Chacune
-// s'ouvre au clic sur son avant et son après. Tout est replié par défaut.
+// récentes (HISTORY_MAX par table), numérotées comme dans la table et nommées par la colonne
+// choisie pour chaque table. Chacune s'ouvre au clic sur son avant et son après. Tout est replié
+// par défaut.
 
 const STATE_ICON = { ajout: 'plus', modif: 'edit', suppression: 'minus', colonne: 'column', [REFUSED]: 'refuse' };
 const COUNTED = [...STATES, 'colonne', REFUSED];
@@ -418,19 +420,16 @@ function when(at) {
 
 function historyRow(c, types, id) {
   const gone = c.state === 'suppression';
+  const label = c.state === 'colonne' ? t('recv.history.colLabel', { col: c.label }) : c.label;
   const line = [
-    el('span', { class: 'chg-n', title: c.n ? t(gone ? 'recv.history.rowGone' : 'recv.history.row', { n: c.n }) : null }, c.n ? String(c.n) : ''),
-    el('span', { class: 'chg-dot', title: t(`recv.history.${c.state}`) }, icon(STATE_ICON[c.state])),
-    el('span', { class: 'chg-label' }, c.state === 'colonne' ? t('recv.history.colLabel', { col: c.label }) : c.label || '—'),
-    el('span', { class: 'chg-state' }, t(`recv.history.${c.state}`)),
+    changeHead({ ...c, label }, c.n ? t(gone ? 'recv.history.rowGone' : 'recv.history.row', { n: c.n }) : null),
     el('time', { class: 'chg-time', datetime: new Date(c.at * 1000).toISOString() }, when(c.at))];
   const rowClass = `chg-row chg-${c.state}`;
   if (!c.detail) return el('li', { class: `chg-item chg-${c.state}` }, el('div', { class: rowClass }, line));
   const { cols, before, after } = c.detail;
   // Un refus montre ce qui est gardé ici et ce qui était proposé.
   const heading = kind => (c.state === REFUSED ? t(`recv.review.${kind === 'before' ? 'here' : 'proposed'}`) : t(`recv.history.${kind}`));
-  const values = (kind, list) => list && el('tr', { class: `mg-${kind}` }, el('th', { scope: 'row' }, heading(kind)),
-    list.map((v, i) => cell(v, types[cols[i][0]])));
+  const values = (kind, list) => list && valuesRow(kind, heading(kind), list, i => types[cols[i][0]]);
   return el('li', { class: `chg-item chg-${c.state}` }, el('details', { open: opened.has(id), ontoggle: keepOpen(id) },
     el('summary', { class: rowClass }, line),
     miniGrid(['', ...cols.map(([, to]) => to)], [values('before', before), values('after', after)])));

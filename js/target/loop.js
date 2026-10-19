@@ -2,27 +2,29 @@
 // widget demande à Grist quelles tables ont changé (voir due) ; si un journal ou une destination a
 // changé, et au moins une fois par minute, chaque journal est déplié, recopié dans ses
 // destinations, puis nettoyé. Le résultat de chaque passage est gardé ici pour l'onglet.
-import { DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, randomHex } from '../logic/common.js';
-import { exchangeColumns, exchangeTables, exportTables, exportableColumns } from '../logic/exports.js';
+import { DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, randomHex, sleep } from '../logic/common.js';
+import { exportTables, returnExportTables } from '../logic/exports.js';
 import { awaitingPartner, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../logic/journal.js';
 import {
-  WAVE, WAVE_STRICT, addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, refusedGaps,
+  WAVE, WAVE_STRICT, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, planConsolidation, receivedColumns, refusedGaps,
   restoreActions, rowNumbers,
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
 import { citedFiles, fillActions, filesState, resolveRows, short } from '../logic/files.js';
-import { apply, docChanges, docIdentity, fetchRows, gristFetch, isOwner, readSchema, withLock } from '../grist.js';
-import { addDestColumnsActions, destColumns, receivedJournals, receivedKey, updateJournalNote, upgradeJournal } from './journals.js';
+import { apply, docChanges, docIdentity, fetchRows, isOwner, publicRecords, readSchema, withLock } from '../grist.js';
+import { addDestColumnsActions, receivedJournals, receivedKey, updateJournalNote, upgradeJournal } from './journals.js';
 import { checkSigned } from '../logic/trust.js';
 import { attachments, receiveFiles } from './files.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
-import { errorText } from '../ui.js';
+import { errorText, failure } from '../ui.js';
 import { t } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
 
 const POLL_MS = 10000;
 const IDLE_MS = 60000;
+// Décision prise pendant un passage : le suivant est relancé dès que celui-ci finit.
+const DECIDE_RETRY_MS = 300;
 // Lignes reçues dépliées par passage, au plus ; au-delà de FLOOD_PER_MIN lignes reçues par minute,
 // l'arrivée est anormale (le webhook n'en dépose que quelques-unes) : la carte le signale.
 const RAW_BATCH = 500;
@@ -31,11 +33,14 @@ const FLOOD_PER_MIN = 600;
 // main, que si Grist dit qu'elle a changé (voir due), au retour sur la page, sur « Synchroniser »,
 // et au plus tard au bout de 5 minutes.
 const REREAD_MS = 300000;
-const DRIFT_KEPT = 20;
+// Retouches, changements à valider et écarts d'un refus : les SHOWN premiers sont gardés pour la
+// carte, qui les montre (avec le compte du reste).
+export const SHOWN = 10;
 // Refus corrigé, chez le document qui administre un Échange : la demande d'envoi posée au lot
 // (Synchro_Renvoi, marque FIX_MARK suivie de l'heure) est effacée au premier passage après
 // FIX_HOLD_S secondes ; l'envoi est parti depuis longtemps (Grist le met en file aussitôt).
 const FIX_MARK = 'refus';
+const FIX_VALUE = new RegExp(`^${FIX_MARK}(\\d+):`);
 const FIX_HOLD_S = 60;
 // Pièces jointes : fichiers attendus notés par table (pour compléter les cellules à leur arrivée,
 // voir fillActions), et fichiers trop gros nommés sur la carte, au plus.
@@ -46,7 +51,7 @@ const BIG_KEPT = 20;
 // error, text } en cas d'erreur) et par table reçue (clé `journal|table` : { at, text, table,
 // stats, recent, dest, copyCols, labelCol, labelCols, types, drift, droppedCols, driftCount,
 // driftGone, pending, gaps, files }, ou { at, error, text }). `drift` : les premières lignes retouchées à la main
-// (DRIFT_KEPT), `droppedCols` : les colonnes reçues effacées ici ([colonne du journal, d'ici]),
+// (SHOWN), `droppedCols` : les colonnes reçues effacées ici ([colonne du journal, d'ici]),
 // `driftCount` : le nombre de retouches en tout (cellules, lignes et colonnes effacées),
 // `driftGone` : celui des lignes effacées. Échange administré ici : `pending`, les changements d'un
 // participant à valider ; `gaps`, les lignes refusées restées différentes chez lui (voir
@@ -119,7 +124,7 @@ async function readLastVisit() {
   if (state.lastVisit !== null) return;
   const key = `visit.${(await docIdentity()).docId}`;
   state.lastVisit = Number(readPref(key)) || 0;
-  writePref(key, String(Math.floor(Date.now() / 1000)));
+  writePref(key, String(Math.floor(nowS())));
 }
 
 // Oublie ce qui est gardé d'un journal (réception arrêtée).
@@ -137,16 +142,10 @@ export function forgetJournal(journal) {
 // instantanés ne sont relus que si leur empreinte (taille et CRC-32, une petite ligne à part) a
 // changé depuis la dernière lecture de cette page. Rend vrai si quelque chose est arrivé.
 async function pull(note, journal) {
-  const read = async (kind) => {
-    const filter = encodeURIComponent(JSON.stringify({ [EXPORT_COL]: [note.export], [TYPE_COL]: [kind] }));
-    const response = await gristFetch(`${note.base}/tables/${SYNC_TABLE}/records?filter=${filter}`).catch(() => null);
-    if (!response || !response.ok) throw new Error('publicClosed');
-    return (await response.json()).records || [];
-  };
-  // Une SOURCE d'avant la version 0.5 n'a pas d'empreinte : l'instantané est relu à chaque fois.
+  const read = kind => publicRecords(note.base, SYNC_TABLE, { [EXPORT_COL]: [note.export], [TYPE_COL]: [kind] });
   const marks = await read(KIND.mark);
   const seen = JSON.stringify(marks.map(r => [r.fields[TABLE_COL], r.fields[LIST_COL]]).sort());
-  if (marks.length && pulled.get(journal) === seen) return false;
+  if (pulled.get(journal) === seen) return false;
   const { actions, tooBig } = planPull({ records: await read(KIND.full), journalRows: await fetchRows(journal), journalTable: journal });
   await apply(actions);
   if (JSON.stringify(tooBig) !== JSON.stringify(note.tooBig || [])) await updateJournalNote(journal, n => ({ ...n, tooBig }));
@@ -157,7 +156,7 @@ async function pull(note, journal) {
 // Arrivée anormale : plus de FLOOD_PER_MIN lignes reçues par minute depuis le passage précédent.
 // Le premier passage d'un chargement ne peut pas le dire (on ne sait pas depuis quand elles sont là).
 function flooded(journal, raw) {
-  const at = Date.now() / 1000;
+  const at = nowS();
   const was = inflow.get(journal);
   inflow.set(journal, { ids: new Set(raw.map(r => r.id)), at });
   if (!was) return false;
@@ -165,7 +164,7 @@ function flooded(journal, raw) {
 }
 
 function nextSuspect(was = {}, rejected, flood) {
-  const at = Math.floor(Date.now() / 1000);
+  const at = Math.floor(nowS());
   return { n: (was.n || 0) + rejected, at, ...(flood ? { flood: at } : was.flood ? { flood: was.flood } : {}) };
 }
 
@@ -180,13 +179,13 @@ async function unpack(journal, note) {
   const flood = flooded(journal, raw);
   const key = note.mode === 'public' ? '' : receivedKey(await readSchema(), journal, note);
   const { bad, bare } = key && raw.length ? await checkSigned(raw, key, note.export) : {};
-  const plan = planUnpack(rows, journal, { exportId: note.mode === 'public' ? null : note.export, max: RAW_BATCH, now: Date.now() / 1000, bad, bare });
+  const plan = planUnpack(rows, journal, { exportId: note.mode === 'public' ? null : note.export, max: RAW_BATCH, now: nowS(), bad, bare });
   if (!plan.actions.length) return { note, rows, left: 0 };
   lastArrival = Date.now();
   await apply(plan.actions);
   const gaps = nextGaps(note, plan);
   if (plan.rejected || flood) gaps.suspect = nextSuspect(note.suspect, plan.rejected, flood);
-  const ended = (plan.ended === undefined ? note.ended : plan.ended && (plan.ended.at || Math.floor(Date.now() / 1000))) || undefined;
+  const ended = (plan.ended === undefined ? note.ended : plan.ended && (plan.ended.at || Math.floor(nowS()))) || undefined;
   if (gaps.suspect || ended !== note.ended || JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
     note = { ...note, ...gaps, ended };
     await updateJournalNote(journal, n => ({ ...n, ...gaps, ended }));
@@ -207,45 +206,38 @@ function offersOf(groups, note) {
   return { pending, offers };
 }
 
-// Colonnes reçues pour une table, et la correspondance. Échange, côté du document qui a invité
-// (`allowed` : colonnes que son export envoie pour cette destination) : l'autre document n'écrit
-// que celles-là (voir exchangeColumns). Une colonne ajoutée à l'export après coup ne remplace
-// jamais une colonne de la destination qui porte déjà son nom (elle prend un nom libre) ; elle
-// est notée pour l'historique (`addedCols`).
-function receivedColumns(entry, tableRows, schema, allowed) {
-  let sent = sentColumns(tableRows, entry.columns || []);
-  let next = entry;
-  if (allowed) {
-    const kept = exchangeColumns(sent, allowed, entry.map);
-    sent = kept.sent;
-    next = { ...entry, map: kept.map };
-  }
-  const map = newColumnsMap(next, destColumns(sent), schema.columns(next.dest).map(c => c.colId));
-  return { sent, entry: map ? { ...next, map, addedCols: addedColumns(next, map, Math.floor(Date.now() / 1000)) } : next };
-}
-
-// Recopie d'une table dans sa destination (une colonne nouvelle y est d'abord ajoutée ; une colonne
-// effacée ici ne l'est pas, elle est notée). Rend l'entrée à jour (destination renommée,
-// correspondance, colonnes effacées), les compteurs, les colonnes recopiées et leurs types, les
-// numéros de ligne et les retouches faites à la main (lus après la recopie).
-async function copyTable(ctx, noted) {
-  const { journal, groups, exchange, hub, swap, allowedFor, rules, decisions } = ctx;
-  let entry = followRenames(noted, ctx.schema);
-  if (!ctx.schema.has(entry.dest)) return { entry, error: t('error.destMissing', { dest: entry.dest }) };
-  const tableRows = groups.get(entry.table) || [];
-  const received = receivedColumns(entry, tableRows, ctx.schema, allowedFor(entry.dest));
-  // Échange : une colonne effacée est recréée, comme avant (la destination repart vers l'autre document).
-  const dropped = exchange ? [] : droppedColumns(received.entry, received.sent, ctx.schema.columns(received.entry.dest).map(c => c.colId));
+// Colonnes d'une table reçue, avant sa recopie : celles qui arrivent (voir receivedColumns),
+// celles effacées ici (notées ; l'Échange les recrée, comme avant : la destination repart vers
+// l'autre document), et celles qui manquent à la destination, ajoutées tout de suite. Rend
+// l'entrée à jour (correspondance, colonnes effacées, numéros des colonnes), les colonnes
+// recopiées, leurs types et les colonnes de pièces jointes.
+async function prepareColumns(ctx, noted, tableRows) {
+  const received = receivedColumns(noted, tableRows, ctx.schema, ctx.allowedFor(noted.dest), Math.floor(nowS()));
+  const dropped = ctx.exchange ? [] : droppedColumns(received.entry, received.sent, ctx.schema.columns(received.entry.dest).map(c => c.colId));
   const kept = received.sent.filter(c => !dropped.some(([from]) => from === c.id));
   const added = addDestColumnsActions(ctx.schema, received.entry.dest, kept, received.entry.map);
   if (added.length) {
     await apply(added);
     ctx.schema = await readSchema();
   }
-  entry = { ...received.entry, refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
-  const copyCols = copyColumns(received.sent.map(c => ({ colId: c.id })), ctx.schema.columns(entry.dest), entry.map);
+  const entry = { ...received.entry, refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
+  const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
   const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
-  const fileCols = copyCols.filter(([from]) => types[from] === 'Attachments');
+  return { entry, dropped, copyCols, types, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments') };
+}
+
+// Recopie d'une table dans sa destination (voir prepareColumns pour ses colonnes). Rend l'entrée à
+// jour (destination renommée, correspondance, colonnes effacées), les compteurs, les colonnes
+// recopiées et leurs types, les numéros de ligne et les retouches faites à la main (lus après la
+// recopie).
+async function copyTable(ctx, noted) {
+  const { journal, groups, exchange, hub, swap, rules, decisions } = ctx;
+  const renamed = followRenames(noted, ctx.schema);
+  if (!ctx.schema.has(renamed.dest)) return { entry: renamed, error: failure('destMissing', { dest: renamed.dest }) };
+  const tableRows = groups.get(renamed.table) || [];
+  const prepared = await prepareColumns(ctx, renamed, tableRows);
+  const { copyCols, types, dropped, fileCols } = prepared;
+  let { entry } = prepared;
   const present = fileCols.length ? await ctx.files() : new Map();
   // La destination n'est relue que si le journal de cette table a changé depuis le dernier
   // passage resté sans effet (ou qu'un fichier est arrivé), ou pour y revoir les retouches (REREAD_MS).
@@ -262,7 +254,7 @@ async function copyTable(ctx, noted) {
   const deleteCol = ctx.schema.columns(entry.dest).some(c => c.colId === DELETE_COL);
   const { actions, stats, gone, pending, fix, held } = planConsolidation({
     journalRows: rows, destRows, copyCols, destTable: entry.dest, journalTable: journal, matchCol: entry.match || '', exchange, hub, deleteCol, rules, decisions,
-    hold: exchange ? null : ctx.renforce ? WAVE_STRICT : WAVE, wave: ctx.waves.get(entry.table) || '',
+    hold: exchange ? null : ctx.renforce ? WAVE_STRICT : WAVE, wave: ctx.waves.get(entry.table) || '', now: nowS(),
   });
   const presentKeys = new Set([...present.keys()].map(short));
   const fill = fillActions({
@@ -298,12 +290,12 @@ async function askResend(lot, dest, keys) {
   if (!lot || !keys.length) return;
   const wanted = new Set(keys);
   const ids = (await fetchRows(dest)).filter(r => wanted.has(r[KEY_COL])).map(r => r.id);
-  if (ids.length) await apply([['UpdateRecord', SYNC_TABLE, lot.id, { [RESEND_COL]: resendValue(`${FIX_MARK}${Math.floor(Date.now() / 1000)}`, ids) }]]);
+  if (ids.length) await apply([['UpdateRecord', SYNC_TABLE, lot.id, { [RESEND_COL]: resendValue(`${FIX_MARK}${Math.floor(nowS())}`, ids) }]]);
 }
 
 async function clearFixMarks(lots) {
-  const now = Date.now() / 1000;
-  const age = value => { const m = /^refus(\d+):/.exec(String(value || '')); return m ? now - Number(m[1]) : -1; };
+  const now = nowS();
+  const age = value => { const m = FIX_VALUE.exec(String(value || '')); return m ? now - Number(m[1]) : -1; };
   const stale = lots.filter(lot => age(lot[RESEND_COL]) > FIX_HOLD_S);
   if (stale.length) await apply(stale.map(lot => ['UpdateRecord', SYNC_TABLE, lot.id, { [RESEND_COL]: '' }]));
 }
@@ -334,33 +326,32 @@ async function copyContext(schema, journal, note, groups) {
 
 // Notes des tables changées (destination renommée, colonnes arrivées après coup). Échange, côté
 // CIBLE : l'export de retour suit (voir followExchange).
-async function saveEntries(journal, note, updates) {
+// Fusionné dans la note relue au moment d'écrire : une table rangée ou une colonne de nom choisie
+// pendant le passage (fenêtres de l'onglet) reste.
+async function saveEntries(journal, updates) {
   if (!updates.size) return;
   const noted = ({ dest, map, match, refs, dropped, addedCols, waiting }) => JSON.parse(JSON.stringify({ dest, map, match, refs, dropped, addedCols, waiting }));
-  const tables = note.tables.map(tb => (updates.has(tb.table) ? { ...tb, dropped: undefined, waiting: undefined, ...noted(updates.get(tb.table)) } : tb));
-  await updateJournalNote(journal, n => ({ ...n, tables }));
-  await followExchange({ ...note, tables });
+  const merged = n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, dropped: undefined, waiting: undefined, ...noted(updates.get(tb.table)) } : tb)) });
+  await followExchange(await updateJournalNote(journal, merged));
 }
 
 // Échange, côté CIBLE : l'export de retour envoie les destinations de la note, avec leurs colonnes.
 // Seul un propriétaire peut le changer (Synchro lui est réservée, voir acl.js) : après le passage
 // d'un éditeur, celui d'un propriétaire le remet d'accord (`rows` : lignes de Synchro déjà lues).
-let owner = null;
 const exportShape = tables => JSON.stringify(tables.map(tb => [tb.table, tb.columns.map(c => `${c.id}>${c.as || ''}`)]).sort());
 async function followExchange(note, rows = null) {
-  if (note.mode !== 'echange' || note.retour || !(owner ??= await isOwner())) return;
+  if (note.mode !== 'echange' || note.retour || !(await isOwner().catch(() => false))) return;
   if (rows) {
     const schema = await readSchema();
-    const want = exchangeTables(note.tables, dest => exportableColumns(schema.columns(dest) || []));
+    const want = returnExportTables(note, schema);
     if (exportShape(exportTables(rows, note.export)) === exportShape(want)) return;
   }
   await wireExchange(note);
 }
 
-// Changements à valider et écarts d'un refus, nommés pour la carte : les REVIEW_KEPT premiers, et
+// Changements à valider et écarts d'un refus, nommés pour la carte : les SHOWN premiers, et
 // toutes les versions à valider (`pendingIds`, pour « Tout accepter »).
-const REVIEW_KEPT = 50;
-const named = (items, labelCol) => items.slice(0, REVIEW_KEPT).map(({ id, n, state: change, row, cells, gone }) => ({
+const named = (items, labelCol) => items.slice(0, SHOWN).map(({ id, n, state: change, row, cells, gone }) => ({
   id, n, state: change, label: labelCol ? String(row[labelCol] ?? '') : '', cells, ...(gone ? { gone } : {}),
 }));
 const reviewResult = (pending = [], gaps = [], labelCol = '') => ({
@@ -369,7 +360,7 @@ const reviewResult = (pending = [], gaps = [], labelCol = '') => ({
 
 // Retouches gardées pour la carte : les premières lignes, nommées, les colonnes effacées et les comptes.
 const driftResult = (drift, labelCol, droppedCols) => ({
-  drift: drift.slice(0, DRIFT_KEPT).map(({ n, row, cells, gone }) => ({ n, label: labelCol ? String(row[labelCol] ?? '') : '', cells, ...(gone ? { gone } : {}) })),
+  drift: drift.slice(0, SHOWN).map(({ n, row, cells, gone }) => ({ n, label: labelCol ? String(row[labelCol] ?? '') : '', cells, ...(gone ? { gone } : {}) })),
   droppedCols,
   driftCount: drift.reduce((sum, d) => sum + (d.gone ? 1 : d.cells.length), 0) + droppedCols.length,
   driftGone: drift.filter(d => d.gone).length,
@@ -420,8 +411,7 @@ async function consolidate(schema, { journal, note: noteBefore }) {
   const unpacked = await unpack(journal, noteBefore);
   let { note } = unpacked;
   if (note.ended && note.mode === 'echange' && !note.retour && !stopped.has(note.export)) {
-    stopped.add(note.export);
-    await stopReturn(note.export).catch(() => {});
+    await stopReturn(note.export).then(() => stopped.add(note.export), () => {});
   }
   // Fichiers du document, lus une fois par passage et seulement s'il en faut.
   let present = null;
@@ -443,7 +433,7 @@ async function consolidate(schema, { journal, note: noteBefore }) {
     const done = await copyTable(ctx, noted);
     tables.push({ ...done, changed: !done.error && JSON.stringify(done.entry) !== JSON.stringify(noted) });
   }
-  await saveEntries(journal, note, new Map(tables.filter(tb => tb.changed).map(tb => [tb.entry.table, tb.entry])));
+  await saveEntries(journal, new Map(tables.filter(tb => tb.changed).map(tb => [tb.entry.table, tb.entry])));
   const after = await fetchRows(journal);
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
   // Lignes reçues laissées pour le passage suivant : il vient sans attendre la minute.
@@ -466,7 +456,7 @@ function notePass(journal, pass, before, offersBefore, at) {
   for (const tb of pass.tables) {
     const key = tableKey(journal, tb.table);
     const was = state.results.get(key);
-    state.results.set(key, tb.error ? { at, error: true, text: tb.error } : { at, text: summary(tb.stats), ...tb });
+    state.results.set(key, tb.error ? { at, error: true, text: errorText(tb.error) } : { at, text: summary(tb.stats), ...tb });
     changed ||= Boolean(tb.error) !== Boolean(was && was.error) || Boolean(tb.stats && tb.stats.added + tb.stats.updated + tb.stats.removed)
       || JSON.stringify([(was && was.drift) || [], (was && was.driftCount) || 0, (was && was.pendingIds) || [], (was && was.gapCount) || 0, (was && was.files) || null, (was && was.held) || null])
         !== JSON.stringify([tb.drift || [], tb.driftCount || 0, tb.pendingIds || [], tb.gapCount || 0, tb.files || null, tb.held || null]);
@@ -488,7 +478,7 @@ async function passAll() {
     const { journal } = received;
     const before = state.results.get(journal);
     const offersBefore = JSON.stringify(state.offers.get(journal) || []);
-    const at = Date.now() / 1000;
+    const at = nowS();
     try {
       changed = notePass(journal, await consolidate(schema, received), before, offersBefore, at) || changed;
       state.readOnly = state.viewer;
@@ -506,16 +496,16 @@ async function passAll() {
 
 // Décision prise sur la carte pour des changements à valider (versions du journal `journal`) :
 // appliquée par un passage lancé aussitôt, ou par le suivant si un passage est déjà en cours.
-export async function decide(journal, ids, choice) {
-  for (const id of ids) decided.set(`${journal}|${id}`, choice);
-  while ((await consolidateAll({ reread: true })) === null) await new Promise(resolve => setTimeout(resolve, 300));
-}
+export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${journal}|${id}`), choice);
 
 // Décision sur une vague de suppressions retenue (table `table` du journal) : 'appliquer' ou
 // 'ignorer' (voir WAVE), pour le passage lancé aussitôt.
-export async function decideWave(journal, table, choice) {
-  decided.set(`${journal}#${table}`, choice);
-  while ((await consolidateAll({ reread: true })) === null) await new Promise(resolve => setTimeout(resolve, 300));
+export const decideWave = (journal, table, choice) => applyDecisions([`${journal}#${table}`], choice);
+
+// Décisions notées, puis un passage, dès que celui en cours est fini.
+async function applyDecisions(keys, choice) {
+  for (const key of keys) decided.set(key, choice);
+  while ((await consolidateAll({ reread: true })) === null) await sleep(DECIDE_RETRY_MS);
 }
 
 // Un passage sur tous les journaux. Deux onglets du même navigateur ne recopient pas en même

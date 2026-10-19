@@ -5,6 +5,7 @@
 // la note de Synchro (`fichiers`, voir readTracking) : aucune table de plus.
 import { EXPORT_COL, KIND, LOT_COL, SYNC_TABLE, TYPE_COL, groupBy, randomHex } from '../logic/common.js';
 import { hooksOf } from '../logic/exports.js';
+import { setFiles } from '../logic/notes.js';
 import { encodeParts, fileSends, forgetHooks, neededFiles, partRow, readTracking, recordSent, trackingNote } from '../logic/files.js';
 import { downloadAttachment, fetchRows, postToHook, readSchema, selectRows } from '../grist.js';
 import { readSourceNote, updateSourceNote } from './synchro.js';
@@ -24,13 +25,7 @@ async function fileRows() {
   return rows || (await fetchRows(SYNC_TABLE)).filter(r => r[TYPE_COL] === KIND.files);
 }
 
-async function saveTracking(change) {
-  await updateSourceNote((note) => {
-    const next = change({ ...(note.fichiers || {}) });
-    if (Object.keys(next).length) note.fichiers = next;
-    else delete note.fichiers;
-  });
-}
+const saveTracking = change => updateSourceNote(note => setFiles(note, change({ ...(note.fichiers || {}) })));
 
 // Envois dus, par export qui envoie des fichiers : { exportId, needed, tracking, sends, hooks }.
 // Le suivi nettoyé (fichiers retirés, destinataires partis) est écrit s'il a changé. `ok(h)` : le

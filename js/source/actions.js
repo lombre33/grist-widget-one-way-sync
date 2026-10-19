@@ -2,14 +2,17 @@
 import { ORDER_COL, RESEND_ALL } from '../logic/common.js';
 import { buildInvitation } from '../logic/codes.js';
 import { rowsSince } from '../logic/resend.js';
-import { deleteWebhookWithNotice, docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
+import { docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
 import { removeTechnicalTables } from '../pages.js';
-import { endExchange, removeParticipant } from '../exchange.js';
-import { endRows, readSourceNote, removeExport, saveExport, updateSourceNote } from './synchro.js';
+import { dropInvitation, setExport, setPause } from '../logic/notes.js';
+import { closeExport, removeRecipient } from '../exchange.js';
+import { readSourceNote, saveExport, updateSourceNote } from './synchro.js';
 import { clearAndMark, resendTables } from './resend.js';
-import { confirmDialog, copyButton, copyField, el, openModal } from '../ui.js';
-import { handoffText } from '../guide.js';
+import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
+import { handoffButton } from '../guide.js';
 import { t } from '../i18n.js';
+
+const AFTER_S = 0.0001; // juste après l'heure de la pause (MajLe en secondes)
 
 // Mise en pause : un webhook désactivé perd son historique d'envoi (Grist remet son état à zéro),
 // il ne peut donc pas dire depuis quand il ne livre plus. On note la plus récente MajLe des tables
@@ -17,9 +20,7 @@ import { t } from '../i18n.js';
 export async function pause(exp, h) {
   let at = 0;
   for (const { table } of exp.tables) for (const r of await fetchRows(table)) at = Math.max(at, r[ORDER_COL] || 0);
-  await updateSourceNote((note) => {
-    note.pauses = note.pauses.filter(p => p.hook !== h.id).concat([{ hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }]);
-  });
+  await updateSourceNote(note => setPause(note, h.id, { hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }));
   await setWebhookEnabled(h.id, false);
 }
 
@@ -48,42 +49,34 @@ function resumeChoice(title, help) {
 export async function resume(exp, h, out) {
   const entry = readSourceNote(await readSchema()).pauses.find(p => p.hook === h.id);
   const all = !entry || entry.columns !== JSON.stringify(exp.tables);
-  const since = all ? RESEND_ALL : entry.at + 0.0001; // MajLe plus récente que la pause
+  const since = all ? RESEND_ALL : entry.at + AFTER_S; // MajLe plus récente que la pause
   let n = 0;
   for (const { table } of exp.tables) n += rowsSince(await fetchRows(table), since).length;
   const help = [t('send.resume.catchup.help', { n }), all ? t('send.resume.all') : ''].filter(Boolean).join(' ');
   const picked = await resumeChoice(t('send.resume.title', { name: h.fields.memo || exp.name }), help);
   if (!picked) return;
   await setWebhookEnabled(h.id, true);
-  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
+  await updateSourceNote(note => setPause(note, h.id));
   // Le renvoi pose sa marque avant tout : s'il s'interrompt, le rattrapage automatique le finit.
   if (picked === 'catchup') await resendTables(exp.id, exp.tables.map(tb => tb.table), out, since);
 }
 
 // Révoquer une personne : son webhook disparaît, les autres destinataires continuent ; sa carte le
-// dit (voir endRows). Un Échange s'arrête dans les deux sens (voir endExchange) ; dans un Échange
-// à plusieurs, pour ce participant seulement (voir removeParticipant).
+// dit (voir endRows). Un Échange s'arrête dans les deux sens (voir closeExport) ; dans un Échange
+// à plusieurs, pour ce participant seulement (voir removeRecipient).
 export async function revoke(exp, h) {
   const one = exp.echange && !exp.retour && exp.recipients.length > 1;
   const body = t(one ? 'send.revoke.participant' : exp.echange ? 'send.revoke.exchange' : 'send.revoke.body');
   if (!(await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body, confirmLabel: t('send.action.revoke') }))) return;
-  if (one) {
-    await removeParticipant(exp.id, h);
-    return;
-  }
-  if (exp.echange) {
-    await endExchange(exp.id, { keepExport: !exp.retour });
-    return;
-  }
-  await deleteWebhookWithNotice(h, await endRows(exp.id));
-  await updateSourceNote((note) => { note.pauses = note.pauses.filter(p => p.hook !== h.id); });
+  if (exp.echange && !one) await closeExport(exp.id, { keepExport: !exp.retour });
+  else await removeRecipient(exp.id, h);
 }
 
 // Annuler une invitation ; celle d'un Échange emporte son journal de retour (et la clé d'écriture
 // de son formulaire).
 export async function cancelInvitation(inv) {
   if (!(await confirmDialog({ title: t('send.cancel.title'), body: t('send.cancel.body'), confirmLabel: t('send.action.cancel') }))) return;
-  await updateSourceNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
+  await updateSourceNote(note => dropInvitation(note, inv.id));
   if (inv.journal) await removeTechnicalTables([inv.journal]);
 }
 
@@ -94,21 +87,12 @@ export async function unblockQueue() {
 }
 
 // Supprimer un export : ses destinataires sont coupés, ses lignes Synchro effacées (la table
-// disparaît avec le dernier export). Les colonnes id_sync et MajLe restent dans les tables.
+// disparaît avec le dernier export), avec le journal de retour d'un Échange. Les colonnes id_sync
+// et MajLe restent dans les tables.
 export async function deleteExport(exp) {
   const body = t('send.delete.body', { n: exp.recipients.length });
   if (!(await confirmDialog({ title: t('send.delete.title', { name: exp.name }), body, confirmLabel: t('send.action.delete') }))) return;
-  if (exp.echange || exp.invitations.some(inv => inv.journal)) {
-    await endExchange(exp.id, { keepExport: false });
-    return;
-  }
-  for (const h of exp.recipients) await deleteWebhookWithNotice(h, await endRows(exp.id));
-  await updateSourceNote((note) => {
-    note.exports = note.exports.filter(e => e.id !== exp.id);
-    note.invitations = note.invitations.filter(i => i.export !== exp.id);
-    note.pauses = note.pauses.filter(p => p.export !== exp.id);
-  });
-  await removeExport(exp.id);
+  await closeExport(exp.id, { keepExport: false });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -119,14 +103,10 @@ export async function publicCode(exp) {
   return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables });
 }
 
-// Bouton « copier avec les consignes » : le code et les étapes de la CIBLE, prêts pour un courriel.
-export const handoff = (mode, code) => el('div', { class: 'handoff' },
-  copyButton(() => handoffText('target', mode, 1, code), t('guide.copyHandoff')), el('span', { class: 'muted small' }, t('guide.copyHandoff.help')));
-
 export async function showPublicCode(exp) {
   const code = await publicCode(exp);
   await new Promise(resolve => openModal({ title: exp.name, onClose: resolve,
-    body: [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code)], buttons: [{ label: t('common.close'), kind: 'btn-primary' }] }));
+    body: [el('p', {}, t('send.public.help')), copyField(code), handoffButton('target', 'public', 1, code)], buttons: closeButtons() }));
 }
 
 // Couper le lien public d'un export : ses instantanés disparaissent, les règles d'accès suivent au
@@ -134,6 +114,6 @@ export async function showPublicCode(exp) {
 export async function stopPublic(exp) {
   const body = t('send.public.revokeBody');
   if (!(await confirmDialog({ title: t('send.public.stopTitle', { name: exp.name }), body, confirmLabel: t('send.public.stop') }))) return;
-  await updateSourceNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: false } : e)); });
+  await updateSourceNote(note => setExport(note, exp.id, { public: false }));
   await saveExport(exp.id, exp.tables, { isPublic: false });
 }

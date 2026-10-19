@@ -4,7 +4,7 @@
 // y est déjà, puis ses morceaux sont effacés. Les cellules qui le citent sont remplies par la
 // recopie (voir loop.js).
 import { apply, fetchRows, uploadAttachment } from '../grist.js';
-import { chunk } from '../logic/common.js';
+import { chunk, nowS } from '../logic/common.js';
 import { fileArrivals, joinParts, sha1, shaOf, short } from '../logic/files.js';
 
 // Dépôt refusé par Grist (taille maximale de l'instance, droits) : ses morceaux restent, et il
@@ -29,7 +29,7 @@ export async function attachments() {
 // avant elle), puis est effacé. Rend les lignes qui restent dans le journal et le nombre de lignes
 // ou de fichiers rejetés (illisibles, altérés).
 export async function receiveFiles(journal, exportId, rows, files, cited) {
-  const { ready, stale, rejected } = fileArrivals(rows, exportId, Date.now() / 1000);
+  const { ready, stale, rejected } = fileArrivals(rows, exportId, nowS());
   if (!ready.length && !stale.length && !rejected.length) return { rows, rejected: 0 };
   const errors = refused.get(journal) || new Map();
   refused.set(journal, errors);

@@ -36,8 +36,9 @@ export async function syncRules({ publicIds = null, open = null } = {}) {
 
 // Après un changement de règles, Grist recharge le document, et le widget avec lui : l'onglet le
 // dit au lieu de se dessiner pour rien (un assistant ouvert serait fermé par le rechargement), et se
-// redessine lui-même si le rechargement tarde.
+// redessine lui-même si le rechargement tarde (RELOAD_MS).
+const RELOAD_MS = 8000;
 export function reloading(root, render) {
   root.replaceChildren(message('info', t('common.reloading')));
-  setTimeout(() => { if (root.isConnected) render(); }, 8000);
+  setTimeout(() => { if (root.isConnected) render(); }, RELOAD_MS);
 }

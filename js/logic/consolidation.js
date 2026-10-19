@@ -4,7 +4,8 @@ import {
   APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
   STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue, parseJson,
 } from './common.js';
-import { REFUSED, STATES, compareOrder, completeLists, lastMark, latestByKey, pendingLists } from './journal.js';
+import { REFUSED, STATES, compareOrder, completeLists, destColumns, lastMark, latestByKey, pendingLists, sentColumns } from './journal.js';
+import { exchangeColumns } from './exports.js';
 
 // Échange, chez le document qui l'administre : ce qu'il fait de chaque type de changement reçu d'un
 // participant (`regles` de l'export : accepter, refuser, ou garder à valider sur la carte), et d'un
@@ -26,9 +27,9 @@ export function exchangeRules(exp) {
 // techniques de la synchro et formules de la destination. La destination ne garde que `id_sync`.
 const TECHNICAL = new Set(['id', 'manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL, LIST_COL, APPLIED_COL, AUTHOR_COL, RECEIVED_COL, STATE_COL,
   BEFORE_COL, DATA_COL, SCHEMA_COL, EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, LOT_COL]);
-export function copyColumns(journalCols, destCols, map = {}) {
+export function copyColumns(journalColIds, destCols, map = {}) {
   const writable = new Set(destCols.filter(c => !c.isFormula).map(c => c.colId));
-  return journalCols.map(c => c.colId).filter(id => !TECHNICAL.has(id) && !id.startsWith('gristHelper_'))
+  return journalColIds.filter(id => !TECHNICAL.has(id) && !id.startsWith('gristHelper_'))
     .map(id => [id, map[id] || id]).filter(([, to]) => writable.has(to) && to !== KEY_COL);
 }
 
@@ -59,7 +60,7 @@ export function followRenames(entry, schema) {
 export function droppedColumns(entry, sent, destColIds) {
   const have = new Set(destColIds);
   const noted = new Set([...Object.keys((entry.refs || {}).cols || {}), ...(entry.dropped || [])]);
-  return sent.filter(c => ![KEY_COL, ORDER_COL, DELETE_COL].includes(c.id))
+  return destColumns(sent)
     .map(c => [c.id, (entry.map || {})[c.id] || c.id]).filter(([, to]) => !have.has(to) && noted.has(to));
 }
 
@@ -129,10 +130,10 @@ const SETTLED_GONE = new Set(['suppression', LEFT]);
 
 // Retouches faites à la main dans la destination, lues après la recopie : cellules d'une ligne
 // reçue qui diffèrent de la dernière version reçue, et lignes reçues effacées ici alors qu'elles
-// sont toujours dans la SOURCE (`gone`). `except` : clés parties de la SOURCE à ce passage. Rend [{ id, key, n, row, cells: [[colonne du
-// journal, colonne d'ici, valeur d'ici, valeur de la SOURCE]] }] par numéro de ligne (`id` : la
-// ligne d'ici, `row` : la version reçue). Échange : rien (une retouche y part vers l'autre
-// document, ce n'est pas un écart).
+// sont toujours dans la SOURCE (`gone`). `except` : clés parties de la SOURCE à ce passage. Rend
+// [{ id, key, n, row, cells: [[colonne du journal, colonne d'ici, valeur d'ici, valeur de la
+// SOURCE]] }] par numéro de ligne (`id` : la ligne d'ici, `row` : la version reçue). Échange : rien
+// (une retouche y part vers l'autre document, ce n'est pas un écart).
 export function manualEdits({ journalRows, destRows, copyCols, exchange = false, except = new Set() }) {
   if (exchange) return [];
   const latest = latestByKey(journalRows);
@@ -301,6 +302,7 @@ function reviewItem(ctx, key, version, state) {
 // les listes et les versions qui suppriment restent à traiter, et le passage suivant refait le
 // même calcul. Ignorées (`wave` : 'ignorer') : les lignes sont détachées (`detach`), et leurs
 // versions notées parties (LEFT) ; les listes, traitées.
+const HELD_SHOWN = 10; // numéros de lignes montrés sur la carte
 function holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, numbers, wave }) {
   const versions = removed.map(key => latest.get(key)).filter(Boolean);
   const ids = new Set(versions.map(v => v.id));
@@ -314,7 +316,7 @@ function holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, n
   }
   for (const id of ids) marks.delete(id);
   for (const { row } of pending) marks.delete(row.id);
-  const shown = removed.map(key => numbers.get(key)).filter(Boolean).sort((a, b) => a - b).slice(0, 10);
+  const shown = removed.map(key => numbers.get(key)).filter(Boolean).sort((a, b) => a - b).slice(0, HELD_SHOWN);
   return { ...kept, detach: [], held: { n: removed.length, numbers: shown } };
 }
 
@@ -347,8 +349,8 @@ function consolidationActions({ destTable, journalTable, copyCols, exchange, del
 // écritures ne touchent pas la ligne 'echange' : la ligne doit repartir (voir le lot dans
 // formulas.js) ; le widget la demande aussi au lot (Synchro_Renvoi), qui l'envoie à coup sûr.
 const FIX_STEP = 0.001;
-export function fixActions(destTable, fixes, copyCols, deleteCol) {
-  const order = f => (typeof f.version.order === 'number' ? f.version.order : Date.now() / 1000) + FIX_STEP;
+function fixActions(destTable, fixes, copyCols, deleteCol, now) {
+  const order = f => (typeof f.version.order === 'number' ? f.version.order : now) + FIX_STEP;
   const kept = fixes.filter(f => f.here).flatMap(f => f.here.map(row => [row.id, order(f)]));
   const added = deleteCol ? fixes.filter(f => !f.here) : [];
   return [
@@ -408,12 +410,13 @@ export function refusedGaps({ journalRows, destRows, copyCols }) {
 // (une SOURCE vidée par erreur, ou une liste forgée), ou dès une ligne en sécurité renforcée
 // (WAVE_STRICT), les suppressions d'un passage attendent une décision sur la carte : les appliquer,
 // ou les ignorer (les lignes restent ici, détachées : leur clé est effacée, plus rien ne les suit).
+// `now` : heure du passage (secondes), pour dater un refus corrigé dont la version n'a pas d'heure.
 export const WAVE = { min: 11, share: 0.2 };
 export const WAVE_STRICT = { min: 1, share: 0 };
 
 export function planConsolidation({
   journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
-  hold = null, wave = '',
+  hold = null, wave = '', now = 0,
 }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
@@ -463,6 +466,23 @@ export function planConsolidation({
     ],
     stats: plan.stats, gone, held: (waved && waved.held) || null,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
-    fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol), keys: plan.fixes.map(f => f.key) },
+    fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol, now), keys: plan.fixes.map(f => f.key) },
   };
+}
+
+// Colonnes reçues pour une table, et la correspondance. Échange, côté du document qui a invité
+// (`allowed` : colonnes que son export envoie pour cette destination) : l'autre document n'écrit
+// que celles-là (voir exchangeColumns). Une colonne ajoutée à l'export après coup ne remplace
+// jamais une colonne de la destination qui porte déjà son nom (elle prend un nom libre) ; elle
+// est notée pour l'historique (`addedCols`, à l'heure `now`, en secondes).
+export function receivedColumns(entry, tableRows, schema, allowed, now) {
+  let sent = sentColumns(tableRows, entry.columns || []);
+  let next = entry;
+  if (allowed) {
+    const kept = exchangeColumns(sent, allowed, entry.map);
+    sent = kept.sent;
+    next = { ...entry, map: kept.map };
+  }
+  const map = newColumnsMap(next, destColumns(sent), schema.columns(next.dest).map(c => c.colId));
+  return { sent, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
 }

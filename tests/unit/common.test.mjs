@@ -1,8 +1,7 @@
 // Outils communs : noms de tables, lignes, seaux de clés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bucketOf, chunk, crc32, freeTableId, isSafeId, toRows, toTableId } from '../../js/logic/common.js';
-import { newColumnsMap } from '../../js/logic/consolidation.js';
+import { bucketOf, chunk, columnNote, crc32, freeTableId, isSafeId, journalId, noteAction, toRows, toTableId } from '../../js/logic/common.js';
 
 test('toRows et chunk', () => {
   assert.deepEqual(toRows({ id: [1, 2], A: ['x', 'y'] }), [{ id: 1, A: 'x' }, { id: 2, A: 'y' }]);
@@ -34,7 +33,16 @@ test('noms : identifiants Grist, conflits sans tenir compte des majuscules', () 
   assert.equal(toTableId('éà'), 'Ea');
   assert.equal(freeTableId('Journal_ANNUAIRE', ['Journal_Annuaire']), 'Journal_ANNUAIRE_2', 'Grist confondrait les deux');
   assert.equal(freeTableId('Note', ['note', 'NOTE_2']), 'Note_3');
-  assert.deepEqual(newColumnsMap({ columns: [] }, [{ id: 'nom' }], ['Nom']), { nom: 'nom_2' }, 'une colonne nouvelle ne prend pas la place d\'une autre');
+  assert.equal(journalId('Annuaire RH', ['Journal_Annuaire_RH']), 'Journal_Annuaire_RH_2');
+  assert.equal(journalId('', []), 'Journal_Export');
+});
+
+test('note dans la description d\'une colonne : objet lu, sinon null ; écrite ou effacée', () => {
+  assert.deepEqual(columnNote({ id: 3, description: '{"a":1}' }), { a: 1 });
+  for (const description of ['', 'texte libre', '[1]', '"x"', 'null']) assert.equal(columnNote({ id: 3, description }), null, description);
+  assert.equal(columnNote(undefined), null, 'colonne absente');
+  assert.deepEqual(noteAction({ id: 3 }, { a: 1 }), ['UpdateRecord', '_grist_Tables_column', 3, { description: '{"a":1}' }]);
+  assert.deepEqual(noteAction({ id: 3 }, null), ['UpdateRecord', '_grist_Tables_column', 3, { description: '' }]);
 });
 
 test('toRows : colonnes manquantes ou absentes', () => {

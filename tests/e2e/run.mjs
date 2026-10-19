@@ -1029,13 +1029,12 @@ try {
   await waitFor(async () => (await names()) === everyone, 'lignes revenues sans le filtre');
   step('SOURCE : filtre de lignes posé puis retiré, la CIBLE suit');
 
-  // --- Document monté en version 0.4 : marque d'envoi coupé numérique, sans suivi des clés ni
-  // dépendances de MajLe. Tout est posé à l'ouverture du widget SOURCE, et une suppression suit.
+  // --- Table Synchro abîmée : marque d'envoi coupé numérique, sans dépendances de MajLe, avec
+  // manualSort. Tout est remis en état à l'ouverture du widget SOURCE, et une suppression suit.
   const synchroRef = await tableRef(source.doc, 'Synchro');
-  const tracks = (await records(source.doc, 'Synchro')).filter(r => r.Synchro_Type === 'suivi').map(r => r.id);
   const lotRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Lot' && c.parentId === synchroRef).id;
-  const syncIds = (await records(source.doc, 'Synchro')).map(r => r.id).filter(id => !tracks.includes(id));
-  await applyActions(source.doc, [['BulkRemoveRecord', 'Synchro', tracks], ['ModifyColumn', 'Synchro', 'Sync_Etat', { type: 'Numeric' }],
+  const syncIds = (await records(source.doc, 'Synchro')).map(r => r.id);
+  await applyActions(source.doc, [['ModifyColumn', 'Synchro', 'Sync_Etat', { type: 'Numeric' }],
     ['UpdateRecord', '_grist_Tables_column', majle.id, { recalcWhen: 2, recalcDeps: null }],
     ['AddColumn', 'Synchro', 'manualSort', { type: 'ManualSortPos', isFormula: false }], ['BulkUpdateRecord', 'Synchro', syncIds, { manualSort: syncIds }]]);
   const markRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Sync_Etat' && c.parentId === synchroRef).id;
@@ -1044,11 +1043,9 @@ try {
   await waitFor(async () => {
     const cols = await records(source.doc, '_grist_Tables_column');
     const mark = cols.find(c => c.id === markRef);
-    const rows = await records(source.doc, 'Synchro');
     return cols.find(c => c.id === majle.id).recalcWhen === 0 && mark.type === 'Any' && (mark.recalcDeps || []).length === 4 &&
-      rows.filter(r => r.Synchro_Type === 'suivi').length === rows.filter(r => r.Synchro_Type === 'cles').length &&
       !cols.some(c => c.colId === 'manualSort' && c.parentId === synchroRef);
-  }, 'montage 0.4 mis à niveau');
+  }, 'Synchro remise en état');
   // Page de la CIBLE fermée : 70 envois du même lot attendent dans son journal. Avec manualSort,
   // ils se plaçaient tous au même rang et Grist finissait par renuméroter (403, file bloquée).
   const city = (await records(source.doc, 'Contacts')).find(r => r.id === alice).Ville;
@@ -1062,10 +1059,10 @@ try {
   await openWidget(target.url);
   await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Ville === 'Ville 69', 'dernière valeur recopiée', 60000);
   await applyActions(source.doc, [['UpdateRecord', 'Contacts', alice, { Ville: city }]]);
-  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'ajout après la mise à niveau');
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'ajout après la remise en état');
   await applyActions(source.doc, [['RemoveRecord', 'Contacts', (await records(source.doc, 'Contacts')).find(r => r.Nom === 'Yann').id]]);
-  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'suppression après la mise à niveau');
-  step('SOURCE : un montage 0.4 reçoit le suivi des clés, la marque d\'envoi coupé, les dépendances de MajLe et perd manualSort ; 70 envois page CIBLE fermée passent');
+  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Yann'), 'suppression après la remise en état');
+  step('SOURCE : Synchro remise en état (marque d\'envoi coupé, dépendances de MajLe, sans manualSort) ; 70 envois page CIBLE fermée passent');
 
   // --- Gros import (4 000 lignes d'un coup) : le lot ne part qu'en partie, la CIBLE le signale ;
   // le widget SOURCE, une fois sa page ouverte, envoie le reste seul
@@ -1380,24 +1377,6 @@ try {
 
   await exchangeSteps();
   await filesSteps();
-
-  // --- Montages d'avant la version 0.4 : signalés, effacés d'un clic
-  const idSyncRef = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'id_sync' && c.parentId === contactsRefId).id;
-  await applyActions(source.doc, [['AddTable', 'Synchro_Contacts', [{ id: 'Synchro_Ids', type: 'Text', isFormula: true, formula: '"ids:"' }]],
-    ['CreateViewSection', contactsRefId, 0, 'record', [idSyncRef], null]]);
-  assert.ok((await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Contacts_summary_id_sync'));
-  await openWidget(source.url);
-  await widget().getByText('Montage d’une version précédente').waitFor();
-  await button('Effacer l’ancien montage').click();
-  await dialogButton('Effacer l’ancien montage').click();
-  await waitFor(async () => (await records(source.doc, '_grist_Tables')).map(tb => tb.tableId).sort().join() === 'Contacts,Table1,Villes', 'ancien montage effacé (SOURCE)');
-  await applyActions(target.doc, [['AddTable', 'Journal_Contacts', [{ id: 'id_sync', type: 'Text' }, { id: 'Synchro_Ids', type: 'Text' }]]]);
-  await openWidget(target.url);
-  await widget().getByText('Réception d’une version précédente').waitFor();
-  await button('Effacer les anciens journaux').click();
-  await dialogButton('Effacer les anciens journaux').click();
-  await waitFor(async () => !(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Journal_Contacts'), 'ancien journal effacé (CIBLE)');
-  step('Montages d\'avant la version 0.4 : signalés et effacés, côté SOURCE et côté CIBLE');
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

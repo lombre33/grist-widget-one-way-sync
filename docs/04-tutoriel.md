@@ -432,4 +432,3 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
-| Carte « Montage d'une version précédente » | Envois créés avant la version 0.4 | Recréer les envois en exports, puis effacer l'ancien montage |

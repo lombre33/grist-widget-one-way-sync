@@ -26,6 +26,9 @@ export function el(tag, attrs = {}, ...children) {
 
 export const icon = name => el('span', { class: `icon icon-${name}`, 'aria-hidden': 'true' });
 
+// Pastille d'état d'une carte ou d'une ligne (`tone` : ok, pending, err, off).
+export const pill = (text, tone) => el('span', { class: `pill pill-${tone}` }, text);
+
 export function message(kind, text) {
   return el('p', { class: `msg msg-${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
 }
@@ -100,7 +103,9 @@ document.addEventListener('keydown', (event) => {
 export function openWizard({ title, steps, onClose }) {
   const stepList = el('ol', { class: 'steps' });
   const content = el('div', { class: 'form' });
-  const modal = openModal({ title, body: [stepList, content], onClose, width: 720 });
+  // `onClose` ne reçoit rien : Échap ferme avec `false`, qui ne doit pas arriver aux fonctions de
+  // dessin (`renderSource(root = container)` dessinerait dans `false`).
+  const modal = openModal({ title, body: [stepList, content], onClose: () => onClose && onClose(), width: 720 });
   let shown = -1;
   return {
     close: () => modal.close(),
@@ -117,8 +122,23 @@ export function openWizard({ title, steps, onClose }) {
       const first = content.querySelector('textarea:not([readonly]), input') || modal.footer.querySelector('.btn-primary');
       if (first) first.focus();
     },
+    // Première étape (`fn`) : une erreur (lecture refusée, réseau) s'affiche dans la fenêtre, avec
+    // Fermer, au lieu de laisser une fenêtre vide.
+    async start(fn) {
+      const report = el('div', { class: 'report' });
+      if ((await run(null, report, async () => { await fn(); return true; })) === undefined) {
+        content.replaceChildren(report);
+        modal.setButtons(closeButtons());
+      }
+    },
   };
 }
+
+// Boutons des assistants : Annuler, Plus tard (ferment la fenêtre), Retour (`onClick`), Fermer.
+export const cancelButton = () => ({ label: t('common.cancel') });
+export const laterButton = () => ({ label: t('common.later') });
+export const backButton = onClick => ({ label: t('common.back'), back: true, onClick });
+export const closeButtons = () => [{ label: t('common.close'), kind: 'btn-primary' }];
 
 // Confirmation d'une action destructrice : promesse d'un booléen, focus sur Annuler.
 export function confirmDialog({ title, body, confirmLabel }) {

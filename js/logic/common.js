@@ -97,6 +97,20 @@ export function parseJson(text, fallback = null) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
 
+// Notes du widget : un objet JSON dans la description d'une colonne (métadonnées, que le webhook
+// n'envoie pas). `columnNote` le rend (null si la colonne manque, ou si la note est vide ou
+// illisible) ; `noteAction` est l'action qui l'écrit (null l'efface).
+export function columnNote(column) {
+  const note = parseJson((column && column.description) || 'null');
+  return note && typeof note === 'object' && !Array.isArray(note) ? note : null;
+}
+export const noteAction = (column, note) => ['UpdateRecord', '_grist_Tables_column', column.id, { description: note == null ? '' : JSON.stringify(note) }];
+
+// Horloge et attente, pour les modules qui lisent ou écrivent (la logique pure reçoit l'heure en
+// paramètre). Heure en secondes, comme Grist.
+export const nowS = () => Date.now() / 1000;
+export const sleep = ms => new Promise((resolve) => { setTimeout(resolve, ms); });
+
 export const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 export const randomHex = n => toHex(crypto.getRandomValues(new Uint8Array(n)));
 export const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
@@ -121,6 +135,9 @@ export function toTableId(name, fallback = 'Table') {
 // Premier identifiant libre : `base`, puis `base_2`, `base_3`… Grist ne distingue pas les
 // majuscules d'un identifiant à l'autre (`ANNUAIRE` prendrait la place d'`Annuaire`) : la
 // comparaison non plus.
+// Nom libre du journal d'un export, d'après le nom de l'export.
+export const journalId = (name, taken) => freeTableId(JOURNAL_PREFIX + toTableId(name, 'Export'), taken);
+
 export function freeTableId(base, taken) {
   const used = new Set(taken.map(id => id.toLowerCase()));
   const free = id => !used.has(id.toLowerCase());

@@ -18,11 +18,10 @@ import { EXPORT_COL, HEX16, KIND, LIST_COL, LOT_COL, AUTHOR_COL, MISSING_COL, RE
 export const PUBLIC_MEMO = 'Synchro : lecture limitée aux exports publics';
 export const OWNER_MEMO = 'Synchro : réservée aux propriétaires';
 export const JOURNAL_MEMO = 'Synchro : journaux réservés aux éditeurs';
-const LEGACY_MEMO = 'Synchro : lecture limitée aux vues d’export';
-const MEMOS = [PUBLIC_MEMO, OWNER_MEMO, JOURNAL_MEMO, LEGACY_MEMO];
+const MEMOS = [PUBLIC_MEMO, OWNER_MEMO, JOURNAL_MEMO];
 
 export const isWidgetRule = r => MEMOS.includes(r.memo);
-export const isPublicRule = r => r.memo === PUBLIC_MEMO || r.memo === LEGACY_MEMO;
+export const isPublicRule = r => r.memo === PUBLIC_MEMO;
 
 const VIEWER = 'user.Access == VIEWER';
 const EDITOR = 'user.Access == EDITOR';

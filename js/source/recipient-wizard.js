@@ -6,9 +6,10 @@
 // de l'export (voir trust.js). La réponse est contrôlée chez Grist : la clé de son formulaire doit
 // désigner le document que dit la fiche. Un code de contrôle, tiré de l'adresse et du secret,
 // s'affiche des deux côtés ; en sécurité renforcée (`renforce`), il faut l'avoir comparé.
-import { AUTHOR_COL, EXPORT_COL, JOURNAL_PREFIX, SYNC_TABLE, freeTableId, randomHex, sha256, toTableId } from '../logic/common.js';
+import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
 import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../logic/codes.js';
-import { exportCondition, hookName } from '../logic/exports.js';
+import { exportCondition, exportEmail, hookMemo, hookName } from '../logic/exports.js';
+import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
 import { controlCode, expiresAt, isExpired, sameDoc } from '../logic/trust.js';
 import { hiddenTables } from '../logic/acl.js';
 import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo } from '../grist.js';
@@ -18,28 +19,30 @@ import { addDeleteColumns, markHub } from '../exchange.js';
 import { saveExport, signingKey, syncRows, updateSourceNote } from './synchro.js';
 import { createJournal, receivedDests, storeKey, updateJournalNote } from '../target/journals.js';
 import { resendTables } from './resend.js';
-import { handoff, publicCode } from './actions.js';
-import { codeField, confirmDialog, controlLine, copyField, el, failure, message, openWizard, run } from '../ui.js';
-import { roleGuide } from '../guide.js';
+import { publicCode } from './actions.js';
+import {
+  backButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, failure, laterButton, message, openWizard, run,
+} from '../ui.js';
+import { handoffButton, roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { dateText, t } from '../i18n.js';
 
 const STEP = { options: 0, invitation: 1, reply: 2, load: 3 };
-const now = () => Date.now() / 1000;
-const later = { label: t('common.later') };
-const back = onClick => ({ label: t('common.back'), back: true, onClick });
-const closeButton = () => [{ label: t('common.close'), kind: 'btn-primary' }];
+const later = laterButton();
+const back = backButton;
 
 // `onClose` : appelé à la fermeture (l'onglet se redessine). Une invitation expirée est refaite,
 // après confirmation (voir renew).
 export async function recipientWizard(exp, pending, onClose) {
-  const expired = pending && !(pending.journal && !pending.ready) && isExpired(pending.at, now());
+  const expired = pending && !(pending.journal && !pending.ready) && isExpired(pending.at, nowS());
   if (expired && !(await confirmNewCode())) return null;
   const steps = ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k));
   const ctx = { exp, steps, onClose, codes: new Map(), wizard: openWizard({ title: t('send.person.title', { name: exp.name }), steps, onClose }) };
-  if (!pending) return showOptions(ctx);
-  if (pending.journal && !pending.ready) return showBack(ctx, pending);
-  return expired ? run(null, null, () => renew(ctx, pending)) : showReply(ctx, pending);
+  return ctx.wizard.start(() => {
+    if (!pending) return showOptions(ctx);
+    if (pending.journal && !pending.ready) return showBack(ctx, pending);
+    return expired ? renew(ctx, pending) : showReply(ctx, pending);
+  });
 }
 
 // 1. Mode (réponse, lien public ou Échange) et sécurité renforcée (sans objet pour le lien public :
@@ -84,13 +87,13 @@ const publicList = exp => exp.tables.map(tb => `${tb.table} (${tb.columns.map(c 
 async function invite(ctx, mode, renforce) {
   if (mode === 'public') return invitePublic(ctx);
   if (renforce && !ctx.exp.renforce) {
-    await updateSourceNote((note) => { note.exports = note.exports.map(e => (e.id === ctx.exp.id ? { ...e, renforce: true } : e)); });
+    await updateSourceNote(note => setExport(note, ctx.exp.id, { renforce: true }));
     ctx.exp = { ...ctx.exp, renforce: true };
   }
   if (mode === 'echange') return openBack(ctx, renforce);
   const secret = randomHex(16);
-  const entry = { id: randomHex(8), export: ctx.exp.id, hash: await sha256(secret), at: now(), ...(renforce ? { renforce: true } : {}) };
-  await updateSourceNote((note) => { note.invitations = [...note.invitations, entry]; });
+  const entry = { id: randomHex(8), export: ctx.exp.id, hash: await sha256(secret), at: nowS(), ...(renforce ? { renforce: true } : {}) };
+  await updateSourceNote(note => putInvitation(note, entry));
   return showInvitation(ctx, entry, secret);
 }
 
@@ -101,19 +104,19 @@ async function invitePublic({ exp, wizard, steps }) {
   const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
   const hidden = hiddenTables(resources, rules, exp.tables.map(tb => tb.table));
   if (hidden.length) throw failure('publicHidden', { tables: hidden.join(', ') });
-  await updateSourceNote((note) => { note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, public: true } : e)); });
+  await updateSourceNote(note => setExport(note, exp.id, { public: true }));
   await saveExport(exp.id, exp.tables, { isPublic: true });
   const code = await publicCode(exp);
   wizard.setSteps(steps.slice(0, 2));
-  wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoff('public', code),
-    message('warn', t('send.public.turnOn')), stepHelp(['public']), roleGuide({ you: 'source', mode: 'public', current: 1 })], closeButton());
+  wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoffButton('target', 'public', 1, code),
+    message('warn', t('send.public.turnOn')), stepHelp(['public']), roleGuide({ you: 'source', mode: 'public', current: 1 })], closeButtons());
 }
 
 async function showInvitation(ctx, entry, secret, retour = '') {
   const { exp } = ctx;
   const mode = retour ? 'echange' : 'reponse';
   const [{ origin, docId }, rows, cle] = await Promise.all([docIdentity(), syncRows(), signingKey(exp.id, { create: true })]);
-  const email = (rows.find(r => r[EXPORT_COL] === exp.id) || {})[AUTHOR_COL] || '';
+  const email = exportEmail(rows, exp.id);
   const code = buildInvitation({
     id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId }, tables: exp.tables, retour,
     expire: expiresAt(entry.at), renforce: Boolean(entry.renforce), cle,
@@ -123,7 +126,7 @@ async function showInvitation(ctx, entry, secret, retour = '') {
   // Échange : le code de contrôle de l'envoi de retour, que la CIBLE voit en lisant l'invitation.
   const backCode = retour ? controlLine(t('send.invite.backCode'), await controlCode(retour, secret)) : null;
   ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), codeField(code),
-    el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expiresAt(entry.at) * 1000) })), backCode, handoff(mode, code), report,
+    el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expiresAt(entry.at) * 1000) })), backCode, handoffButton('target', mode, 1, code), report,
     stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply']), roleGuide({ you: 'source', mode, current: 1 })],
   [back(() => run(null, report, () => backToOptions(ctx, entry))), later, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(ctx, entry) }]);
 }
@@ -132,7 +135,7 @@ async function showInvitation(ctx, entry, secret, retour = '') {
 // d'un Échange ; la personne en crée une autre.
 async function backToOptions(ctx, inv) {
   if (!(await confirmDialog({ title: t('send.backOptions.title'), body: t('send.backOptions.body'), confirmLabel: t('common.back') }))) return;
-  await updateSourceNote((note) => { note.invitations = note.invitations.filter(i => i.id !== inv.id); });
+  await updateSourceNote(note => dropInvitation(note, inv.id));
   if (inv.journal) await removeTechnicalTables([inv.journal]);
   showOptions(ctx);
 }
@@ -143,7 +146,7 @@ async function backToOptions(ctx, inv) {
 // Échange le refait par son lien de retour.
 async function backToInvitation(ctx, inv) {
   const kept = ctx.codes.get(inv.id);
-  if (kept && !isExpired(inv.at, now())) return showInvitation(ctx, inv, kept.secret, kept.retour);
+  if (kept && !isExpired(inv.at, nowS())) return showInvitation(ctx, inv, kept.secret, kept.retour);
   if (!(await confirmNewCode())) return null;
   return renew(ctx, inv);
 }
@@ -153,8 +156,8 @@ const confirmNewCode = () => confirmDialog({ title: t('send.newCode.title'), bod
 async function renew(ctx, inv) {
   if (inv.journal) return showBack(ctx, inv);
   const secret = randomHex(16);
-  const entry = { ...inv, hash: await sha256(secret), at: now() };
-  await updateSourceNote((note) => { note.invitations = note.invitations.map(i => (i.id === inv.id ? entry : i)); });
+  const entry = { ...inv, hash: await sha256(secret), at: nowS() };
+  await updateSourceNote(note => putInvitation(note, entry));
   return showInvitation(ctx, entry, secret);
 }
 
@@ -163,12 +166,12 @@ async function renew(ctx, inv) {
 // il peut être refait.
 async function openBack(ctx, renforce) {
   const { exp } = ctx;
-  const journal = freeTableId(JOURNAL_PREFIX + toTableId(exp.name, 'Export'), (await readSchema()).tableIds);
-  const entry = { id: randomHex(8), export: exp.id, hash: '', at: now(), journal, ...(renforce ? { renforce: true } : {}) };
+  const journal = journalId(exp.name, (await readSchema()).tableIds);
+  const entry = { id: randomHex(8), export: exp.id, hash: '', at: nowS(), journal, ...(renforce ? { renforce: true } : {}) };
   await createJournal(journal, {
     id: entry.id, export: exp.id, name: exp.name, secret: '', from: {}, mode: 'echange', retour: true, reserve: true, tables: [], refused: [], missing: {},
   });
-  await updateSourceNote((note) => { note.invitations = [...note.invitations, entry]; });
+  await updateSourceNote(note => putInvitation(note, entry));
   return showBack(ctx, entry);
 }
 
@@ -181,8 +184,8 @@ async function showBack(ctx, inv) {
     const retour = buildWebhookUrl(input.value, inv.journal);
     await testUrl(retour, inv.journal);
     const secret = randomHex(16);
-    const entry = { ...inv, hash: await sha256(secret), at: now(), ready: true };
-    await updateSourceNote((note) => { note.invitations = note.invitations.map(i => (i.id === inv.id ? entry : i)); });
+    const entry = { ...inv, hash: await sha256(secret), at: nowS(), ready: true };
+    await updateSourceNote(note => putInvitation(note, entry));
     await showInvitation(ctx, entry, secret, retour);
   };
   ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.back.help', { where: await formWhere(inv.journal) })), ...linkFigures(), input, report,
@@ -210,7 +213,7 @@ function showReply(ctx, inv) {
     ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, go) }]);
   };
   const toInvitation = back(() => run(null, report, () => backToInvitation(ctx, inv)));
-  if (isExpired(inv.at, now())) report.replaceChildren(message('warn', t('send.invite.expired')));
+  if (isExpired(inv.at, nowS())) report.replaceChildren(message('warn', t('send.invite.expired')));
   ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
 }
 
@@ -221,7 +224,7 @@ function showReply(ctx, inv) {
 async function checkReply(exp, inv, text) {
   const reply = parseReply(text, (await docIdentity()).origin);
   if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
-  if (isExpired(inv.at, now())) throw new Error('invitationExpired');
+  if (isExpired(inv.at, nowS())) throw new Error('invitationExpired');
   if (loopingTables(exp.tables.map(tb => tb.table), reply.recipient.docId, receivedDests(await readSchema())).length) throw new Error('loop');
   if (Boolean(inv.journal) !== Boolean(reply.retour) || (reply.retour || []).some(b => !exp.tables.some(tb => tb.table === b.dest))) throw new Error('codeInvalid');
   const share = await shareInfo(reply.url);
@@ -263,7 +266,7 @@ async function approve(ctx, inv, reply) {
   const { exp } = ctx;
   const r = reply.recipient;
   const hook = await createWebhook({
-    name: hookName(exp.name, exp.id), memo: [r.email, r.docId, r.team].filter(Boolean).join(' · '), url: reply.url,
+    name: hookName(exp.name, exp.id), memo: hookMemo(r), url: reply.url,
     tableId: SYNC_TABLE, condition: exportCondition(exp.id),
   });
   if (inv.journal) {
@@ -273,13 +276,13 @@ async function approve(ctx, inv, reply) {
     // réponse : elle est rangée dans ses destinations, les tables de l'export (voir receivedKey).
     await storeKey(exp.tables.map(tb => tb.table), inv.journal, reply.cle);
     await updateJournalNote(inv.journal, n => ({
-      ...n, from: { email: r.email, docId: r.docId }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
+      ...n, from: { email: r.email, docId: r.docId, docName: reply.share.name }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
     }));
     await markHub(exp.id);
   }
   await updateSourceNote((note) => {
-    note.invitations = note.invitations.filter(i => i.id !== inv.id);
-    if (inv.journal) note.exports = note.exports.map(e => (e.id === exp.id ? { ...e, echange: true } : e));
+    const rest = dropInvitation(note, inv.id);
+    return inv.journal ? setExport(rest, exp.id, { echange: true }) : rest;
   });
   await showLoad(ctx);
 }
@@ -291,15 +294,15 @@ async function showLoad({ exp, wizard, onClose }) {
   for (const { table } of exp.tables) total += (await fetchRows(table)).length;
   const report = el('div', { class: 'report' });
   if (!total) {
-    wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], closeButton());
+    wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], closeButtons());
     return;
   }
   const send = async () => {
-    wizard.show(STEP.load, [message('ok', t('send.connected')), report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButton());
+    wizard.show(STEP.load, [message('ok', t('send.connected')), report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
     report.replaceChildren(message('info', t('send.load.progress', { done: 0, total })));
     const n = await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
     if (!report.isConnected) return onClose && onClose();
-    return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done')), closeButton());
+    return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done')), closeButtons());
   };
   wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: total })), report],
     [later, { label: t('send.load.ok'), kind: 'btn-primary', onClick: () => run(null, report, send) }]);

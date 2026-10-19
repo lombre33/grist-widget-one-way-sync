@@ -31,7 +31,8 @@ test('toute clé écrite dans le code existe, toute clé existante sert', () => 
 });
 
 test('chaque erreur levée par le code a son texte', () => {
-  const thrown = new Set([...code.matchAll(/new Error\('(\w+)'\)/g)].map(m => m[1]));
+  const thrown = new Set([...code.matchAll(/(?:new Error|failure)\('(\w+)'[,)]/g)].map(m => m[1]));
+  assert.ok(thrown.has('linkTest'), 'erreurs avec valeurs (failure) vues aussi');
   // Erreurs rattrapées avant d'être montrées : un renvoi déjà en cours, Grist trop lent au démarrage.
   for (const handled of ['resendBusy', 'timeout']) thrown.delete(handled);
   for (const name of thrown) assert.ok(`error.${name}` in fr, `error.${name}`);
@@ -63,8 +64,18 @@ test('mise en forme : espaces insécables et nombres en français, pluriels des 
   assert.equal(format('fr', 'error.generic'), fr['error.generic'].replace(' :', ' :'), 'valeur absente : laissée entre accolades');
 });
 
-test('toute image du tutoriel existe', () => {
-  const names = [...read('js/tutorial.js').matchAll(/images: \[([^\]]*)\]/g)].flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(n => n[1]));
+test('tutoriel : sections complètes dans les deux langues, aides et images existantes', () => {
+  const sections = JSON.parse(read('i18n/tutorial.json'));
+  const ids = sections.map(s => s.id);
+  assert.equal(new Set(ids).size, ids.length, 'identifiants uniques');
+  for (const s of sections) {
+    assert.ok(['source', 'target', 'both'].includes(s.role), s.id);
+    assert.ok(s.title.fr && s.title.en, `${s.id} : titre`);
+    assert.equal(s.text.fr.length, s.text.en.length, `${s.id} : autant de paragraphes en fr et en en`);
+  }
+  const asked = [...code.matchAll(/stepHelp\(\[([^\]]*)\]/g)].flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(n => n[1]));
+  assert.deepEqual(asked.filter(id => !ids.includes(id)), [], 'toute aide d’étape existe');
+  const names = sections.flatMap(s => s.images);
   assert.ok(names.length > 20);
   const missing = names.map(name => (name.startsWith('img/') ? name : `docs/images/${name}.png`)).filter(path => !existsSync(new URL(`../../${path}`, import.meta.url)));
   assert.deepEqual(missing, []);

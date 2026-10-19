@@ -2,11 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrackRowsAction, conditionExport, exchangeColumns, exchangeTables, exportableColumns, exportCondition, exportRowsActions, exportTables, hookName, hooksOf, isFileColumn,
-  rowFilter,
+  conditionExport, exchangeColumns, exchangeTables, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
+  hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, rowFilter, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
-import { resendValue } from '../../js/logic/resend.js';
 import { EXPORT } from './fixtures.mjs';
 
 test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'autre document', () => {
@@ -71,11 +70,6 @@ test('table Synchro : lignes d\'un export (liste, lot, instantané public), tabl
   const edit = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom'), col('Age')] }]);
   assert.deepEqual(edit.changed, ['Contacts']);
   assert.deepEqual(edit.actions.map(a => [a[0], a[2]]), [['BulkUpdateRecord', [1, 2, 3]], ['BulkRemoveRecord', [4, 5, 6]]], 'l\'autre export n\'est pas touché');
-  assert.equal(addTrackRowsAction(rows.filter(r => r.Synchro_Export === E)), null, 'chaque table a son suivi');
-  const before05 = rows.filter(r => r.Synchro_Type !== 'suivi');
-  assert.deepEqual(addTrackRowsAction(before05), ['BulkAddRecord', 'Synchro', [null, null, null], {
-    Synchro_Export: [E, E, 'fedcba9876543210'], Synchro_Table: ['Contacts', 'Villes', 'Contacts'], Synchro_Colonnes: [values.Synchro_Colonnes[0], values.Synchro_Colonnes[3], '[]'],
-    Synchro_Type: ['suivi', 'suivi', 'suivi'], Synchro_Renvoi: ['', '', ''] }], 'montage 0.4 : le suivi est ajouté');
   const pub = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom')] }, { table: 'Villes', columns: [col('Ville')] }], { isPublic: true });
   assert.deepEqual(pub.actions[0][3].Synchro_Type, ['complet', 'empreinte', 'complet', 'empreinte']);
   assert.deepEqual(pub.changed, []);
@@ -106,7 +100,6 @@ test('webhook d\'un destinataire : condition sur son export, relue à l\'identiq
   assert.throws(() => exportCondition('" or True or "'), /codeInvalid/);
   assert.equal(conditionExport('rec.Synchro_Export == "0123456789ABCDEF" and rec.Synchro_Type in ("cles", "lot")'), '');
   assert.equal(hookName('Annuaire', E), 'Synchro Annuaire #0123456789abcdef');
-  assert.equal(resendValue('ab12', [3, 4]), 'ab12:3,4');
 });
 
 // Cas limites.
@@ -146,4 +139,39 @@ test('Échange : colonnes renvoyées sous leur nom d\'origine, correspondance d�
   // soi (Salaire), ni colonne nouvelle (Pirate).
   const forged = exchangeColumns([{ id: 'X', as: 'Salaire' }, { id: 'Salaire' }, { id: 'Pirate' }, { id: 'Commune', as: 'Ville' }], allowed);
   assert.deepEqual(forged, { sent: [{ id: 'Commune', as: 'Ville' }], map: { Commune: 'Ville' } });
+});
+
+test('état d\'un destinataire et d\'un export : pastille, erreur dite simplement', () => {
+  const hook = (enabled, usage) => ({ id: 'h', fields: { enabled, memo: 'a@b.fr · docA12345678 · equipe' }, usage });
+  assert.deepEqual(hookStatus(hook(false, {})), ['paused', 'off']);
+  assert.deepEqual(hookStatus(hook(true, { status: 'idle', lastHttpStatus: 200 })), ['active', 'ok']);
+  assert.deepEqual(hookStatus(hook(true, { status: 'retrying' })), ['error', 'err']);
+  assert.deepEqual(hookStatus(hook(true, { lastHttpStatus: 403 })), ['error', 'err']);
+  assert.equal(tooLarge(hook(true, { status: 'retrying', lastEventBatch: { httpStatus: 413 } })), true);
+  assert.equal(tooLarge(hook(true, { status: 'idle', lastEventBatch: { httpStatus: 413 } })), false, 'seul compte l\'envoi que Grist retente');
+  assert.equal(hookErrorKey(hook(true, { lastEventBatch: { httpStatus: 413 } })), 'send.error.size');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Invalid column "X"' })), 'send.error.column');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 404 })), 'send.error.link');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.other');
+  const exp = fields => ({ recipients: [], invitations: [], ...fields });
+  assert.deepEqual(exportStatus(exp({})), ['alone', 'off']);
+  assert.deepEqual(exportStatus(exp({ invitations: [{}] })), ['invited', 'pending']);
+  assert.deepEqual(exportStatus(exp({ public: true })), ['people', 'ok']);
+  assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {})] })), ['people', 'ok']);
+  assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {})], echange: true })), ['participants', 'ok']);
+  assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {})], echange: true, retour: true })), ['people', 'ok'], 'un retour d\'Échange n\'a qu\'un destinataire');
+  assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {}), hook(true, { lastHttpStatus: 403 })] })), ['error', 'err'], 'une erreur l\'emporte');
+});
+
+test('fiche d\'un destinataire : mémo, journal de retour, auteur de l\'export', () => {
+  assert.equal(hookMemo({ email: 'a@b.fr', docId: 'docA12345678', team: '' }), 'a@b.fr · docA12345678');
+  const h = { id: 7, fields: { memo: 'a@b.fr · docA12345678 · equipe' } };
+  assert.equal(ownJournal(h)({ note: { hook: 7 } }), true, 'noté à l\'approbation');
+  assert.equal(ownJournal(h)({ note: { hook: 8, from: { docId: 'docA12345678' } } }), false, 'le webhook noté l\'emporte sur le document');
+  assert.equal(ownJournal(h)({ note: { from: { docId: 'docA12345678' } } }), true, 'Échange branché avant : retrouvé par le document');
+  assert.equal(ownJournal(h)({ note: { from: { docId: 'docA1234' } } }), false, 'document entier, pas un préfixe');
+  assert.equal(ownJournal(h)({ note: { from: {} } }), false);
+  const rows = [{ Synchro_Export: 'x', Sync_Par: 'x@b.fr' }, { Synchro_Export: 'y', Sync_Par: 'y@b.fr' }];
+  assert.equal(exportEmail(rows, 'y'), 'y@b.fr');
+  assert.equal(exportEmail(rows, 'z'), '');
 });

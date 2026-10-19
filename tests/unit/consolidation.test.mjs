@@ -2,13 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  WAVE, WAVE_STRICT, addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, refusedGaps, restoreActions,
-  rowNumbers,
+  WAVE, WAVE_STRICT, addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, receivedColumns,
+  refusedGaps, restoreActions, rowNumbers,
 } from '../../js/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {
-  const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'Age', 'manualSort', 'gristHelper_X'].map(colId => ({ colId }));
+  const journal = ['id_sync', 'MajLe', 'Supprime', 'Nom', 'Ville', 'Age', 'manualSort', 'gristHelper_X'];
   const dest = [{ colId: 'id_sync' }, { colId: 'Nom' }, { colId: 'Ville', isFormula: true }, { colId: 'Age' }];
   assert.deepEqual(copyColumns(journal, dest), [['Nom', 'Nom'], ['Age', 'Age']]);
   assert.deepEqual(copyColumns(journal, [...dest, { colId: 'Commune' }], { Ville: 'Commune' }), [['Nom', 'Nom'], ['Ville', 'Commune'], ['Age', 'Age']]);
@@ -409,4 +409,19 @@ test('vague de suppressions : retenue au-delà de 10 lignes et de 20 % ; Appliqu
   const one = planConsolidation({ journalRows: [...journalRows.slice(0, 40), list(100, keys.slice(0, 39))], destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', hold: WAVE_STRICT });
   assert.deepEqual(one.held, { n: 1, numbers: [40] });
   assert.equal(plan(journalRows, destRows).held, null, 'sans seuil (Échange) : rien n\'est retenu');
+});
+
+test('colonnes reçues : une colonne nouvelle prend un nom libre et est notée ; en Échange, seules les colonnes envoyées d\'ici', () => {
+  assert.deepEqual(newColumnsMap({ columns: [] }, [{ id: 'nom' }], ['Nom']), { nom: 'nom_2' }, 'une colonne nouvelle ne prend pas la place d\'une autre');
+  const schema = { columns: () => [{ colId: 'Nom' }, { colId: 'Note' }, { colId: 'id_sync' }] };
+  const described = cols => [{ id: 1, Synchro_Colonnes: JSON.stringify(cols) }];
+  const entry = { table: 'Contacts', dest: 'Contacts', columns: [{ id: 'Nom', type: 'Text' }], map: {} };
+  const same = receivedColumns(entry, described([{ id: 'Nom', type: 'Text' }]), schema, null, 100);
+  assert.deepEqual([same.sent.map(c => c.id), same.entry], [['Nom'], entry], 'rien de nouveau : l\'entrée ne change pas');
+  const more = receivedColumns(entry, described([{ id: 'Nom', type: 'Text' }, { id: 'Note', type: 'Text' }]), schema, null, 100);
+  assert.deepEqual(more.entry.map, { Note: 'Note_2' }, 'la colonne Note d\'ici n\'est pas écrasée');
+  assert.deepEqual(more.entry.addedCols, [{ col: 'Note_2', at: 100 }]);
+  assert.deepEqual(receivedColumns(entry, [], schema, null, 100).sent, entry.columns, 'sans description reçue : celles de l\'invitation');
+  const swap = receivedColumns(entry, described([{ id: 'Nom', type: 'Text' }, { id: 'Secret', type: 'Text' }]), schema, new Set(['Nom']), 100);
+  assert.deepEqual(swap.sent.map(c => c.id), ['Nom'], 'Échange : une colonne que cet export n\'envoie pas est écartée');
 });

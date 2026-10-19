@@ -1,6 +1,6 @@
 // CIBLE : assistant de réception, en quatre étapes (Code, Destinations, Lien, Réponse). Une
 // réception en attente (ou à rebrancher) l'ouvre directement à l'étape Lien (`group`).
-import { APPLIED_COL, AUTHOR_COL, JOURNAL_PREFIX, LIST_COL, freeTableId, toTableId } from '../logic/common.js';
+import { APPLIED_COL, AUTHOR_COL, LIST_COL, journalId, nowS } from '../logic/common.js';
 import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../logic/codes.js';
 import { controlCode, sameDoc } from '../logic/trust.js';
 import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../grist.js';
@@ -11,21 +11,21 @@ import { signingKey } from '../source/synchro.js';
 import { createJournal, prepareDest, receivedJournals, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
 import { checkDests, confirmOutgoing, destField, mappingBlock } from './dest.js';
-import { codeField, confirmDialog, controlLine, copyButton, el, message, openWizard, run } from '../ui.js';
-import { handoffText, roleGuide } from '../guide.js';
+import { backButton, cancelButton, codeField, confirmDialog, controlLine, el, message, openWizard, run } from '../ui.js';
+import { handoffButton, roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';
 
 const STEP = { code: 0, dest: 1, link: 2, reply: 3 };
-const cancel = { label: t('common.cancel') };
-const back = onClick => ({ label: t('common.back'), back: true, onClick });
+const cancel = cancelButton();
+const back = backButton;
 const flowOf = note => (note.mode === 'echange' ? 'echange' : 'reponse');
 
 // `onClose` : appelé à la fermeture (l'onglet se redessine).
 export function receiveWizard(group, onClose) {
   const steps = ['recv.step.code', 'recv.step.dest', 'recv.step.link', 'recv.step.reply'].map(k => t(k));
   const ctx = { steps, onClose, wizard: openWizard({ title: t('recv.new'), steps, onClose }) };
-  return group ? showLink(ctx, group) : showCode(ctx);
+  return ctx.wizard.start(() => (group ? showLink(ctx, group) : showCode(ctx)));
 }
 
 // 1. Code d'invitation.
@@ -49,7 +49,7 @@ async function readInvitation(text) {
   const invitation = parseInvitation(text);
   const { origin } = await docIdentity();
   if (invitation.mode === 'public' && new URL(invitation.base).origin !== origin) throw new Error('otherInstance');
-  if (invitation.expire && Date.now() / 1000 > invitation.expire) throw new Error('invitationExpired');
+  if (invitation.expire && nowS() > invitation.expire) throw new Error('invitationExpired');
   if (invitation.mode !== 'echange') return invitation;
   if (invitation.retourOrigin !== origin) throw new Error('otherInstance');
   if (!(await isOwner())) throw new Error('exchangeOwner');
@@ -149,7 +149,7 @@ function showColumns(ctx, invitation, plans, schema) {
 // Un journal pour l'export, nommé d'après lui, et une destination par table. Échange : l'envoi de
 // retour est branché aussitôt ; l'adresse de retour, un droit d'écriture, n'est notée nulle part.
 async function create(ctx, invitation, plans) {
-  const journal = freeTableId(JOURNAL_PREFIX + toTableId(invitation.name, 'Export'), (await readSchema()).tableIds);
+  const journal = journalId(invitation.name, (await readSchema()).tableIds);
   const { mode } = invitation;
   const reserve = ctx.reserve !== false;
   const note = {
@@ -215,7 +215,7 @@ async function showReply(ctx, { journal, note }, link) {
   const flow = flowOf(note);
   ctx.wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), codeField(code),
     controlLine(t('recv.reply.code'), await controlCode(url, note.secret)),
-    el('div', { class: 'handoff' }, copyButton(() => handoffText('source', flow, 3, code), t('guide.copyHandoff')), el('span', { class: 'muted small' }, t('guide.copyHandoff.help'))),
+    handoffButton('source', flow, 3, code),
     stepHelp(['t-reply', 's-reply', 's-load', 't-daily']), roleGuide({ you: 'target', mode: flow, current: 3 })],
   [back(() => showLink(ctx, { journal, note })), { label: t('common.close'), kind: 'btn-primary' }]);
 }

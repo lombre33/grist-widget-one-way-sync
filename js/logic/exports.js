@@ -1,7 +1,7 @@
 // SOURCE : un export (des tables, leurs colonnes, un filtre de lignes facultatif) et ses lignes
 // dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; ce qu'un Échange renvoie. Les
 // règles d'accès du lien public sont dans acl.js.
-import { COL_ID, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
+import { AUTHOR_COL, COL_ID, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -84,17 +84,6 @@ export function exportRowsActions(rows, exportId, tables, { isPublic = false, sw
   return { actions, changed };
 }
 
-// Montage d'avant la version 0.5 : le suivi des clés manque aux tables des exports. Rend l'action
-// qui l'ajoute (le suivi part des clés présentes : rien n'est effacé dans les CIBLES), ou null.
-export function addTrackRowsAction(rows) {
-  const has = new Set(rows.filter(r => r[TYPE_COL] === KIND.track).map(r => `${r[EXPORT_COL]}|${r[TABLE_COL]}`));
-  const add = rows.filter(r => r[TYPE_COL] === KIND.keys && !has.has(`${r[EXPORT_COL]}|${r[TABLE_COL]}`));
-  if (!add.length) return null;
-  const cols = [EXPORT_COL, TABLE_COL, SCHEMA_COL];
-  return ['BulkAddRecord', SYNC_TABLE, add.map(() => null),
-    { ...Object.fromEntries(cols.map(c => [c, add.map(r => r[c] ?? '')])), [TYPE_COL]: add.map(() => KIND.track), [RESEND_COL]: add.map(() => '') }];
-}
-
 // Tables, colonnes et filtres d'un export, lus dans ses lignes Synchro.
 export function exportTables(rows, exportId) {
   const mine = rows.filter(r => r[EXPORT_COL] === exportId && r[TYPE_COL] !== KIND.swap && r[TYPE_COL] !== KIND.sign);
@@ -133,6 +122,50 @@ export function conditionExport(text) {
 // Nom du webhook d'un destinataire : lisible dans les réglages de Grist, avec l'export en fin.
 export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
 
+// État d'un destinataire, lu dans l'état d'envoi que Grist donne à son webhook (`usage`) :
+// [état, ton de la pastille].
+export function hookStatus(h) {
+  if (!h.fields.enabled) return ['paused', 'off'];
+  const u = h.usage || {};
+  return ['retrying', 'error'].includes(u.status) || u.lastHttpStatus >= 400 ? ['error', 'err'] : ['active', 'ok'];
+}
+
+// Lot refusé pour sa taille. L'état d'un webhook est remis à zéro quand la file est vidée, mais un
+// envoi en vol peut encore y écrire son échec : seul compte l'envoi que Grist retente.
+export function tooLarge(h) {
+  const u = h.usage || {};
+  return ['retrying', 'postponed'].includes(u.status) && (u.lastEventBatch || {}).httpStatus === 413;
+}
+
+// Erreur d'envoi d'un destinataire : clé du texte qui la dit simplement, avec ce qu'il faut faire.
+export function hookErrorKey(h) {
+  const u = h.usage || {};
+  const status = u.lastHttpStatus || (u.lastEventBatch || {}).httpStatus;
+  if (status === 413) return 'send.error.size';
+  if (/Invalid column/i.test(u.lastErrorMessage || '')) return 'send.error.column';
+  return [401, 403, 404].includes(status) ? 'send.error.link' : 'send.error.other';
+}
+
+// État d'un export pour sa carte : [clé de la pastille, ton]. `exp` : { recipients, invitations,
+// public, echange, retour }.
+export function exportStatus(exp) {
+  if (exp.recipients.some(h => hookStatus(h)[0] === 'error')) return ['error', 'err'];
+  if (exp.recipients.length && exp.echange && !exp.retour) return ['participants', 'ok'];
+  if (exp.recipients.length || exp.public) return ['people', 'ok'];
+  return exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
+}
+
+// Mémo d'un webhook : la fiche du destinataire, « e-mail · document · équipe » (voir memoMatches).
+export const hookMemo = ({ email, docId, team }) => [email, docId, team].filter(Boolean).join(' · ');
+
+// Journal de retour d'un participant (webhook `hook`) : noté à l'approbation (`hook`) ; pour un
+// Échange branché avant, retrouvé par le document de la fiche, cité dans le mémo du webhook.
+export const ownJournal = hook => ({ note }) => note.hook === hook.id
+  || (!note.hook && Boolean((note.from || {}).docId) && (hook.fields.memo || '').split(' · ').includes(note.from.docId));
+
+// E-mail de la personne qui a créé l'export (colonne Sync_Par de ses lignes Synchro).
+export const exportEmail = (rows, exportId) => (rows.find(r => r[EXPORT_COL] === exportId) || {})[AUTHOR_COL] || '';
+
 // Destinataires d'un export : les webhooks sur Synchro dont la condition nomme cet export
 // (`conditions` : texte de la condition par webhook).
 export const hooksOf = (hooks, conditions, exportId) =>
@@ -153,6 +186,10 @@ export function exchangeTables(entries, columnsOf) {
     return { table: entry.dest, columns, filter: null };
   }).filter(tb => tb.columns.length);
 }
+
+// Export de retour d'un Échange, côté CIBLE : les destinations de la note du journal, avec leurs
+// colonnes actuelles.
+export const returnExportTables = (note, schema) => exchangeTables(note.tables, dest => exportableColumns(schema.columns(dest) || []));
 
 // Côté SOURCE (journal de retour) : colonnes reçues de l'autre document gardées, et leur
 // correspondance (colonne de l'autre document -> d'ici), lue dans leur nom ici (`as`) ; un choix

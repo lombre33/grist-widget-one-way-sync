@@ -1,14 +1,14 @@
 // Démarrage : thème et langue, chargement de l'API des widgets depuis l'instance Grist, choix de
 // l'onglet, Réglages.
-import { GRIST_ORIGINS, VERSION } from './config.js';
+import { GRIST_ORIGINS, VERSION, WIDGET_URL } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
-import { SYNC_TABLE } from './logic/common.js';
+import { SYNC_TABLE, sleep } from './logic/common.js';
 import { readSchema } from './grist.js';
-import { legacyTables, readSourceNote } from './source/synchro.js';
-import { legacyJournals, receivedJournals } from './target/journals.js';
+import { readSourceNote } from './source/synchro.js';
+import { receivedJournals } from './target/journals.js';
 import { copyField, el, errorText, message, openModal } from './ui.js';
-import { roleGuide, widgetAddress } from './guide.js';
+import { roleGuide } from './guide.js';
 import { tutorialView } from './tutorial.js';
 import { refreshSource, renderSource } from './source/tab.js';
 import { startAutoCatchUp } from './source/resend.js';
@@ -16,6 +16,8 @@ import { refreshTarget, renderTarget } from './target/tab.js';
 import { consolidateAll, startAutoConsolidation } from './target/loop.js';
 
 const $ = id => document.getElementById(id);
+const RETRY_MS = 3000; // Grist injoignable un instant : nouvel essai de l'onglet
+const START_MS = 15000; // au démarrage, au-delà : Grist est injoignable
 
 // L'API des widgets vient de l'instance qui affiche le widget, si elle est dans la liste ; sinon
 // de la première instance de la liste. Jamais d'une adresse choisie par la page qui encadre.
@@ -41,7 +43,7 @@ function showScreen(...nodes) {
 // pour recharger. Les onglets restent visibles, grisés.
 function showStartProblem(text, { withAddress = false, reload = false } = {}) {
   for (const button of document.querySelectorAll('[data-tab]')) button.disabled = true;
-  showScreen(message('warn', text), withAddress ? copyField(widgetAddress()) : null,
+  showScreen(message('warn', text), withAddress ? copyField(WIDGET_URL) : null,
     reload ? el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, t('start.reload')) : null);
 }
 
@@ -52,7 +54,7 @@ async function select(tab, retry = true) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', String(button.dataset.tab === tab));
   const view = el('div', { class: 'view' });
   showScreen(view);
-  if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(widgetAddress()))));
+  if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(WIDGET_URL))));
   try {
     await (tab === 'send' ? renderSource(view) : renderTarget(view));
   } catch (e) {
@@ -61,7 +63,7 @@ async function select(tab, retry = true) {
     if (!unreachable(e)) console.error(e);
     else console.warn(e);
     if (unreachable(e) && retry) {
-      await new Promise(resolve => { setTimeout(resolve, 3000); });
+      await sleep(RETRY_MS);
       return view.isConnected ? select(tab, false) : undefined;
     }
     view.replaceChildren(message('err', errorText(e)));
@@ -122,7 +124,7 @@ async function start() {
   grist.ready({ requiredAccess: 'full' });
   // Sans accès complet, Grist refuse la lecture ; sans réponse du tout, Grist est injoignable.
   try {
-    await Promise.race([grist.docApi.fetchTable('_grist_Tables'), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000))]);
+    await Promise.race([grist.docApi.fetchTable('_grist_Tables'), sleep(START_MS).then(() => { throw new Error('timeout'); })]);
   } catch (e) {
     return e.message === 'timeout' ? showStartProblem(t('start.slow'), { reload: true }) : showStartProblem(t('start.access'));
   }
@@ -153,8 +155,8 @@ async function openFirstScreen() {
   const backLink = readSourceNote(schema).invitations.some(inv => inv.journal && !inv.ready);
   ready = true;
   if (picked) await select(picked);
-  else if (!backLink && (journals.some(r => !r.note.retour) || legacyJournals(schema).length)) await select('receive');
-  else if (schema.has(SYNC_TABLE) || legacyTables(schema).length) await select('send');
+  else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
+  else if (schema.has(SYNC_TABLE)) await select('send');
   else showHome();
   if (journals.length) consolidateAll();
 }

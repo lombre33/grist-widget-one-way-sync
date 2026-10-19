@@ -18,10 +18,9 @@ const MAX_TABLES = 200; // tables suivies dans la note d'un journal
 // Ligne telle que déposée par le webhook (ou le lien public) : une liste des clés ou un lot.
 export const isRaw = row => !isBlank(row[TYPE_COL]);
 
-// Note d'un journal (description de sa colonne Synchro_Ids) : { id, export, name, secret, from,
-// mode, base, retour, tables: [{ table, dest, columns, map, match, label, refs }], refused, missing,
-// big, tooBig, suspect }. Le journal de retour d'un Échange (`retour`, côté du document qui a
-// invité) attend la réponse (`from` encore vide) avant de recopier quoi que ce soit.
+// Note d'un journal : voir readNote dans target/journals.js. Le journal de retour d'un Échange
+// (`retour`, côté du document qui a invité) attend la réponse (`from` encore vide) avant de
+// recopier quoi que ce soit.
 export const awaitingPartner = note => note.mode === 'echange' && Boolean(note.retour) && !(note.from || {}).docId;
 
 // ---------------------------------------------------------------------------------------------
@@ -104,6 +103,13 @@ function unpackedRows(row, { table, text }, lines) {
     ...(i === 0 ? { [SCHEMA_COL]: row[SCHEMA_COL] || '' } : {}),
   }));
 }
+
+// Tables à relire parmi celles que Grist dit changées (`changed` ; null : on ne sait pas) : les
+// journaux et destinations suivis (`watched`), et le schéma (une table ou une colonne ajoutée,
+// effacée). Null : tout relire.
+const SCHEMA_TABLES = ['_grist_Tables', '_grist_Tables_column'];
+export const touchedTables = (changed, watched) => (changed === null ? null
+  : [...changed].filter(table => watched.has(table) || SCHEMA_TABLES.includes(table)));
 
 // Dépliage, dans l'ordre d'arrivée : chaque lot devient une ligne par version (clé, date,
 // suppression, bloc des colonnes, table d'origine), chaque liste des clés une ligne de liste (qui
@@ -236,6 +242,9 @@ const lastWhere = (rows, test) => rows.reduce((latest, row) => (test(row) && (!l
 // Dernière ligne qui porte la description des colonnes (listes, et première version de chaque lot).
 const latestSchemaRow = rows => lastWhere(rows, r => !isBlank(r[SCHEMA_COL]));
 
+// Colonnes que la destination reçoit : les colonnes de données (sans la clé, MajLe ni Supprime).
+export const destColumns = columns => columns.filter(c => ![KEY_COL, ORDER_COL, DELETE_COL].includes(c.id));
+
 // Colonnes envoyées, lues dans la dernière description reçue, sinon `fallback` (celles de l'invitation).
 export function sentColumns(rows, fallback = []) {
   const cols = parseJson((latestSchemaRow(rows) || {})[SCHEMA_COL]);
@@ -294,21 +303,16 @@ export function planPurge(journalRows, journalTable, { keep = [], drop = [] } = 
   return chunk(ids).map(part => ['BulkRemoveRecord', journalTable, part]);
 }
 
+// États d'une version recopiée montrés dans l'historique (voir recentChanges).
+export const STATES = ['ajout', 'modif', 'suppression'];
+export const REFUSED = 'refus';
+const SHOWN = [...STATES, REFUSED];
+
 // Historique : dernière version de chaque clé recopiée avec un effet connu, arrivée après `since`
 // (secondes), la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne ; `n` est son
 // numéro dans la destination (`numbers`, voir rowNumbers), celui qu'elle avait pour une ligne
 // supprimée ; `detail` montre avant et après sur les colonnes recopiées (`copyCols`). Échange, chez
 // le document qui l'administre : un changement refusé (REFUSED) y figure aussi.
-export const STATES = ['ajout', 'modif', 'suppression'];
-export const REFUSED = 'refus';
-const SHOWN = [...STATES, REFUSED];
-
-// Tables à relire parmi celles que Grist dit changées (`changed` ; null : on ne sait pas) : les
-// journaux et destinations suivis (`watched`), et le schéma (une table ou une colonne ajoutée,
-// effacée). Null : tout relire.
-const SCHEMA_TABLES = ['_grist_Tables', '_grist_Tables_column'];
-export const touchedTables = (changed, watched) => (changed === null ? null
-  : [...changed].filter(table => watched.has(table) || SCHEMA_TABLES.includes(table)));
 export function recentChanges(journalRows, labelCol, since, max, { copyCols = [], numbers = new Map() } = {}) {
   return [...latestByKey(journalRows).values()]
     .map(v => ({ at: v.row[RECEIVED_COL] ?? v.order, state: v.row[STATE_COL], row: v.row }))

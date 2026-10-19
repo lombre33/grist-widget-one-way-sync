@@ -1,0 +1,396 @@
+[
+  {
+    "id": "install",
+    "role": "both",
+    "title": {
+      "fr": "Installer le widget (dans chaque document)",
+      "en": "Install the widget (in each document)"
+    },
+    "text": {
+      "fr": [
+        "Il faut un propriétaire du document SOURCE et un éditeur du document CIBLE, sur la même instance Grist. Chacun installe le widget dans son document :",
+        "1. Ajouter, puis Ajouter une page.",
+        "2. Choisir la vue Personnalisée, avec n’importe quelle table, puis Ajouter une page.",
+        "3. Choisir Synchro Grist dans la galerie de widgets de l’instance s’il y figure. Sinon : cliquer « URL personnalisée », coller l’adresse officielle du widget (en bas de cet onglet), jamais une adresse reçue par courriel, puis Ajouter un widget. Grist peut demander de confirmer que vous faites confiance au widget.",
+        "4. Dans le panneau de droite, accepter l’accès complet au document. Renommer la page, par exemple « Synchro ». Les tables techniques n’ont pas de page : elles sont dans « Données source »."
+      ],
+      "en": [
+        "You need an owner of the SOURCE document and an editor of the TARGET document, on the same Grist instance. Each installs the widget in their document:",
+        "1. Add, then Add page.",
+        "2. Pick the Custom view, with any table, then Add page.",
+        "3. Pick Synchro Grist in the instance’s widget gallery if it is there. Otherwise: click “Custom URL”, paste the official widget address (at the bottom of this tab), never an address received by email, then Add widget. Grist may ask you to confirm you trust the widget.",
+        "4. In the right panel, accept full access to the document. Rename the page, for example “Sync”. Technical tables have no page: they are in “Raw data”."
+      ]
+    },
+    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00d-installer-acces", "01-accueil"]
+  },
+  {
+    "id": "s-tables",
+    "role": "source",
+    "title": {
+      "fr": "Créer un export : les tables",
+      "en": "Create an export: the tables"
+    },
+    "text": {
+      "fr": [
+        "Un export a un nom, des tables et leurs colonnes ; on y ajoute ensuite les personnes qui le reçoivent. Envoyer, Nouvel export, cocher les tables."
+      ],
+      "en": [
+        "An export has a name, tables and their columns; you then add the people who receive it. Send, New export, tick the tables."
+      ]
+    },
+    "images": ["02-source-tables"]
+  },
+  {
+    "id": "s-columns",
+    "role": "source",
+    "title": {
+      "fr": "Choisir les colonnes, nommer l’export",
+      "en": "Pick the columns, name the export"
+    },
+    "text": {
+      "fr": [
+        "Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export.",
+        "À la création, le widget ajoute id_sync (identifiant stable) et MajLe (date de modification) aux tables, et la table technique Synchro, une seule pour tout le document. Une colonne Supprime déjà présente est prise en compte : une ligne cochée est retirée de la CIBLE."
+      ],
+      "en": [
+        "Tick the columns to send (all by default, except attachments, to tick). The rest never leaves the document. Columns apply to all recipients of the export.",
+        "On creation, the widget adds id_sync (stable key) and MajLe (last change) to the tables, and the Synchro technical table, one for the whole document. An existing Supprime column is honoured: a ticked row is removed from the TARGET."
+      ]
+    },
+    "images": ["03-source-colonnes", "03b-source-nom"]
+  },
+  {
+    "id": "s-options",
+    "role": "source",
+    "title": {
+      "fr": "Ajouter un destinataire",
+      "en": "Add a recipient"
+    },
+    "text": {
+      "fr": [
+        "Sur la carte de l’export, Ajouter un destinataire. Mode « dans un seul sens » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas. La case Sécurité renforcée impose de comparer le code de contrôle avec la personne avant de brancher."
+      ],
+      "en": [
+        "On the export card, Add a recipient. “One way” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below. The Enhanced security box requires comparing the control code with the person before connecting."
+      ]
+    },
+    "images": ["04-source-options"]
+  },
+  {
+    "id": "s-invite",
+    "role": "source",
+    "title": {
+      "fr": "Transmettre l’invitation",
+      "en": "Send the invitation"
+    },
+    "text": {
+      "fr": [
+        "Copier le code, ou « Copier avec les consignes » pour un message prêt à envoyer par courriel à la personne de la CIBLE. « Plus tard » ferme l’assistant : l’invitation attend sur la carte de l’export."
+      ],
+      "en": [
+        "Copy the code, or “Copy with instructions” for a message ready to email to the TARGET person. “Later” closes the wizard: the invitation waits on the export card."
+      ]
+    },
+    "images": ["05-source-invitation", "06-source-attente"]
+  },
+  {
+    "id": "t-code",
+    "role": "target",
+    "title": {
+      "fr": "Coller le code d’invitation",
+      "en": "Paste the invitation code"
+    },
+    "text": {
+      "fr": [
+        "Recevoir, Accepter une invitation, coller le code reçu de la SOURCE."
+      ],
+      "en": [
+        "Receive, Accept an invitation, paste the code received from the SOURCE."
+      ]
+    },
+    "images": ["07-cible-code"]
+  },
+  {
+    "id": "t-dest",
+    "role": "target",
+    "title": {
+      "fr": "Choisir les destinations",
+      "en": "Pick the destinations"
+    },
+    "text": {
+      "fr": [
+        "Pour chaque table de l’export : Nouvelle table (nom modifiable) ou une table du document.",
+        "Pour une table existante, dire où va chaque colonne et par quelle colonne rattacher les lignes déjà là : une ligne dont cette colonne a la même valeur est mise à jour au lieu d’être doublée.",
+        "Le widget crée un journal pour l’export et publie son formulaire de réception sur sa propre page, en bas de la liste des pages."
+      ],
+      "en": [
+        "For each table of the export: New table (name editable) or a table of the document.",
+        "For an existing table, say where each column goes and which column attaches rows already there: a row with the same value is updated instead of duplicated.",
+        "The widget creates a journal for the export and publishes its receiving form on its own page, at the bottom of the page list."
+      ]
+    },
+    "images": ["08-cible-destinations", "08b-cible-colonnes"]
+  },
+  {
+    "id": "t-link",
+    "role": "target",
+    "title": {
+      "fr": "Copier le lien du formulaire",
+      "en": "Copy the form link"
+    },
+    "text": {
+      "fr": [
+        "Ouvrir la page du formulaire, en bas de la liste des pages, puis dans sa carte : Partager, Copier le lien. Coller ce lien dans le widget, Tester le lien : le widget vérifie qu’il écrit bien dans le journal de cette réception. Il sert pour toutes les tables de l’export, et pour celles qui s’y ajouteront.",
+        "Ce lien est un droit d’écriture dans votre journal : ne le diffusez pas ailleurs. Chaque réception a le sien."
+      ],
+      "en": [
+        "Open the form’s page, at the bottom of the page list, then in its card: Share, Copy link. Paste it in the widget, Test the link: the widget checks that it writes into this reception’s journal. It works for every table of the export, and those added later.",
+        "This link is a write right into your journal: do not share it elsewhere. Each reception has its own."
+      ]
+    },
+    "images": ["img/aide-partager.png", "img/aide-copier.png", "09-cible-lien"]
+  },
+  {
+    "id": "t-reply",
+    "role": "target",
+    "title": {
+      "fr": "Renvoyer la réponse",
+      "en": "Send the reply back"
+    },
+    "text": {
+      "fr": [
+        "Copier le code de réponse, ou « Copier avec les consignes », et l’envoyer à la SOURCE. Il contient l’adresse d’écriture et votre fiche (e-mail, document, équipe), pas de données."
+      ],
+      "en": [
+        "Copy the reply code, or “Copy with instructions”, and send it to the SOURCE. It holds the write address and your card (email, document, team), no data."
+      ]
+    },
+    "images": ["10-cible-reponse"]
+  },
+  {
+    "id": "s-reply",
+    "role": "source",
+    "title": {
+      "fr": "Approuver la réponse",
+      "en": "Approve the reply"
+    },
+    "text": {
+      "fr": [
+        "Sur la carte de l’export, ligne de l’invitation, Coller la réponse. Vérifier qui a accepté, puis Approuver et brancher : Grist reçoit un webhook filtré sur cet export, la personne ne reçoit que ses lignes."
+      ],
+      "en": [
+        "On the export card, invitation line, Paste the reply. Check who accepted, then Approve and connect: Grist gets a webhook filtered on this export, the person only receives its rows."
+      ]
+    },
+    "images": ["11-source-fiche"]
+  },
+  {
+    "id": "s-load",
+    "role": "source",
+    "title": {
+      "fr": "Envoyer les lignes existantes",
+      "en": "Send the existing rows"
+    },
+    "text": {
+      "fr": [
+        "Le branchement n’envoie que les changements à venir : Envoyer pousse les lignes déjà là."
+      ],
+      "en": [
+        "Connecting only sends future changes: Send pushes the rows already there."
+      ]
+    },
+    "images": ["12-source-envoi"]
+  },
+  {
+    "id": "s-manage",
+    "role": "source",
+    "title": {
+      "fr": "Gérer un export",
+      "en": "Manage an export"
+    },
+    "text": {
+      "fr": [
+        "La carte de l’export liste ses tables et ses destinataires. Pour l’export : Ajouter un destinataire (sans refaire l’export) ; Modifier (tables, colonnes, nom, pour tous) ; Tout renvoyer ; Supprimer.",
+        "Pour une personne : Mettre en pause, puis Reprendre, qui propose de rattraper les changements de la pause (recommandé) ; Débloquer la file si un envoi échoue ; Révoquer, sans toucher aux autres.",
+        "Un renvoi part vers tous les destinataires de l’export ; chez ceux qui avaient déjà ces lignes, il est sans effet."
+      ],
+      "en": [
+        "The export card lists its tables and recipients. For the export: Add a recipient (without redoing the export); Edit (tables, columns, name, for everyone); Resend all; Delete.",
+        "For one person: Pause, then Resume, which offers to catch up on changes made during the pause (recommended); Unblock the queue when a delivery fails; Revoke, without affecting the others.",
+        "A resend goes to all recipients of the export; for those who already had these rows, it has no effect."
+      ]
+    },
+    "images": ["13-source-actif", "18-source-modifier", "13b-source-reprendre"]
+  },
+  {
+    "id": "t-daily",
+    "role": "target",
+    "title": {
+      "fr": "Au quotidien, côté CIBLE",
+      "en": "Day to day, TARGET side"
+    },
+    "text": {
+      "fr": [
+        "Chaque changement de la SOURCE arrive dans le journal en une seconde environ, même page fermée. La recopie dans vos tables se fait quand un éditeur ouvre la page du widget (même replié), puis dès que quelque chose change (le widget le demande à Grist toutes les 10 secondes).",
+        "L’historique montre, par table, les lignes ajoutées, modifiées et supprimées depuis votre dernière visite, avec leur numéro de ligne et nommées par la colonne de votre choix. Il est replié, comme chacune de ses lignes, qui s’ouvre au clic sur ses valeurs avant et après. Une colonne ajoutée à l’export par la SOURCE y est annoncée.",
+        "Une valeur, une ligne ou une colonne modifiée ou supprimée à la main reste ainsi jusqu’à la prochaine modification de la même ligne dans la SOURCE ; d’ici là, la carte la signale une dizaine de secondes après, avec la valeur d’ici et celle de la SOURCE, et « Corriger » remet l’état exact de la SOURCE. Arrêter la réception efface le journal et garde vos tables."
+      ],
+      "en": [
+        "Each SOURCE change reaches the journal in about a second, even with the page closed. Copying into your tables happens when an editor opens the widget page (even collapsed), then as soon as something changes (the widget asks Grist every 10 seconds).",
+        "The history shows, per table, the rows added, changed and deleted since your last visit, with their row number and named by the column of your choice. It is collapsed, like each of its rows, which opens on click on its values before and after. A column added to the export by the SOURCE is announced there.",
+        "A value, a row or a column changed or deleted by hand stays that way until the same row changes again in the SOURCE; until then, the card flags it about ten seconds later, with the value here and the SOURCE value, and “Fix” puts the exact SOURCE state back. Stop receiving deletes the journal and keeps your tables."
+      ]
+    },
+    "images": ["14-cible-historique"]
+  },
+  {
+    "id": "t-offer",
+    "role": "target",
+    "title": {
+      "fr": "Une table ajoutée à l’export",
+      "en": "A table added to the export"
+    },
+    "text": {
+      "fr": [
+        "Quand la SOURCE ajoute une table à l’export, une fenêtre demande où la ranger : Recevoir (nouvelle table, ou table existante avec la correspondance des colonnes), Refuser (ses lignes sont effacées à l’arrivée), ou Plus tard (elle reste proposée sur la carte)."
+      ],
+      "en": [
+        "When the SOURCE adds a table to the export, a dialog asks where it goes: Receive (new table, or existing table with column mapping), Refuse (its rows are deleted on arrival), or Later (it stays offered on the card)."
+      ]
+    },
+    "images": ["17-cible-nouvelle-table", "08b-cible-colonnes"]
+  },
+  {
+    "id": "big",
+    "role": "both",
+    "title": {
+      "fr": "Gros changements, valeurs venues d’une autre table",
+      "en": "Big changes, values from another table"
+    },
+    "text": {
+      "fr": [
+        "Un changement de plus de 2 000 lignes environ, fait d’un coup (import, remplacement), ne part qu’en partie. Grist le note dans la table Synchro, et le widget SOURCE envoie le reste par tranches, seul, dès qu’un propriétaire ouvre sa page (même repliée). En attendant, la CIBLE affiche combien de lignes manquent.",
+        "Une valeur qui change à cause d’une autre table (le nom d’une ville renommée, affiché par une Référence, ou une formule) repart seule, sans toucher la ligne.",
+        "Une grande table part comme une petite : la liste de ses clés tient en 256 empreintes, et le widget envoie la liste complète par morceaux quand il le faut. Si des envois en attente dépassent ensemble la taille permise par Grist, le widget SOURCE vide la file et renvoie tout, seul."
+      ],
+      "en": [
+        "A change of more than about 2,000 rows made at once (import, replace) is only partly sent. Grist notes it in the Synchro table, and the SOURCE widget sends the rest in batches, on its own, as soon as an owner opens its page (even collapsed). Meanwhile, the TARGET shows how many rows are missing.",
+        "A value that changes because of another table (the name of a renamed city, shown by a Reference, or a formula) leaves on its own, without touching the row.",
+        "A large table leaves like a small one: its key list fits in 256 fingerprints, and the widget sends the full list in parts when needed. If waiting deliveries together exceed the size Grist allows, the SOURCE widget clears the queue and resends everything, on its own."
+      ]
+    },
+    "images": ["19-cible-envoi-coupe"]
+  },
+  {
+    "id": "files",
+    "role": "both",
+    "title": {
+      "fr": "Pièces jointes",
+      "en": "Attachments"
+    },
+    "text": {
+      "fr": [
+        "Une colonne Pièces jointes part si on la coche dans l’export. La CIBLE la reçoit comme une vraie colonne Pièces jointes : les fichiers s’ouvrent, se téléchargent et se prévisualisent comme les siens.",
+        "La liste des fichiers part avec la ligne, tout de suite ; leur contenu part quand un propriétaire de la SOURCE a la page du widget ouverte (même repliée), une fois par destinataire, en morceaux. En attendant, la carte de la CIBLE dit combien de fichiers sont attendus, et la cellule se remplit dès leur arrivée. Un fichier que la CIBLE a déjà n’est pas déposé deux fois.",
+        "Un fichier de plus de 25 Mo ne part pas : la CIBLE le signale. Les fichiers ne passent pas par le lien public, et ne vont que de la SOURCE vers la CIBLE dans un Échange."
+      ],
+      "en": [
+        "An Attachments column is sent if you tick it in the export. The TARGET receives it as a real Attachments column: files open, download and preview like its own.",
+        "The list of files leaves with the row, right away; their content leaves while an owner of the SOURCE has the widget page open (even collapsed), once per recipient, in parts. Meanwhile, the TARGET card says how many files are expected, and the cell fills as soon as they arrive. A file the TARGET already has is not stored twice.",
+        "A file over 25 MB is not sent: the TARGET says so. Files do not travel through the public link, and only go from SOURCE to TARGET in an Exchange."
+      ]
+    },
+    "images": ["25-source-pieces-jointes", "26-cible-fichiers-attendus"]
+  },
+  {
+    "id": "exchange",
+    "role": "both",
+    "title": {
+      "fr": "Variante : Échange, dans les deux sens",
+      "en": "Variant: Exchange, both ways"
+    },
+    "text": {
+      "fr": [
+        "Deux documents se tiennent à jour l’un l’autre : une modification faite d’un côté passe de l’autre, sans revenir ; quand la même ligne change des deux côtés, la plus récente l’emporte. Il faut un propriétaire de chaque côté.",
+        "SOURCE : en ajoutant un destinataire (le premier de l’export), choisir Échange. Le widget publie un formulaire de retour sur sa propre page : copier son lien, il part dans l’invitation. CIBLE : accepter comme d’habitude ; la réponse branche les deux sens à la fois. SOURCE : approuver.",
+        "Une case Supprime est ajoutée aux tables : cochée d’un côté, la ligne disparaît des deux. Arrêter, d’un côté ou de l’autre, arrête les deux sens ; les tables gardent leurs lignes.",
+        "Échange à plusieurs : sur un export déjà en Échange, « Ajouter un participant » invite un document de plus. Le document qui invite administre : il reçoit les modifications de chacun et les renvoie aux autres ; les participants ne se branchent qu’à lui. Une ligne cochée Supprime par un participant reste chez lui, cochée, et disparaît chez les autres. Révoquer ne retire qu’un participant.",
+        "Valider ou refuser : dans « Modifier », à l’étape Nom, le document qui administre choisit pour chaque type de changement des participants (ajout, modification, suppression) : Accepter, Refuser ou À valider. Un changement à valider attend sur la carte du participant, dans Recevoir, avec Accepter et Refuser. Refusé, il est par défaut défait chez le participant, qui reprend la ligne d’ici."
+      ],
+      "en": [
+        "Two documents keep each other up to date: a change made on one side reaches the other, without coming back; when the same row changes on both sides, the most recent wins. Each side needs an owner.",
+        "SOURCE: when adding a recipient (the first of the export), pick Exchange. The widget publishes a return form on its own page: copy its link, it goes into the invitation. TARGET: accept as usual; the reply connects both ways at once. SOURCE: approve.",
+        "A Supprime box is added to the tables: ticked on one side, the row disappears on both. Stopping, on either side, stops both ways; the tables keep their rows.",
+        "Multi-party Exchange: on an export already in Exchange, “Add a participant” invites one more document. The inviting document runs the Exchange: it receives each one’s changes and passes them on to the others; participants only connect to it. A row ticked Supprime by a participant stays there, ticked, and disappears for the others. Revoke only removes one participant.",
+        "Review or refuse: in “Edit”, at the Name step, the document running the Exchange chooses for each kind of participant change (addition, modification, deletion): Accept, Refuse or Review. A change to review waits on the participant’s card, in Receive, with Accept and Refuse. When refused, it is undone on the participant’s side by default: they take back this document’s row."
+      ]
+    },
+    "images": ["20-echange-mode", "21-echange-cible", "22-echange-plusieurs", "23-echange-regles", "24-echange-valider"]
+  },
+  {
+    "id": "public",
+    "role": "both",
+    "title": {
+      "fr": "Variante : lien public",
+      "en": "Variant: public link"
+    },
+    "text": {
+      "fr": [
+        "SOURCE : en ajoutant un destinataire, choisir Lien public. Le widget pose des règles d’accès : un lecteur du document, dont le lien public, ne voit plus que les exports publics. Puis, dans Partager, régler « Lien public » sur Lecture.",
+        "CIBLE : coller le code, choisir les destinations, c’est tout. Le widget lit la SOURCE toutes les 10 secondes tant que sa page est ouverte. À éviter pour des données qui ne doivent pas être publiques."
+      ],
+      "en": [
+        "SOURCE: when adding a recipient, pick Public link. The widget adds access rules: a viewer of the document, including the public link, only sees the public exports. Then, in Share, set “Public link” to Viewer.",
+        "TARGET: paste the code, pick the destinations, that is all. The widget reads the SOURCE every 10 seconds while its page is open. Avoid for data that must not be public."
+      ]
+    },
+    "images": ["15-source-public"]
+  },
+  {
+    "id": "relay",
+    "role": "both",
+    "title": {
+      "fr": "Envoyer et recevoir dans le même document, relais",
+      "en": "Send and receive in the same document, relay"
+    },
+    "text": {
+      "fr": [
+        "Un document peut envoyer certaines tables et en recevoir d’autres : les deux onglets fonctionnent ensemble.",
+        "Une table reçue peut être relayée vers un troisième document (A vers B vers C). Le second saut part quand un éditeur ouvre la page du widget de B. Une ligne ajoutée à la main dans la table relayée reste dans B.",
+        "Le widget refuse les boucles : renvoyer une table reçue au document d’où elle vient, ou une table vers elle-même."
+      ],
+      "en": [
+        "A document can send some tables and receive others: both tabs work together.",
+        "A received table can be relayed to a third document (A to B to C). The second hop leaves when an editor opens the widget page of B. A row added by hand in the relayed table stays in B.",
+        "The widget refuses loops: sending a received table back to the document it comes from, or a table to itself."
+      ]
+    },
+    "images": []
+  },
+  {
+    "id": "trouble",
+    "role": "both",
+    "title": {
+      "fr": "Si quelque chose coince",
+      "en": "If something gets stuck"
+    },
+    "text": {
+      "fr": [
+        "Rien n’arrive dans la table de la CIBLE : ouvrir la page du widget dans la CIBLE, les versions attendaient dans le journal.",
+        "Ligne d’un destinataire en rouge : la CIBLE a arrêté la réception, coupé ou dépublié son formulaire. Révoquer cette personne, puis l’inviter de nouveau ; dans la CIBLE, la même réception reprend.",
+        "Tous les envois du document SOURCE sont en retard : un envoi en échec bloque la file. Débloquer la file.",
+        "Des lignes ne sont pas arrivées : ouvrir la page du widget dans la SOURCE (un gros changement y finit de partir seul), sinon Tout renvoyer.",
+        "Au branchement, « Grist 1.7.11 ou plus récent » : l’instance ne sait pas filtrer un webhook par export."
+      ],
+      "en": [
+        "Nothing reaches the TARGET table: open the widget page in the TARGET, versions were waiting in the journal.",
+        "Red recipient line: the TARGET stopped receiving, cut or unpublished its form. Revoke this person, then invite them again; in the TARGET, the same reception resumes.",
+        "All deliveries of the SOURCE document are late: a failed delivery blocks the queue. Unblock the queue.",
+        "Rows did not arrive: open the widget page in the SOURCE (a big change finishes leaving there on its own), otherwise Resend all.",
+        "On connecting, “Grist 1.7.11 or later”: the instance cannot filter a webhook by export."
+      ]
+    },
+    "images": []
+  }
+]

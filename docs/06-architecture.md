@@ -56,9 +56,9 @@ table de réglages.
 | SOURCE | Dans chaque table d'un export : `id_sync` (UUID à la création) et `MajLe` (date du dernier changement d'une valeur envoyée : formule de déclenchement sur les colonnes des exports). Une colonne `Supprime` déjà présente est prise en compte (ajoutée en Échange). La table `Synchro` : par table d'un export, une ligne `cles`, une ligne `lot`, une ligne de suivi, une ligne `fichiers` si elle envoie des pièces jointes, et pour un export public `complet` et `empreinte` ; par export, une ligne `signature` qui garde la clé de signature de ses envois. Un webhook par destinataire, sur `Synchro`, avec la condition de son export ; son mémo garde la fiche du destinataire. Les exports, les invitations en attente (empreinte du secret), les pauses et les fichiers déjà envoyés (empreintes abrégées) sont notés dans la description de la colonne `Synchro_Export`. Des règles d'accès marquées « Synchro : réservée aux propriétaires », et en mode lien public « Synchro : lecture limitée aux exports publics ». En Échange, la clé de signature de chaque participant dans la description de `id_sync` des tables envoyées. |
 | CIBLE | Les tables de destination, avec leurs colonnes de données plus `id_sync`, masquée de leur page, dont la description garde la clé de signature de l'export reçu. Les pièces jointes reçues, déposées une fois chacune. `Journal_<export>` : les colonnes de `Synchro` (lignes reçues, contrôlées, dépliées puis effacées ; morceaux de fichiers, effacés une fois le fichier déposé), puis par version : table d'origine, clé, date, suppression, bloc des colonnes, et `Sync_Applique`, `Sync_Etat`, `Sync_Avant` (ce que la recopie a remplacé, pour l'historique), `Sync_Par`, `Sync_Recu`. Une page `Journal_<export>` par réception, à la racine de la liste des pages, avec son formulaire publié (sauf en mode lien public). Ce que la CIBLE a choisi est noté dans la description de la colonne `Synchro_Ids` du journal, avec les fichiers attendus et les vagues de suppressions en attente. Une règle d'accès « Synchro : journaux réservés aux éditeurs » (case cochée à l'acceptation). |
 
-Les envois créés avant la version 0.4 sont signalés « à refaire », avec un bouton qui efface
-l'ancien montage. Les réceptions d'avant la 0.5 dont le formulaire partage sa page avec un autre
-sont signalées, avec un bouton qui les sépare.
+Les réceptions d'avant la 0.5 dont le formulaire partage sa page avec un autre sont signalées,
+avec un bouton qui les sépare. Les montages d'avant la 0.5 (développement, 14 et 15 octobre) ne
+sont plus reconnus : leurs tables techniques s'effacent à la main.
 
 ## Limites connues
 
@@ -113,7 +113,7 @@ règles et se lit sans navigateur.
 | `js/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks), `acl.js` (règles d'accès du widget), `trust.js` (document vérifié par Grist, code de contrôle, expiration, signatures), `resend.js` (renvois, budget), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie), `files.js` (pièces jointes : suivi des envois, morceaux, réception, cellules) |
 | `js/source/` | Onglet Envoyer : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `files.js` (envoi des pièces jointes), `actions.js` (pause, reprise, révocation, file), `tab.js` (cartes), `export-wizard.js`, `recipient-wizard.js` |
 | `js/target/` | Onglet Recevoir : `journals.js` (journaux et leur note), `loop.js` (recopie automatique), `files.js` (réception des pièces jointes), `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `wizard.js` (assistant de réception) |
-| `js/guide.js`, `js/tutorial.js` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images |
+| `js/guide.js`, `js/tutorial.js`, `i18n/tutorial.json` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images (texte du tutoriel dans le JSON) |
 | `js/ui.js`, `js/i18n.js`, `i18n/*.json`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
 
 ## Tests
@@ -128,8 +128,8 @@ npm run test:e2e              # parcours complet dans un vrai Grist et un vrai n
 Le test d'intégration déroule tout le parcours avec plusieurs documents : envoi des lignes
 existantes, recopie, ajout, modification, suppressions, retouche manuelle préservée et signalée, historique avec avant et après,
 second destinataire et révocation d'un seul, table et colonne ajoutées à l'export (table existante
-rattachée), Référence renommée, Ctrl+Z, destinations renommées, filtre de lignes, montage 0.4 mis
-à niveau, gros import, file bloquée par un envoi trop gros, table de 21 000 lignes, pause et
+rattachée), Référence renommée, Ctrl+Z, destinations renommées, filtre de lignes, table Synchro
+remise en état, gros import, file bloquée par un envoi trop gros, table de 21 000 lignes, pause et
 reprise avec rattrapage, relais, lignes forgées rejetées, lien d'un autre document refusé, lien
 commun signalé puis coupé, réception reprise, arrêts, lien public (seul l'instantané est lisible,
 sans la note de la SOURCE) et Échange. Avec `CAPTURES=1`, il refait les captures de `docs/images`,

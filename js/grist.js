@@ -1,20 +1,33 @@
-// Accès au document courant, avec les droits de la personne qui a ouvert la page.
-// Deux canaux seulement :
+// Accès au document courant, avec les droits de la personne qui a ouvert la page, et tout ce que
+// le widget envoie sur le réseau (ce fichier seul) :
 //  - l'API des widgets (`grist.docApi`) : lecture des tables, écritures groupées ;
-//  - l'API REST de la même instance pour les webhooks et les pièces jointes, que l'API des widgets
-//    n'expose pas, et pour des lectures légères en SQL, avec un jeton d'accès court
-//    (`getAccessToken`) passé en paramètre `auth=`.
-// Toute requête réseau du widget passe par gristFetch.
+//  - l'API REST du document pour les webhooks et les pièces jointes, que l'API des widgets
+//    n'expose pas, et pour des lectures légères (SQL, comparaison d'états), avec un jeton d'accès
+//    court (`getAccessToken`) passé en paramètre `auth=` (voir authUrl) ;
+//  - des requêtes anonymes à la même instance : écriture par la clé d'un formulaire (postRows),
+//    fiche d'un partage (shareInfo), lecture d'un document public (publicAccess, publicRecords).
+// Toutes passent par gristFetch, qui refuse une instance hors de la liste.
 import { GRIST_ORIGINS } from './config.js';
 import { maskKey, parseDocBaseUrl, parseWebhookUrl } from './logic/codes.js';
-import { toRows } from './logic/common.js';
+import { parseJson, toRows } from './logic/common.js';
 import { readShare } from './logic/trust.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).
-export async function gristFetch(url, options = {}) {
+// Délais d'abandon : avis de fin envoyé juste avant d'effacer un webhook, fiche d'un partage.
+const SHORT_MS = 10000;
+const SHARE_MS = 15000;
+
+async function gristFetch(url, options = {}) {
   if (!GRIST_ORIGINS.includes(new URL(url).origin)) throw new Error('otherInstance');
   return fetch(url, { ...options, credentials: 'omit' });
+}
+
+// Adresse REST du document courant suivie de `path`, avec un jeton d'accès court (lecture seule
+// sauf `write`).
+async function authUrl(path, { write = false } = {}) {
+  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: !write });
+  return `${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
 }
 
 export const fetchRows = async tableId => toRows(await grist.docApi.fetchTable(tableId));
@@ -61,8 +74,21 @@ export async function docIdentity() {
 // Le nom du document, lui, n'est pas lisible : l'API REST refuse au jeton la fiche du document.
 export const isReadOnly = () => new URLSearchParams(location.search).get('readonly') === 'true';
 
-// Propriétaire du document : seul un propriétaire lit la liste des webhooks.
-export const isOwner = () => listWebhooks().then(() => true, () => false);
+// Propriétaire du document : seul un propriétaire lit la liste des webhooks. Une réponse sûre est
+// gardée pour la session ; une autre erreur (réseau, document rechargé) remonte, sans rien garder.
+let owner = null;
+export async function isOwner() {
+  if (owner === null) {
+    try {
+      await listWebhooks();
+      owner = true;
+    } catch (e) {
+      if (e.message !== 'ownerOnly') throw e;
+      owner = false;
+    }
+  }
+  return owner;
+}
 
 // Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
 // léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture
@@ -70,10 +96,9 @@ export const isOwner = () => listWebhooks().then(() => true, () => false);
 // si Grist refuse (droits, table absente) : lire alors la table entière.
 export async function selectRows(tableId, colIds, where = {}) {
   try {
-    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
     const test = Object.entries(where).map(([c, v]) => `"${c}" = '${String(v).replace(/'/g, "''")}'`).join(' and ');
     const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"${test ? ` where ${test}` : ''}`;
-    const response = await gristFetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
+    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(sql)}`));
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
   } catch (e) {
     return null;
@@ -82,18 +107,16 @@ export async function selectRows(tableId, colIds, where = {}) {
 
 // Contenu d'une pièce jointe du document (numéro dans _grist_Attachments).
 export async function downloadAttachment(id) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
-  const response = await gristFetch(`${baseUrl}/attachments/${Number(id)}/download?auth=${encodeURIComponent(token)}`);
+  const response = await gristFetch(await authUrl(`/attachments/${Number(id)}/download`));
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return new Uint8Array(await response.arrayBuffer());
 }
 
 // Dépose un fichier dans le document, avec les droits de la personne ; rend son numéro.
 export async function uploadAttachment(name, bytes) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
   const form = new FormData();
   form.append('upload', new Blob([bytes]), name);
-  const response = await gristFetch(`${baseUrl}/attachments?auth=${encodeURIComponent(token)}`, {
+  const response = await gristFetch(await authUrl('/attachments', { write: true }), {
     method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: form,
   });
   if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
@@ -107,8 +130,7 @@ export async function uploadAttachment(name, bytes) {
 // millisecondes ; une valeur au plus par colonne revient). Null si Grist refuse : la comparaison
 // est réservée à qui peut lire tout le document.
 export async function docChanges(since) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
-  const read = left => gristFetch(`${baseUrl}/compare?left=${encodeURIComponent(left)}&right=HEAD&maxRows=1&auth=${encodeURIComponent(token)}`);
+  const read = async left => gristFetch(await authUrl(`/compare?left=${encodeURIComponent(left)}&right=HEAD&maxRows=1`));
   try {
     let response = await read(since || 'HEAD');
     if ([401, 403].includes(response.status)) return null;
@@ -130,8 +152,7 @@ export const withLock = (name, fn) => (navigator.locks ? navigator.locks.request
 // Webhooks (propriétaires du document seulement : Grist refuse sinon en 403)
 
 async function rest(method, path, body) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
-  const response = await gristFetch(`${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`, {
+  const response = await gristFetch(await authUrl(path, { write: true }), {
     method,
     // Grist exige l'un de ces en-têtes pour toute écriture sans cookie (protection CSRF).
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -176,11 +197,9 @@ export async function createWebhook({ name, memo, url, tableId, condition }) {
 export async function webhookConditions() {
   const conditions = new Map();
   for (const trigger of await fetchRows('_grist_Triggers')) {
-    let text = '';
-    try { text = (JSON.parse(trigger.condition || '{}') || {}).text || ''; } catch (e) { /* condition illisible */ }
-    let actions = [];
-    try { actions = JSON.parse(trigger.actions || '[]') || []; } catch (e) { /* actions illisibles */ }
-    for (const action of actions) if (action && action.type === 'webhook') conditions.set(action.id, text);
+    const text = (parseJson(trigger.condition || '{}') || {}).text || '';
+    const actions = parseJson(trigger.actions || '[]');
+    for (const action of Array.isArray(actions) ? actions : []) if (action && action.type === 'webhook') conditions.set(action.id, text);
   }
   return conditions;
 }
@@ -189,18 +208,19 @@ export const setWebhookEnabled = (id, enabled) => rest('PATCH', `/webhooks/${enc
 export const renameWebhook = (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name });
 export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
 
-// Envoi direct à l'adresse d'un webhook (`rows`, comme le webhook les enverrait) : le lien du
-// formulaire du destinataire n'accepte qu'un ajout de lignes, sans identifiant. Une erreur ne cite
-// jamais la clé.
-export async function postToHook(h, rows, timeout = 60000) {
-  const response = await gristFetch(h.fields.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows), signal: AbortSignal.timeout(timeout) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+// Envoi direct de lignes à une adresse d'écriture (clé d'un formulaire publié : elle n'accepte
+// qu'un ajout de lignes, sans identifiant), comme le webhook les enverrait. Écriture anonyme en
+// JSON : l'en-tête Content-Type suffit à Grist. Une erreur cite le début de la réponse, jamais la clé.
+export async function postRows(url, rows, timeout = 60000) {
+  const response = await gristFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows), signal: AbortSignal.timeout(timeout) });
+  if (!response.ok) throw new Error(maskKey(`HTTP ${response.status} ${(await response.text()).slice(0, 120)}`));
 }
+export const postToHook = (h, rows, timeout) => postRows(h.fields.url, rows, timeout);
 
 // Webhook effacé après un dernier envoi direct à son adresse. Un lien déjà mort ou trop lent ne
 // retient pas l'effacement.
 export async function deleteWebhookWithNotice(h, rows) {
-  await postToHook(h, rows, 10000).catch(() => {});
+  await postToHook(h, rows, SHORT_MS).catch(() => {});
   await deleteWebhook(h.id);
 }
 export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
@@ -211,10 +231,35 @@ export const clearWebhookQueue = () => rest('DELETE', '/webhooks/queue');
 export async function shareInfo(url) {
   const target = parseWebhookUrl(url);
   if (!target) return null;
-  const response = await gristFetch(`${target.origin}${target.prefix}/api/s/${target.key}`, { signal: AbortSignal.timeout(15000) });
+  const response = await gristFetch(`${target.origin}${target.prefix}/api/s/${target.key}`, { signal: AbortSignal.timeout(SHARE_MS) });
   if (response.status === 404 || response.status === 403) return null;
   if (!response.ok) throw new Error('shareUnreadable');
   const info = readShare(await response.json().catch(() => null));
   if (!info) throw new Error('shareUnreadable');
   return info;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Document public (lien public), lu sans identifiant
+
+// Droit du lien public du document d'adresse REST `base` : 'viewers', 'editors' (s'il a été réglé
+// sur Éditeur), '' s'il n'est pas public, ou null quand la réponse ne permet pas de le dire
+// (réseau, serveur occupé).
+export async function publicAccess(base) {
+  try {
+    const response = await gristFetch(base);
+    if (response.ok) return String(((await response.json().catch(() => null)) || {}).access || 'viewers');
+    return [401, 403, 404].includes(response.status) ? '' : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Lignes d'une table d'un document public (`filter` : { colonne: [valeurs] }). Une erreur
+// 'publicClosed' si Grist refuse ou ne répond pas.
+export async function publicRecords(base, tableId, filter) {
+  const query = encodeURIComponent(JSON.stringify(filter));
+  const response = await gristFetch(`${base}/tables/${tableId}/records?filter=${query}`).catch(() => null);
+  if (!response || !response.ok) throw new Error('publicClosed');
+  return (await response.json()).records || [];
 }

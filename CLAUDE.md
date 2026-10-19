@@ -340,9 +340,10 @@ Limites : un envoi Grist est limité à 1 Mo (corps JSON, `express.json`) et reg
 donc dans le même envoi, d'où le budget du lot `max(20 ko, min(250 ko, 950 ko - 40 o × lignes))`.
 En V0.4, une liste des clés de plus de 25 000 lignes environ, ou plusieurs listes en attente
 regroupées, dépassaient 1 Mo et bloquaient la file : la V0.5 n'envoie plus que les seaux qui
-changent, et la liste complète par morceaux lors d'un renvoi. Les montages
-d'avant la V0.4 sont signalés « à refaire » avec un bouton de nettoyage (`legacyTables`,
-`legacyJournals`).
+changent, et la liste complète par morceaux lors d'un renvoi. Depuis le 19 octobre (Antoine,
+carte « Retirer »), les montages d'avant la 0.5 (tables `Synchro_<table>`, journaux par table,
+lignes sans `suivi`, règle « lecture limitée aux vues d'export ») ne sont plus reconnus ni
+nettoyés par le widget.
 
 V0.4.1 (demande d'Antoine : « on anticipe et on fait partir en auto ») :
 - `MajLe` est une formule de déclenchement (`recalcWhen` 0) dont `recalcDeps` liste les colonnes
@@ -382,7 +383,7 @@ analyse de sécurité dans `SECURITY.md`, tutoriel `docs/04-tutoriel.md`). Tests
 Grist Docker, trois documents ; `CAPTURES=1` refait les captures de `docs/images`, leurs vignettes
 recadrées du README (`docs/images/readme`, `shot(nom, 'modal' | 'card')`) et les images d'aide
 de `img/` ; `npm test` vérifie les images et liens des README). Les instances autorisées sont à la fois dans `js/config.js` et dans la CSP de
-`index.html`. Aide intégrée (V0.3) : onglet Tutoriel (`js/tutorial.js`), « Qui fait quoi ? » et
+`index.html`. Aide intégrée (V0.3) : onglet Tutoriel (`js/tutorial.js`, texte dans `i18n/tutorial.json`), « Qui fait quoi ? » et
 « Copier avec les consignes » (`js/guide.js`), aide en images à chaque étape des assistants.
 
 Piège vérifié le 15 octobre (V0.4.4) : la table `Synchro` n'a pas de colonne `manualSort`
@@ -416,8 +417,7 @@ V0.4.3 (audit du 15 octobre) :
   (`newColumnsMap`). Une table envoyée par ce document ne peut pas être destination
   (`destExported`) ; `isUserTable` écarte `Synchro`, `Synchro_*` et `Journal_*`.
 - Lien public : `isPublic` vaut vrai, faux ou inconnu (inconnu : rien ne change) ; le refus
-  général n'est posé que si le widget a déjà ses propres règles. L'ancien montage n'efface que
-  les webhooks des anciennes tables ou d'adresse `…/records?flat=1`.
+  général n'est posé que si le widget a déjà ses propres règles.
 - Un lot vide part pour une table vide lors d'un renvoi (la CIBLE remet son compte de lignes
   manquantes à zéro). Les boutons d'une fenêtre sont grisés pendant l'action (pas de doublon sur
   double clic).

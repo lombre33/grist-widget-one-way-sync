@@ -1,22 +1,22 @@
 // Onglet « Envoyer » (document SOURCE) : une carte par export (un nom, des tables et leurs
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
-import { AUTHOR_COL, EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../logic/common.js';
+import { EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
 import { maskKey } from '../logic/codes.js';
-import { conditionExport, exportTables, exportableColumns, hooksOf } from '../logic/exports.js';
+import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookStatus, hooksOf } from '../logic/exports.js';
 import { STATES, parseLot } from '../logic/journal.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, parseCharge } from '../logic/resend.js';
-import { deleteWebhook, docIdentity, fetchRows, gristFetch, listWebhooks, readSchema, shareInfo, webhookConditions } from '../grist.js';
+import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
 import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
 import { reloading, syncRules } from '../acl.js';
-import { ensureSyncTable, isCharge, legacyTables, readSourceNote, refreshMajLe, removeLegacy } from './synchro.js';
-import { catchUp, chargeNotice, hookStatus, resendTables } from './resend.js';
+import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe } from './synchro.js';
+import { catchUp, chargeNotice, resendTables } from './resend.js';
 import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { confirmDialog, el, icon, message, run } from '../ui.js';
+import { confirmDialog, el, icon, message, pill, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 
@@ -39,13 +39,9 @@ async function loadState() {
   const note = readSourceNote(schema);
   const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])];
   const exports = ids.map(id => exportState(id, { note, rows, schema, recipients: hooksOf(hooks, conditions, id) }));
-  const legacy = legacyTables(schema);
-  // Webhooks de l'ancien montage : sur ses tables, ou vers un journal par une clé de formulaire.
-  // Les autres webhooks du document (autres outils) ne sont pas à lui.
-  const legacyHooks = hooks.filter(h => h.fields.tableId !== SYNC_TABLE && (legacy.includes(h.fields.tableId) || /\/api\/s\/[^/]+\/tables\/[^/]+\/records\?flat=1$/.test(h.fields.url || '')));
   const unsafe = hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id)));
   const charge = parseCharge((all.find(isCharge) || {})[RESEND_COL]);
-  return { ownerOnly, schema, note, exports, unsafe, charge, legacy: { tables: legacy, hooks: legacyHooks } };
+  return { ownerOnly, schema, rows, note, exports, unsafe, charge };
 }
 
 function exportState(id, { note, rows, schema, recipients }) {
@@ -53,7 +49,7 @@ function exportState(id, { note, rows, schema, recipients }) {
   const tables = exportTables(rows, id);
   return {
     ...(note.exports.find(e => e.id === id) || { id, name: id }), tables, recipients, invitations: note.invitations.filter(i => i.export === id),
-    email: (mine[0] || {})[AUTHOR_COL] || '',
+    email: exportEmail(mine, id),
     partial: recipients.some(h => h.fields.enabled) && mine.some(r => (r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0) || listDue(r)),
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
     tooBig: mine.filter(r => r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
@@ -76,20 +72,6 @@ function drift(schema, tables) {
   return { lost, changed };
 }
 
-// Lien public : le document est-il lisible sans identifiant ? (requête anonyme) Rend le droit du
-// lien public ('viewers', ou 'editors' si on l'a réglé sur Éditeur : les règles du widget, qui
-// visent les lecteurs, ne protègent alors plus rien), '' s'il n'est pas public, ou null quand la
-// réponse ne permet pas de le dire (réseau, serveur occupé) : rien ne change alors.
-async function publicAccess(base) {
-  try {
-    const response = await gristFetch(base);
-    if (response.ok) return String(((await response.json().catch(() => null)) || {}).access || 'viewers');
-    return [401, 403, 404].includes(response.status) ? '' : null;
-  } catch (e) {
-    return null;
-  }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Tableau de bord
 
@@ -106,15 +88,17 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
   // rattrapage d'un envoi coupé.
   if (!state.ownerOnly && state.schema.has(SYNC_TABLE)) {
-    const upgraded = await ensureSyncTable();
-    const majle = await refreshMajLe();
-    if (upgraded || majle) state = await loadState();
+    // Les lectures de loadState servent aux deux ; on ne relit qu'après une écriture.
+    if (await ensureSyncTable(state.schema, state.rows)) state = await loadState();
+    if (await refreshMajLe(state.schema, state.rows)) state = await loadState();
     catchUp(refreshSource);
   }
   // Règles d'accès du widget (voir syncRules) : Synchro réservée aux propriétaires, et lien public
   // accordé aux exports partagés. Document lisible par lien public ? Vérifié à chaque affichage :
   // tant qu'il l'est, le refus général posé par le widget reste en place, même sans export public ;
-  // le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même.
+  // le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même. Lien public réglé
+  // sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus rien. Réponse
+  // inconnue (null) : rien ne change.
   const access = await publicAccess((await docIdentity()).baseUrl);
   const open = access === null ? null : Boolean(access);
   if (!periodic && !state.ownerOnly && await syncRules({ publicIds: state.exports.filter(e => e.public).map(e => e.id), open })) {
@@ -128,7 +112,6 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
   const cards = state.ownerOnly ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
   if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
-  if (state.legacy.tables.length) cards.push(legacyCard(state, out));
   container.replaceChildren(...[toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
@@ -183,22 +166,7 @@ const wizardButton = (label, iconName, onclick, { primary = false, ownerOnly = f
   class: `btn btn-small ${primary ? 'btn-primary' : ''}`, type: 'button', disabled: ownerOnly || Boolean(reason), title: reason || null, onclick,
 }, icon(iconName), label);
 
-const pill = (key, tone, vars) => el('span', { class: `pill pill-${tone}` }, t(`send.status.${key}`, vars));
-
-// Erreur d'envoi d'un destinataire, dite simplement, et ce qu'il faut faire.
-function hookError(u) {
-  const status = u.lastHttpStatus || (u.lastEventBatch || {}).httpStatus;
-  if (status === 413) return t('send.error.size');
-  if (/Invalid column/i.test(u.lastErrorMessage || '')) return t('send.error.column');
-  return t([401, 403, 404].includes(status) ? 'send.error.link' : 'send.error.other');
-}
-
-function exportStatus(exp) {
-  if (exp.recipients.some(h => hookStatus(h)[0] === 'error')) return ['error', 'err'];
-  if (exp.recipients.length && exp.echange && !exp.retour) return ['participants', 'ok'];
-  if (exp.recipients.length || exp.public) return ['people', 'ok'];
-  return exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
-}
+const statusPill = (key, tone, vars) => pill(t(`send.status.${key}`, vars), tone);
 
 // Échange administré ici : les types de changement des participants qui ne sont pas acceptés d'office.
 function rulesLine(exp) {
@@ -240,7 +208,7 @@ function exportCard(exp, state, open, out) {
   // Un seul bouton principal par carte, l'étape suivante : ajouter un premier destinataire, ou
   // celui d'une invitation en attente.
   return el('article', { class: 'card', 'data-export': exp.id },
-    el('div', { class: 'card-head' }, el('strong', {}, exp.name), pill(status, tone, { n: n + (exp.public ? 1 : 0) })),
+    el('div', { class: 'card-head' }, el('strong', {}, exp.name), statusPill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
     exportNotes(exp),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
@@ -259,11 +227,11 @@ function personRow(exp, h, ownerOnly, out) {
   const failing = status === 'error';
   const other = (checked.get(h.id) || {}).other;
   return el('li', { class: 'person' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), pill(status, tone)),
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), statusPill(status, tone)),
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
-    failing ? el('p', { class: 'small text-danger' }, hookError(u)) : null,
+    failing ? el('p', { class: 'small text-danger' }, t(hookErrorKey(h))) : null,
     failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) })) : null,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
@@ -276,11 +244,11 @@ function personRow(exp, h, ownerOnly, out) {
 // Une invitation vaut 7 jours : expirée, son code est à refaire.
 function inviteRow(exp, inv, ownerOnly, out) {
   const back = inv.journal && !inv.ready;
-  const expired = !back && isExpired(inv.at, Date.now() / 1000);
+  const expired = !back && isExpired(inv.at, nowS());
   const until = t(expired ? 'send.invite.expiredOn' : 'send.invite.until', { at: dateText(expiresAt(inv.at) * 1000) });
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },
-      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), expired ? pill('expired', 'err') : pill('invited', 'pending')),
+      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), expired ? statusPill('expired', 'err') : statusPill('invited', 'pending')),
     el('p', { class: 'muted small' }, [back ? t('send.mode.echange') : until, inv.renforce ? t('send.renforce.on') : ''].filter(Boolean).join(' · ')),
     el('div', { class: 'person-actions' },
       wizardButton(back ? t('send.back.resume') : expired ? t('send.newCode.ok') : t('send.reply'), back ? 'link' : expired ? 'key' : 'paste', () => openRecipient(exp, inv), { primary: true, ownerOnly }),
@@ -290,7 +258,7 @@ function inviteRow(exp, inv, ownerOnly, out) {
 
 function publicRow(exp, open, ownerOnly, out) {
   return el('li', { class: 'person' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, t('send.public.label')), pill(open ? 'public' : 'publicOff', open ? 'ok' : 'pending')),
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, t('send.public.label')), statusPill(open ? 'public' : 'publicOff', open ? 'ok' : 'pending')),
     open ? null : el('p', { class: 'small' }, t('send.public.turnOn')),
     exp.tooBig.length ? message('warn', t('send.public.tooBig', { tables: exp.tooBig.join(', ') })) : null,
     el('div', { class: 'person-actions' },
@@ -310,17 +278,7 @@ function cleanupCard({ title, body, status, clean, confirm, ownerOnly, out, fn }
 
 // Webhook sur Synchro sans filtre reconnu : il recevrait les lignes de tous les exports.
 const unsafeCard = (hooks, ownerOnly, out) => cleanupCard({
-  title: t('send.unsafe.title'), status: pill('error', 'err'), body: t('send.unsafe.body', { who: hooks.map(h => h.fields.memo || h.fields.name).join(', ') }),
+  title: t('send.unsafe.title'), status: statusPill('error', 'err'), body: t('send.unsafe.body', { who: hooks.map(h => h.fields.memo || h.fields.name).join(', ') }),
   clean: t('send.unsafe.delete'), confirm: t('send.unsafe.confirm'), ownerOnly, out,
   fn: async () => { for (const h of hooks) await deleteWebhook(h.id); },
-});
-
-// Montage d'avant la version 0.4 : à refaire avec un export ; le bouton efface l'ancien.
-const legacyCard = (state, out) => cleanupCard({
-  title: t('send.legacy.title'), status: pill('legacy', 'pending'), body: t('send.legacy.body', { tables: state.legacy.tables.join(', ') }),
-  clean: t('send.legacy.clean'), confirm: t('send.legacy.confirm'), ownerOnly: state.ownerOnly, out,
-  fn: async () => {
-    for (const h of state.legacy.hooks) await deleteWebhook(h.id);
-    await removeLegacy(await readSchema());
-  },
 });

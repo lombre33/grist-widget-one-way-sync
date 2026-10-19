@@ -1,13 +1,14 @@
 // Renvois (SOURCE) : marques reprenables, listes des clés, budget par document.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addSpent, BUDGET_WINDOW, budgetWait, chargeBusy, chunkMark, LEASE_S, listOverdue, listRequest, parseCharge, RESEND_BUDGET, rowsSince, trackState } from '../../js/logic/resend.js';
+import { addSpent, BUDGET_WINDOW, budgetWait, chargeBusy, chunkMark, LEASE_S, listOverdue, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
 import { RESEND_ALL } from '../../js/logic/common.js';
 import { parseList } from '../../js/logic/journal.js';
 
 test('renvoi reprenable : lignes depuis la marque, dans l\'ordre de MajLe ; la marque avance par tranche', () => {
   const rows = [{ id: 1, MajLe: 30 }, { id: 2, MajLe: null }, { id: 3, MajLe: 10 }, { id: 4, MajLe: 20 }, { id: 5, MajLe: 10 }];
   assert.deepEqual(rowsSince(rows, RESEND_ALL).map(r => r.id), [2, 3, 5, 4, 1], 'toute la table, lignes sans MajLe d\'abord');
+  assert.equal(resendValue('ab12', [3, 4]), 'ab12:3,4', 'demande de renvoi : marque et numéros');
   assert.deepEqual(rowsSince(rows, 20).map(r => r.id), [4, 1]);
   assert.deepEqual(rowsSince(rows, 31), []);
   const all = rowsSince(rows, RESEND_ALL);

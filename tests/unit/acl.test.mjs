@@ -19,7 +19,6 @@ test('lien public : seuls les instantanés des exports publics, sans la note de 
   assert.ok(publicAclRules([E]).every(r => r.memo === PUBLIC_MEMO && isPublicRule(r) && isWidgetRule(r)));
   assert.deepEqual(publicAclRules([]), []);
   assert.deepEqual(publicAclRules([], { keepDeny: true }).map(r => r.tableId), ['*'], 'document encore public : le refus général reste');
-  assert.ok(isPublicRule({ memo: 'Synchro : lecture limitée aux vues d’export' }), 'règle d\'une version précédente reconnue');
   assert.ok(!isWidgetRule({ memo: '' }) && !isWidgetRule({ memo: 'Synchro' }));
 });
 
@@ -47,11 +46,11 @@ test('règles du widget : remplacées seulement si elles diffèrent, avant toute
   const resources = [{ id: 1, tableId: '*', colIds: '*' }, { id: 2, tableId: 'Synchro', colIds: '*' }];
   const rules = [
     { id: 5, resource: 1, rulePos: 1, aclFormula: 'user.Email == "a@b.fr"', permissionsText: '+R', memo: '' },
-    { id: 6, resource: 1, rulePos: -1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: 'Synchro : lecture limitée aux vues d’export' },
+    { id: 6, resource: 1, rulePos: -1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: PUBLIC_MEMO },
   ];
   const wanted = [...publicAclRules([E]), ...ownerAclRules()];
   const actions = aclActions(resources, rules, wanted);
-  assert.deepEqual(actions[0], ['BulkRemoveRecord', '_grist_ACLRules', [6]], 'règle d\'une version précédente retirée, celle d\'autrui gardée');
+  assert.deepEqual(actions[0], ['BulkRemoveRecord', '_grist_ACLRules', [6]], 'règle du widget qui n\'a plus lieu d\'être retirée, celle d\'autrui gardée');
   assert.deepEqual(actions.filter(a => a[1] === '_grist_ACLResources').map(a => [a[2], `${a[3].tableId}:${a[3].colIds}`]),
     [[-1, 'Synchro:Synchro_Export'], [-2, 'Synchro:Synchro_Lot,Synchro_Ids,Sync_Etat,Sync_Par'], [-3, 'Synchro:Synchro_Renvoi']], 'une ressource par colonnes, réutilisée');
   const bulk = actions.filter(a => a[1] === '_grist_ACLRules' && a[0].endsWith('AddRecord'));

@@ -1,9 +1,9 @@
 // Pages du document : formulaires de réception (un par journal, chacun sur sa page) et ménage des
 // pages que laissent les tables techniques.
 import { apply, fetchRows, readSchema } from './grist.js';
-import { randomHex } from './logic/common.js';
+import { parseJson, randomHex } from './logic/common.js';
 
-const published = section => JSON.parse(section.shareOptions || '{}').publish === true;
+const published = section => (parseJson(section.shareOptions) || {}).publish === true;
 
 // ---------------------------------------------------------------------------------------------
 // Formulaires de réception
@@ -77,9 +77,10 @@ function tidyActions(viewRef, sections, views, pages) {
   const here = sections.filter(s => s.parentId === viewRef);
   const ids = new Set(here.map(s => s.id));
   const actions = [];
-  if (view.layoutSpec) {
+  const spec = parseJson(view.layoutSpec); // illisible : laissé tel quel
+  if (spec) {
     const keep = box => (box.leaf !== undefined ? (ids.has(box.leaf) ? box : null) : { ...box, children: (box.children || []).map(keep).filter(Boolean) });
-    const { collapsed = [], ...tree } = JSON.parse(view.layoutSpec);
+    const { collapsed = [], ...tree } = spec;
     const tidy = { ...keep(tree), collapsed: collapsed.filter(c => ids.has(c.leaf)) };
     if (!tidy.collapsed.length) delete tidy.collapsed;
     if (JSON.stringify(tidy) !== view.layoutSpec) actions.push(['UpdateRecord', '_grist_Views', viewRef, { layoutSpec: JSON.stringify(tidy) }]);
@@ -125,13 +126,6 @@ export async function dropPages(tableIds) {
   const views = tables.filter(tb => tableIds.includes(tb.tableId) && tb.primaryViewId).filter(tb =>
     sections.filter(s => s.parentId === tb.primaryViewId).every(s => s.tableRef === tb.id)).map(tb => tb.primaryViewId);
   await apply(views.map(v => ['RemoveView', v]));
-}
-
-// Page commune aux vues d'export de la version 0.3 (SOURCE), effacée avec l'ancien montage. 0 si
-// elle n'existe pas.
-export async function exportsViewRef() {
-  const view = (await fetchRows('_grist_Views')).find(v => v.name === 'Synchro_Exports');
-  return view ? view.id : 0;
 }
 
 // Retire une colonne de la page principale de sa table (elle reste dans les données brutes).
