@@ -56,6 +56,12 @@ export const DATA_COL = 'Synchro_Donnees'; // colonnes envoyées d'une ligne, en
 // CIBLE : ce que la recopie a remplacé, pour l'historique, en JSON : { v: valeurs d'avant des
 // colonnes modifiées } pour une modification, { n: numéro de la ligne } pour une suppression.
 export const BEFORE_COL = 'Sync_Avant';
+// CIBLE : sceau d'une ligne dépliée par le widget (voir sealText, trust.js). Propre au journal,
+// comme les colonnes ci-dessus : jamais dans Synchro.
+export const SEAL_COL = 'Sync_Sceau';
+
+// Clé de signature d'un export (voir trust.js) : 32 caractères hexadécimaux.
+export const SIG_KEY = /^[0-9a-f]{32}$/;
 
 // Les clés d'une table sont réparties en BUCKETS seaux selon leur CRC-32 (voir formulas.js).
 export const BUCKETS = 256;

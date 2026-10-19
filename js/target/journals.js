@@ -1,20 +1,19 @@
 // CIBLE : un journal par export reçu, Journal_<export>, où le webhook dépose les listes et les lots.
 // Ce que la CIBLE a choisi (destinations, colonnes) est noté dans la description de sa colonne
-// Synchro_Ids (voir awaitingPartner pour sa forme) ; la clé du formulaire peut la lire, mais pas
+// Synchro_Ids (voir readNote pour sa forme) ; la clé du formulaire peut la lire, mais pas
 // l'écrire. Le journal n'a pas de page : seul son formulaire en a une (voir pages.js).
 import {
-  APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, MISSING_COL, ORDER_COL, RECEIVED_COL, STATE_COL,
-  columnNote, noteAction,
+  APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, JOURNAL_PREFIX, KEY_COL, LIST_COL, MISSING_COL, ORDER_COL, RECEIVED_COL, SEAL_COL,
+  SIG_KEY, STATE_COL, columnNote, noteAction,
 } from '../logic/common.js';
 import { syncColumns } from '../logic/formulas.js';
 import { destColumns } from '../logic/journal.js';
-import { SIG_KEY } from '../logic/trust.js';
 import { apply, readSchema } from '../grist.js';
 import { dropPages, hideColumn } from '../pages.js';
 
 // Colonnes du journal : celles de la table Synchro (le webhook envoie chaque ligne entière), puis
 // les colonnes des lignes dépliées et leurs marques (clé, date, suppression, bloc des colonnes ;
-// recopiée, effet, valeurs remplacées, auteur, date d'arrivée). Le webhook n'écrit que les
+// recopiée, effet, valeurs remplacées, auteur, date d'arrivée, sceau). Le webhook n'écrit que les
 // premières : une colonne propre au journal ne gêne pas.
 const JOURNAL_COLUMNS = [
   ...syncColumns([]).map(({ id, type }) => ({ id, type, isFormula: false })).filter(c => ![AUTHOR_COL, MISSING_COL].includes(c.id)),
@@ -27,6 +26,7 @@ const JOURNAL_COLUMNS = [
   { id: BEFORE_COL, type: 'Text', isFormula: false },
   { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 },
   { id: RECEIVED_COL, type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 0 },
+  { id: SEAL_COL, type: 'Text', isFormula: false },
 ];
 
 // Journaux d'exports reçus : { journal, note } (note : voir readNote), dont la note dit d'où ils
@@ -101,12 +101,14 @@ export async function prepareDest({ dest, columns, map = {} }) {
 // Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
 //   docName }, mode (absent : réponse ; 'echange', 'public' avec base, l'adresse de la SOURCE),
-//   renforce, reserve (journal réservé aux éditeurs, voir acl.js) ;
+//   renforce, reserve (journal réservé aux éditeurs, voir acl.js), reserved (règle posée) ;
 // - Échange : retour (journal de retour, chez qui a invité), hook (webhook du participant) ;
 // - par table : tables [{ table, dest, columns, map, match, label, refs, dropped, addedCols,
 //   waiting }] (voir loop.js), refused (tables refusées) ;
 // - état des arrivées : missing { table: lignes manquantes }, big { table: clés trop grosses },
-//   tooBig (lien public), suspect (arrivées suspectes), ended (heure de l'avis de fin).
+//   tooBig (lien public), suspect (arrivées suspectes), ended (heure de l'avis de fin) ;
+// - sceau : empreinte de la clé qui scelle les lignes dépliées (voir trust.js). Une fois notée, une
+//   clé de signature introuvable arrête le dépliage (voir sealing dans loop.js).
 const listColumn = (schema, tableId) => (schema.columns(tableId) || []).find(c => c.colId === LIST_COL);
 
 const readNote = (schema, tableId) => columnNote(listColumn(schema, tableId));

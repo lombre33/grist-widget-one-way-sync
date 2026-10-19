@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   conditionExport, exchangeColumns, exchangeTables, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, rowFilter, tooLarge,
+  hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, rowFilter, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { EXPORT } from './fixtures.mjs';
@@ -174,4 +174,12 @@ test('fiche d\'un destinataire : mémo, journal de retour, auteur de l\'export',
   const rows = [{ Synchro_Export: 'x', Sync_Par: 'x@b.fr' }, { Synchro_Export: 'y', Sync_Par: 'y@b.fr' }];
   assert.equal(exportEmail(rows, 'y'), 'y@b.fr');
   assert.equal(exportEmail(rows, 'z'), '');
+});
+
+test('tables lues pour un export : les siennes et celles qu\'affichent ses Références', () => {
+  const tables = [
+    { table: 'Contacts', columns: [{ id: 'Nom', source: 'Text' }, { id: 'Ville', source: 'Ref:Villes' }, { id: 'Tags', source: 'RefList:Tags' }] },
+    { table: 'Villes', columns: [{ id: 'Nom', type: 'Text' }] },
+  ];
+  assert.deepEqual(readTables(tables), ['Contacts', 'Villes', 'Tags']);
 });

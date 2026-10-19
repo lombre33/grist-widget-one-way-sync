@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { partRow } from '../../js/logic/files.js';
 import { decodeCode } from '../../js/logic/codes.js';
 import { signText } from '../../js/logic/trust.js';
+import { bucketOf } from '../../js/logic/common.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
@@ -909,9 +910,13 @@ try {
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: first.fields.url });
   await openWidget(source.url);
   await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByText(/envoie maintenant vers un autre document/).waitFor({ timeout: 30000 });
+  // Adresse qui n'est plus celle d'un formulaire (ici, une barre en plus : Grist l'accepte encore).
+  await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: second.fields.url.replace('/records?', '/records/?') });
+  await openWidget(source.url);
+  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByText(/n’est plus celle d’un formulaire de cette instance/).waitFor({ timeout: 30000 });
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: second.fields.url });
   await openWidget(source.url);
-  assert.equal(await widget().getByText(/envoie maintenant vers un autre document/).count(), 0);
+  assert.equal(await widget().getByText(/envoie maintenant vers un autre document|n’est plus celle d’un formulaire/).count(), 0);
   await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
   await moveAlice('Nancy', 'le premier reçoit toujours');
@@ -1201,7 +1206,19 @@ try {
   const forge = rows => fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
   const pirate = JSON.stringify({ lignes: [['pirate', 9e9, false, { Nom: 'Pirate' }]], total: 1 });
   const unsigned = JSON.stringify({ lignes: [['pirate2', Date.now() / 1000, false, { Nom: 'Pirate' }]], total: 1 });
+  // Versions « déjà dépliées » (sans Synchro_Type), postées par la clé du formulaire : elles ne
+  // passent pas par le dépliage, donc ni par la signature ; sans le sceau du widget, rejetées.
+  const victim = (await records(target.doc, 'Contacts')).find(r => r.id_sync);
+  const now = Date.now() / 1000;
+  const injected = [
+    { Synchro_Table: 'Contacts', id_sync: victim.id_sync, MajLe: 32503680000, Supprime: true, Synchro_Donnees: '{}' },
+    { Synchro_Table: 'Contacts', id_sync: 'pirate3', MajLe: now, Synchro_Donnees: JSON.stringify({ Nom: 'Pirate', Photo: [[`${forgedSha}.txt`, 'pirate.txt', 6]] }) },
+    { Synchro_Table: 'Contacts', Synchro_Ids: JSON.stringify({ seaux: { [bucketOf(victim.id_sync)]: [] }, t: now }) },
+    { Synchro_Table: 'Contacts', id_sync: victim.id_sync, MajLe: 32503680000, Sync_Applique: true, Sync_Etat: 'ajout', Sync_Recu: 1e13, Synchro_Donnees: '{"Nom":"Faux"}' },
+    { Synchro_Table: 'Inconnue', id_sync: 'pirate4', MajLe: now, Synchro_Donnees: '{"Nom":"Pirate"}', Synchro_Colonnes: '[{"id":"Nom","type":"Text"}]' },
+  ];
   assert.ok((await forge([
+    ...injected,
     { Synchro_Export: 'ffffffffffffffff', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: pirate },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: 'pas du JSON' },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
@@ -1215,10 +1232,15 @@ try {
   // Rien n'est arrivé depuis plus d'une minute : le passage suivant viendrait dans une minute.
   await widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   await widget().getByText('Arrivées suspectes').waitFor();
-  await widget().getByText(/5\s+lignes rejetées/).waitFor();
+  // Exactement 10 (« 11 010 lignes » contient aussi « 10 lignes ») : aucune ligne légitime écartée.
+  await widget().getByText(/(?<!\d\s?)10\s+lignes rejetées/).waitFor();
   assert.equal(await widget().getByText('Coupé par la SOURCE').count(), 0, 'un avis de fin forgé ne coupe pas la réception');
   await widget().getByText('Lien commun à d’autres formulaires').waitFor();
-  assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Pirate'), 'rien de recopié');
+  const contactsAfter = await records(target.doc, 'Contacts');
+  assert.ok(!contactsAfter.some(r => r.Nom === 'Pirate' || r.Nom === 'Faux'), 'rien de recopié');
+  assert.equal(contactsAfter.find(r => r.id === victim.id).Nom, victim.Nom, 'rien d\'effacé ni de modifié');
+  assert.equal(await widget().getByText(/\bInconnue\b/).count(), 0, 'aucune table proposée');
+  assert.ok(!(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Synchro_Type && r.Synchro_Table && !r.Sync_Sceau), 'versions injectées effacées');
   const leftRaw = await rawRows(target.doc, 'Journal_Annuaire');
   assert.deepEqual(leftRaw.map(r => r.Synchro_Type), ['fichier'], 'lignes rejetées effacées, le fichier non cité attend');
   assert.ok(!(await records(target.doc, '_grist_Attachments')).some(a => a.fileIdent.startsWith(forgedSha)), 'fichier non cité : pas déposé');
@@ -1341,6 +1363,13 @@ try {
   assert.ok(!anonColumns.some(c => /invitations|exports/.test(c.fields.description || '')), 'note de la SOURCE cachée au lien public');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
+  // Une règle d'accès posée après coup sur une table de l'export public est signalée sur sa carte.
+  const later = (await applyActions(source.doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Contacts', colIds: 'Interne' }]])).retValues[0];
+  const laterRule = (await applyActions(source.doc, [['AddRecord', '_grist_ACLRules', null,
+    { resource: later, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 100, memo: 'e2e' }]])).retValues[0];
+  await openWidget(source.url);
+  await widget().getByText(/Une règle d’accès cache maintenant une partie de Contacts/).waitFor();
+  await applyActions(source.doc, [['RemoveRecord', '_grist_ACLRules', laterRule], ['RemoveRecord', '_grist_ACLResources', later]]);
   // Lien public réglé sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus.
   await api('PATCH', `/docs/${source.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'editors' } } });
   await openWidget(source.url);

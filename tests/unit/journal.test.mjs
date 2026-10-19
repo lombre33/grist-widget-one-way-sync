@@ -95,7 +95,7 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
   assert.deepEqual(values.Sync_Recu, [102, 102, 103, 104]);
   assert.deepEqual(values.Synchro_Donnees.slice(0, 3), ['{"Nom":"A"}', '{"Nom":"C"}', '{"Nom":"B"}']);
   assert.deepEqual(actions[1], ['BulkRemoveRecord', 'J', [2, 3, 4, 5, 6]]);
-  assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { actions: [], missing: {}, big: {}, arrived: {}, resent: [], rejected: 0, left: 0 });
+  assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { added: [], removed: [], actions: [], missing: {}, big: {}, arrived: {}, resent: [], rejected: 0, left: 0 });
   const empty = raw(10, 'cles', { Synchro_Ids: '', Synchro_Colonnes: '' });
   assert.deepEqual(planUnpack([empty], 'J').actions, [['BulkRemoveRecord', 'J', [10]]], 'liste vide sans colonnes : rien à garder');
   const seaux = '{"t": 1, "seaux": {"3": ["a"]}}';

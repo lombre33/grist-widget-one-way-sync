@@ -1,8 +1,7 @@
 // Codes échangés entre SOURCE et CIBLE (préfixe + JSON en base64url, sur une ligne) et adresses
 // Grist qu'ils portent. Tout ce qui vient d'un code collé est contrôlé ici : identifiants, colonnes,
 // adresses réécrites à partir de leurs seuls éléments reconnus.
-import { HEX16, is, isSafeId, parseJson } from './common.js';
-import { SIG_KEY } from './trust.js';
+import { HEX16, SIG_KEY, is, isSafeId, parseJson } from './common.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;

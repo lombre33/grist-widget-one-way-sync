@@ -8,7 +8,8 @@ import { aclActions, currentRules, isPublicRule, journalAclRules, ownerAclRules,
 import { apply, fetchRows, readSchema } from './grist.js';
 import { message } from './ui.js';
 import { t } from './i18n.js';
-import { receivedJournals } from './target/journals.js';
+import { receivedJournals, updateJournalNote } from './target/journals.js';
+import { readSourceNote } from './source/synchro.js';
 
 // `publicIds` : exports partagés par lien public, et `open` : le document est-il public (vrai,
 // faux, ou null si on ne sait pas). Sans eux (onglet Recevoir), les règles du lien public restent
@@ -21,9 +22,17 @@ export async function syncRules({ publicIds = null, open = null } = {}) {
     ? current.filter(isPublicRule).filter(r => r.tableId === '*' || schema.has(r.tableId))
     : publicAclRules(publicIds, { keepDeny: Boolean(open) && current.some(isPublicRule) });
   const journals = receivedJournals(schema).filter(r => r.note.reserve).map(r => r.journal);
-  const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules() : []), ...journalAclRules(journals)];
+  const exchanges = readSourceNote(schema).exports.filter(e => e.echange).map(e => e.id);
+  const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals)];
   const actions = aclActions(resources, rules, wanted, id => !schema.has(id));
-  if (!actions.length) return false;
+  if (!actions.length) {
+    // Règles en place : chaque journal réservé le note, pour l'onglet d'un éditeur (qui ne lit pas
+    // les règles d'accès, voir receivedGroups).
+    for (const { journal } of receivedJournals(schema).filter(r => r.note.reserve && !r.note.reserved)) {
+      await updateJournalNote(journal, n => ({ ...n, reserved: true }));
+    }
+    return false;
+  }
   try {
     await apply(actions);
   } catch (e) {

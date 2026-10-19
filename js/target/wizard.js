@@ -1,14 +1,14 @@
 // CIBLE : assistant de réception, en quatre étapes (Code, Destinations, Lien, Réponse). Une
 // réception en attente (ou à rebrancher) l'ouvre directement à l'étape Lien (`group`).
-import { APPLIED_COL, AUTHOR_COL, LIST_COL, journalId, nowS } from '../logic/common.js';
+import { APPLIED_COL, AUTHOR_COL, EXPORT_COL, LIST_COL, journalId, nowS } from '../logic/common.js';
 import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../logic/codes.js';
 import { controlCode, sameDoc } from '../logic/trust.js';
 import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../grist.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
 import { wireExchange } from '../exchange.js';
-import { signingKey } from '../source/synchro.js';
-import { createJournal, prepareDest, receivedJournals, storeKey, updateJournalNote } from './journals.js';
+import { readSourceNote, signingKey, syncRows } from '../source/synchro.js';
+import { createJournal, prepareDest, receivedJournals, receivedKey, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
 import { checkDests, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import { backButton, cancelButton, codeField, confirmDialog, controlLine, el, message, openWizard, run } from '../ui.js';
@@ -34,8 +34,12 @@ function showCode(ctx) {
   const report = el('div', { class: 'report' });
   const next = async () => {
     const invitation = await readInvitation(area.value);
-    const known = receivedJournals(await readSchema()).find(r => r.note.export === invitation.export);
-    return known ? showRelink(ctx, known, invitation) : showDest(ctx, invitation);
+    const schema = await readSchema();
+    const known = receivedJournals(schema).find(r => r.note.export === invitation.export);
+    // La clé de signature d'un export ne change pas : une autre clé dans une nouvelle invitation
+    // pour la même réception est à faire confirmer par la SOURCE.
+    const oldKey = known ? receivedKey(schema, known.journal, known.note) : '';
+    return known ? showRelink(ctx, known, invitation, Boolean(oldKey && invitation.cle && oldKey !== invitation.cle)) : showDest(ctx, invitation);
   };
   ctx.wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report, stepHelp(['t-code']), roleGuide({ you: 'target', current: 1 })],
     [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
@@ -53,6 +57,13 @@ async function readInvitation(text) {
   if (invitation.mode !== 'echange') return invitation;
   if (invitation.retourOrigin !== origin) throw new Error('otherInstance');
   if (!(await isOwner())) throw new Error('exchangeOwner');
+  // L'Échange reprend l'identifiant de l'export de l'autre document : ce ne doit pas être celui
+  // d'un export d'ici, qu'il remplacerait en coupant ses destinataires, sauf le retour de ce même
+  // Échange (nouvelle invitation pour une réception déjà là, voir showRelink).
+  const schema = await readSchema();
+  const local = readSourceNote(schema).exports.some(e => e.id === invitation.export) || (await syncRows(schema)).some(r => r[EXPORT_COL] === invitation.export);
+  const again = receivedJournals(schema).some(r => r.note.export === invitation.export && r.note.mode === 'echange' && !r.note.retour);
+  if (local && !again) throw new Error('exportTaken');
   const share = await shareInfo(invitation.retour);
   if (!share) throw new Error('shareUnknown');
   if (!sameDoc(share.docId, invitation.from.docId || '')) throw new Error('shareOtherDoc');
@@ -66,7 +77,7 @@ const shareText = share => `${share.name} (${[share.folder, share.personal ? t('
 // réception reprend, avec son journal et ses tables, si l'invitation vient du même document, dans
 // le même mode. La fiche est montrée avant : la personne confirme que c'est bien la même SOURCE.
 // Un Échange rebranche son retour sur la nouvelle adresse.
-function showRelink(ctx, known, invitation) {
+function showRelink(ctx, known, invitation, newKey = false) {
   const same = invitation.mode !== 'public' && invitation.mode === (known.note.mode || 'reponse') && !known.note.retour
     && (known.note.from || {}).docId === invitation.from.docId;
   if (!same) throw new Error('alreadyReceived');
@@ -81,7 +92,8 @@ function showRelink(ctx, known, invitation) {
     await ensureForm(known.journal);
     return showLink(ctx, { journal: known.journal, note }, message('info', t('recv.relink')));
   };
-  ctx.wizard.show(STEP.dest, [message('info', t('recv.relink.confirm', { name: known.note.name, journal: known.journal })), sourceFiche(invitation), report],
+  ctx.wizard.show(STEP.dest, [message('info', t('recv.relink.confirm', { name: known.note.name, journal: known.journal })),
+    newKey ? message('warn', t('recv.relink.newKey')) : null, sourceFiche(invitation), report],
     [back(() => showCode(ctx)), cancel, { label: t('recv.relink.ok'), kind: 'btn-primary', onClick: () => run(null, report, relink) }]);
 }
 

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  JOURNAL_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, ownerAclRules, publicAclRules, ruleText,
+  JOURNAL_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, ownerAclRules, publicAclRules, ruleText,
 } from '../../js/logic/acl.js';
 
 const E = '0123456789abcdef';
@@ -30,7 +30,9 @@ test('Synchro réservée aux propriétaires : un éditeur ne lit que les lignes 
   ]);
   assert.equal(rules[0].aclFormula, 'user.Access == VIEWER', 'note de la SOURCE cachée aux lecteurs');
   assert.equal(rules[1].aclFormula, 'user.Access == EDITOR', 'les colonnes ne visent pas les lecteurs : le lien public lit encore l\'instantané');
-  assert.equal(rules[2].aclFormula, 'user.Access == EDITOR and rec.Synchro_Type in ["echange", "lot"]', 'la recopie d\'un Échange écrit Synchro_Renvoi');
+  assert.equal(rules[2].aclFormula, 'user.Access == EDITOR and rec.Synchro_Export in [] and rec.Synchro_Type in ["echange", "lot"]', 'sans Échange : aucune ligne');
+  assert.equal(ownerAclRules([E, 'pas-un-id', '00000000000000ff'])[2].aclFormula,
+    `user.Access == EDITOR and rec.Synchro_Export in ["00000000000000ff", "${E}"] and rec.Synchro_Type in ["echange", "lot"]`, 'la recopie d\'un Échange écrit Synchro_Renvoi de ses lots seulement');
   assert.equal(rules[3].aclFormula, rules[2].aclFormula);
   assert.equal(rules[4].aclFormula, 'user.Access != OWNER');
 });
@@ -79,14 +81,31 @@ test('lien public : refusé pour une table dont une règle cache des lignes ou d
   const rules = [
     { resource: 1, permissionsText: '-R', memo: '' },
     { resource: 2, permissionsText: '+R-U', memo: '' },
-    { resource: 3, permissionsText: '-R', memo: '' },
     { resource: 4, permissionsText: 'none', memo: '' },
     { resource: 2, permissionsText: '-R', memo: OWNER_MEMO },
+    { resource: 3, permissionsText: '-R', memo: PUBLIC_MEMO },
+    { resource: 3, permissionsText: '-S', memo: '' },
   ];
   assert.deepEqual(hiddenTables(resources, rules, ['Contacts', 'Villes', 'Notes', 'Autre']), ['Contacts', 'Notes'],
-    'colonne cachée, table refusée ; pas une règle qui n\'ôte que l\'écriture, ni une règle du widget');
+    'colonne cachée, table refusée ; pas une règle qui n\'ôte que l\'écriture ou la structure, ni une règle du widget');
   assert.deepEqual(hiddenTables(resources, [{ resource: 2, permissionsText: '-CRUD', memo: '' }], ['Villes']), ['Villes']);
   assert.deepEqual(hiddenTables(resources, [{ resource: 2, permissionsText: '-U+R', memo: '' }], ['Villes']), []);
+  assert.deepEqual(hiddenTables(resources, [...rules, { resource: 3, permissionsText: '-R', memo: '' }], ['Villes', 'Autre']), ['Villes', 'Autre'],
+    'une règle d\'autrui sur toutes les tables les vise toutes');
+});
+
+test('Renforcé : les éditeurs peuvent-ils modifier la structure (formules de Synchro) ?', () => {
+  const resources = [{ id: 1, tableId: '*', colIds: '*' }, { id: 2, tableId: 'Contacts', colIds: '*' }];
+  assert.equal(editorsEditStructure(resources, []), true, 'réglage par défaut de Grist');
+  assert.equal(editorsEditStructure(resources, [{ resource: 1, aclFormula: 'user.Access != OWNER', permissionsText: '-S', rulePos: 1 }]), false, 'case décochée');
+  assert.equal(editorsEditStructure(resources, [{ resource: 1, aclFormula: 'user.Access == EDITOR', permissionsText: '+S', rulePos: 1 }]), true, 'case cochée explicitement');
+  assert.equal(editorsEditStructure(resources, [
+    { resource: 1, aclFormula: 'user.Access in [OWNER]', permissionsText: 'all', rulePos: 1 },
+    { resource: 1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', rulePos: 2 },
+    { resource: 1, aclFormula: '', permissionsText: '+R-UCDS', rulePos: 3 },
+  ]), false, 'règle de repli qui ôte la structure à tous');
+  assert.equal(editorsEditStructure(resources, [{ resource: 2, aclFormula: '', permissionsText: '-S', rulePos: 1 }]), true, 'le droit de structure est réglé pour tout le document');
+  assert.equal(editorsEditStructure(resources, [{ resource: 1, aclFormula: 'user.Email == "a@b.fr"', permissionsText: '-S', rulePos: 1 }]), true, 'formule inconnue : ne dit rien');
 });
 
 test('règles du widget : une ressource d\'une table effacée part avec elles, sauf si une autre règle s\'en sert', () => {

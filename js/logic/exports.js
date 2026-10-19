@@ -18,6 +18,11 @@ export function exportableColumns(cols) {
   }));
 }
 
+// Tables que lisent les formules de Synchro pour les tables d'un export (`tables`, voir
+// exportTables) : les siennes, et celles d'où vient le texte affiché de ses colonnes Référence.
+export const readTables = tables => [...new Set(tables.flatMap(({ table, columns }) => [table,
+  ...columns.map(c => (/^Ref(?:List)?:(\w+)$/.exec(c.source || '') || [])[1]).filter(Boolean)]))];
+
 // Colonne Pièces jointes (envoyée ou reçue).
 export const isFileColumn = c => c.type === 'Attachments';
 

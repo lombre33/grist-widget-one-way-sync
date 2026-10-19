@@ -5,11 +5,11 @@
 // notés dans la description de sa colonne Synchro_Export : des métadonnées, que le webhook
 // n'envoie pas. Synchro n'a pas de page : elle reste dans « Données source ».
 import {
-  EXPORT_COL, KIND, LIST_COL, LOT_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction, randomHex,
+  EXPORT_COL, KIND, SIG_KEY, LIST_COL, LOT_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction, randomHex,
 } from '../logic/common.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf } from '../logic/exports.js';
-import { SIG_KEY, signText } from '../logic/trust.js';
+import { signText } from '../logic/trust.js';
 import { apply, fetchRows, listWebhooks, readSchema, webhookConditions } from '../grist.js';
 import { dropPages, removeTechnicalTables } from '../pages.js';
 

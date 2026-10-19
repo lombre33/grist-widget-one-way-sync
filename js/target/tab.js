@@ -8,7 +8,7 @@ import { fetchRows, isOwner, isReadOnly, readSchema } from '../grist.js';
 import { reloading, syncRules } from '../acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { closeExport } from '../exchange.js';
-import { receivedJournals, updateJournalNote } from './journals.js';
+import { receivedJournals, receivedKey, updateJournalNote } from './journals.js';
 import { SHOWN, consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
 import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
@@ -35,14 +35,20 @@ export async function refreshTarget() {
 
 // Réceptions à montrer. Le journal de retour d'un Échange se règle depuis l'onglet Envoyer : il
 // n'attend jamais son lien ici. `shared` : autres formulaires atteints par la même clé.
-async function receivedGroups(schema) {
+// `owner` : la personne pose les règles d'accès elle-même (voir syncRules) ; sinon, un journal
+// réservé aux éditeurs ne l'est qu'une fois qu'un propriétaire a ouvert la page (`reserved`).
+async function receivedGroups(schema, owner) {
   const forms = await formPages();
   const groups = [];
   for (const { journal, note } of receivedJournals(schema).filter(r => !awaitingPartner(r.note))) {
     const known = state.results.get(journal);
     const rows = known ? known.rows : (await fetchRows(journal)).length;
     const waiting = note.mode !== 'public' && !note.retour && !rows;
-    groups.push({ journal, note, public: note.mode === 'public', waiting, shared: (forms.get(journal) || {}).shared || 0 });
+    // Sans clé de signature jamais vue : réception d'avant la 0.8 (une clé perdue arrête la
+    // recopie, voir sealing dans loop.js).
+    const unsigned = note.mode !== 'public' && !note.sceau && !receivedKey(schema, journal, note);
+    const unreserved = Boolean(note.reserve) && !note.reserved && !owner;
+    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
 }
@@ -55,12 +61,13 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   state.readOnly ||= state.viewer;
   // Règles d'accès du widget (journaux cachés aux lecteurs, Synchro d'un Échange réservée aux
   // propriétaires) : seul un propriétaire peut les poser.
-  if (!periodic && !state.readOnly && await isOwner() && await syncRules()) {
+  const owner = !state.readOnly && await isOwner().catch(() => true);
+  if (!periodic && owner && await syncRules()) {
     reloading(container, renderTarget);
     return;
   }
   const schema = await readSchema();
-  const groups = await receivedGroups(schema);
+  const groups = await receivedGroups(schema, owner || state.viewer);
   // Formulaire des exports en attente, chacun sur sa page.
   const out = el('div', { class: 'out' });
   try {
@@ -73,7 +80,7 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   const toolbar = el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
     el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
-  const cards = groups.map(syncCard);
+  const cards = groups.map(safeCard);
   container.replaceChildren(...[toolbar,
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
@@ -143,6 +150,8 @@ function cardNotes(group) {
   const { note } = group;
   return [
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
+    group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
+    group.unreserved ? message('info', t('recv.reserve.owner')) : null,
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
@@ -174,6 +183,22 @@ function syncCard(group) {
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link', () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : ''),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
+}
+
+// Une carte qui ne peut pas se dessiner (journal abîmé) n'empêche pas les autres de l'être : elle
+// garde son nom, l'erreur, et de quoi couper le lien ou arrêter la réception.
+function safeCard(group) {
+  try {
+    return syncCard(group);
+  } catch (e) {
+    console.error(e);
+    return el('article', { class: 'card', 'data-journal': group.journal },
+      el('div', { class: 'card-head' }, el('strong', {}, String(group.note.name || group.journal)), pill(t('recv.status.error'), 'err')),
+      message('err', errorText(e)),
+      el('div', { class: 'card-actions' },
+        group.public ? null : button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text'),
+        button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
+  }
 }
 
 const alertBlock = (title, lines, actions) => el('div', { class: 'msg msg-warn suspect', role: 'status' },

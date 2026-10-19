@@ -2,8 +2,9 @@
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
 import { EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
-import { maskKey } from '../logic/codes.js';
-import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookStatus, hooksOf } from '../logic/exports.js';
+import { maskKey, parseWebhookUrl } from '../logic/codes.js';
+import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookStatus, hooksOf, readTables } from '../logic/exports.js';
+import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
 import { STATES, parseLot } from '../logic/journal.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, parseCharge } from '../logic/resend.js';
@@ -37,18 +38,26 @@ async function loadState() {
   const all = schema.has(SYNC_TABLE) ? await fetchRows(SYNC_TABLE) : [];
   const rows = all.filter(r => !isCharge(r));
   const note = readSourceNote(schema);
+  // Règles d'accès (lisibles par un propriétaire seulement) : revérifiées à chaque affichage.
+  const [resources, aclRules] = ownerOnly ? [[], []] : await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
+  const acl = { resources, rules: aclRules };
   const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])];
-  const exports = ids.map(id => exportState(id, { note, rows, schema, recipients: hooksOf(hooks, conditions, id) }));
+  const exports = ids.map(id => exportState(id, { note, rows, schema, acl, recipients: hooksOf(hooks, conditions, id) }));
   const unsafe = hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id)));
   const charge = parseCharge((all.find(isCharge) || {})[RESEND_COL]);
   return { ownerOnly, schema, rows, note, exports, unsafe, charge };
 }
 
-function exportState(id, { note, rows, schema, recipients }) {
+function exportState(id, { note, rows, schema, acl, recipients }) {
   const mine = rows.filter(r => r[EXPORT_COL] === id);
   const tables = exportTables(rows, id);
+  const entry = note.exports.find(e => e.id === id) || { id, name: id };
   return {
-    ...(note.exports.find(e => e.id === id) || { id, name: id }), tables, recipients, invitations: note.invitations.filter(i => i.export === id),
+    ...entry, tables, recipients, invitations: note.invitations.filter(i => i.export === id),
+    // Lien public : une règle d'accès posée depuis cache une partie de ce qu'il montre à tous.
+    hidden: entry.public ? hiddenTables(acl.resources, acl.rules, readTables(tables)) : [],
+    // Renforcé : les éditeurs peuvent réécrire les formules de Synchro (droit de structure).
+    structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
     partial: recipients.some(h => h.fields.enabled) && mine.some(r => (r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0) || listDue(r)),
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
@@ -128,21 +137,30 @@ export async function renderSource(root = container, { periodic = false } = {}) 
 
 // Chaque destinataire est revérifié chez Grist au plus une fois par heure (voir shareInfo) : la clé
 // de son webhook désigne-t-elle toujours le document de sa fiche (mémo) ? Un co-propriétaire peut
-// changer l'adresse d'un webhook dans les réglages de Grist. Rend vrai si un résultat a changé.
+// changer l'adresse d'un webhook dans les réglages de Grist, même vers un autre site : une adresse
+// qui n'est pas celle d'un formulaire de cette instance est signalée sans rien demander à personne.
+// Rend vrai si un résultat a changé.
 const CHECK_MS = 3600000;
-const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' }
+const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' ; bad }
 async function checkHooks(hooks) {
   const due = hooks.filter((h) => {
     const was = checked.get(h.id);
     return !was || was.url !== h.fields.url || Date.now() - was.at > CHECK_MS;
   });
+  if (!due.length) return false;
+  const { origin } = await docIdentity();
   let changed = false;
+  const note = (h, result) => {
+    const was = checked.get(h.id) || { other: '', bad: false };
+    changed ||= was.other !== result.other || was.bad !== result.bad;
+    checked.set(h.id, { at: Date.now(), url: h.fields.url, ...result });
+  };
   await Promise.all(due.map(async (h) => {
+    const target = parseWebhookUrl(h.fields.url);
+    if (!target || !target.flat || target.origin !== origin) return note(h, { other: '', bad: true });
     const info = await shareInfo(h.fields.url).catch(() => undefined);
     if (info === undefined) return; // Grist ne répond pas : au prochain affichage
-    const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
-    changed ||= (checked.get(h.id) || { other: '' }).other !== other;
-    checked.set(h.id, { at: Date.now(), url: h.fields.url, other });
+    note(h, { other: info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '', bad: false });
   }));
   return changed;
 }
@@ -178,6 +196,8 @@ function rulesLine(exp) {
 
 // Avis d'un export : tables perdues, colonnes changées, envoi incomplet, fichiers à envoyer, Échange.
 const exportNotes = exp => [
+  exp.hidden.length ? message('err', t('send.public.hiddenNow', { tables: exp.hidden.join(', ') })) : null,
+  exp.structure ? message('warn', t('send.renforce.structure')) : null,
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
   exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
   exp.partial ? message('info', t('send.export.partial')) : null,
@@ -225,9 +245,10 @@ function personRow(exp, h, ownerOnly, out) {
   const u = h.usage || {};
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const failing = status === 'error';
-  const other = (checked.get(h.id) || {}).other;
+  const { other, bad } = checked.get(h.id) || {};
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), statusPill(status, tone)),
+    bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,

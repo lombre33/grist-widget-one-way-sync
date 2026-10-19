@@ -2,7 +2,8 @@
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
 import { SYNC_TABLE, isUserTable, nowS, randomHex } from '../logic/common.js';
-import { exportEmail, exportableColumns, hookName, isFileColumn } from '../logic/exports.js';
+import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../logic/exports.js';
+import { hiddenTables } from '../logic/acl.js';
 import { putExport } from '../logic/notes.js';
 import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
 import { STATES } from '../logic/journal.js';
@@ -12,7 +13,7 @@ import { saveExport, syncRows, updateSourceNote } from './synchro.js';
 import { receivedDests } from '../target/journals.js';
 import { resendTables } from './resend.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { cancelButton, checkList, el, message, openWizard, pickField, run } from '../ui.js';
+import { cancelButton, checkList, el, failure, message, openWizard, pickField, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
@@ -163,6 +164,12 @@ async function prepareTables(ctx) {
 async function save(ctx, name, report) {
   const { exp, wizard } = ctx;
   const tables = await prepareTables(ctx);
+  // Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
+  if (exp && exp.public) {
+    const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
+    const hidden = hiddenTables(resources, rules, readTables(tables));
+    if (hidden.length) throw failure('publicHiddenEdit', { tables: hidden.join(', ') });
+  }
   const id = exp ? exp.id : randomHex(8);
   const changed = await saveExport(id, tables, { isPublic: Boolean(exp && exp.public), swap: Boolean(exp && exp.echange) });
   // Règles d'un Échange administré ici : notées seulement si elles ne sont pas toutes « Accepter ».

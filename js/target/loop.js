@@ -2,9 +2,13 @@
 // widget demande à Grist quelles tables ont changé (voir due) ; si un journal ou une destination a
 // changé, et au moins une fois par minute, chaque journal est déplié, recopié dans ses
 // destinations, puis nettoyé. Le résultat de chaque passage est gardé ici pour l'onglet.
-import { DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, randomHex, sleep } from '../logic/common.js';
+import {
+  DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, RESEND_COL, SCHEMA_COL, SEAL_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, chunk, nowS, randomHex, sleep,
+} from '../logic/common.js';
 import { exportTables, returnExportTables } from '../logic/exports.js';
-import { awaitingPartner, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../logic/journal.js';
+import {
+  awaitingPartner, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables, unpackActions,
+} from '../logic/journal.js';
 import {
   WAVE, WAVE_STRICT, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, planConsolidation, receivedColumns, refusedGaps,
   restoreActions, rowNumbers,
@@ -13,7 +17,7 @@ import { resendValue } from '../logic/resend.js';
 import { citedFiles, fillActions, filesState, resolveRows, short } from '../logic/files.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, publicRecords, readSchema, withLock } from '../grist.js';
 import { addDestColumnsActions, receivedJournals, receivedKey, updateJournalNote, upgradeJournal } from './journals.js';
-import { checkSigned } from '../logic/trust.js';
+import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
 import { attachments, receiveFiles } from './files.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
@@ -168,29 +172,68 @@ function nextSuspect(was = {}, rejected, flood) {
   return { n: (was.n || 0) + rejected, at, ...(flood ? { flood: at } : was.flood ? { flood: was.flood } : {}) };
 }
 
-// Déplie ce qui est arrivé, et note dans le journal ce qui manque encore, les arrivées suspectes
-// (lignes rejetées, flot anormal) et la fin de l'envoi annoncée par la SOURCE (`ended`, heure ;
-// effacée si des données arrivent ensuite). Un export dont la clé de signature est connue ici
-// (voir receivedKey) rejette les lignes mal signées. Rend la note à jour, les lignes du journal, et
-// s'il reste des lignes reçues pour le passage suivant.
-async function unpack(journal, note) {
+// Clé de signature de l'export reçu (voir receivedKey) et sceau des lignes dépliées (voir trust.js).
+// Première fois avec une clé, ou clé changée par une nouvelle invitation : les lignes dépliées
+// déjà là sont scellées avec elle (confiance à ce moment-là) et son empreinte notée (`sceau`). Une
+// fois notée, une clé introuvable (destination effacée, description vidée) arrête la recopie de ce
+// journal, au lieu de tout accepter. Sans clé jamais vue (réception d'avant la 0.8, lien public) :
+// rien n'est vérifié. Rend { key, seal, note }.
+async function sealing(schema, journal, note) {
+  const key = note.mode === 'public' ? '' : receivedKey(schema, journal, note);
+  if (!key) {
+    if (note.sceau) throw failure('keyLost');
+    return { key: '', seal: null, note };
+  }
+  const seal = await sealer(key);
+  const mark = await sealMark(seal);
+  if (note.sceau === mark) return { key, seal, note };
+  sealsSeen.delete(journal);
+  const sealed = await sealRows((await fetchRows(journal)).filter(isUnpacked), note.export, seal);
+  await apply(chunk(sealed).map(part => ['BulkUpdateRecord', journal, part.map(r => r.id), { [SEAL_COL]: part.map(r => r[SEAL_COL]) }]));
+  return { key, seal, note: await updateJournalNote(journal, n => ({ ...n, sceau: mark })) };
+}
+
+// Sceaux déjà vérifiés, par journal (voir checkSeals).
+const sealsSeen = new Map();
+
+// Lignes du journal sans les lignes dépliées au sceau faux (`forged`, numéros) : ajoutées par la
+// clé du formulaire sans passer par le dépliage. Sans sceau (voir sealing) : toutes.
+async function trusted(journal, note, rows, seal) {
+  if (!seal) return { rows, forged: [] };
+  if (!sealsSeen.has(journal)) sealsSeen.set(journal, new Map());
+  const { kept, forged } = await checkSeals(rows, note.export, seal, sealsSeen.get(journal));
+  return { rows: kept, forged };
+}
+
+// Déplie ce qui est arrivé (lignes scellées, voir sealing), efface les lignes au sceau faux, et note
+// dans le journal ce qui manque encore, les arrivées suspectes (lignes rejetées ou au sceau faux,
+// flot anormal) et la fin de l'envoi annoncée par la SOURCE (`ended`, heure ; effacée si des
+// données arrivent ensuite). Avec la clé de signature, les lignes mal signées sont rejetées. Rend
+// la note à jour, les lignes du journal, et s'il reste des lignes reçues pour le passage suivant.
+async function unpack(journal, { key, seal, note: noteBefore }) {
+  let note = noteBefore;
   let rows = await fetchRows(journal);
   const raw = rows.filter(isRaw);
   const flood = flooded(journal, raw);
-  const key = note.mode === 'public' ? '' : receivedKey(await readSchema(), journal, note);
   const { bad, bare } = key && raw.length ? await checkSigned(raw, key, note.export) : {};
   const plan = planUnpack(rows, journal, { exportId: note.mode === 'public' ? null : note.export, max: RAW_BATCH, now: nowS(), bad, bare });
-  if (!plan.actions.length) return { note, rows, left: 0 };
-  lastArrival = Date.now();
-  await apply(plan.actions);
+  if (plan.actions.length) {
+    lastArrival = Date.now();
+    await apply(seal ? unpackActions(journal, await sealRows(plan.added, note.export, seal), plan.removed) : plan.actions);
+    rows = await fetchRows(journal);
+  }
+  const checked = await trusted(journal, note, rows, seal);
+  rows = checked.rows;
+  if (checked.forged.length) await apply(chunk(checked.forged).map(ids => ['BulkRemoveRecord', journal, ids]));
+  if (!plan.actions.length && !checked.forged.length) return { note, rows, left: 0 };
+  const rejected = plan.rejected + checked.forged.length;
   const gaps = nextGaps(note, plan);
-  if (plan.rejected || flood) gaps.suspect = nextSuspect(note.suspect, plan.rejected, flood);
+  if (rejected || flood) gaps.suspect = nextSuspect(note.suspect, rejected, flood);
   const ended = (plan.ended === undefined ? note.ended : plan.ended && (plan.ended.at || Math.floor(nowS()))) || undefined;
   if (gaps.suspect || ended !== note.ended || JSON.stringify(gaps) !== JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) {
     note = { ...note, ...gaps, ended };
     await updateJournalNote(journal, n => ({ ...n, ...gaps, ended }));
   }
-  rows = await fetchRows(journal);
   return { note, rows, left: plan.left };
 }
 
@@ -395,7 +438,11 @@ export async function restoreSource(journal, table) {
       await updateJournalNote(journal, n => ({ ...n, tables: n.tables.map(tb => (tb.table === table ? { ...tb, dropped: undefined } : tb)) }));
     }
     const fileCols = copyCols.filter(([from]) => types[from] === 'Attachments').map(([from]) => from);
-    const journalRows = resolveRows(rowsByTable(expandRows(await fetchRows(journal))).get(table) || [], fileCols, fileCols.length ? await attachments() : new Map());
+    const schema = await readSchema();
+    const { note } = receivedJournals(schema).find(r => r.journal === journal);
+    const { seal } = await sealing(schema, journal, note);
+    const rows = (await trusted(journal, note, await fetchRows(journal), seal)).rows;
+    const journalRows = resolveRows(rowsByTable(expandRows(rows)).get(table) || [], fileCols, fileCols.length ? await attachments() : new Map());
     await apply(restoreActions(manualEdits({ journalRows, destRows: await fetchRows(dest), copyCols }), dest, copyCols));
     const after = await fetchRows(dest);
     const drift = manualEdits({ journalRows, destRows: after, copyCols });
@@ -408,7 +455,8 @@ export async function restoreSource(journal, table) {
 // nettoyer. Chaque étape est un seul lot d'écritures, donc tout ou rien.
 async function consolidate(schema, { journal, note: noteBefore }) {
   if (noteBefore.mode === 'public' && await pull(noteBefore, journal)) lastArrival = Date.now();
-  const unpacked = await unpack(journal, noteBefore);
+  const trust = await sealing(schema, journal, noteBefore);
+  const unpacked = await unpack(journal, trust);
   let { note } = unpacked;
   if (note.ended && note.mode === 'echange' && !note.retour && !stopped.has(note.export)) {
     await stopReturn(note.export).then(() => stopped.add(note.export), () => {});
@@ -417,7 +465,7 @@ async function consolidate(schema, { journal, note: noteBefore }) {
   let present = null;
   const files = async () => (present ||= await attachments());
   const cited = citedFiles(unpacked.rows, note.tables.flatMap(tb => tb.waiting || []));
-  const { rows, rejected } = await receiveFiles(journal, note.export, unpacked.rows, files, cited);
+  const { rows, rejected } = await receiveFiles(journal, note.export, unpacked.rows, files, cited, !unpacked.left);
   if (rejected) {
     const suspect = nextSuspect(note.suspect, rejected, false);
     note = { ...note, suspect };
@@ -434,7 +482,7 @@ async function consolidate(schema, { journal, note: noteBefore }) {
     tables.push({ ...done, changed: !done.error && JSON.stringify(done.entry) !== JSON.stringify(noted) });
   }
   await saveEntries(journal, new Map(tables.filter(tb => tb.changed).map(tb => [tb.entry.table, tb.entry])));
-  const after = await fetchRows(journal);
+  const after = (await trusted(journal, note, await fetchRows(journal), trust.seal)).rows;
   await apply(planPurge(after, journal, { keep: pending, drop: note.refused }));
   // Lignes reçues laissées pour le passage suivant : il vient sans attendre la minute.
   if (unpacked.left) lastArrival = Date.now();

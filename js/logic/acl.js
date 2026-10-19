@@ -25,7 +25,6 @@ export const isPublicRule = r => r.memo === PUBLIC_MEMO;
 
 const VIEWER = 'user.Access == VIEWER';
 const EDITOR = 'user.Access == EDITOR';
-const EXCHANGE_ROWS = `${EDITOR} and rec.${TYPE_COL} in ["${KIND.swap}", "${KIND.lot}"]`;
 
 // Règles voulues : [{ tableId, colIds, aclFormula, permissionsText, memo }], dans l'ordre.
 export function publicAclRules(exportIds, { keepDeny = false } = {}) {
@@ -41,7 +40,11 @@ export function publicAclRules(exportIds, { keepDeny = false } = {}) {
   ];
 }
 
-export function ownerAclRules() {
+// `exchangeIds` : exports en Échange. Un éditeur ne lit et ne marque (renvoi) que leurs lignes
+// 'echange' et 'lot', pour la recopie ; ni celles des autres exports, ni la note.
+export function ownerAclRules(exchangeIds = []) {
+  const ids = exchangeIds.filter(id => HEX16.test(id)).sort().map(id => `"${id}"`).join(', ');
+  const EXCHANGE_ROWS = `${EDITOR} and rec.${EXPORT_COL} in [${ids}] and rec.${TYPE_COL} in ["${KIND.swap}", "${KIND.lot}"]`;
   const rule = (colIds, aclFormula, permissionsText) => ({ tableId: SYNC_TABLE, colIds, aclFormula, permissionsText, memo: OWNER_MEMO });
   return [
     rule(EXPORT_COL, VIEWER, '-R'),
@@ -96,10 +99,27 @@ export function aclActions(resources, rules, wanted, missing = () => false) {
 }
 
 // Lien public : tables de `tables` dont une règle d'accès (hors règles du widget) cache des lignes ou
-// des colonnes, à quelqu'un ou à tous. Les formules de Synchro lisent sans les règles : le lien
-// public montrerait à tous ce qu'elles cachent.
+// des colonnes, à quelqu'un ou à tous ; une telle règle sur toutes les tables (`*`) les vise
+// toutes. Les formules de Synchro lisent sans les règles : le lien public montrerait à tous ce
+// qu'elles cachent.
 const deniesRead = p => p === 'none' || /-[A-Z]*R/.test(p || '');
 export function hiddenTables(resources, rules, tables) {
   const tableOf = id => (resources.find(r => r.id === id) || {}).tableId;
-  return tables.filter(table => rules.some(r => !isWidgetRule(r) && tableOf(r.resource) === table && deniesRead(r.permissionsText)));
+  const denied = new Set(rules.filter(r => !isWidgetRule(r) && deniesRead(r.permissionsText)).map(r => tableOf(r.resource)));
+  return tables.filter(table => denied.has(table) || denied.has('*'));
+}
+
+// Les éditeurs peuvent-ils modifier la structure du document, donc les formules de Synchro (ce qui
+// part) ? C'est le réglage par défaut de Grist ; la case « Permettre aux éditeurs de modifier la
+// structure », décochée, ajoute à la ressource `*` une règle `user.Access != OWNER` → `-S`. La
+// première règle de cette ressource qui vise les éditeurs et dit quelque chose du droit S décide ;
+// une formule que Grist n'écrit pas lui-même ne dit rien.
+const EDITOR_FORMULAS = ['', 'user.Access != OWNER', 'user.Access == EDITOR', 'user.Access in [EDITOR]', 'user.Access in [EDITOR, OWNER]', 'user.Access in [OWNER, EDITOR]'];
+const structureSign = p => (p === 'all' ? '+' : p === 'none' ? '-' : (/([+-])[A-Z]*S/.exec(p || '') || [])[1]);
+export function editorsEditStructure(resources, rules) {
+  const defaults = new Set(resources.filter(r => r.tableId === '*' && r.colIds === '*').map(r => r.id));
+  const decisive = rules.filter(r => defaults.has(r.resource) && structureSign(r.permissionsText)
+    && EDITOR_FORMULAS.includes(String(r.aclFormula || '').replace(/\s+/g, ' ').trim()))
+    .sort((a, b) => (a.rulePos || 0) - (b.rulePos || 0))[0];
+  return !decisive || structureSign(decisive.permissionsText) === '+';
 }

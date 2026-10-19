@@ -143,19 +143,23 @@ export function readPart(row, exportId) {
   if (row[EXPORT_COL] !== exportId || row[TYPE_COL] !== KIND.part || !m || typeof m !== 'object' || !is(SHA, m.sha) || typeof m.nom !== 'string') return null;
   if (!Number.isInteger(m.taille) || m.taille < 0 || m.taille > FILE_MAX || !Number.isInteger(m.parts) || m.parts < 1 || m.parts > MAX_PARTS) return null;
   if (!Number.isInteger(m.n) || m.n < 0 || m.n >= m.parts || !is(SEND, m.envoi) || typeof data !== 'string' || data.length > PART_TEXT_MAX || !BASE64.test(data)) return null;
-  const name = m.nom.replace(/[\\/\u0000-\u001f\u007f]/g, '_').slice(0, 255) || 'fichier';
+  // Séparateurs de chemin, caractères de contrôle, et caractères invisibles ou de sens d'écriture
+  // (« facture\u202Efdp.exe » s'afficherait « facture exe.pdf »).
+  const name = m.nom.replace(/[\\/\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '_').slice(0, 255) || 'fichier';
   return { sha: m.sha, name, size: m.taille, n: m.n, parts: m.parts, send: m.envoi, data };
 }
 
 // Fichiers arrivés : pour chaque empreinte, l'envoi le plus récent (celui de la dernière ligne
 // arrivée), s'il a tous ses morceaux (`ready` : { sha, name, size, data: [base64, dans l'ordre],
-// ids, old }). Les morceaux d'un envoi plus ancien ou resté incomplet plus de PART_TTL secondes
-// (`stale`) et les lignes illisibles (`rejected`) sont à effacer. `old` : arrivé il y a plus de
-// PART_TTL secondes. `now` : secondes.
+// ids, old, bytes }). Les morceaux d'un envoi plus ancien ou resté incomplet plus de PART_TTL
+// secondes (`stale`) et les lignes illisibles (`rejected`) sont à effacer ; ceux d'un envoi en
+// cours attendent (`partial` : { ids, bytes }). `old` : arrivé il y a plus de PART_TTL secondes.
+// `bytes` : octets reçus. `now` : secondes.
 export function fileArrivals(rows, exportId, now) {
   const ready = [];
   const stale = [];
   const rejected = [];
+  const partial = [];
   const parts = [];
   for (const row of rows.filter(r => r[TYPE_COL] === KIND.part)) {
     const part = readPart(row, exportId);
@@ -169,11 +173,26 @@ export function fileArrivals(rows, exportId, now) {
       const { sha, name, size, parts: count } = items[items.length - 1].part;
       const byN = new Map(items.filter(p => p.part.parts === count).map(p => [p.part.n, p.part.data]));
       const arrived = Math.max(...items.map(p => (typeof p.row[RECEIVED_COL] === 'number' ? p.row[RECEIVED_COL] : now)));
-      if (send === last && byN.size === count) ready.push({ sha, name, size, data: Array.from({ length: count }, (_, n) => byN.get(n)), ids, old: now - arrived > PART_TTL });
+      const bytes = items.reduce((n, p) => n + Math.floor(p.part.data.length * 3 / 4), 0);
+      if (send === last && byN.size === count) ready.push({ sha, name, size, data: Array.from({ length: count }, (_, n) => byN.get(n)), ids, old: now - arrived > PART_TTL, bytes });
       else if (send !== last || now - arrived > PART_TTL) stale.push(...ids);
+      else partial.push({ ids, bytes });
     }
   }
-  return { ready, stale, rejected };
+  return { ready, stale, rejected, partial };
+}
+
+// Morceaux gardés en attente dans un journal, au plus (envois en cours, fichiers qu'aucune version
+// ne cite encore) : la place de deux fichiers de la plus grande taille. La SOURCE n'envoie qu'un
+// fichier à la fois, et ses versions arrivent avant ses fichiers ; qui n'a que la clé du
+// formulaire peut, lui, parquer des morceaux bien formés.
+export const PARKED_MAX = 2 * FILE_MAX;
+
+// Envois en attente (`groups` : { ids, bytes }) à effacer pour que les autres tiennent dans `max`
+// octets : les plus anciens (dernière ligne arrivée la plus ancienne) d'abord.
+export function parkedOverflow(groups, max = PARKED_MAX) {
+  let total = 0;
+  return [...groups].sort((a, b) => Math.max(...b.ids) - Math.max(...a.ids)).filter(g => (total += g.bytes) > max);
 }
 
 // Fichiers cités par les versions du journal (lignes brutes `rows`), et par les cellules qui en

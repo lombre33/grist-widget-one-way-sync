@@ -2,7 +2,11 @@
 // Grist), code de contrôle, durée de vie d'une invitation, signature des envois.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INVITE_DAYS, checkSigned, controlCode, expiresAt, hmac, isExpired, memoMatches, readShare, sameDoc, signText, signature } from '../../js/logic/trust.js';
+import {
+  INVITE_DAYS, checkSeals, checkSigned, controlCode, expiresAt, hmac, isExpired, isUnpacked, memoMatches, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText,
+  signature,
+} from '../../js/logic/trust.js';
+import { planUnpack, unpackActions } from '../../js/logic/journal.js';
 
 const FULL = 'hX3ab9Kq2LmZ7pRtVw8yNc';
 
@@ -26,13 +30,17 @@ test('document désigné : identifiant court (au moins 12 caractères) ou comple
   assert.ok(memoMatches('a@b.fr', FULL) && memoMatches('', FULL), 'un mémo sans document ne dit rien');
 });
 
-test('code de contrôle : six caractères lisibles, tirés de l\'adresse et du secret', async () => {
+test('code de contrôle : six caractères lisibles, tirés de la clé de l\'adresse et du secret', async () => {
   const url = 'https://g.fr/api/s/abc/tables/Journal_A/records?flat=1';
   const code = await controlCode(url, 'secret');
   assert.match(code, /^[2-9A-HJKMNP-Z]{3}-[2-9A-HJKMNP-Z]{3}$/, 'ni 0, 1, I, L ni O');
   assert.equal(await controlCode(url, 'secret'), code, 'le même des deux côtés');
   assert.notEqual(await controlCode(url.replace('abc', 'abd'), 'secret'), code, 'adresse remplacée : autre code');
   assert.notEqual(await controlCode(url, 'autre'), code);
+  // Seule la clé, tirée par Grist, compte : changer l'équipe ou la table ne permet pas de chercher
+  // une adresse à soi qui donne le même code.
+  assert.equal(await controlCode('https://g.fr/o/equipe/api/s/abc/tables/Journal_B/records?flat=1', 'secret'), code);
+  assert.notEqual(await controlCode('https://g.fr/o/equipe/api/s/abd/tables/Journal_A/records?flat=1', 'secret'), code);
 });
 
 test('invitation : valable 7 jours', () => {
@@ -78,4 +86,39 @@ test('signature : liste des clés, avis de fin, types non signés', async () => 
   const { bad, bare } = await checkSigned(rows, KEY, '00112233aabbccdd');
   assert.deepEqual([...bad], [2]);
   assert.deepEqual([...bare], [5]);
+});
+
+test('sceau des lignes dépliées : une ligne d\'une table sans sceau valide est écartée, quelle que soit sa forme', async () => {
+  const E = '0123456789abcdef';
+  const seal = await sealer('k'.repeat(32));
+  assert.match(await sealMark(seal), /^[0-9a-f]{8}$/);
+  assert.notEqual(await sealMark(seal), await sealMark(await sealer('j'.repeat(32))), 'empreinte propre à la clé');
+  // Un lot reçu, déplié puis scellé : les lignes écrites gardent leur sceau.
+  const lot = JSON.stringify({ lignes: [['k1', 100, false, { Nom: 'A' }], ['k2', 101, true, {}]], total: 2 });
+  const plan = planUnpack([{ id: 1, Synchro_Export: E, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: lot, Synchro_Colonnes: '[]', Sync_Recu: 99 }], 'J', { exportId: E });
+  const added = await sealRows(plan.added, E, seal);
+  const [add] = unpackActions('J', added, plan.removed);
+  assert.equal(add[3].Sync_Sceau.length, 2);
+  // Relues comme Grist les rend (numéros, valeurs vides normalisées), avec les marques que la
+  // recopie pose ensuite (une suppression vue dans une liste récrit l'heure d'arrivée).
+  const stored = added.map((r, i) => ({ id: 10 + i, Synchro_Type: '', Synchro_Ids: '', Synchro_Donnees: '', ...r,
+    Sync_Applique: true, Sync_Etat: i ? 'suppression' : 'ajout', Sync_Avant: '{"n":4}', ...(i ? { Sync_Recu: 500 } : {}) }));
+  const probe = { id: 20, Synchro_Type: '', Synchro_Table: '', id_sync: '', Sync_Par: 'test' };
+  const raw = { id: 21, Synchro_Type: 'lot', Synchro_Table: 'Contacts', Synchro_Lot: lot };
+  const forged = [
+    { id: 30, Synchro_Type: '', Synchro_Table: 'Contacts', id_sync: 'x1', MajLe: 1e10, Synchro_Donnees: '{"Nom":"Faux"}' },
+    { id: 31, Synchro_Type: '', Synchro_Table: 'Contacts', Synchro_Ids: '{"seaux":{"17":[]},"t":1}' },
+    { ...stored[0], id: 32, Synchro_Donnees: '{"Nom":"Autre"}' },
+    { ...stored[1], id: 33, Sync_Sceau: await seal(sealText('fedcba9876543210', stored[1])) },
+  ];
+  assert.equal(isUnpacked(probe), false, 'test du lien : sans table');
+  assert.equal(isUnpacked(raw), false, 'ligne reçue : contrôlée au dépliage');
+  const seen = new Map();
+  const out = await checkSeals([...stored, probe, raw, ...forged], E, seal, seen);
+  assert.deepEqual(out.forged, [30, 31, 32, 33], 'sans sceau, liste forgée, contenu changé, sceau d\'un autre export');
+  assert.deepEqual(out.kept.map(r => r.id), [10, 11, 20, 21]);
+  assert.deepEqual([...seen.keys()], [10, 11], 'sceaux vérifiés gardés');
+  const again = await checkSeals([stored[1]], E, seal, seen);
+  assert.deepEqual([again.forged, [...seen.keys()]], [[], [11]], 'une ligne disparue sort du cache');
+  assert.deepEqual((await checkSeals(stored, E, await sealer('j'.repeat(32)), new Map())).forged, [10, 11], 'autre clé');
 });

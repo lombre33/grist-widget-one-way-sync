@@ -147,16 +147,24 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
     added.push(...unpackedRows(row, read, lines));
     if (read.lot) noteGaps(gaps, read.table, read.lot, !isBlank(row[RESEND_COL]));
   }
+  const removed = raw.map(r => r.id);
+  const plain = map => Object.fromEntries(map);
+  return {
+    added, removed, actions: unpackActions(journalTable, added, removed),
+    missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], rejected, left: all.length - raw.length,
+    ...(ended === undefined ? {} : { ended }),
+  };
+}
+
+// Lignes dépliées (`added`, scellées ou non, voir trust.js) ajoutées et lignes reçues (`removed`)
+// effacées, dans le même lot.
+export function unpackActions(journalTable, added, removed) {
   const cols = [...new Set(added.flatMap(Object.keys))];
   const empty = c => (c === DELETE_COL ? false : c === ORDER_COL || c === RECEIVED_COL ? null : '');
   const actions = chunk(added).map(part => ['BulkAddRecord', journalTable, part.map(() => null),
     Object.fromEntries(cols.map(c => [c, part.map(r => r[c] ?? empty(c))]))]);
-  for (const part of chunk(raw.map(r => r.id))) actions.push(['BulkRemoveRecord', journalTable, part]);
-  const plain = map => Object.fromEntries(map);
-  return {
-    actions, missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], rejected, left: all.length - raw.length,
-    ...(ended === undefined ? {} : { ended }),
-  };
+  for (const part of chunk(removed)) actions.push(['BulkRemoveRecord', journalTable, part]);
+  return actions;
 }
 
 // Un renvoi remet le compte de sa table à zéro (la SOURCE recoupe elle-même un lot de renvoi trop
@@ -307,6 +315,9 @@ export function planPurge(journalRows, journalTable, { keep = [], drop = [] } = 
 export const STATES = ['ajout', 'modif', 'suppression'];
 export const REFUSED = 'refus';
 const SHOWN = [...STATES, REFUSED];
+// Heure lisible par Date (secondes) : une valeur au-delà ferait échouer l'affichage.
+const MAX_TIME_S = 8.64e12;
+const validTime = at => Number.isFinite(at) && Math.abs(at) < MAX_TIME_S;
 
 // Historique : dernière version de chaque clé recopiée avec un effet connu, arrivée après `since`
 // (secondes), la plus récente d'abord, au plus `max`. `labelCol` nomme la ligne ; `n` est son
@@ -316,7 +327,7 @@ const SHOWN = [...STATES, REFUSED];
 export function recentChanges(journalRows, labelCol, since, max, { copyCols = [], numbers = new Map() } = {}) {
   return [...latestByKey(journalRows).values()]
     .map(v => ({ at: v.row[RECEIVED_COL] ?? v.order, state: v.row[STATE_COL], row: v.row }))
-    .filter(c => SHOWN.includes(c.state) && typeof c.at === 'number' && c.at > since)
+    .filter(c => SHOWN.includes(c.state) && validTime(c.at) && c.at > since)
     .sort((a, b) => b.at - a.at).slice(0, max)
     .map((c) => {
       const was = parseJson(c.row[BEFORE_COL]) || {};

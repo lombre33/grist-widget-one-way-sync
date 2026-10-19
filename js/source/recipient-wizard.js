@@ -8,7 +8,7 @@
 // s'affiche des deux côtés ; en sécurité renforcée (`renforce`), il faut l'avoir comparé.
 import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
 import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../logic/codes.js';
-import { exportCondition, exportEmail, hookMemo, hookName } from '../logic/exports.js';
+import { exportCondition, exportEmail, hookMemo, hookName, readTables } from '../logic/exports.js';
 import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
 import { controlCode, expiresAt, isExpired, sameDoc } from '../logic/trust.js';
 import { hiddenTables } from '../logic/acl.js';
@@ -102,7 +102,7 @@ async function invite(ctx, mode, renforce) {
 // recharge alors).
 async function invitePublic({ exp, wizard, steps }) {
   const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-  const hidden = hiddenTables(resources, rules, exp.tables.map(tb => tb.table));
+  const hidden = hiddenTables(resources, rules, readTables(exp.tables));
   if (hidden.length) throw failure('publicHidden', { tables: hidden.join(', ') });
   await updateSourceNote(note => setExport(note, exp.id, { public: true }));
   await saveExport(exp.id, exp.tables, { isPublic: true });

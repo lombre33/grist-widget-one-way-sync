@@ -10,7 +10,7 @@ import { exportCondition, exportTables, hookMemo, hookName, ownJournal, returnEx
 import { clearExport, dropExport, putExport, setExport, setPause } from './logic/notes.js';
 import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from './grist.js';
 import { removeTechnicalTables } from './pages.js';
-import { endRows, exportHooks, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
+import { endRows, exportHooks, readSourceNote, removeExport, saveExport, signingKey, syncRows, updateSourceNote } from './source/synchro.js';
 import { receivedJournals } from './target/journals.js';
 
 // Côté CIBLE : l'export de retour (identifiant et nom de l'export reçu) envoie les destinations à
@@ -24,9 +24,13 @@ export async function wireExchange(note, retour = '') {
     await apply([...prepareSourceActions(dest, missingSyncColumns(cols)), keyTriggerAction(dest, cols), deleteColumnAction(dest, cols)].filter(Boolean));
   }
   schema = await readSchema();
+  // Jamais par-dessus un export d'ici qui n'est pas ce retour (voir readInvitation, target/wizard.js).
+  const local = readSourceNote(schema).exports.find(e => e.id === note.export);
+  if (local && !local.retour) throw new Error('exportTaken');
   await saveExport(note.export, returnExportTables(note, schema), { swap: true });
-  // L'envoi de retour est signé par une clé propre à ce document, donnée dans la réponse (voir
-  // trust.js) : l'invitation seule, qui porte l'adresse de retour, ne suffit pas pour la forger.
+  // L'envoi de retour est signé par une clé propre à ce document, donnée dans la réponse, et ce
+  // que l'autre côté en déplie est scellé avec elle (voir trust.js) : l'invitation seule, qui porte
+  // l'adresse de retour, ne suffit pas pour y faire recopier quoi que ce soit.
   await signingKey(note.export, { create: true });
   await updateSourceNote((n) => {
     const was = n.exports.find(e => e.id === note.export) || { at: nowS() };

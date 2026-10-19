@@ -157,15 +157,22 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
   jointes ne sont pas proposées. Une CIBLE d'avant la 0.7 refuse un lot qui porte des fichiers.
   Testé de bout en bout dans `filesSteps` (`ONLY_FILES=1`). Depuis la 0.8, un fichier n'est déposé
   que si une version du journal ou une cellule en attente (`waiting`) le cite (`citedFiles`) : les
-  morceaux ne sont pas signés ; un fichier non cité attend un jour (`old`), puis est effacé.
+  morceaux ne sont pas signés ; un fichier non cité attend un jour (`old`), puis est effacé. Depuis
+  la 0.9, les morceaux en attente (envois incomplets `partial`, fichiers non cités) sont bornés à
+  `PARKED_MAX` (2 × 25 Mo) par journal, une fois toutes les versions dépliées (`parkedOverflow`, les
+  plus anciens partent ; seuls les envois incomplets en trop comptent comme suspects).
 - Sécurité (V0.8.0, corrections 1 à 13 de `/mnt/project-files/notes/audit-securite-donnees/corrections-impacts.md`,
   niveau choisi par Antoine : « Standard + case Renforcé ») ; logique pure dans `js/logic/trust.js`
   et `js/logic/acl.js`, règles posées par `js/acl.js` (`syncRules`) :
   - `GET <instance>[/o/<équipe>]/api/s/<clé>` en anonyme rend nom, identifiant (complet), dossier
     et équipe du document de la clé (vérifié) : `shareInfo` dans `js/grist.js`, `sameDoc` compare
     par préfixe d'urlId (12 caractères au moins). Vérifié à « Vérifier » (SOURCE), à la lecture d'une
-    invitation d'Échange (CIBLE), et toutes les heures par webhook (`checkHooks`, onglet Envoyer).
-  - Code de contrôle (`controlCode`) : 6 caractères de SHA-256(`url\nsecret`), « XXX-XXX ». Secret
+    invitation d'Échange (CIBLE), et toutes les heures par webhook (`checkHooks`, onglet Envoyer ;
+    depuis la 0.9, une adresse qui n'est plus `…/api/s/<clé>/tables/<T>/records?flat=1` sur l'instance
+    du document est signalée, `send.person.badAddress`).
+  - Code de contrôle (`controlCode`) : 6 caractères de SHA-256(`<clé de partage>\nsecret`) depuis
+    la 0.9 (avant : l'adresse entière, dont le préfixe `/o/<équipe>` que Grist ne contrôle pas pour
+    une clé de partage : forgeable par essais), « XXX-XXX ». Secret
     toujours ; invitation valable 7 jours (`expire`, `isExpired`, « Refaire le code » remet `at`).
   - Signatures : clé par export dans la ligne `signature` de `Synchro` (`Synchro_Colonnes`,
     `signingKey`) ; les formules (`signed()` de `formulas.js`) ajoutent `, "sig": "<hex>"}` à la liste
@@ -175,11 +182,35 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
     (`keySlot`) : en Échange, chaque côté signe avec sa clé, donnée dans son propre code (`cle` de
     l'invitation, `cle` de la réponse ; vérifié qu'un lot signé avec la clé de l'invitation est
     rejeté). `checkSigned` : 'bad' rejeté (suspect), 'bare' (liste vide non signée : colonnes non
-    lues), morceaux de fichiers non signés. Une réception sans clé accepte tout (branchée avant).
-    Versions et listes de plus de 600 s dans le futur rejetées (`planUnpack`, `now`).
+    lues), morceaux de fichiers non signés. Une réception sans clé accepte tout (branchée avant ;
+    sa carte le dit, `recv.unsigned`). Versions et listes de plus de 600 s dans le futur rejetées
+    (`planUnpack`, `now`). `SIG_KEY` est dans `logic/common.js` (trust.js et codes.js s'importent).
+  - **Sceau (0.9)** : la clé du formulaire peut créer une ligne SANS `Synchro_Type`, prise avant pour
+    une version déjà dépliée, jamais contrôlée (injection de versions, listes de seaux vides,
+    citations de fichiers, offres de tables). Le dépliage scelle chaque ligne qu'il crée : colonne
+    `Sync_Sceau` du journal (propre au journal, ajoutée par `upgradeJournal`), HMAC de `sealText`
+    (export, table, clé, MajLe, Supprime, données, listes ; pas `Sync_Recu`, que la recopie récrit pour une suppression vue dans une liste : l'e2e l'a montré, 11 000 versions légitimes effacées) avec la clé de signature
+    (`sealer`, `sealRows`, `checkSeals` dans trust.js ; `sealing`, `trusted` dans target/loop.js,
+    cache des sceaux vérifiés par journal). Une ligne dépliée (`isUnpacked`) au sceau faux est
+    effacée et comptée suspecte. Note du journal : `sceau` = empreinte de la clé (8 hex) ; si elle
+    change (première fois, nouvelle invitation), les lignes dépliées présentes sont rescellées ;
+    `sceau` noté sans clé trouvée : `failure('keyLost')`, le journal n'est plus recopié. Testé
+    dans l'étape « lignes forgées » de l'e2e (10 lignes rejetées). Les colonnes d'état
+    (`Sync_Applique`, `Sync_Etat`, `Sync_Avant`, `Sync_Recu`) restent hors sceau : la clé ne peut
+    que créer. Toute colonne qu'une recopie récrit sur une version doit rester hors sceau.
+  - Échange (0.9) : une invitation dont l'export est un export local (note SOURCE ou `Synchro`)
+    est refusée (`exportTaken`, dans `readInvitation` et `wireExchange`), sauf reprise du même
+    Échange. Une reprise (`showRelink`) qui change la clé de signature le dit (`recv.relink.newKey`).
   - Règles d'accès du widget (mémos dans `logic/acl.js`) : lien public, puis `Synchro` réservée aux
-    propriétaires (5 règles, exception éditeur pour la recopie d'un Échange), puis journaux réservés
-    aux éditeurs (`note.reserve`, case cochée à l'acceptation). **Piège vérifié** : Grist range chaque
+    propriétaires (5 règles, exception éditeur pour la recopie d'un Échange, limitée depuis la 0.9
+    aux exports en Échange : `ownerAclRules(exchangeIds)`), puis journaux réservés aux éditeurs
+    (`note.reserve`, case cochée à l'acceptation ; seul un propriétaire pose la règle, qui note
+    `reserved` dans la note du journal quand elle est en place, et la carte d'un éditeur dit
+    `recv.reserve.owner` en attendant : un non-propriétaire ne lit pas `_grist_ACLRules`, vérifié
+    dans GranularAccess). **Limite** : par défaut, Grist donne aux éditeurs le droit de structure
+    (règle spéciale SchemaEdit, rangée par l'interface dans la ressource `*` : `user.Access != OWNER`
+    → `-S` quand la case est décochée) ; ils peuvent alors réécrire les formules de `Synchro`. En
+    Renforcé, la carte de l'export le signale (`editorsEditStructure`). **Piège vérifié** : Grist range chaque
     `AddRecord` de règle avant la première position plus grande, positions toujours positives :
     des ajouts successifs à positions négatives s'inversent, et le widget reposait les règles à
     chaque chargement (rechargement en boucle). Tout part en un seul `BulkAddRecord`. Changer une
@@ -203,8 +234,11 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
     Ignorer (`decideWave` ; Ignorer détache les lignes, `id_sync` vide, versions `partie`).
   - Renforcé (case à l'invitation, `renforce` dans l'invitation et la note) : comparaison du code
     exigée (`codeNotCompared`), vague stricte, pas de lien public. Lien public refusé si une règle
-    d'autrui cache des lignes ou colonnes d'une table de l'export (`hiddenTables`), colonnes publiques
-    listées en rouge, alerte si le lien public n'est pas en lecture seule. Échange rangé dans une
+    d'autrui cache des lignes ou colonnes d'une table de l'export (`hiddenTables` ; depuis la 0.9,
+    une règle sur `*` les vise toutes, et les tables affichées par une Référence de l'export comptent,
+    `readTables` ; revérifié à chaque « Modifier » d'un export public, refus `publicHiddenEdit`, et à
+    chaque affichage de la carte, `send.public.hiddenNow`), colonnes publiques listées en rouge,
+    alerte si le lien public n'est pas en lecture seule. Échange rangé dans une
     table existante : `confirmOutgoing` liste ce qui repartira. Consignes : `WIDGET_URL`
     (`js/config.js`), galerie d'abord.
 
@@ -223,7 +257,15 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.8.0 (16 octobre 2026)
+## État : V0.9.0 (19 octobre 2026)
+
+V0.9.0 (demande d'Antoine du 19 octobre : audits UI/UX, code, sécurité, gwaudit ; comptes rendus
+dans `/mnt/project-files/notes/audits-v0.8/`) : parcours harmonisés (43641ec), refacto (b112bb0 :
+réseau dans `grist.js` seul, notes SOURCE par `logic/notes.js`, tutoriel dans `i18n/tutorial.json`,
+montages d'avant la 0.5 retirés sur décision d'Antoine), puis sécurité (sceau, code de contrôle
+sur la clé de partage, Échange, voir « Après l'Alpha »). Format changé : un code de contrôle
+calculé par la 0.8 ne correspond plus ; un onglet 0.8 resté ouvert déplierait sans sceau (lignes
+effacées comme suspectes, la SOURCE renvoie).
 
 V0.8.0 : corrections de sécurité 1 à 13 (voir « Après l'Alpha »). Piège vu au test : au chargement
 du document SOURCE (Grist décharge un document inactif), une petite table (20 lignes au plus) part

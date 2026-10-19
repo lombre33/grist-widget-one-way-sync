@@ -2,7 +2,11 @@
 // que désigne une clé de formulaire, lu chez Grist ; un code de contrôle à comparer par téléphone ;
 // la durée de vie d'une invitation ; la signature des envois (HMAC-SHA256 avec une clé propre à
 // l'export, que seuls la SOURCE et ses destinataires connaissent).
-import { EXPORT_COL, KIND, LIST_COL, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL, is, toHex } from './common.js';
+import {
+  DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, ORDER_COL, SCHEMA_COL, SEAL_COL, TABLE_COL, TYPE_COL, is, isBlank, isTrue,
+  toHex,
+} from './common.js';
+import { parseWebhookUrl } from './codes.js';
 
 // ---------------------------------------------------------------------------------------------
 // Document désigné par une clé de formulaire
@@ -35,12 +39,15 @@ export function memoMatches(memo, fullId) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Code de contrôle : six caractères tirés de l'adresse d'écriture et du secret, affichés des deux
-// côtés. Une adresse remplacée en route (ou une réponse faite par un autre) donne un autre code.
+// Code de contrôle : six caractères tirés de la clé de l'adresse d'écriture et du secret, affichés
+// des deux côtés. Une adresse remplacée en route (ou une réponse faite par un autre) donne un autre
+// code. Seule la clé compte, tirée par Grist : le reste de l'adresse (équipe, table) se choisit, et
+// le faire varier jusqu'à retomber sur le même code serait à la portée d'un ordinateur.
 
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // sans 0, 1, I, L, O
 export async function controlCode(url, secret) {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${url}\n${secret || ''}`)));
+  const subject = (parseWebhookUrl(url) || {}).key || url;
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${subject}\n${secret || ''}`)));
   const chars = Array.from(bytes.slice(0, 6), b => ALPHABET[b % ALPHABET.length]).join('');
   return `${chars.slice(0, 3)}-${chars.slice(3)}`;
 }
@@ -60,7 +67,6 @@ export const isExpired = (at, now) => now > expiresAt(at);
 // du lot, qui repart avec elles. Le widget SOURCE signe de même l'avis de fin ('fin', dans
 // Synchro_Lot).
 
-export const SIG_KEY = /^[0-9a-f]{32}$/;
 const SIGNED = { [KIND.lot]: LOT_COL, [KIND.keys]: LIST_COL, [KIND.end]: LOT_COL };
 const SIG_TAIL = /, "sig": "([0-9a-f]{64})"\}$/;
 
@@ -100,4 +106,50 @@ export async function checkSigned(rows, key, exportId) {
     if (verdict !== 'ok') out[verdict].add(row.id);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sceau des lignes dépliées (CIBLE). La clé du formulaire d'un journal peut y créer une ligne avec
+// n'importe quelles colonnes : sans type, elle n'est pas une ligne reçue et passerait pour une
+// version déjà dépliée, sans contrôle de signature ni de date. Le widget scelle donc chaque ligne
+// qu'il déplie (HMAC avec la clé de signature de l'export, que la clé du formulaire ne lit pas) et
+// écarte toute ligne d'une table sans sceau valide. Le sceau couvre ce que le dépliage écrit, pas
+// les marques que la recopie pose ensuite (Sync_Applique, Sync_Etat, Sync_Avant, et Sync_Recu, que
+// la recopie récrit sur la version d'une ligne effacée d'après une liste des clés : voir
+// planConsolidation).
+const SEALED = [TABLE_COL, KEY_COL, ORDER_COL, DELETE_COL, DATA_COL, SCHEMA_COL, LIST_COL];
+export const sealText = (exportId, row) => JSON.stringify(['sceau', exportId,
+  ...SEALED.map(c => (c === DELETE_COL ? isTrue(row[c]) : isBlank(row[c]) ? '' : row[c]))]);
+
+// Lignes dépliées, à sceller : une ligne d'une table (version ou liste des clés). Les lignes
+// reçues sont contrôlées au dépliage ; une ligne sans table (test du lien) ne sert à rien.
+export const isUnpacked = row => isBlank(row[TYPE_COL]) && !isBlank(row[TABLE_COL]);
+
+// Sceau d'un texte avec la clé `key`, importée une fois : fonction asynchrone texte -> hexadécimal.
+export async function sealer(key) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return async text => toHex(new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(text))));
+}
+
+// Empreinte de la clé qui scelle, notée dans la note du journal (`sceau`) : quand elle change
+// (première fois, nouvelle invitation), le widget rescelle ce qui est déjà là.
+export const sealMark = async seal => (await seal('sceau')).slice(0, 8);
+
+export const sealRows = async (rows, exportId, seal) => Promise.all(rows.map(async r => ({ ...r, [SEAL_COL]: await seal(sealText(exportId, r)) })));
+
+// Lignes du journal à garder : toutes, sauf les lignes d'une table au sceau absent ou faux
+// (`forged`, numéros). `seen` : sceaux déjà vérifiés, par numéro de ligne, tenu à jour ici (une
+// ligne disparue en sort : un numéro réutilisé est vérifié de nouveau).
+export async function checkSeals(rows, exportId, seal, seen = new Map()) {
+  const present = new Set(rows.map(r => r.id));
+  for (const id of seen.keys()) if (!present.has(id)) seen.delete(id);
+  const forged = [];
+  for (const row of rows.filter(isUnpacked)) {
+    const got = row[SEAL_COL];
+    if (got && seen.get(row.id) === got) continue;
+    if (got && got === await seal(sealText(exportId, row))) seen.set(row.id, got);
+    else forged.push(row.id);
+  }
+  const bad = new Set(forged);
+  return { kept: rows.filter(r => !bad.has(r.id)), forged };
 }

@@ -5,7 +5,7 @@
 // recopie (voir loop.js).
 import { apply, fetchRows, uploadAttachment } from '../grist.js';
 import { chunk, nowS } from '../logic/common.js';
-import { fileArrivals, joinParts, sha1, shaOf, short } from '../logic/files.js';
+import { fileArrivals, joinParts, parkedOverflow, sha1, shaOf, short } from '../logic/files.js';
 
 // Dépôt refusé par Grist (taille maximale de l'instance, droits) : ses morceaux restent, et il
 // n'est retenté qu'au bout de RETRY_MS. Gardé ici pour la carte : journal -> Map(empreinte -> { name, error, at }).
@@ -26,19 +26,23 @@ export async function attachments() {
 // Reçoit les fichiers arrivés en entier dans le journal `journal` (lignes `rows`) ; `files()` rend
 // les fichiers du document (voir attachments), complétés au fil des dépôts. Un fichier qu'aucune
 // version ne cite (`cited`, voir citedFiles) attend la sienne, un jour au plus (il peut arriver
-// avant elle), puis est effacé. Rend les lignes qui restent dans le journal et le nombre de lignes
-// ou de fichiers rejetés (illisibles, altérés).
-export async function receiveFiles(journal, exportId, rows, files, cited) {
-  const { ready, stale, rejected } = fileArrivals(rows, exportId, nowS());
-  if (!ready.length && !stale.length && !rejected.length) return { rows, rejected: 0 };
+// avant elle), puis est effacé. Quand toutes les versions arrivées sont dépliées (`settled`), les
+// morceaux en attente au-delà de PARKED_MAX sont effacés, les plus anciens d'abord. Rend les
+// lignes qui restent dans le journal et le nombre de lignes ou de fichiers rejetés (illisibles,
+// altérés, envois incomplets en trop).
+export async function receiveFiles(journal, exportId, rows, files, cited, settled = true) {
+  const { ready, stale, rejected, partial } = fileArrivals(rows, exportId, nowS());
+  if (!ready.length && !stale.length && !rejected.length && !partial.length) return { rows, rejected: 0 };
   const errors = refused.get(journal) || new Map();
   refused.set(journal, errors);
   const done = [...stale, ...rejected];
   let bad = rejected.length;
   const present = await files();
+  const parked = [...partial];
   for (const file of ready) {
     if (!present.has(file.sha) && !cited.has(short(file.sha))) {
       if (file.old) done.push(...file.ids);
+      else parked.push(file);
       continue;
     }
     if (!present.has(file.sha)) {
@@ -58,6 +62,13 @@ export async function receiveFiles(journal, exportId, rows, files, cited) {
       }
     }
     done.push(...file.ids);
+  }
+  if (settled) {
+    // Seuls les envois incomplets en trop sont suspects : des fichiers entiers peuvent venir d'une
+    // table refusée ici.
+    const over = parkedOverflow(parked);
+    bad += over.filter(g => !g.sha).length;
+    done.push(...over.flatMap(g => g.ids));
   }
   await apply(chunk(done).map(part => ['BulkRemoveRecord', journal, part]));
   const gone = new Set(done);

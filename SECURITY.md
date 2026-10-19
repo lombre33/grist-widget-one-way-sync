@@ -22,8 +22,9 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   invitation vaut 7 jours et porte toujours un secret.
 - Le document qui recevra est lu **chez Grist** (nom, dossier, équipe) à l'approbation, puis
   revérifié toutes les heures ; un code de contrôle court se compare de vive voix.
-- Les envois sont **signés** (HMAC-SHA256, une clé par export) : la clé d'écriture d'une réception
-  ne suffit plus pour y faire recopier des données.
+- Les envois sont **signés** (HMAC-SHA256, une clé par export), et ce que la CIBLE en déplie est
+  **scellé** avec la même clé : la clé d'écriture d'une réception ne suffit plus pour y faire
+  recopier des données.
 - Règles d'accès posées par le widget : `Synchro` réservée aux propriétaires de la SOURCE, journaux
   de la CIBLE réservés à ses éditeurs (case cochée par défaut).
 - Niveau **Renforcé**, au choix à l'invitation : code de contrôle à comparer obligatoirement,
@@ -96,7 +97,9 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   dans le webhook de l'autre côté. Les règles du document qui administre (accepter, refuser, à
   valider) sont notées dans sa note d'exports, jamais dans un journal : un participant ne peut pas
   faire passer un changement pour accepté. Un changement à valider n'est écrit qu'au clic sur
-  **Accepter** ; une ligne de journal forgée marquée « refusée » ne change que l'affichage.
+  **Accepter** ; une ligne de journal forgée marquée « refusée » ne change que l'affichage. Une
+  invitation d'Échange qui reprend l'identifiant d'un export de ce document est refusée (elle
+  remplacerait cet export et couperait ses destinataires).
 - **Pièces jointes** : une colonne Pièces jointes ne part que cochée. Le lot ne porte que la liste
   de ses fichiers (empreinte, nom, taille). Le contenu ne passe pas par le webhook : le widget
   SOURCE, page ouverte par un propriétaire, télécharge chaque fichier cité par une ligne de
@@ -107,13 +110,21 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   est effacé et compté parmi les « Arrivées suspectes ». Les morceaux ne sont pas signés, les
   versions si : un fichier n'est déposé que si une version reçue le cite (ou une cellule qui
   l'attend encore) ; sinon il attend la sienne un jour au plus, puis est effacé (vérifié). Les
-  fichiers ne vont jamais de la CIBLE vers la SOURCE, ni par lien public.
+  morceaux en attente (envois en cours, fichiers non cités) sont bornés à 50 Mo par journal : au-delà,
+  les plus anciens sont effacés, et un envoi incomplet en trop compte parmi les « Arrivées
+  suspectes ». Le nom d'un fichier perd aussi ses caractères invisibles et de sens d'écriture
+  (« facture\u202Efdp.exe »). Les fichiers ne vont jamais de la CIBLE vers la SOURCE, ni par lien
+  public.
 - **`Synchro` réservée aux propriétaires** : ses formules lisent les tables sans les règles
   d'accès, et elle porte la clé de signature des exports. À l'ouverture de l'onglet Envoyer par un
   propriétaire, le widget pose des règles de mémo « Synchro : réservée aux propriétaires », avant
-  les autres : un lecteur ne la voit pas, un éditeur ne la voit ni ne la modifie. Seule exception,
-  pour la recopie d'un Échange par un éditeur : les lignes `echange` et `lot`, sans leur contenu,
-  et leur colonne `Synchro_Renvoi`. Un éditeur ne voit donc plus les cartes des exports. Changer
+  les autres : un lecteur ne la voit pas, un éditeur ne voit ni ne modifie ses lignes. Seule
+  exception, pour la recopie d'un Échange par un éditeur : les lignes `echange` et `lot` des
+  exports en Échange, sans leur contenu, et leur colonne `Synchro_Renvoi`. Un éditeur ne voit donc
+  plus les cartes des exports. **Limite** : par défaut, Grist laisse les éditeurs modifier la
+  structure du document, donc les formules de `Synchro` (ce qui part) et la description de ses
+  colonnes ; une règle d'accès n'y peut rien. Il faut décocher « Permettre aux éditeurs de modifier
+  la structure » ; en Renforcé, la carte de l'export le demande tant que ce n'est pas fait. Changer
   une règle recharge le document (une fois) ; le widget ne le fait jamais pendant un assistant
   ouvert, et ne touche jamais aux règles des autres (vérifié : l'ordre est gardé, rien n'est
   reposé au chargement suivant).
@@ -128,8 +139,11 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   identifiant, les tables d'origine répondent 403, la note n'est pas lisible, et `Synchro` ne
   montre que les lignes de l'export public. L'assistant liste en rouge les colonnes rendues
   publiques, refuse une table dont une règle d'accès (d'autrui) cache des lignes ou des colonnes
-  (les formules de `Synchro` liraient sans elle), et la carte alerte si le lien public donne plus
-  que la lecture. Un export Renforcé n'a pas de lien public.
+  (les formules de `Synchro` liraient sans elle) ; une règle sur toutes les tables compte, comme
+  celle d'une table dont une colonne Référence de l'export affiche le texte. Ce contrôle est refait
+  à chaque modification d'un export public (refusée s'il échoue) et à chaque affichage de sa carte
+  (une règle posée depuis y est signalée). La carte alerte aussi si le lien public donne plus que
+  la lecture. Un export Renforcé n'a pas de lien public.
 
 ## Codes d'invitation et de réponse
 
@@ -159,11 +173,15 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   s'ils diffèrent, avertissement pour un espace personnel (n'importe qui peut en créer un). La
   CIBLE fait de même pour l'adresse de retour d'un Échange. La SOURCE revérifie chaque webhook au
   plus une fois par heure, page ouverte : un co-propriétaire peut en changer l'adresse dans les
-  réglages de Grist ; la carte le signale.
-- **Code de contrôle** : 6 caractères tirés de SHA-256(adresse, secret), montrés des deux côtés
-  (sans 0, 1, I, L, O). Ils ne coïncident que si la réponse vient de qui a reçu l'invitation et
-  désigne ce document : à comparer par téléphone, ce qui ferme le cas d'un attaquant dans la même
-  équipe. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
+  réglages de Grist ; la carte signale un autre document que celui de la fiche, et une adresse qui
+  n'est plus celle d'un formulaire de cette instance. Ce contrôle protège de l'erreur, pas d'un
+  co-propriétaire décidé, qui peut aussi réécrire la fiche (le mémo du webhook).
+- **Code de contrôle** : 6 caractères tirés de SHA-256(clé de partage, secret), montrés des deux
+  côtés (sans 0, 1, I, L, O). La clé de partage est tirée par Grist : le reste de l'adresse (le
+  préfixe d'équipe, que Grist ne contrôle pas pour une clé de partage) n'entre pas dans le calcul,
+  sinon un intermédiaire pourrait le faire varier jusqu'à retomber sur le même code. Ils ne
+  coïncident que si la réponse vient de qui a reçu l'invitation et désigne ce formulaire : à
+  comparer par téléphone, ce qui ferme le cas d'un attaquant dans la même équipe. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
   d'approuver (et, en Échange, côté CIBLE avant de répondre).
 - Contrôles à la lecture (`js/logic/codes.js`) : préfixe et version, identifiants, secret,
   colonnes (noms Grist, types connus, 400 au plus), textes coupés à 200 caractères, adresses de la
@@ -197,12 +215,24 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   et le contenu). La CIBLE efface sans effet, et compte parmi les « Arrivées suspectes », toute
   ligne mal signée ou non signée (vérifié) ; une liste de clés vide non signée n'est lue que comme
   vide, sans les colonnes qu'elle annonce. Une réception branchée avant la 0.8 ne connaît pas la
-  clé : elle accepte les envois non signés jusqu'à une nouvelle invitation. Qui a la clé du
-  formulaire **et** la clé de signature (un lecteur de la CIBLE peut lire cette dernière) peut
-  encore forger : couper le lien y met fin. En Échange, chaque côté signe avec sa propre clé,
+  clé : elle accepte les envois non signés jusqu'à une nouvelle invitation, et sa carte le dit.
+  Qui a la clé du formulaire **et** la clé de signature (un lecteur de la CIBLE peut lire cette
+  dernière) peut encore forger : couper le lien y met fin. **Une seule clé par export**, la même
+  pour tous ses destinataires, en clair dans chaque invitation : une réponse envoyée en citant
+  l'invitation réunit les deux clés dans le même message ; mieux vaut répondre dans un nouveau
+  message. En Échange, chaque côté signe avec sa propre clé,
   donnée dans son propre code : l'invitation porte l'adresse de retour mais pas la clé du retour,
   la réponse l'inverse ; il faut les deux codes pour forger un envoi (vérifié : un lot signé avec
   la clé de l'invitation est rejeté par le document qui invite).
+- **Sceau des lignes dépliées** : la clé du formulaire peut créer une ligne avec n'importe quelles
+  colonnes, donc une ligne qui ressemble à une version déjà dépliée, qui n'aurait jamais été
+  contrôlée. La CIBLE scelle donc chaque version et chaque liste qu'elle déplie (colonne
+  `Sync_Sceau` du journal : HMAC-SHA256, avec la clé de signature de l'export, de l'export, de la
+  table, de la clé, de l'horodatage, de `Supprime` et du contenu). Une ligne dépliée au sceau
+  faux ou absent est effacée sans effet et comptée parmi les « Arrivées suspectes » (vérifié). L'empreinte de la clé est notée dans la note du journal : à la première
+  fois, ou quand une nouvelle invitation change la clé, les lignes dépliées déjà là sont scellées ;
+  ensuite, une clé introuvable (destination effacée, description vidée) arrête la recopie de ce
+  journal au lieu de tout accepter. Une reprise qui change la clé le dit avant de confirmer.
 - **Dates du futur** : une version ou une liste datée de plus de 10 minutes après l'heure de la
   CIBLE est rejetée (même instance, même horloge) : elle l'emporterait sur toutes les vraies.
 - **Vague de suppressions** : quand un passage effacerait plus de 10 lignes et plus de 20 % des
@@ -217,7 +247,9 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   comptée ; une arrivée anormale est signalée (« Arrivées suspectes ») avec un bouton pour couper
   le lien. Aucun nom reçu ne peut viser une propriété des objets JavaScript (`__proto__`…), et les
   volumes sont bornés (100 000 lignes par lot, 1 000 clés trop grosses et 200 tables suivies par
-  journal, 500 lignes reçues par passage).
+  journal, 500 lignes reçues par passage). Une date d'arrivée hors bornes ne peut pas casser
+  l'affichage, et une carte qui ne se dessine pas laisse les autres, et ses boutons « Couper le
+  lien » et « Arrêter », à leur place.
 - **Fin d'un envoi** : quand la SOURCE révoque un destinataire, supprime l'export ou arrête un
   Échange, son widget envoie d'abord une ligne « fin » à l'adresse du webhook, puis l'efface ; la
   carte de la CIBLE affiche « Coupé par la SOURCE ». Cette ligne est signée ; pour une réception
@@ -250,14 +282,17 @@ IA, ni dans un ticket, ni dans un salon de discussion.
 ## Qui peut quoi
 
 - SOURCE : seul un **propriétaire** crée, suspend ou supprime un webhook, donc branche ou révoque
-  un destinataire, et lui seul voit et modifie `Synchro` (règles posées par le widget, voir plus
-  haut) : un éditeur ne peut plus élargir ce que reçoivent les destinataires branchés. Il voit
-  « réservé aux propriétaires » à la place des cartes.
+  un destinataire, et lui seul voit et modifie les lignes de `Synchro` (règles posées par le
+  widget, voir plus haut). Un éditeur voit « réservé aux propriétaires » à la place des cartes ; il
+  ne peut élargir ce que reçoivent les destinataires branchés que si Grist lui laisse modifier la
+  structure (réglage par défaut, voir plus haut).
 - CIBLE : un **éditeur** accepte une invitation, range les tables et recopie. Les journaux sont
   réservés aux éditeurs (règle de mémo « Synchro : journaux réservés aux éditeurs », case cochée par
   défaut à l'acceptation) : ils gardent les versions reçues et ce qu'elles ont remplacé, quelles
   que soient les règles des tables de destination. Un lecteur ne voit donc pas les réceptions,
-  seulement les boutons grisés. Un Échange demande un propriétaire.
+  seulement les boutons grisés. Seul un propriétaire peut poser cette règle : une réception
+  acceptée par un éditeur le dit sur sa carte jusqu'à ce qu'un propriétaire ouvre la page. Un
+  Échange demande un propriétaire.
 
 ## Ce que le widget écrit et garde
 
@@ -288,7 +323,7 @@ Pour un usage en production :
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et
   la politique de `index.html` que les instances Grist utilisées ;
-- relire le code à chaque mise à jour : environ 6 700 lignes de JavaScript commenté, sans dépendance.
+- relire le code à chaque mise à jour : environ 6 900 lignes de JavaScript commenté, sans dépendance.
 
 ## Ce que le widget ne fait pas
 
@@ -301,11 +336,16 @@ Pour un usage en production :
 
 - L'expéditeur d'un export peut écrire dans les tables de destination ce que l'export pourrait y
   écrire : c'est le principe de la synchro (une vague de suppressions attend une décision, une date
-  du futur est refusée). Qui a obtenu la clé d'une réception ne le peut plus sans la clé de
-  signature, sauf pour une réception branchée avant la 0.8. Couper le lien y met fin. Pour un
-  export qui envoie des pièces jointes, la SOURCE dépose ses fichiers (25 Mo chacun au plus) : un
-  fichier reçu s'ouvre avec la même prudence qu'une pièce jointe de courriel. Qui n'a que la clé
-  du formulaire peut faire attendre un fichier non cité un jour dans le journal, sans dépôt.
+  du futur est refusée). La vague se compte par passage : une SOURCE qui efface peu à la fois n'est
+  pas retenue (en Renforcé, toute suppression l'est). Qui a obtenu la clé d'une réception ne le
+  peut plus sans la clé de signature (signature et sceau), sauf pour une réception branchée avant
+  la 0.8. Couper le lien y met fin. Pour un export qui envoie des pièces jointes, la SOURCE dépose
+  ses fichiers (25 Mo chacun au plus) : un fichier reçu s'ouvre avec la même prudence qu'une pièce
+  jointe de courriel. Qui n'a que la clé du formulaire peut faire attendre des morceaux de fichier
+  dans le journal (50 Mo au plus, un jour au plus), sans dépôt.
+- Les lignes dépliées présentes quand la CIBLE pose son sceau pour la première fois (ou pour une
+  nouvelle clé) sont tenues pour bonnes. Un onglet resté ouvert sur une version d'avant la 0.9
+  déplierait sans sceau : ces lignes seraient effacées comme suspectes, et la SOURCE renverra.
 - La clé du formulaire lit la note de son journal, dont le secret de l'invitation, et le nom du
   document : le secret ne sert plus une fois l'invitation acceptée.
 - Un envoi en échec bloque la file de tous les webhooks du document SOURCE environ 15 minutes

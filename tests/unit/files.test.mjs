@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FILE_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, partRow, readPart, readTracking,
+  FILE_MAX, PARKED_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, parkedOverflow, partRow, readPart, readTracking,
   recordSent, resolveCell, resolveRows, sha1, shaOf, short, trackingNote,
 } from '../../js/logic/files.js';
 import { EXPORT } from './fixtures.mjs';
@@ -83,6 +83,8 @@ test('morceaux : base64 de 512 Ko au plus, rassemblés à l\'identique', async (
 test('CIBLE : un morceau ne vient que de la SOURCE de l\'export, bien formé', () => {
   const ok = { id: 1, ...partRow(EXPORT, { sha: A, name: '../a\u0000.pdf', size: 3 }, '0a1b2c3d', 0, 1, 'YWJj') };
   assert.deepEqual(readPart(ok, EXPORT), { sha: A, name: '.._a_.pdf', size: 3, n: 0, parts: 1, send: '0a1b2c3d', data: 'YWJj' });
+  const bidi = { id: 2, ...partRow(EXPORT, { sha: A, name: 'facture\u202Efdp.exe\u200b', size: 3 }, '0a1b2c3d', 0, 1, 'YWJj') };
+  assert.equal(readPart(bidi, EXPORT).name, 'facture_fdp.exe_', 'sens d\'écriture et caractères invisibles neutralisés');
   const meta = change => ({ ...ok, Synchro_Colonnes: JSON.stringify({ ...JSON.parse(ok.Synchro_Colonnes), ...change }) });
   for (const [row, why] of [
     [ok, 'autre export'], [meta({ sha: 'x' }), 'empreinte'], [meta({ n: 1 }), 'rang'], [meta({ parts: 99 }), 'trop de morceaux'],
@@ -107,6 +109,16 @@ test('CIBLE : fichier arrivé en entier, envoi remplacé, envoi abandonné, lign
   assert.deepEqual(rejected, [6]);
   assert.deepEqual(fileArrivals(rows, EXPORT, 1000 + 90000).stale.sort(), [3, 4, 5]);
   assert.deepEqual([ready[0].old, fileArrivals(rows, EXPORT, 1000 + 90000).ready[0].old], [false, true], 'arrivé depuis plus d\'un jour');
+  assert.deepEqual(fileArrivals(rows, EXPORT, 1000 + 3600).partial, [{ ids: [4], bytes: 3 }, { ids: [5], bytes: 3 }], 'envois en cours, octets reçus');
+  assert.equal(ready[0].bytes, 6);
+});
+
+test('CIBLE : morceaux en attente bornés, les plus anciens effacés d\'abord', () => {
+  const groups = [{ ids: [1, 2], bytes: 40 }, { ids: [9], bytes: 30 }, { ids: [5], bytes: 30 }];
+  assert.deepEqual(parkedOverflow(groups, 100), [], 'tout tient');
+  assert.deepEqual(parkedOverflow(groups, 70).map(g => g.ids), [[1, 2]], 'le plus ancien part');
+  assert.deepEqual(parkedOverflow(groups, 29).map(g => g.ids), [[9], [5], [1, 2]]);
+  assert.equal(PARKED_MAX, 2 * FILE_MAX);
 });
 
 test('CIBLE : seuls les fichiers cités par une version, ou attendus par une cellule, sont déposés', () => {
