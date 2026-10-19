@@ -113,7 +113,13 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.8 (16 octobre 2026)
+## État : V0.5.9 (19 octobre 2026)
+
+V0.5.9 (trouvé par l'audit de sécurité de la V0.8, 19 octobre) : une ligne écrite par la clé du
+formulaire avec une date impossible (`Sync_Recu` 1e13) faisait échouer tout l'onglet Recevoir
+(`toISOString`), donc cachait « Couper le lien ». L'historique écarte ces dates (`validTime` dans
+`recentChanges`) et chaque carte se dessine à part (`safeCard`). Dans l'Alpha, la clé d'une
+réception reste un droit d'écriture (pas de signatures : risque accepté de SECURITY.md).
 
 V0.5.8 (deux défauts trouvés par les tests de la V0.8.0, préparés sur `alpha` à la demande
 d'Antoine, non publiés) : au chargement du document SOURCE, Grist recalcule `RecalculLe` de toutes

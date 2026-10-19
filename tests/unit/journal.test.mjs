@@ -39,6 +39,8 @@ test('historique : versions recopiées arrivées après la visite, plus récente
   assert.deepEqual(recentChanges(rows, 'Nom', 12, 20).map(brief), [
     { at: 40, label: 'n3', state: 'suppression' }, { at: 31, label: 'n2', state: 'modif' }, { at: 15, label: 'n4', state: 'ajout' }]);
   assert.equal(recentChanges(rows, 'Nom', 0, 1).length, 1);
+  const odd = [j(7, 'e', 60, { Sync_Etat: 'ajout', Sync_Recu: 1e13 }), j(8, 'f', 61, { Sync_Etat: 'ajout', Sync_Recu: Infinity })];
+  assert.deepEqual(recentChanges(odd, 'Nom', 0, 20), [], 'date hors bornes (ligne forgée) : pas montrée');
 });
 
 test('historique : numéro de ligne d\'ici, avant et après sur les colonnes recopiées', () => {

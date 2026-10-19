@@ -947,6 +947,8 @@ try {
     { Synchro_Export: 'ffffffffffffffff', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: pirate },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Lot: 'pas du JSON' },
     { Synchro_Export: exportId, Synchro_Table: 'Contacts', Synchro_Type: 'complet', Synchro_Lot: pirate },
+    // Une version « déjà recopiée » à une date impossible : l'onglet ne doit pas en tomber.
+    { Synchro_Table: 'Contacts', id_sync: 'fantome', MajLe: 1, Sync_Applique: true, Sync_Etat: 'ajout', Sync_Recu: 1e13, Synchro_Donnees: '{"Nom":"Fantôme"}' },
   ])).ok, 'le lien du formulaire accepte n\'importe quelle ligne');
   await widget().getByRole('tab', { name: 'Recevoir' }).click();
   // Rien n'est arrivé depuis plus d'une minute : le passage suivant viendrait dans une minute.
