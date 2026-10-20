@@ -8,4 +8,4 @@ export const GRIST_ORIGINS = ['https://grist.numerique.gouv.fr', 'https://docs.g
 // propre copie, ou la publie dans sa galerie de widgets, met ici son adresse.
 export const WIDGET_URL = 'https://grist-factory.github.io/grist-widget-syncPlus/';
 
-export const VERSION = '0.11.0';
+export const VERSION = '0.11.1';

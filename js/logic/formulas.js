@@ -201,7 +201,7 @@ function lotFormula(pick) {
     `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...READ,
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
     `again = set(int(i) for i in ($${RESEND_COL} or "").split(":")[-1].split(",") if i.strip().isdigit())`,
-    `rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
+    `if $${TYPE_COL} != "${KIND.lot}": rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
     `if $${TYPE_COL} == "${KIND.files}":`,
     '  files = {}',
     '  for r in rows:',
@@ -217,10 +217,17 @@ function lotFormula(pick) {
     `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}")`,
     `  mute = swap.id and swap.${SCHEMA_COL} != "${HUB}"`,
     `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
-    `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
-    // Seule RECALC_COL (un nombre : lu vite) est lue sur toutes les lignes ; les dates, bien plus
-    // lentes à lire, seulement sur les lignes recalculées depuis moins de WINDOW_S secondes.
-    `  touched = [r for r in rows if (v(getattr(r, "${RECALC_COL}", None)) or 0) > v(cut)]`,
+    // L'heure est lue par time.time() et non NOW() : Grist recalcule toutes les heures les formules
+    // qui appellent NOW(), sur toutes les lignes (voir RECALC_SPEC).
+    '  import time',
+    `  cut = datetime.datetime.fromtimestamp(time.time() - ${WINDOW_S}, datetime.timezone.utc)`,
+    // Le lot est recalculé à chaque modification de la table : seule RECALC_COL (un nombre : lu
+    // vite) est lue sur toutes les lignes ; le reste (clé, filtre, dates, bien plus lentes à lire)
+    // seulement sur les lignes recalculées depuis moins de WINDOW_S secondes et celles à renvoyer.
+    '  c = v(cut)',
+    `  hit = [r for r in src.all if (getattr(r, "${RECALC_COL}", None) or 0) > c or r.id in again]`,
+    `  hit = [r for r in hit if r.${KEY_COL} and keep(r)]`,
+    `  touched = [r for r in hit if (getattr(r, "${RECALC_COL}", None) or 0) > c]`,
     '  def echo(r):',
     `    t, m = v(getattr(r, "${RECALC_COL}")) or 0, v(r.${ORDER_COL}) or 0`,
     '    return any(abs(t - s) < 1 and m < s for s in stamps)',
@@ -229,8 +236,8 @@ function lotFormula(pick) {
     '  undone = set(r.id for r in touched if r.id not in recent and r.id not in fresh and not echo(r))',
     // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
     // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
-    `  if len(touched) == len(rows) > (0 if swap.id else ${SMALL_TABLE}): undone = set()`,
-    '  rows = [r for r in rows if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
+    `  if len(touched) > (0 if swap.id else ${SMALL_TABLE}) and len(touched) == sum(1 for r in src.all if r.${KEY_COL} and keep(r)): undone = set()`,
+    '  rows = [r for r in hit if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
     // Une ligne renvoyée part au plus tôt à son dernier recalcul (hors Échange) : un rechargement
     // du document a pu la faire partir à cette heure-là (petite table), et la CIBLE ignorerait
     // sinon le renvoi, plus ancien, par exemple celui d'une colonne ajoutée à l'export (vérifié).
@@ -335,8 +342,12 @@ export function syncColumns(tables) {
 
 // RecalculLe : heure (en secondes) du dernier recalcul de MajLe. Un nombre, et non une date : la
 // formule du lot la lit sur toutes les lignes à chaque modification, et Grist lit une date environ
-// cinq fois plus lentement (mesuré : 190 ms contre 38 ms sur 12 000 lignes).
-export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW().timestamp()` };
+// cinq fois plus lentement (mesuré : 190 ms contre 38 ms sur 12 000 lignes). L'heure vient de
+// time.time() et non de NOW() : Grist recalcule toutes les heures, document ouvert, chaque formule
+// qui appelle NOW() (action UpdateCurrentTime), donc RecalculLe de toutes les lignes, et le
+// changement allait dans l'historique (mesuré : 6 s de calcul et 1,1 Mo par heure pour 20 000
+// lignes). Au chargement du document, Grist recalcule toutes les formules : là, rien à faire.
+export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nimport time\nreturn time.time()` };
 
 // Colonnes de la synchro qui manquent à une table.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, RECALC_COL].filter(id => !cols.some(c => c.colId === id));

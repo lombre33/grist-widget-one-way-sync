@@ -274,7 +274,29 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.11.0 (20 octobre 2026)
+## État : V0.11.1 (20 octobre 2026)
+
+V0.11.1 (audit de performance demandé par Antoine le 20 octobre, rapport
+`/mnt/project-files/notes/audits-v0.8/performance.md`, scripts de mesure dans
+`/mnt/project-files/notes/audits-v0.8/perf/`) :
+- **Piège vérifié** : Grist recalcule toutes les heures (action système `UpdateCurrentTime`,
+  document chargé) toute formule qui appelle `NOW()`, sur toutes les lignes. `RecalculLe` le
+  faisait : 20 000 lignes réécrites, 6 s de calcul et 1,1 Mo d'historique par heure. Les formules
+  du widget lisent l'heure par `time.time()` (`RECALC_SPEC`, `cut` du lot) ; `refreshMajLe`
+  remplace l'ancienne formule. Au chargement du document, Grist recalcule toutes les formules :
+  `RecalculLe` y est réécrite pour toutes les lignes (prix de la détection de Ctrl+Z, mesuré
+  3 s et 0,56 Mo pour 20 000 lignes).
+- **Piège vérifié** : un jeton `getAccessToken({ readOnly: true })` est traité en lecteur : `/sql`
+  et `/compare` le refusent (403) dès que le document a des règles d'accès, donc toujours une
+  fois le widget installé. `selectRows` et `docChanges` prennent le jeton aux droits de la
+  personne (`authUrl(…, { full: true })`). Avant : la CIBLE relisait chaque journal en entier
+  toutes les minutes (16 Mo/min pour deux réceptions de 10 000 lignes), la SOURCE relisait
+  `Synchro` et le schéma toutes les 10 s.
+- CIBLE : quand Grist dit ce qui a changé, un passage sans changement n'a lieu que toutes les
+  5 minutes (`QUIET_MS`).
+- Lot : seule `RecalculLe` est lue sur toutes les lignes, clé et filtre seulement sur les lignes
+  recalculées ou à renvoyer (`hit`) : écriture SOURCE de 75 à 38 ms (10 000 lignes ; témoin sans
+  widget 15 ms).
 
 V0.11.0 (Antoine, 20 octobre : boutons « tous » et « aucun », fenêtre agrandissable, et « améliorer
 l'outil de filtrage des tables, opérateur, valeurs existantes [...] tout type de colonne (référence,
@@ -370,10 +392,10 @@ L'Échange recrée toujours seul une colonne effacée.
 V0.5.7 (Antoine : l'alerte « dès que ça se passe », et « dire dans l'historique qu'une colonne a
 été ajoutée à l'export ») : toutes les 10 s, `due` (`js/target/loop.js`) demande à Grist les tables
 changées depuis l'état vu au coup d'œil précédent (`docChanges` : `GET /compare?left=<hash>&right=HEAD&maxRows=1`,
-une dizaine de ms ; 500 « Cannot read hash » si l'état est sorti de l'historique, alors relu depuis
+jeton aux droits de la personne (refusé en lecture seule), une dizaine de ms ; 500 « Cannot read hash » si l'état est sorti de l'historique, alors relu depuis
 HEAD ; `tableRenames` non vide : tout relire ; réservé à qui peut tout lire du document, sinon
 l'ancien rythme). Un passage n'a lieu que si un journal, une destination ou `_grist_Tables*` a
-changé (`touchedTables`), au moins une fois par minute, et au rythme d'avant pour un lien public ;
+changé (`touchedTables`), au moins toutes les 5 minutes depuis la 0.11.1 (une fois par minute avant), et au rythme d'avant pour un lien public ;
 une destination changée perd son cache (`settled`, qui note `dest`) et est relue. Nos propres
 écritures valent un passage de plus, sans effet. Colonnes ajoutées à l'export : notées dans
 l'entrée (`addedCols`, `addedColumns`, les 10 dernières) quand `newColumnsMap` les range, et

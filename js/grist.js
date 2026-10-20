@@ -23,10 +23,13 @@ async function gristFetch(url, options = {}) {
   return fetch(url, { ...options, credentials: 'omit' });
 }
 
-// Adresse REST du document courant suivie de `path`, avec un jeton d'accès court (lecture seule
-// sauf `write`).
-async function authUrl(path, { write = false } = {}) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: !write });
+// Adresse REST du document courant suivie de `path`, avec un jeton d'accès court : en lecture
+// seule, sauf `full` (les droits de la personne). Il le faut pour écrire, mais aussi pour /sql et
+// /compare, que Grist réserve à qui peut lire tout le document : un jeton en lecture seule y est
+// traité en lecteur, et refusé (403) dès que le document a des règles d'accès, celles que pose le
+// widget comprises (vérifié). Sans lui, chaque coup d'œil retombait sur une lecture complète.
+async function authUrl(path, { full = false } = {}) {
+  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: !full });
   return `${baseUrl}${path}${path.includes('?') ? '&' : '?'}auth=${encodeURIComponent(token)}`;
 }
 
@@ -90,7 +93,7 @@ export async function isOwner() {
   return owner;
 }
 
-// Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
+// Quelques colonnes d'une table, lues par l'API REST en SQL (voir authUrl) : bien plus
 // léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture
 // répétée. `where` : { colonne: valeur } (des noms du widget, pas des valeurs lues ailleurs). Null
 // si Grist refuse (droits, table absente) : lire alors la table entière.
@@ -98,7 +101,7 @@ export async function selectRows(tableId, colIds, where = {}) {
   try {
     const test = Object.entries(where).map(([c, v]) => `"${c}" = '${String(v).replace(/'/g, "''")}'`).join(' and ');
     const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"${test ? ` where ${test}` : ''}`;
-    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(sql)}`));
+    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(sql)}`, { full: true }));
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
   } catch (e) {
     return null;
@@ -116,7 +119,7 @@ export async function downloadAttachment(id) {
 export async function uploadAttachment(name, bytes) {
   const form = new FormData();
   form.append('upload', new Blob([bytes]), name);
-  const response = await gristFetch(await authUrl('/attachments', { write: true }), {
+  const response = await gristFetch(await authUrl('/attachments', { full: true }), {
     method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: form,
   });
   if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
@@ -130,7 +133,7 @@ export async function uploadAttachment(name, bytes) {
 // millisecondes ; une valeur au plus par colonne revient). Null si Grist refuse : la comparaison
 // est réservée à qui peut lire tout le document.
 export async function docChanges(since) {
-  const read = async left => gristFetch(await authUrl(`/compare?left=${encodeURIComponent(left)}&right=HEAD&maxRows=1`));
+  const read = async left => gristFetch(await authUrl(`/compare?left=${encodeURIComponent(left)}&right=HEAD&maxRows=1`, { full: true }));
   try {
     let response = await read(since || 'HEAD');
     if ([401, 403].includes(response.status)) return null;
@@ -152,7 +155,7 @@ export const withLock = (name, fn) => (navigator.locks ? navigator.locks.request
 // Webhooks (propriétaires du document seulement : Grist refuse sinon en 403)
 
 async function rest(method, path, body) {
-  const response = await gristFetch(await authUrl(path, { write: true }), {
+  const response = await gristFetch(await authUrl(path, { full: true }), {
     method,
     // Grist exige l'un de ces en-têtes pour toute écriture sans cookie (protection CSRF).
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },

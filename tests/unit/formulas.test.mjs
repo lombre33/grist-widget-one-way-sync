@@ -37,15 +37,17 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);
-  assert.match(lot, /timedelta\(seconds=5\)/);
+  assert.match(lot, /  cut = datetime\.datetime\.fromtimestamp\(time\.time\(\) - 5, datetime\.timezone\.utc\)/);
+  assert.ok(!/NOW\(\)/.test(lot), 'pas de NOW() dans le lot : Grist le recalculerait toutes les heures');
   assert.match(lot, /lists = Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\)/);
   assert.match(lot, /room = 950000 - sum\(len\(r\.Synchro_Ids or ""\) for r in lists\)\nbudget = max\(20000, min\(250000, room \/\/ max\(1, len\(lists\)\)\)\)/,
     'les lots d\'un export se partagent ce que leurs listes des clés laissent');
   assert.match(lot, /if capped and n > max\(budget, room\):\n    big\.append\(r\.id_sync\)\n    continue/, 'une ligne plus grosse qu\'un envoi est signalée');
   assert.match(lot, /if capped and out and size \+ n > budget: break/, 'la première ligne part seule, même au-delà du plafond');
   assert.match(lot, /  if not capped and size > 2000000: return json\.dumps\(\{"lignes": \[\], "total": len\(rows\), "trop": True\}\)/, 'instantané public plafonné');
-  assert.match(lot, /  touched = \[r for r in rows if \(v\(getattr\(r, "RecalculLe", None\)\) or 0\) > v\(cut\)\]\n/,
-    'seule RecalculLe (un nombre) est lue sur toutes les lignes, MajLe sur les lignes recalculées');
+  assert.match(lot, /  hit = \[r for r in src\.all if \(getattr\(r, "RecalculLe", None\) or 0\) > c or r\.id in again\]\n  hit = \[r for r in hit if r\.id_sync and keep\(r\)\]\n/,
+    'seule RecalculLe (un nombre) est lue sur toutes les lignes, clé et filtre sur les lignes recalculées ou à renvoyer');
+  assert.match(lot, /if \$Synchro_Type != "lot": rows = \[r for r in src\.all if r\.id_sync and keep\(r\)\]/, 'instantané et fichiers : toutes les lignes');
   assert.match(lot, /  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut and not \(mute and echo\(r\)\)\)/,
     'une ligne reçue par l\'Échange ne repart pas vers l\'autre document, même dans les 5 secondes');
   assert.match(lot, /  mute = swap\.id and swap\.Synchro_Colonnes != "plusieurs"\n/,
@@ -59,7 +61,7 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /    t, m = v\(getattr\(r, "RecalculLe"\)\) or 0, v\(r\.MajLe\) or 0\n    return any\(abs\(t - s\) < 1 and m < s for s in stamps\)/,
     'écho : ligne recalculée par la consolidation, MajLe plus ancienne qu\'elle');
   assert.match(lot, /  swap = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Type="echange"\)\n/);
-  assert.match(lot, /if len\(touched\) == len\(rows\) > \(0 if swap\.id else 20\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
+  assert.match(lot, /if len\(touched\) > \(0 if swap\.id else 20\) and len\(touched\) == sum\(1 for r in src\.all if r\.id_sync and keep\(r\)\): undone = set\(\)/, 'un rechargement du document n\'est pas une annulation');
   assert.match(lot, /if r\.id in undone: return v\(getattr\(r, "RecalculLe"\)\)/, 'une annulation part à son heure');
   assert.match(lot, /if r\.id in again and \$Synchro_Type == "lot" and not swap\.id: return max\(v\(r\.MajLe\) or 0, v\(getattr\(r, "RecalculLe", None\)\) or 0\)/,
     'un renvoi part au plus tôt au dernier recalcul, hors Échange');
@@ -109,6 +111,8 @@ test('préparation de la SOURCE : colonnes manquantes et clés des lignes exista
   assert.deepEqual(prepareSourceActions('T', ['MajLe']), [
     ['AddColumn', 'T', 'MajLe', { type: 'DateTime:UTC', isFormula: false, formula: 'NOW()', recalcWhen: 2 }],
   ]);
+  assert.match(prepareSourceActions('T', ['RecalculLe'])[0][3].formula, /^\$MajLe\nimport time\nreturn time\.time\(\)$/,
+    'RecalculLe sans NOW() : Grist ne la recalcule pas toutes les heures');
   let n = 0;
   const actions = fillKeyActions('T', [{ id: 1, id_sync: '' }, { id: 2, id_sync: 'x' }, { id: 3 }], () => `u${++n}`);
   assert.deepEqual(actions, [['BulkUpdateRecord', 'T', [1, 3], { id_sync: ['u1', 'u2'] }]]);
