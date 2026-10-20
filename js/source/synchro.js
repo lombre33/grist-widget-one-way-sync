@@ -9,6 +9,7 @@ import {
 } from '../logic/common.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf } from '../logic/exports.js';
+import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { apply, fetchRows, listWebhooks, readSchema, webhookConditions } from '../grist.js';
 import { dropPages, removeTechnicalTables } from '../pages.js';
@@ -102,7 +103,7 @@ export async function refreshMajLe(schema = null, rows = null) {
   for (const id of new Set(rows.map(r => r[EXPORT_COL]))) {
     // Une colonne de filtre compte aussi : une ligne qui entre dans le filtre doit partir.
     for (const { table, columns, filter } of exportTables(rows, id)) {
-      sent.set(table, new Set([...(sent.get(table) || []), ...columns.map(c => c.id), ...(filter ? [filter.id] : [])]));
+      sent.set(table, new Set([...(sent.get(table) || []), ...columns.map(c => c.id), ...filterColumns(filter)]));
     }
   }
   const tables = [...sent].filter(([table]) => schema.has(table));

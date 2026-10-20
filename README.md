@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.10.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.11.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -87,7 +87,8 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 ## Fonctionnalités
 
 - **Exports** : plusieurs par document, chacun avec ses tables, ses colonnes et un filtre de
-  lignes ; une modification de l'export vaut pour tous ses destinataires.
+  lignes (conditions sur tout type de colonne, Références comprises, avec le nombre de lignes qui
+  partiront) ; une modification de l'export vaut pour tous ses destinataires.
 - **Trois modes par destinataire** : *dans un seul sens* (deux codes, l'envoi est fait par Grist même
   page fermée), *Échange* (dans les deux sens, la modification la plus récente l'emporte) et
   *lien public* (un seul code, la CIBLE lit ce que la SOURCE publie).

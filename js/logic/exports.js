@@ -1,7 +1,8 @@
 // SOURCE : un export (des tables, leurs colonnes, un filtre de lignes facultatif) et ses lignes
 // dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; ce qu'un Échange renvoie. Les
 // règles d'accès du lien public sont dans acl.js.
-import { AUTHOR_COL, COL_ID, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
+import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
+import { rowFilter } from './filters.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -25,18 +26,6 @@ export const readTables = tables => [...new Set(tables.flatMap(({ table, columns
 
 // Colonne Pièces jointes (envoyée ou reçue).
 export const isFileColumn = c => c.type === 'Attachments';
-
-// Filtre de lignes d'une table : n'envoyer que les lignes dont la colonne `id` vaut `value` (texte
-// affiché, sans tenir compte des majuscules ; une case à cocher vaut « oui » ou « non »). Rend le
-// filtre tel que la formule le lit, ou null s'il est vide ou mal formé.
-const YES = ['oui', 'yes', 'vrai', 'true', '1', 'x'];
-export function rowFilter(filter) {
-  if (!filter || !COL_ID.test(String(filter.id || ''))) return null;
-  const source = String(filter.source || '');
-  const text = String(filter.value ?? '').trim().toLowerCase();
-  const value = source === 'Bool' ? (YES.includes(text) ? 'oui' : 'non') : text;
-  return { id: filter.id, source, visible: String(filter.visible || ''), value };
-}
 
 // ---------------------------------------------------------------------------------------------
 // Lignes Synchro d'un export

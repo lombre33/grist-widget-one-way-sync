@@ -26,6 +26,60 @@ const PUBLIC_MAX = 2000000;
 // (UUID) fait une quarantaine d'octets : de quoi laisser la place aux lots.
 const PART_KEYS = 5000;
 
+// Filtre de lignes de la table dans l'export (`keep`) : ses conditions, à remplir toutes ou au moins
+// une ; mêmes comparaisons que filterTester (filters.js, qui dit quelles valeurs, sous quelle forme).
+// `items` : valeurs d'une cellule ; une condition qui échoue sur une ligne ne la garde pas. Un filtre
+// d'avant la 0.11 ({ value }, sans conditions) compare le texte affiché.
+const FILTER = [
+  'def kind(s):',
+  '  if s == "Bool": return "bool"',
+  '  if s in ("Numeric", "Int"): return "number"',
+  '  if s == "Date" or s.startswith("DateTime"): return "date"',
+  '  if s.startswith("RefList:"): return "refs"',
+  '  if s.startswith("Ref:"): return "ref"',
+  '  return "list" if s == "ChoiceList" else "text"',
+  'def items(r, c, k):',
+  '  try:',
+  '    x = getattr(r, c["id"])',
+  '    if k == "ref": return [x.id] if x and x.id else []',
+  '    if k == "refs": return [y.id for y in x] if x else []',
+  '    if k == "list": return [txt(y) for y in x] if isinstance(x, (list, tuple)) else []',
+  '    if k == "bool": return [x is True]',
+  '    if k == "number": return [x] if isinstance(x, (int, float)) and not isinstance(x, bool) else []',
+  '    if k == "date": return [x.date().isoformat() if isinstance(x, datetime.datetime) else x.isoformat()] if isinstance(x, datetime.date) else []',
+  '  except Exception:',
+  '    return []',
+  '  t = txt(g(r, c))',
+  '  return [t] if t else []',
+  'def test(r, c):',
+  '  op, w, k = c.get("op") or "", c.get("values") or [], kind(c.get("source") or "")',
+  '  if op.startswith("not"): return not test(r, dict(c, op=op[3:]))',
+  '  if op in ("contains", "starts", "eq") and k not in ("number", "date"):',
+  '    t = txt(g(r, c))',
+  '    return t == w[0] if op == "eq" else t.startswith(w[0]) if op == "starts" else w[0] in t',
+  '  i = items(r, c, k)',
+  '  if op == "empty": return not i',
+  '  if op == "in": return any(x in w for x in i)',
+  '  if op == "true": return i == [True]',
+  '  if op == "false": return i != [True]',
+  '  if not i: return False',
+  '  x = i[0]',
+  '  if op == "between": return w[0] <= x <= w[1]',
+  '  return {"eq": x == w[0], "lt": x < w[0], "le": x <= w[0], "gt": x > w[0], "ge": x >= w[0]}.get(op, False)',
+  'def ok(r, c):',
+  '  try:',
+  '    return test(r, c)',
+  '  except Exception:',
+  '    return False',
+  `f = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.filter}")`,
+  `spec = json.loads(f.${SCHEMA_COL} or "null") if f.id else None`,
+  'def keep(r):',
+  '  if not spec: return True',
+  '  if "conds" not in spec: return txt(g(r, spec)) == spec["value"]',
+  '  oks = [ok(r, c) for c in spec["conds"]]',
+  '  return any(oks) if spec.get("mode") == "any" else all(oks)',
+];
+
 // Lecture d'une valeur (`g`) et filtre de lignes de la table dans l'export (`keep`), communs aux
 // formules : une ligne qui sort du filtre quitte les clés, la CIBLE l'efface. Une valeur est lue à
 // part : une cellule en erreur part vide sans bloquer les autres. Dates en secondes (format de
@@ -52,9 +106,7 @@ const READ = [
   '  if isinstance(x, float) and x.is_integer(): x = int(x)',
   '  if isinstance(x, list): return ", ".join(txt(y) for y in x)',
   '  return "" if x is None else str(x).strip().lower()',
-  `f = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.filter}")`,
-  `spec = json.loads(f.${SCHEMA_COL} or "null") if f.id else None`,
-  'def keep(r): return not spec or txt(g(r, spec)) == spec["value"]',
+  ...FILTER,
 ];
 
 // Signature d'un lot ou d'une liste des clés (`kind`) par chacune des clés des destinataires de

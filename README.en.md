@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.10.1 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.11.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -84,7 +84,8 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 
 ## Features
 
-- **Exports**: several per document, each with its tables, columns and a row filter; editing an
+- **Exports**: several per document, each with its tables, columns and a row filter (conditions on
+  any column type, References included, with the number of rows that will be sent); editing an
   export applies to all its recipients.
 - **Three modes per recipient**: *one way* (two codes, Grist does the sending even with the
   page closed), *Exchange* (both ways, the most recent change wins) and *public link* (a single

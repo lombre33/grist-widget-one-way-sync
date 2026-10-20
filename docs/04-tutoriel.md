@@ -65,9 +65,18 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher : voir
 [Pièces jointes](#pièces-jointes)). Le reste ne sort jamais du document. Une
 Référence part comme le texte qu'elle affiche. Les colonnes
-valent pour toutes les personnes qui reçoivent l'export. En option, un **filtre de lignes** par
-table : seules partent les lignes où une colonne vaut un texte donné ; une ligne qui en sort est
-effacée chez les destinataires.
+valent pour toutes les personnes qui reçoivent l'export. **Tous** et **Aucun** cochent ou décochent
+d'un coup les colonnes que la recherche affiche, et la liste s'agrandit par son coin (la fenêtre
+aussi).
+
+En option, un **filtre de lignes** par table (**Filtrer les lignes**, puis **Ajouter une
+condition**) : une colonne, un opérateur et ses valeurs. Selon le type de la colonne : *est l'une
+de* (valeurs existantes à cocher, avec leur nombre de lignes), *contient*, *commence par*, *est
+vide* ; =, >, <, *est entre* pour un nombre ; *avant le*, *après le*, *entre* pour une date ;
+*cochée* ou non pour une case à cocher. Une Référence ou une Liste de références se filtre par les
+fiches citées : une fiche renommée reste dans le filtre. Plusieurs conditions se combinent (toutes,
+ou au moins une), et le nombre de lignes qui partiront s'affiche pendant le réglage. Une ligne qui
+sort du filtre est effacée chez les destinataires.
 
 ![Colonnes](images/03-source-colonnes.png)
 

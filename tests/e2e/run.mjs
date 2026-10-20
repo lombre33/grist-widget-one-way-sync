@@ -1033,29 +1033,57 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).find(r => r.Nom === 'Alice').Ville === 'Marseille', 'noms d\'origine suivis');
   step('CIBLE : table et colonne de destination renommées, la recopie suit');
 
-  // --- Filtre de lignes : seule Alice part, les autres lignes sont effacées chez la CIBLE ; le
-  // filtre retiré, elles reviennent
+  // --- Choix des colonnes et filtre de lignes. « Aucun » puis « Tous » ; seule Alice part (Nom
+  // est l'une de), les autres lignes sont effacées chez la CIBLE ; puis par sa ville (Référence),
+  // qui reste dans le filtre une fois renommée ; le filtre retiré, tout revient.
   const names = async () => (await records(target.doc, 'Contacts')).map(r => r.Nom).sort().join();
   const everyone = await names();
-  const setFilter = async (column, value) => {
+  const contactsBlock = () => dialog().locator('.table-block').filter({ has: widget().locator('h3', { hasText: /^Contacts$/ }) });
+  const editFilter = async (change) => {
     await openWidget(source.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    const rowsButton = dialog().getByRole('button', { name: 'Filtrer les lignes', exact: true }).first();
+    const rowsButton = contactsBlock().getByRole('button', { name: 'Filtrer les lignes', exact: true });
     if (await rowsButton.getAttribute('aria-expanded') !== 'true') await rowsButton.click();
-    await pick('Lignes de Contacts à envoyer', column);
-    if (value) await dialog().getByRole('textbox', { name: 'Valeur des lignes de Contacts à envoyer' }).fill(value);
+    await change();
     await dialogButton('Continuer').click();
     await dialogButton('Enregistrer').click();
     await dialog().getByText(/^Enregistré/).waitFor();
     await dialogButton('Fermer').click();
     await openWidget(target.url);
   };
-  await setFilter('Nom', 'alice');
+  await editFilter(async () => {
+    const columnsButton = contactsBlock().getByRole('button', { name: 'Choisir les colonnes', exact: true });
+    if (await columnsButton.getAttribute('aria-expanded') !== 'true') await columnsButton.click();
+    const columnsTotal = (await contactsBlock().locator('.check-count').first().textContent()).match(/sur\s(\d+)/)[1];
+    const boxes = contactsBlock().locator('.check-list').first().getByRole('checkbox');
+    const before = await boxes.evaluateAll(list => list.map(box => box.checked));
+    await contactsBlock().getByRole('button', { name: 'Aucun', exact: true }).first().click();
+    await contactsBlock().getByText(`0 sur ${columnsTotal}`).waitFor();
+    await dialogButton('Continuer').click();
+    await dialog().getByText('Cochez au moins une colonne', { exact: false }).waitFor();
+    await contactsBlock().getByRole('button', { name: 'Tous', exact: true }).first().click();
+    await contactsBlock().getByText(`${columnsTotal} sur ${columnsTotal}`).waitFor();
+    for (const [i, box] of (await boxes.all()).entries()) if (!before[i]) await box.uncheck();
+    await contactsBlock().getByRole('button', { name: 'Ajouter une condition', exact: true }).click();
+    await contactsBlock().getByRole('group', { name: 'Valeur de la condition 1' }).getByRole('checkbox', { name: /^Alice/ }).check();
+    await contactsBlock().getByText(/^1\sligne partira sur \d+/).waitFor();
+  });
   await waitFor(async () => (await names()) === 'Alice', 'seule la ligne du filtre reste');
-  await setFilter('Toutes les lignes');
+  await editFilter(async () => {
+    await pick('Colonne de la condition 1', 'Lieu');
+    await contactsBlock().getByRole('group', { name: 'Valeur de la condition 1' }).getByRole('checkbox', { name: /^Villeurbanne/ }).check();
+    await contactsBlock().getByText(/^1\sligne partira sur \d+/).waitFor();
+    assert.match(await contactsBlock().locator('p.small').first().textContent(), /lignes où Lieu est l’une de\s«\sVilleurbanne\s»/, 'résumé du filtre');
+  });
+  await applyActions(source.doc, [['UpdateRecord', 'Villes', 1, { Ville: 'Villeurbanne-Est' }]]);
+  await waitFor(async () => (await names()) === 'Alice' && (await records(target.doc, 'Contacts'))[0].Lieu === 'Villeurbanne-Est', 'ville renommée : la ligne reste dans le filtre');
+  await editFilter(async () => {
+    await contactsBlock().getByRole('button', { name: 'Retirer la condition 1', exact: true }).click();
+    await contactsBlock().getByText('Aucune condition : toutes les lignes partent.').waitFor();
+  });
   await waitFor(async () => (await names()) === everyone, 'lignes revenues sans le filtre');
-  step('SOURCE : filtre de lignes posé puis retiré, la CIBLE suit');
+  step('SOURCE : colonnes (Aucun, Tous) ; filtre de lignes par valeurs cochées puis par Référence (renommée, elle reste), retiré, la CIBLE suit');
 
   // --- Table Synchro abîmée : marque d'envoi coupé numérique, sans dépendances de MajLe, avec
   // manualSort. Tout est remis en état à l'ouverture du widget SOURCE, et une suppression suit.

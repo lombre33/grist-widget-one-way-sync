@@ -16,6 +16,7 @@ import { catchUp, chargeNotice, resendTables } from './resend.js';
 import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
+import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { confirmDialog, el, icon, message, pill, run } from '../ui.js';
 import { roleGuide } from '../guide.js';
@@ -226,7 +227,7 @@ const exportNotes = exp => [
 ];
 
 const tablesLine = exp => exp.tables.map(tb => t(tb.filter ? 'send.export.tableFiltered' : 'send.export.table',
-  { table: tb.table, n: tb.columns.length, ...(tb.filter ? { col: tb.filter.id, value: tb.filter.value } : {}) })).join(' · ') || '—';
+  { table: tb.table, n: tb.columns.length, filter: filterSummary(tb.filter) })).join(' · ') || '—';
 
 function exportCard(exp, state, open, out) {
   const { ownerOnly } = state;

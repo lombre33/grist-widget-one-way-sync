@@ -50,11 +50,11 @@
     },
     "text": {
       "fr": [
-        "Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export.",
+        "Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher ; Tous et Aucun cochent d’un coup ce que la recherche affiche). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export. En option, Filtrer les lignes : des conditions par colonne (valeurs à cocher, contient, nombres, dates, Références par fiche), avec le nombre de lignes qui partiront.",
         "À la création, le widget ajoute id_sync (identifiant stable) et MajLe (date de modification) aux tables, et la table technique Synchro, une seule pour tout le document. Une colonne Supprime déjà présente est prise en compte : une ligne cochée est retirée de la CIBLE."
       ],
       "en": [
-        "Tick the columns to send (all by default, except attachments, to tick). The rest never leaves the document. Columns apply to all recipients of the export.",
+        "Tick the columns to send (all by default, except attachments, to tick; All and None tick at once what the search shows). The rest never leaves the document. Columns apply to all recipients of the export. Optionally, Filter rows: conditions per column (values to tick, contains, numbers, dates, References by record), with the number of rows that will be sent.",
         "On creation, the widget adds id_sync (stable key) and MajLe (last change) to the tables, and the Synchro technical table, one for the whole document. An existing Supprime column is honoured: a ticked row is removed from the TARGET."
       ]
     },

@@ -12,7 +12,7 @@ const en = JSON.parse(read('i18n/en.json'));
 const jsFiles = readdirSync(new URL('../../js', import.meta.url), { recursive: true }).filter(f => f.endsWith('.js'));
 const code = [...jsFiles.map(f => read(`js/${f}`)), read('index.html')].join('\n');
 // Familles de clés que le code compose (`t(`send.status.${key}`)`, `error.${e.message}`).
-const DYNAMIC = ['type.', 'guide.role.', 'guide.handoff.', 'send.status.', 'recv.status.', 'recv.history.', 'error.', 'send.rules.', 'send.refusal.', 'recv.review.', 'recv.gap.'];
+const DYNAMIC = ['type.', 'send.op.', 'send.filter.mode.', 'guide.role.', 'guide.handoff.', 'send.status.', 'recv.status.', 'recv.history.', 'error.', 'send.rules.', 'send.refusal.', 'recv.review.', 'recv.gap.'];
 const placeholders = text => [...new Set([...text.matchAll(/\{(\w+)(?:\|[^}]*)?\}/g)].map(m => m[1]))].sort();
 
 test('les deux langues ont les mêmes clés et les mêmes valeurs à insérer', () => {

@@ -29,7 +29,8 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(keys, /"t": state\["t"\], "cles": have\[i:i \+ 5000\], "fin": i \+ 5000 >= len\(have\)\}/, 'liste complète en morceaux, au renvoi seulement, à l\'heure du suivi');
   for (const formula of [keys, lot, state]) {
     assert.match(formula, /f = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="filtre"\)/, 'filtre de la table lu dans sa ligne');
-    assert.match(formula, /def keep\(r\): return not spec or txt\(g\(r, spec\)\) == spec\["value"\]/);
+    assert.match(formula, /  return any\(oks\) if spec\.get\("mode"\) == "any" else all\(oks\)/, 'conditions : toutes, ou au moins une');
+    assert.match(formula, /  if "conds" not in spec: return txt\(g\(r, spec\)\) == spec\["value"\]/, 'filtre d\'avant la 0.11 : texte affiché');
   }
   assert.match(lot, /rows = \[r for r in src\.all if r\.id_sync and keep\(r\)\]/, 'seules les lignes du filtre partent');
   assert.match(lot, /tables = \{"Contacts": Contacts, "Villes": Villes\}/);

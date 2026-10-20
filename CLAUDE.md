@@ -274,7 +274,27 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.10.1 (20 octobre 2026)
+## État : V0.11.0 (20 octobre 2026)
+
+V0.11.0 (Antoine, 20 octobre : boutons « tous » et « aucun », fenêtre agrandissable, et « améliorer
+l'outil de filtrage des tables, opérateur, valeurs existantes [...] tout type de colonne (référence,
+référence multiple incluse) ») :
+- `checkList` (`js/ui.js`) : « Tous » et « Aucun » agissent sur ce que la recherche trouve, compteur
+  « n sur N », `wide` (grille, colonnes d'une table), longue liste haute de son contenu jusqu'à 45 %
+  de la fenêtre puis étirable au coin (`fitHeight`, mesurée à son premier affichage), 300 éléments
+  montrés au plus. Les assistants (`.modal-720`) s'agrandissent par leur coin.
+- Filtre de lignes (`js/logic/filters.js`, fenêtre `js/source/filter-editor.js`) : ligne `filtre` =
+  `{ mode: 'all'|'any', conds: [{ id, source, visible, op, values, labels }] }`. Opérateurs par type
+  (`OPERATORS`, `filterKind`) ; une Référence ou Liste de références se filtre par **numéro de
+  fiche** (renommer une fiche ne fait sortir aucune ligne, vérifié e2e), « contient » sur le texte
+  affiché ; une date se compare en jour « AAAA-MM-JJ », dans le fuseau d'une colonne Date et heure.
+  Une condition incomplète est ignorée (`rowFilter`) : « est l'une de » sans rien de coché aurait tout
+  effacé chez les destinataires. **La formule Python (`FILTER` dans `formulas.js`) et `filterTester`
+  doivent comparer pareil** (aperçu « n lignes partiront ») : vérifié sur 31 cas avec des objets
+  Grist simulés. Un filtre d'avant la 0.11 (`{ id, value }`) est lu par la formule (`"conds" not in
+  spec`) et par `rowFilter` (op `eq`, texte affiché) ; réécrit au prochain enregistrement de l'export,
+  la table repart une fois. MajLe suit toutes les colonnes du filtre (`filterColumns`). Pas de
+  condition relative à la date du jour : une formule ne se recalcule pas avec l'heure.
 
 V0.10.1 (Antoine, 20 octobre : « nomEspace/nomDoc ») : la fiche d'un destinataire, côté SOURCE,
 montre « e-mail · document · équipe/nom du document ». Le nom (lu chez Grist à l'approbation) est

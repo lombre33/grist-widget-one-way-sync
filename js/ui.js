@@ -181,25 +181,66 @@ export function copyButton(text, label, onFail = () => {}) {
   return button;
 }
 
-// Liste à cocher, filtrable au clavier (tables, colonnes). `items` : [{ value, label, hint }]
-// (`hint` : type de la colonne, en discret). `checked` : valeurs cochées au départ. `onChange`
-// reçoit les valeurs cochées, dans l'ordre de la liste. `label` nomme la liste.
-export function checkList({ items, checked = [], label = '', onChange }) {
+// Liste à cocher, filtrable au clavier (tables, colonnes, valeurs d'un filtre). `items` :
+// [{ value, label, hint, keywords }] (`hint` : type de la colonne ou nombre de lignes, en discret ;
+// `keywords` : texte cherché en plus du libellé). `checked` : valeurs cochées au départ. `onChange`
+// reçoit les valeurs cochées, dans l'ordre de la liste. `label` nomme la liste. « Tous » et « Aucun »
+// ne touchent que ce que la recherche trouve. `wide` : sur plusieurs colonnes quand la place le permet. Une longue liste
+// prend la hauteur de son contenu jusqu'à 45 % de la fenêtre, puis s'étire à la souris. Au-delà de
+// SHOWN_MAX éléments trouvés, les suivants attendent une recherche plus précise.
+const LONG_LIST = 8;
+const SHOWN_MAX = 300;
+export function checkList({ items, checked = [], label = '', onChange, wide = false }) {
   const name = label ? t('common.filterIn', { name: label }) : t('common.filter');
   const filter = el('input', { class: 'search-input', type: 'search', placeholder: t('common.filter'), 'aria-label': name, autocomplete: 'off' });
-  const list = el('div', { class: 'check-list', role: 'group', 'aria-label': label || null });
+  const long = items.length > LONG_LIST;
+  const list = el('div', { class: `check-list${wide ? ' check-grid' : ''}${long ? ' check-long' : ''}`, role: 'group', 'aria-label': label || null });
   const chosen = new Set(checked);
+  const count = el('span', { class: 'check-count muted small', 'aria-live': 'polite' });
+  const found = () => items.filter(it => matches(`${it.label} ${it.keywords || ''}`, filter.value));
+  const changed = () => {
+    count.textContent = t('common.checkedCount', { n: chosen.size, total: items.length });
+    onChange(items.map(i => i.value).filter(v => chosen.has(v)));
+  };
   const render = () => {
-    const found = items.filter(it => matches(it.label, filter.value));
-    list.replaceChildren(...(found.length ? found.map(it => el('label', {},
+    const all = found();
+    const shown = all.slice(0, SHOWN_MAX);
+    const more = all.length - shown.length;
+    list.replaceChildren(...[...(shown.length ? shown.map(it => el('label', {},
       el('input', {
         type: 'checkbox', checked: chosen.has(it.value),
-        onchange: (e) => { if (e.target.checked) chosen.add(it.value); else chosen.delete(it.value); onChange(items.map(i => i.value).filter(v => chosen.has(v))); },
-      }), it.label, it.hint ? el('span', { class: 'hint' }, it.hint) : null)) : [el('p', { class: 'muted small' }, t('common.none'))]));
+        onchange: (e) => { if (e.target.checked) chosen.add(it.value); else chosen.delete(it.value); changed(); },
+      }), el('span', { class: 'check-label' }, it.label), it.hint ? el('span', { class: 'hint' }, it.hint) : null)) : [el('p', { class: 'muted small' }, t('common.none'))]),
+      more > 0 ? el('p', { class: 'muted small check-more' }, t('common.moreItems', { n: more })) : null].filter(Boolean));
+  };
+  const setShown = (on) => {
+    for (const it of found()) if (on) chosen.add(it.value); else chosen.delete(it.value);
+    render();
+    changed();
   };
   filter.addEventListener('input', render);
   render();
-  return el('div', { class: 'check-select' }, filter, list);
+  count.textContent = t('common.checkedCount', { n: chosen.size, total: items.length });
+  if (long) fitHeight(list);
+  const tools = items.length > 1 ? el('div', { class: 'check-tools' }, filter,
+    el('button', { class: 'btn btn-small', type: 'button', onclick: () => setShown(true) }, t('common.all')),
+    el('button', { class: 'btn btn-small', type: 'button', onclick: () => setShown(false) }, t('common.noneChecked')),
+    count) : filter;
+  return el('div', { class: 'check-select' }, tools, list);
+}
+
+// Hauteur de départ d'une longue liste, prise la première fois qu'elle s'affiche (elle peut être
+// repliée) : celle de son contenu, jusqu'à 45 % de la fenêtre. Ensuite, la poignée du coin
+// l'agrandit sans limite.
+function fitHeight(list) {
+  if (typeof ResizeObserver === 'undefined') return;
+  const watch = new ResizeObserver(() => {
+    if (!list.offsetHeight) return;
+    watch.disconnect();
+    list.style.height = `${Math.min(list.scrollHeight + 2, Math.max(160, Math.round(window.innerHeight * 0.45)))}px`;
+    list.style.maxHeight = 'none';
+  });
+  watch.observe(list);
 }
 
 // Choix d'une valeur dans une liste filtrable (tables, colonnes) : un bouton qui affiche le choix

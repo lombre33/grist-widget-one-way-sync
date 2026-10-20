@@ -14,6 +14,7 @@ import { receivedDests } from '../target/journals.js';
 import { resendTables } from './resend.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { cancelButton, checkList, el, failure, message, openWizard, pickField, run } from '../ui.js';
+import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
@@ -62,29 +63,36 @@ function columnsBlock(ctx, schema, table, relayed) {
   const describe = () => {
     const n = ctx.selected.get(table).length;
     const filter = ctx.filters.get(table);
+    const rows = filterSummary(filter);
     summary.textContent = `${n === usable.length ? t('send.columns.all', { n }) : t('send.columns.some', { n, total: usable.length })} · ${
-      filter ? t('send.rows.filtered', { column: filter.visible || filter.id, value: filter.value }) : t('send.rows.all')}`;
+      rows ? t('send.rows.filtered', { filter: rows }) : t('send.rows.all')}`;
   };
   const columns = el('div', { class: 'form' },
-    checkList({ items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source) })),
+    checkList({ items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source) })), wide: true,
       checked: ctx.selected.get(table), label: table, onChange: (values) => { ctx.selected.set(table, values); describe(); } }),
     files.length ? el('p', { class: 'muted small' }, t('send.columns.files', { cols: files.join(', ') })) : null);
-  const rows = el('div', {}, filterField(table, usable.filter(c => !isFileColumn(c)), ctx.filters.get(table), (filter) => { ctx.filters.set(table, filter); describe(); }));
+  const editor = filterEditor({
+    table, columns: usable, current: ctx.filters.get(table), labelOf: columnLabel,
+    onChange: (filter) => { ctx.filters.set(table, filter); describe(); },
+  });
+  const filtered = Boolean(filterSummary(ctx.filters.get(table)));
+  if (filtered) editor.load();
   describe();
   return el('div', { class: 'form table-block' }, el('h3', {}, table),
     relayed ? message('info', t('send.columns.relay')) : null, summary,
     el('div', { class: 'block-actions' },
       togglePart(columns, t('send.columns.pick'), ctx.selected.get(table).length !== usable.length),
-      togglePart(rows, t('send.rows.pick'), Boolean(ctx.filters.get(table)))),
-    columns, rows);
+      togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
+    columns, editor.node);
 }
 
-// Bouton qui ouvre ou ferme une partie de la fenêtre.
-function togglePart(part, label, open) {
+// Bouton qui ouvre ou ferme une partie de la fenêtre ; `onOpen` à chaque ouverture.
+function togglePart(part, label, open, onOpen = () => {}) {
   part.classList.toggle('hidden', !open);
   const button = el('button', { class: 'btn btn-small', type: 'button', 'aria-expanded': String(open), onclick: () => {
     const now = part.classList.toggle('hidden') === false;
     button.setAttribute('aria-expanded', String(now));
+    if (now) onOpen();
   } }, label);
   return button;
 }
@@ -206,28 +214,4 @@ async function showEdited({ exp, wizard, onClose }, { name, changed, report }) {
   if (changed.length && !report.isConnected) return onClose && onClose();
   const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
   return wizard.show(3, saved, [{ label: t('common.close'), kind: 'btn-primary' }]);
-}
-
-// Filtre de lignes d'une table, facultatif : une colonne et la valeur qu'ont les lignes envoyées.
-// `onChange` reçoit le filtre ({ id, source, visible, value }), ou null pour toutes les lignes.
-function filterField(table, columns, current, onChange) {
-  const input = el('input', { type: 'text', class: 'input', value: current ? current.value : '', 'aria-label': t('send.filter.value', { table }) });
-  const hint = el('p', { class: 'muted small' });
-  const filter = () => {
-    const column = columns.find(col => col.id === pick.value());
-    return column ? { id: column.id, source: column.source, visible: column.visible, value: input.value } : null;
-  };
-  const show = (id) => {
-    const column = columns.find(col => col.id === id);
-    input.hidden = !column;
-    hint.textContent = column ? t(column.source === 'Bool' ? 'send.filter.bool' : 'send.filter.help') : '';
-    onChange(filter());
-  };
-  const pick = pickField({
-    items: [{ value: '', label: t('send.filter.all') }, ...columns.map(c => ({ value: c.id, label: columnLabel(c) }))],
-    value: current ? current.id : '', label: t('send.filter.title', { table }), onChange: show,
-  });
-  input.addEventListener('input', () => onChange(filter()));
-  show(current ? current.id : '');
-  return el('div', { class: 'filter-field' }, el('p', { class: 'field-title' }, t('send.filter.title', { table })), pick, input, hint);
 }

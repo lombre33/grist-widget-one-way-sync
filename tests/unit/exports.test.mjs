@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   conditionExport, exchangeColumns, exchangeTables, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, rowFilter, tooLarge,
+  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { memoMatches } from '../../js/logic/trust.js';
@@ -76,18 +76,15 @@ test('table Synchro : lignes d\'un export (liste, lot, instantané public), tabl
   assert.deepEqual(pub.changed, []);
   // Filtre de lignes : une ligne 'filtre' par table filtrée ; poser, changer ou retirer un filtre
   // renvoie la table.
-  const filter = { id: 'Statut', source: 'Choice', visible: '', value: ' Actif ' };
+  const filter = { mode: 'all', conds: [{ id: 'Statut', source: 'Choice', visible: '', op: 'in', values: [' Actif '], labels: ['Actif'] }] };
   const filtered = exportRowsActions(rows, E, [{ table: 'Contacts', columns: [col('Nom')], filter }, { table: 'Villes', columns: [col('Ville')] }]);
   assert.deepEqual(filtered.changed, ['Contacts']);
   assert.deepEqual(filtered.actions[0][3].Synchro_Type, ['filtre']);
-  assert.equal(filtered.actions[0][3].Synchro_Colonnes[0], '{"id":"Statut","source":"Choice","visible":"","value":"actif"}');
+  assert.equal(filtered.actions[0][3].Synchro_Colonnes[0], '{"mode":"all","conds":[{"id":"Statut","source":"Choice","visible":"","op":"in","values":["actif"],"labels":["Actif"]}]}');
   const withFilter = [...rows, { id: 10, Synchro_Export: E, Synchro_Table: 'Contacts', Synchro_Type: 'filtre', Synchro_Colonnes: filtered.actions[0][3].Synchro_Colonnes[0] }];
-  assert.deepEqual(exportTables(withFilter, E)[0].filter, { id: 'Statut', source: 'Choice', visible: '', value: 'actif' });
+  assert.deepEqual(exportTables(withFilter, E)[0].filter, { mode: 'all', conds: [{ id: 'Statut', source: 'Choice', visible: '', op: 'in', values: ['actif'], labels: ['Actif'] }] });
   const unfiltered = exportRowsActions(withFilter, E, [{ table: 'Contacts', columns: [col('Nom')] }, { table: 'Villes', columns: [col('Ville')] }]);
   assert.deepEqual(unfiltered, { actions: [['BulkRemoveRecord', 'Synchro', [10]]], changed: ['Contacts'] });
-  assert.equal(rowFilter({ id: 'a;b', value: 'x' }), null);
-  assert.equal(rowFilter({ id: 'Actif', source: 'Bool', value: 'Yes' }).value, 'oui', 'case à cocher : oui ou non, en français comme en anglais');
-  assert.equal(rowFilter({ id: 'Actif', source: 'Bool', value: 'faux' }).value, 'non');
 });
 
 test('webhook d\'un destinataire : condition sur son export, relue à l\'identique seulement', () => {
@@ -104,15 +101,6 @@ test('webhook d\'un destinataire : condition sur son export, relue à l\'identiq
 });
 
 // Cas limites.
-
-test('filtre de lignes : formes acceptées', () => {
-  assert.equal(rowFilter(null), null);
-  assert.equal(rowFilter({ id: 'a b', value: 'x' }), null);
-  assert.deepEqual(rowFilter({ id: 'Actif', source: 'Bool', value: ' Oui ' }), { id: 'Actif', source: 'Bool', visible: '', value: 'oui' });
-  assert.deepEqual(rowFilter({ id: 'Actif', source: 'Bool', value: 'peut-être' }).value, 'non');
-  assert.equal(rowFilter({ id: 'Ville', value: '  LYON ' }).value, 'lyon');
-  assert.equal(rowFilter({ id: 'N', value: 0 }).value, '0');
-});
 
 test('condition d\'un webhook : rien d\'autre que la forme exacte', () => {
   const ok = `rec.Synchro_Export == "${EXPORT}" and rec.Synchro_Type in ("cles", "lot")`;
