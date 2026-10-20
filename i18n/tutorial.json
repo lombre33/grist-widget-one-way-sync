@@ -337,12 +337,12 @@
     },
     "text": {
       "fr": [
-        "SOURCE : en ajoutant un destinataire, choisir Lien public. Le widget pose des règles d’accès : un lecteur du document, dont le lien public, ne voit plus que les exports publics. Puis, dans Partager, régler « Lien public » sur Lecture.",
-        "CIBLE : coller le code, choisir les destinations, c’est tout. Le widget lit la SOURCE toutes les 10 secondes tant que sa page est ouverte. À éviter pour des données qui ne doivent pas être publiques."
+        "SOURCE : en ajoutant un destinataire, choisir Lien public. Le widget pose des règles d’accès : un lecteur du document, dont le lien public, ne voit plus que les exports publics. Puis, dans Partager, Gérer les utilisateurs : « Accès public » sur Activé, en Lecture seule.",
+        "CIBLE : coller le code, choisir les destinations, c’est tout. Tant que sa page est ouverte, le widget regarde chaque minute si l’export a changé (toutes les 10 secondes juste après une arrivée). À éviter pour des données qui ne doivent pas être publiques."
       ],
       "en": [
-        "SOURCE: when adding a recipient, pick Public link. The widget adds access rules: a viewer of the document, including the public link, only sees the public exports. Then, in Share, set “Public link” to Viewer.",
-        "TARGET: paste the code, pick the destinations, that is all. The widget reads the SOURCE every 10 seconds while its page is open. Avoid for data that must not be public."
+        "SOURCE: when adding a recipient, pick Public link. The widget adds access rules: a viewer of the document, including the public link, only sees the public exports. Then, in Share, Manage users: “Public access” On, as Viewer.",
+        "TARGET: paste the code, pick the destinations, that is all. While its page is open, the widget checks every minute whether the export changed (every 10 seconds right after an arrival). Avoid for data that must not be public."
       ]
     },
     "images": ["15-source-public"]
