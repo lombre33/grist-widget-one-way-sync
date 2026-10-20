@@ -160,8 +160,29 @@ export function exportStatus(exp) {
   return exp.invitations.length ? ['invited', 'pending'] : ['alone', 'off'];
 }
 
-// Mémo d'un webhook : la fiche du destinataire, « e-mail · document · équipe » (voir memoMatches).
-export const hookMemo = ({ email, docId, team }) => [email, docId, team].filter(Boolean).join(' · ');
+// Mémo d'un webhook : la fiche du destinataire, « e-mail · document · équipe/nom du document »
+// (voir memoMatches). Le nom, lu chez Grist à l'approbation, perd ses « · » ; le mémo d'un webhook
+// d'avant la 0.10.1 s'arrête à l'équipe.
+const memoText = text => String(text || '').replace(/\s*·\s*/g, ' - ').trim();
+export const hookMemo = ({ email, docId, team, docName }) => {
+  const name = memoText(docName);
+  return [email, docId, name ? `${team || ''}/${name}` : team].filter(Boolean).join(' · ');
+};
+
+// Fiche d'un destinataire à l'écran : son mémo, l'équipe suivie du nom du document. `docName` : le
+// nom vu chez Grist au dernier contrôle (voir checkHooks), qui l'emporte sur celui du mémo (document
+// renommé) et complète un mémo qui n'en a pas.
+export function hookLabel(memo, docName = '') {
+  const parts = String(memo || '').split(' · ').filter(Boolean);
+  let at = parts.findIndex(p => p.includes('/'));
+  if (at < 0 && parts.length === 3) at = 2;
+  const place = at < 0 ? '' : parts[at];
+  const team = place.split('/')[0];
+  const name = memoText(docName) || place.slice(team.length + 1);
+  const shown = [team, name].filter(Boolean).join('/');
+  if (at < 0) return [...parts, shown].filter(Boolean).join(' · ');
+  return parts.map((p, i) => (i === at ? shown : p)).filter(Boolean).join(' · ');
+}
 
 // Journal de retour d'un participant (webhook `hook`) : noté à l'approbation (`hook`) ; pour un
 // Échange branché avant, retrouvé par le document de la fiche, cité dans le mémo du webhook.

@@ -282,7 +282,7 @@ async function approve(ctx, inv, reply) {
   const r = reply.recipient;
   await putRecipientKey(exp.id, inv.id, reply.keys.down);
   const hook = await createWebhook({
-    name: hookName(exp.name, exp.id), memo: hookMemo(r), url: reply.url,
+    name: hookName(exp.name, exp.id), memo: hookMemo({ ...r, docName: reply.share.name }), url: reply.url,
     tableId: SYNC_TABLE, condition: exportCondition(exp.id),
   });
   await putRecipientKey(exp.id, hook, reply.keys.down, inv.id);

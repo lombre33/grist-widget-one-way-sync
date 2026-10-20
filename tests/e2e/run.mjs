@@ -874,6 +874,14 @@ try {
   const reply2 = await accept(target2.doc, target2.url, invitation2);
   await approve(reply2, { compare: true });
   await widget().locator('.person').nth(1).getByText('Actif').waitFor();
+  // Fiche du destinataire : équipe/nom du document, lu chez Grist ; un mémo d'avant la 0.10.1, sans
+  // le nom, est complété à l'affichage.
+  await widget().locator('.person-who', { hasText: `${env.team}/Cible 2` }).waitFor();
+  const firstHook = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.find(h => !h.fields.memo.includes('Cible 2'));
+  assert.ok(firstHook.fields.memo.endsWith(`${env.team}/Cible`), 'nom du document dans le mémo');
+  await api('PATCH', `/docs/${source.doc}/webhooks/${firstHook.id}`, { memo: firstHook.fields.memo.replace('/Cible', '') });
+  await openWidget(source.url);
+  await widget().locator('.person-who', { hasText: new RegExp(`${env.team}/Cible$`) }).waitFor({ timeout: 30000 });
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'file vide');
   await shot('13-source-actif', 'card');
   await openWidget(target2.url);

@@ -3,7 +3,7 @@
 // destinataire, filtré par Grist sur les lignes de son export.
 import { EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
 import { maskKey, parseWebhookUrl } from '../logic/codes.js';
-import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookStatus, hooksOf, readTables } from '../logic/exports.js';
+import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookLabel, hookStatus, hooksOf, readTables } from '../logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
 import { STATES, parseLot } from '../logic/journal.js';
 import { exchangeRules } from '../logic/consolidation.js';
@@ -153,9 +153,11 @@ function resumeExchange(state) {
 // de son webhook désigne-t-elle toujours le document de sa fiche (mémo) ? Un co-propriétaire peut
 // changer l'adresse d'un webhook dans les réglages de Grist, même vers un autre site : une adresse
 // qui n'est pas celle d'un formulaire de cette instance est signalée sans rien demander à personne.
-// Rend vrai si un résultat a changé.
+// Le nom du document, lu au passage, complète la fiche affichée (voir hookLabel). Rend vrai si un
+// résultat ou une fiche a changé.
 const CHECK_MS = 3600000;
-const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' ; bad }
+const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' ; bad ; docName }
+const personLabel = h => hookLabel(h.fields.memo, (checked.get(h.id) || {}).docName) || '—';
 async function checkHooks(hooks) {
   const due = hooks.filter((h) => {
     const was = checked.get(h.id);
@@ -166,15 +168,17 @@ async function checkHooks(hooks) {
   let changed = false;
   const note = (h, result) => {
     const was = checked.get(h.id) || { other: '', bad: false };
-    changed ||= was.other !== result.other || was.bad !== result.bad;
+    const label = personLabel(h);
     checked.set(h.id, { at: Date.now(), url: h.fields.url, ...result });
+    changed ||= was.other !== result.other || was.bad !== result.bad || label !== personLabel(h);
   };
   await Promise.all(due.map(async (h) => {
     const target = parseWebhookUrl(h.fields.url);
     if (!target || !target.flat || target.origin !== origin) return note(h, { other: '', bad: true });
     const info = await shareInfo(h.fields.url).catch(() => undefined);
     if (info === undefined) return; // Grist ne répond pas : au prochain affichage
-    note(h, { other: info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '', bad: false });
+    const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
+    note(h, { other, bad: false, docName: info && !other ? info.name : '' });
   }));
   return changed;
 }
@@ -261,7 +265,7 @@ function personRow(exp, h, ownerOnly, out) {
   const failing = status === 'error';
   const { other, bad } = checked.get(h.id) || {};
   return el('li', { class: 'person' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, h.fields.memo || '—'), statusPill(status, tone)),
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, personLabel(h)), statusPill(status, tone)),
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,

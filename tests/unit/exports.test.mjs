@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   conditionExport, exchangeColumns, exchangeTables, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, rowFilter, tooLarge,
+  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, rowFilter, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
+import { memoMatches } from '../../js/logic/trust.js';
 import { EXPORT } from './fixtures.mjs';
 
 test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'autre document', () => {
@@ -165,6 +166,16 @@ test('état d\'un destinataire et d\'un export : pastille, erreur dite simplemen
 
 test('fiche d\'un destinataire : mémo, journal de retour, auteur de l\'export', () => {
   assert.equal(hookMemo({ email: 'a@b.fr', docId: 'docA12345678', team: '' }), 'a@b.fr · docA12345678');
+  const memo = hookMemo({ email: 'a@b.fr', docId: 'docA12345678', team: 'equipe', docName: 'Suivi · RH' });
+  assert.equal(memo, 'a@b.fr · docA12345678 · equipe/Suivi - RH', 'équipe/nom du document, sans « · » dans le nom');
+  assert.ok(memoMatches(memo, 'docA12345678xyz'), 'le document se lit toujours dans le mémo');
+  assert.equal(hookLabel(memo), memo);
+  assert.equal(hookLabel(memo, 'Suivi 2027'), 'a@b.fr · docA12345678 · equipe/Suivi 2027', 'document renommé : son nom actuel');
+  assert.equal(hookLabel('a@b.fr · docA12345678 · equipe', 'Suivi RH'), 'a@b.fr · docA12345678 · equipe/Suivi RH', 'mémo d\'avant la 0.10.1 complété');
+  assert.equal(hookLabel('a@b.fr · docA12345678 · equipe'), 'a@b.fr · docA12345678 · equipe');
+  assert.equal(hookLabel('a@b.fr · docA12345678', 'Perso'), 'a@b.fr · docA12345678 · Perso', 'sans équipe');
+  assert.equal(hookLabel(hookMemo({ email: 'a@b.fr', docId: 'docA12345678', docName: 'Perso' })), 'a@b.fr · docA12345678 · Perso');
+  assert.equal(hookLabel('', ''), '');
   const h = { id: 7, fields: { memo: 'a@b.fr · docA12345678 · equipe' } };
   assert.equal(ownJournal(h)({ note: { hook: 7 } }), true, 'noté à l\'approbation');
   assert.equal(ownJournal(h)({ note: { hook: 8, from: { docId: 'docA12345678' } } }), false, 'le webhook noté l\'emporte sur le document');

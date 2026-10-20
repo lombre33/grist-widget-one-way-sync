@@ -274,7 +274,13 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.10.0 (19 octobre 2026)
+## État : V0.10.1 (20 octobre 2026)
+
+V0.10.1 (Antoine, 20 octobre : « nomEspace/nomDoc ») : la fiche d'un destinataire, côté SOURCE,
+montre « e-mail · document · équipe/nom du document ». Le nom (lu chez Grist à l'approbation) est
+dans le mémo des nouveaux webhooks (`hookMemo`, `docName`) ; à l'affichage (`hookLabel`), le nom vu
+par le contrôle horaire (`checkHooks`, `docName`) complète un mémo plus ancien et suit un document
+renommé. Le mémo garde l'identifiant du document (`memoMatches`, `ownJournal`).
 
 V0.10.0 (Antoine, 19 octobre : « corriger les failles de sécurité et défauts d'UX restants ») :
 clé de signature par destinataire (N4, voir « Signatures »), code de contrôle qui couvre niveau et
