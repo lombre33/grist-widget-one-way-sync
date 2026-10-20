@@ -123,7 +123,10 @@ function lotFormula(pick) {
     `if $${TYPE_COL} == "${KIND.lot}":`,
     `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id`,
     `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
-    `  cut = NOW() - datetime.timedelta(seconds=${WINDOW_S})`,
+    // L'heure est lue par time.time() et non NOW() : Grist recalcule toutes les heures les formules
+    // qui appellent NOW(), sur toutes les lignes (voir RECALC_SPEC).
+    '  import time',
+    `  cut = datetime.datetime.fromtimestamp(time.time() - ${WINDOW_S}, datetime.timezone.utc)`,
     // Seule RECALC_COL (un nombre : lu vite) est lue sur toutes les lignes ; les dates, bien plus
     // lentes à lire, seulement sur les lignes recalculées depuis moins de WINDOW_S secondes.
     `  touched = [r for r in rows if (v(getattr(r, "${RECALC_COL}", None)) or 0) > v(cut)]`,
@@ -242,7 +245,11 @@ export function syncColumns(tables) {
 // RecalculLe : heure (en secondes) du dernier recalcul de MajLe. Un nombre, et non une date : la
 // formule du lot la lit sur toutes les lignes à chaque modification, et Grist lit une date environ
 // cinq fois plus lentement (mesuré : 190 ms contre 38 ms sur 12 000 lignes).
-export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nreturn NOW().timestamp()` };
+// L'heure vient de time.time() et non de NOW() : Grist recalcule toutes les heures, document
+// ouvert, chaque formule qui appelle NOW() (action UpdateCurrentTime), donc RecalculLe de toutes
+// les lignes, et le changement allait dans l'historique (mesuré : 6 s de calcul et 1,1 Mo par
+// heure pour 20 000 lignes).
+export const RECALC_SPEC = { type: 'Numeric', isFormula: true, formula: `$${ORDER_COL}\nimport time\nreturn time.time()` };
 
 // Colonnes de la synchro qui manquent à une table.
 export const missingSyncColumns = cols => [KEY_COL, ORDER_COL, RECALC_COL].filter(id => !cols.some(c => c.colId === id));

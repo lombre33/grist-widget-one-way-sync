@@ -113,7 +113,15 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.5.9 (19 octobre 2026)
+## État : V0.5.10 (20 octobre 2026)
+
+V0.5.10 (audit de performance du 20 octobre, `/mnt/project-files/notes/audits-v0.8/performance.md`,
+mêmes corrections que la V0.11.1 de `main` sauf l'allègement de la formule du lot) : `RecalculLe`
+et le lot lisent l'heure par `time.time()` (Grist recalcule toutes les heures les formules qui
+appellent `NOW()`, sur toutes les lignes : 6 s et 1,1 Mo d'historique par heure pour 20 000
+lignes) ; `/sql` et `/compare` prennent le jeton aux droits de la personne (en lecture seule,
+refusés en 403 dès que le document a des règles d'accès : la CIBLE relisait chaque journal en
+entier toutes les minutes) ; CIBLE sans changement : un passage toutes les 5 minutes.
 
 V0.5.9 (trouvé par l'audit de sécurité de la V0.8, 19 octobre) : une ligne écrite par la clé du
 formulaire avec une date impossible (`Sync_Recu` 1e13) faisait échouer tout l'onglet Recevoir

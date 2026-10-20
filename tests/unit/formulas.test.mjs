@@ -27,7 +27,8 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);
-  assert.match(lot, /timedelta\(seconds=5\)/);
+  assert.match(lot, /  cut = datetime\.datetime\.fromtimestamp\(time\.time\(\) - 5, datetime\.timezone\.utc\)/);
+  assert.ok(!/NOW\(\)/.test(lot), 'pas de NOW() dans le lot : Grist le recalculerait toutes les heures');
   assert.match(lot, /lists = Synchro\.lookupRecords\(Synchro_Export=\$Synchro_Export, Synchro_Type="cles"\)/);
   assert.match(lot, /room = 950000 - sum\(len\(r\.Synchro_Ids or ""\) for r in lists\)\nbudget = max\(20000, min\(250000, room \/\/ max\(1, len\(lists\)\)\)\)/,
     'les lots d\'un export se partagent ce que leurs listes des clés laissent');

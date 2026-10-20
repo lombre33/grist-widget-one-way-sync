@@ -16,6 +16,10 @@ import { readPref, writePref } from '../prefs.js';
 
 const POLL_MS = 10000;
 const IDLE_MS = 60000;
+// Quand Grist dit ce qui a changé (voir due), un passage sans changement ne sert qu'aux tâches à
+// échéance : toutes les 5 minutes. Un passage relit chaque journal en entier (mesuré : 16 Mo pour
+// deux réceptions de 10 000 lignes).
+const QUIET_MS = 300000;
 // Lignes reçues dépliées par passage, au plus ; au-delà de FLOOD_PER_MIN lignes reçues par minute,
 // l'arrivée est anormale (le webhook n'en dépose que quelques-unes) : la carte le signale.
 const RAW_BATCH = 500;
@@ -69,8 +73,8 @@ export function startAutoConsolidation(render) {
 
 // Un passage est-il dû ? Grist dit quelles tables ont changé depuis le coup d'œil précédent
 // (docChanges) : un journal où des lignes sont arrivées, une destination retouchée à la main (elle
-// est alors relue), ou le schéma. Sinon un passage par minute suffit (retouche que la comparaison
-// n'aurait pas dite). Un lien public, que rien ne signale ici, et le cas où Grist refuse la
+// est alors relue), ou le schéma. Sinon un passage toutes les QUIET_MS. Un lien public, que rien
+// ne signale ici, et le cas où Grist refuse la
 // comparaison (droits) gardent le rythme d'avant : toutes les POLL_MS tant que des lignes
 // arrivent, puis toutes les minutes.
 async function due() {
@@ -84,7 +88,7 @@ async function due() {
       watch.hash = changes.hash;
       if (touched === null) settled.clear();
       else for (const [key, was] of settled) if (touched.includes(was.dest)) settled.delete(key);
-      return elapsed >= IDLE_MS || touched === null || touched.length > 0 || (watch.pull && steady);
+      return elapsed >= QUIET_MS || touched === null || touched.length > 0 || (watch.pull && steady);
     }
     watch.compare = false;
   }

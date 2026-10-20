@@ -63,12 +63,15 @@ export const isReadOnly = () => new URLSearchParams(location.search).get('readon
 // Propriétaire du document : seul un propriétaire lit la liste des webhooks.
 export const isOwner = () => listWebhooks().then(() => true, () => false);
 
-// Quelques colonnes d'une table, lues par l'API REST en SQL (jeton en lecture seule) : bien plus
+// /sql et /compare : Grist traite un jeton en lecture seule en lecteur, et le refuse (403) dès que
+// le document a des règles d'accès, celles que pose le widget comprises (vérifié) ; il faut le
+// jeton aux droits de la personne, sinon chaque coup d'œil retombe sur une lecture complète.
+// Quelques colonnes d'une table, lues par l'API REST en SQL : bien plus
 // léger que fetchTable quand la table a de grosses cellules (lots de Synchro), pour une lecture
 // répétée. Null si Grist refuse (droits, table absente) : lire alors la table entière.
 export async function selectRows(tableId, colIds) {
   try {
-    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+    const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
     const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"`;
     const response = await gristFetch(`${baseUrl}/sql?q=${encodeURIComponent(sql)}&auth=${encodeURIComponent(token)}`);
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
@@ -84,7 +87,7 @@ export async function selectRows(tableId, colIds) {
 // millisecondes ; une valeur au plus par colonne revient). Null si Grist refuse : la comparaison
 // est réservée à qui peut lire tout le document.
 export async function docChanges(since) {
-  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+  const { token, baseUrl } = await grist.docApi.getAccessToken({ readOnly: false });
   const read = left => gristFetch(`${baseUrl}/compare?left=${encodeURIComponent(left)}&right=HEAD&maxRows=1&auth=${encodeURIComponent(token)}`);
   try {
     let response = await read(since || 'HEAD');
