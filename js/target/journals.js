@@ -38,9 +38,10 @@ export function receivedJournals(schema) {
   }).filter(Boolean);
 }
 
-// Tables reçues ici, avec le document qui les envoie : pour refuser les boucles et repérer un relais.
+// Tables reçues ici, avec la table envoyée et le document qui l'envoie : pour refuser les boucles,
+// repérer un relais et dire ce qu'une destination reçoit déjà.
 export const receivedDests = schema => receivedJournals(schema)
-  .flatMap(({ note }) => note.tables.map(tb => ({ dest: tb.dest, fromDocId: (note.from || {}).docId || '' })));
+  .flatMap(({ note }) => note.tables.map(tb => ({ dest: tb.dest, table: tb.table, fromDocId: (note.from || {}).docId || '' })));
 
 // Un journal créé par une version précédente du widget reçoit les colonnes techniques qui lui
 // manquent. Renvoie vrai si le schéma a changé.

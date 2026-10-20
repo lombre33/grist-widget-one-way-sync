@@ -975,6 +975,10 @@ try {
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });
   await dialog().getByText(/envoie maintenant la table Villes \(2 lignes/).waitFor();
+  // Une table qui reçoit déjà une synchro le dit dans la liste, et le refus dit pourquoi.
+  await pick('Villes', 'Contacts (reçoit déjà Contacts)');
+  await dialogButton('Recevoir').click();
+  await dialog().getByText(/Contacts reçoit déjà la table Contacts\s:/).waitFor();
   await pick('Villes', 'Communes');
   await shot('17-cible-nouvelle-table');
   await dialogButton('Recevoir').click();

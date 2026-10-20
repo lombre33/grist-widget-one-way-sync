@@ -7,7 +7,7 @@
 // sans effet et comptée, et rien de ce qui est lu ne peut servir de nom propre aux objets JavaScript.
 import {
   APPLIED_COL, BEFORE_COL, BUCKETS, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LIST_PREFIX, LOT_COL, ORDER_COL, RECEIVED_COL, RESEND_COL,
-  SCHEMA_COL, STATE_COL, TABLE_COL, TYPE_COL, chunk, groupBy, isBlank, isSafeId, isTrue, parseJson,
+  SCHEMA_COL, STATE_COL, TABLE_COL, TYPE_COL, chunk, groupBy, isBlank, isSafeId, isTrue, isUserTable, parseJson,
 } from './common.js';
 import { exportSchema, validColumns } from './codes.js';
 
@@ -257,6 +257,21 @@ const lastWhere = (rows, test) => rows.reduce((latest, row) => (test(row) && (!l
 
 // Dernière ligne qui porte la description des colonnes (listes, et première version de chaque lot).
 const latestSchemaRow = rows => lastWhere(rows, r => !isBlank(r[SCHEMA_COL]));
+
+// Destinations choisies pour des tables reçues (`plans` : [{ table, dest }]) : la première qui ne va
+// pas, avec sa raison, ou null. Une destination ne reçoit qu'une table (`received` : voir
+// receivedDests), et n'est pas une table du widget.
+export function destProblem(plans, received) {
+  const seen = new Set();
+  for (const { dest } of plans) {
+    if (!isUserTable(dest)) return { code: 'destReserved', vars: { dest } };
+    if (seen.has(dest)) return { code: 'destTwice', vars: { dest } };
+    seen.add(dest);
+    const feed = received.find(r => r.dest === dest);
+    if (feed) return { code: 'destTaken', vars: { dest, table: feed.table } };
+  }
+  return null;
+}
 
 // Colonnes que la destination reçoit : les colonnes de données (sans la clé, MajLe ni Supprime).
 export const destColumns = columns => columns.filter(c => ![KEY_COL, ORDER_COL, DELETE_COL].includes(c.id));

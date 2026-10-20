@@ -6,22 +6,25 @@ import { docIdentity, isOwner, readSchema } from '../grist.js';
 import { exportableColumns } from '../logic/exports.js';
 import { syncRows } from '../source/synchro.js';
 import { wireExchange } from '../exchange.js';
-import { destColumns } from '../logic/journal.js';
+import { destColumns, destProblem } from '../logic/journal.js';
 import { keySlot, prepareDest, receivedDests, receivedJournals, receivedKey, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
-import { confirmDialog, el, message, openModal, pickField, run } from '../ui.js';
+import { confirmDialog, el, failure, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';
 
 // Choix de la destination d'une table. `dest()` rend son nom : une table existante, ou le nom
-// tapé (un nom qui est celui d'une table existante, aux majuscules près, désigne cette table).
+// tapé (un nom qui est celui d'une table existante, aux majuscules près, désigne cette table). Une
+// table qui reçoit déjà une synchro le dit dans la liste (elle sera refusée, voir checkDests).
 export function destField(schema, table) {
   const tables = schema.tableIds.filter(isUserTable);
+  const feeds = new Map(receivedDests(schema).map(r => [r.dest, r.table]));
+  const label = id => (feeds.has(id) ? t('recv.dest.taken', { dest: id, table: feeds.get(id) }) : id);
   const name = el('input', { type: 'text', class: 'input', value: toTableId(table), 'aria-label': t('recv.dest.name', { table }) });
   const nameBox = el('div', { class: 'dest-pick' }, el('span', { class: 'muted small' }, t('recv.dest.nameLabel')), name);
   const field = pickField({
     label: table, value: '',
-    items: [{ value: '', label: t('recv.dest.new') }, ...tables.map(id => ({ value: id, label: id }))],
+    items: [{ value: '', label: t('recv.dest.new') }, ...tables.map(id => ({ value: id, label: label(id) }))],
     onChange: (v) => { nameBox.classList.toggle('hidden', v !== ''); },
   });
   const typed = () => toTableId(name.value, table);
@@ -74,9 +77,9 @@ export async function confirmOutgoing(schema, dests, where) {
 // une table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]). Échange (`exportId`) :
 // une table que ce document envoie dans le même Échange peut recevoir.
 export async function checkDests(schema, plans, fromDocId, exportId = null) {
-  const taken = receivedDests(schema).map(d => d.dest);
+  const problem = destProblem(plans, receivedDests(schema));
+  if (problem) throw failure(problem.code, problem.vars);
   const dests = plans.map(p => p.dest);
-  if (new Set(dests).size !== dests.length || dests.some(d => taken.includes(d) || !isUserTable(d))) throw new Error('destTaken');
   const sent = new Set((await syncRows(schema)).filter(r => !exportId || r[EXPORT_COL] !== exportId).map(r => r[TABLE_COL]));
   if (dests.some(d => sent.has(d))) throw new Error('destExported');
   if (fromDocId && fromDocId === (await docIdentity()).docId && plans.some(p => p.dest === p.table)) throw new Error('loop');

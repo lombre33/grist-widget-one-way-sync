@@ -1,7 +1,7 @@
 // Journal (CIBLE) : dépliage des lignes reçues, lots et listes, purge, historique, lien public.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareVersion, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../../js/logic/journal.js';
+import { compareVersion, destProblem, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../../js/logic/journal.js';
 import { KIND } from '../../js/logic/common.js';
 import { j, list, done, gone, part, EXPORT } from './fixtures.mjs';
 
@@ -329,4 +329,13 @@ test('historique : un changement refusé montre ce qui est gardé ici et ce qui 
     ['x', 'refus', { cols: [['Nom', 'Nom']], before: null, after: ['X'] }],
     ['b', 'refus', null],
   ]);
+});
+
+test('destinations choisies : une table d\'ici reçoit une seule table envoyée, la raison est dite', () => {
+  const received = [{ dest: 'Annuaire', table: 'BDD', fromDocId: 'docA' }];
+  assert.equal(destProblem([{ table: 'Villes', dest: 'Communes' }], received), null);
+  assert.deepEqual(destProblem([{ table: 'INSTANCES', dest: 'Annuaire' }], received), { code: 'destTaken', vars: { dest: 'Annuaire', table: 'BDD' } });
+  assert.deepEqual(destProblem([{ table: 'A', dest: 'T' }, { table: 'B', dest: 'T' }], []), { code: 'destTwice', vars: { dest: 'T' } });
+  assert.deepEqual(destProblem([{ table: 'A', dest: 'Synchro' }], []), { code: 'destReserved', vars: { dest: 'Synchro' } });
+  assert.equal(destProblem([{ table: 'A', dest: 'Journal_x' }], []).code, 'destReserved');
 });

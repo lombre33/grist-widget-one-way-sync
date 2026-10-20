@@ -274,7 +274,13 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.11.1 (20 octobre 2026)
+## État : V0.11.2 (20 octobre 2026)
+
+V0.11.2 (Antoine, 20 octobre : « un message relou » en rangeant une table ajoutée à l'export dans
+une table déjà reçue) : `destProblem` (`js/logic/journal.js`) dit quelle table pose problème
+(`destTaken` : « Annuaire reçoit déjà la table BDD », `destTwice`, `destReserved`), et la liste
+des destinations (`destField`) marque « (reçoit déjà X) » les tables d'ici qui reçoivent déjà
+(`receivedDests`). Une destination ne reçoit toujours qu'une table envoyée.
 
 V0.11.1 (audit de performance demandé par Antoine le 20 octobre, rapport
 `/mnt/project-files/notes/audits-v0.8/performance.md`, scripts de mesure dans
