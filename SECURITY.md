@@ -336,8 +336,7 @@ Pour un usage en production :
 
 - installer le widget depuis la **galerie de l'instance** quand il y est ; sinon n'utiliser que
   l'adresse officielle, celle que donnent les consignes du widget (`WIDGET_URL` dans
-  `js/config.js` ; seule la version de test, servie depuis `BETA_URL`, donne la sienne), jamais
-  une adresse reçue par courriel ;
+  `js/config.js`), jamais une adresse reçue par courriel ;
 - héberger une **copie figée** du dépôt (version relue, étiquette Git) sur un serveur de
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et

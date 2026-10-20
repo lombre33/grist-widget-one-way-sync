@@ -1,6 +1,6 @@
 // Démarrage : thème et langue, chargement de l'API des widgets depuis l'instance Grist, choix de
 // l'onglet, Réglages.
-import { GRIST_ORIGINS, VERSION, widgetUrl } from './config.js';
+import { GRIST_ORIGINS, VERSION, WIDGET_URL } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
 import { SYNC_TABLE, sleep } from './logic/common.js';
@@ -43,7 +43,7 @@ function showScreen(...nodes) {
 // pour recharger. Les onglets restent visibles, grisés.
 function showStartProblem(text, { withAddress = false, reload = false } = {}) {
   for (const button of document.querySelectorAll('[data-tab]')) button.disabled = true;
-  showScreen(message('warn', text), withAddress ? copyField(widgetUrl()) : null,
+  showScreen(message('warn', text), withAddress ? copyField(WIDGET_URL) : null,
     reload ? el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, t('start.reload')) : null);
 }
 
@@ -54,7 +54,7 @@ async function select(tab, retry = true) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', String(button.dataset.tab === tab));
   const view = el('div', { class: 'view' });
   showScreen(view);
-  if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(widgetUrl()))));
+  if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(WIDGET_URL))));
   try {
     await (tab === 'send' ? renderSource(view) : renderTarget(view));
   } catch (e) {

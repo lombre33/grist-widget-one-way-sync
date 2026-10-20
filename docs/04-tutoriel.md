@@ -396,16 +396,14 @@ L'historique montre les changements refusés.
 widget liste en rouge les colonnes qui deviendront publiques, et refuse une table dont une règle
 d'accès cache des lignes ou des colonnes. Il pose ensuite des règles d'accès : toute personne qui
 n'est que **lectrice** du document, dont le lien public, ne voit plus que les instantanés des
-exports publics, dans la table `Synchro`. Enfin, dans le menu **Partager** du document,
-**Gérer les utilisateurs** : « Accès public » sur **Activé**, en **Lecture seule** (jamais
-**Éditeur** : la carte le signale), puis **Confirmer**. La ligne passe de « Lien public à
-activer » à « Public ».
+exports publics, dans la table `Synchro`. Enfin, dans le menu **Partager** du document, régler
+« Lien public » sur **Lecture** (jamais **Éditeur** : la carte le signale). La ligne passe de
+« Lien public à activer » à « Public ».
 
 ![Mode lien public](images/15-source-public.png)
 
-Côté CIBLE : coller le code, choisir les destinations, c'est tout. Tant que sa page est ouverte,
-le widget regarde chaque minute si l'export a changé (toutes les 10 secondes juste après une
-arrivée). À éviter pour des données qui ne doivent pas être
+Côté CIBLE : coller le code, choisir les destinations, c'est tout. Le widget lit la SOURCE toutes
+les 10 secondes tant que sa page est ouverte. À éviter pour des données qui ne doivent pas être
 publiques ; les lecteurs déjà invités sur la SOURCE ne voient plus, eux aussi, que les exports
 publics.
 
