@@ -1,7 +1,7 @@
 // CIBLE : recopie des versions d'un journal dans la table de destination (`planConsolidation`), et
 // correspondance des colonnes entre les deux.
 import {
-  APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
+  APPLIED_COL, ARCHIVE_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
   STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue, parseJson,
 } from './common.js';
 import { REFUSED, STATES, compareOrder, completeLists, destColumns, lastMark, latestByKey, pendingLists, sentColumns } from './journal.js';
@@ -133,7 +133,8 @@ const SETTLED_GONE = new Set(['suppression', LEFT]);
 // sont toujours dans la SOURCE (`gone`). `except` : clés parties de la SOURCE à ce passage. Rend
 // [{ id, key, n, row, cells: [[colonne du journal, colonne d'ici, valeur d'ici, valeur de la
 // SOURCE]] }] par numéro de ligne (`id` : la ligne d'ici, `row` : la version reçue). Échange : rien
-// (une retouche y part vers l'autre document, ce n'est pas un écart).
+// (une retouche y part vers l'autre document, ce n'est pas un écart). Une ligne gardée en archive
+// (sa dernière version la supprime) n'en a pas.
 export function manualEdits({ journalRows, destRows, copyCols, exchange = false, except = new Set() }) {
   if (exchange) return [];
   const latest = latestByKey(journalRows);
@@ -141,7 +142,7 @@ export function manualEdits({ journalRows, destRows, copyCols, exchange = false,
   const edits = [];
   for (const row of destRows) {
     const version = latest.get(row[KEY_COL]);
-    if (!version || isTrue(version.row[DELETE_COL])) continue;
+    if (!version || isTrue(version.row[DELETE_COL]) || version.row[STATE_COL] === 'suppression') continue;
     const cells = copyCols.filter(([from, to]) => !sameValue(version.row[from], row[to]))
       .map(([from, to]) => [from, to, row[to] ?? null, version.row[from] ?? null]);
     if (cells.length) edits.push({ id: row.id, key: row[KEY_COL], n: numbers.get(row[KEY_COL]) || null, row: version.row, cells });
@@ -249,6 +250,7 @@ function versionEffect(ctx, key, version, gone) {
   // Échange : la version reçue n'a d'effet que si elle est plus récente que la ligne d'ici.
   if (ctx.exchange && here && compareOrder(version.order, newest(here)) <= 0) return '';
   if (isTrue(version.row[DELETE_COL]) || gone.has(key)) return deletionEffect(ctx, version, here);
+  if (ctx.archived.has(key)) return 'modif'; // ligne gardée en archive, revenue à la SOURCE
   // Sans clé ici : un ajout, ou le rattachement d'une ligne sans clé (colonne commune).
   if (!here) return ctx.matchFrom && ctx.dest.unkeyed.get(version.row[ctx.matchFrom])?.length ? 'modif' : 'ajout';
   return withoutEffect(ctx, version, here) ? '' : 'modif';
@@ -326,17 +328,18 @@ function holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, n
 
 // Le plan en actions Grist : ajouts et modifications par clé, rattachements, suppressions, puis
 // marques dans le journal et, pour l'historique, ce qui a été remplacé.
-function consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
+function consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol, archive, uncheck }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
   const values = (versions) => {
     const out = Object.fromEntries(copyCols.map(([from, to]) => [to, versions.map(v => v.row[from] ?? null)]));
     if (exchange && deleteCol) out[DELETE_COL] = versions.map(v => isTrue(v.row[DELETE_COL]));
+    if (uncheck && !Object.hasOwn(out, ARCHIVE_COL)) out[ARCHIVE_COL] = versions.map(() => false);
     return exchange ? { ...out, [ORDER_COL]: versions.map(v => v.order ?? null) } : out;
   };
   return [
     ...chunk(upserts).map(part => ['BulkAddOrUpdateRecord', destTable, { [KEY_COL]: part.map(v => v.row[KEY_COL]) }, values(part), { on_many: 'all' }]),
     ...chunk(attached).map(part => ['BulkUpdateRecord', destTable, part.map(([row]) => row.id),
       { [KEY_COL]: part.map(([, v]) => v.row[KEY_COL]), ...values(part.map(([, v]) => v)) }]),
-    ...chunk(removeIds).map(part => ['BulkRemoveRecord', destTable, part]),
+    ...chunk(removeIds).map(part => (archive ? ['BulkUpdateRecord', destTable, part, { [ARCHIVE_COL]: part.map(() => true) }] : ['BulkRemoveRecord', destTable, part])),
     ...chunk([...marks]).map(part => ['BulkUpdateRecord', journalTable, part.map(([id]) => id),
       { [APPLIED_COL]: part.map(() => true), [STATE_COL]: part.map(([, state]) => state) }]),
     ...chunk(listGone).map(part => ['BulkUpdateRecord', journalTable, part.map(([id]) => id),
@@ -415,29 +418,35 @@ export function refusedGaps({ journalRows, destRows, copyCols }) {
 // (WAVE_STRICT), les suppressions d'un passage attendent une décision sur la carte : les appliquer,
 // ou les ignorer (les lignes restent ici, détachées : leur clé est effacée, plus rien ne les suit).
 // `now` : heure du passage (secondes), pour dater un refus corrigé dont la version n'a pas d'heure.
+// Réception en archive (`archive`, jamais en Échange) : rien n'est effacé ici ; une ligne partie de
+// la SOURCE reste, cochée ARCHIVE_COL, et n'est plus suivie par les listes ; une nouvelle version
+// de sa clé la décoche. Décocher l'archive n'efface pas les lignes déjà archivées : elles restent
+// cochées (`archived` se lit toujours), seules les suivantes sont effacées.
 export const WAVE = { min: 11, share: 0.2 };
 export const WAVE_STRICT = { min: 1, share: 0 };
 
 export function planConsolidation({
   journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
-  hold = null, wave = '', now = 0,
+  hold = null, wave = '', now = 0, archive = false,
 }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
   const marks = new Map(); // ligne du journal -> effet ('' pour une liste ou une version sans effet)
   const pending = pendingLists(journalRows);
-  const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, dest.byKey, marks);
+  const archived = exchange ? new Set() : new Set(destRows.filter(r => isTrue(r[ARCHIVE_COL]) && !isBlank(r[KEY_COL])).map(r => r[KEY_COL]));
+  const followed = archived.size ? new Map([...dest.byKey].filter(([key]) => !archived.has(key))) : dest.byKey;
+  const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, followed, marks);
   if (exchange) pending.forEach(({ row }) => marks.set(row.id, ''));
-  const ctx = consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest);
+  const ctx = { ...consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest), archived };
   const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], stats: { added: 0, updated: 0, removed: 0 } };
   planVersions(ctx, plan, latest, decisions);
-  const { removed, numbers, waved } = planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone });
+  const { removed, numbers, waved } = planRemovals({ plan, dest, destRows, hold: archive ? null : hold, wave, latest, pending, listGone, leftGone, archived });
   plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
   for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
   return {
     actions: [
-      ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol }, { ...plan, removeIds, ...(waved || { listGone, leftGone }) }),
+      ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol, archive: archive && !exchange, uncheck: archived.size > 0 || (archive && !exchange) }, { ...plan, removeIds, ...(waved || { listGone, leftGone }) }),
       ...chunk(waved?.detach || []).map(part => ['BulkUpdateRecord', destTable, part, { [KEY_COL]: part.map(() => '') }]),
     ],
     stats: plan.stats, gone, held: waved?.held || null,
@@ -480,10 +489,11 @@ function planVersions(ctx, plan, latest, decisions) {
   }
 }
 
-// Suppressions du passage (clés de `plan.gone` encore ici), ou rien si elles forment une vague
-// retenue (`waved`, voir holdWave) ; `numbers` : numéros des lignes d'ici, s'il en faut.
-function planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone }) {
-  const removed = [...plan.gone].filter(key => dest.byKey.has(key));
+// Suppressions du passage (clés de `plan.gone` encore ici, sauf celles déjà gardées en archive), ou
+// rien si elles forment une vague retenue (`waved`, voir holdWave) ; `numbers` : numéros des
+// lignes d'ici, s'il en faut.
+function planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone, archived }) {
+  const removed = [...plan.gone].filter(key => dest.byKey.has(key) && !archived.has(key));
   const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
   const isWave = hold && wave !== 'appliquer' && removed.length >= hold.min && removed.length > hold.share * dest.byKey.size;
   if (!isWave) return { removed, numbers, waved: null };

@@ -102,10 +102,13 @@ function readKeys(table, value, limit) {
   return !text || (list && !(listTime(list) > limit)) ? { table, text } : null;
 }
 
-// Lignes à ajouter au journal pour une ligne brute lue (`lines` : celles du lot gardées).
-function unpackedRows(row, { table, text }, lines) {
+// Lignes à ajouter au journal pour une ligne brute lue (`lines` : celles du lot gardées). Un lot
+// sans ligne dont la description des colonnes a changé (`known` : la dernière connue) la garde
+// seule : une liste de choix ou un format changé à la SOURCE part ainsi, sans renvoi des lignes.
+function unpackedRows(row, { table, text }, lines, known) {
   const base = { [TABLE_COL]: table, [RECEIVED_COL]: row[RECEIVED_COL] ?? null };
   if (!lines) return text || row[SCHEMA_COL] ? [{ ...base, [LIST_COL]: text, [SCHEMA_COL]: row[SCHEMA_COL] || '' }] : [];
+  if (!lines.length) return !isBlank(row[SCHEMA_COL]) && row[SCHEMA_COL] !== known ? [{ ...base, [LIST_COL]: '', [SCHEMA_COL]: row[SCHEMA_COL] }] : [];
   return lines.map((l, i) => ({
     ...base, [KEY_COL]: l.key, [ORDER_COL]: l.order, [DELETE_COL]: l.deleted, [DATA_COL]: JSON.stringify(l.data),
     ...(i === 0 ? { [SCHEMA_COL]: row[SCHEMA_COL] || '' } : {}),
@@ -141,6 +144,7 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
   let rejected = 0;
   let ended;
   const limit = now + FUTURE_S;
+  const schemas = new Map(journalRows.filter(r => !isRaw(r) && !isBlank(r[SCHEMA_COL])).sort((a, b) => a.id - b.id).map(r => [r[TABLE_COL], r[SCHEMA_COL]]));
   for (const got of raw) {
     const row = bare.has(got.id) ? { ...got, [SCHEMA_COL]: '' } : got;
     const read = bad.has(row.id) ? null : readRaw(row, exportId, limit);
@@ -152,7 +156,9 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
     if (read.end) continue;
     const lines = read.lot ? read.lot.lines.filter(l => !(l.order > limit)) : null;
     rejected += read.lot ? read.lot.lines.length - lines.length : 0;
-    added.push(...unpackedRows(row, read, lines));
+    const rows = unpackedRows(row, read, lines, schemas.get(read.table));
+    for (const r of rows) if (!isBlank(r[SCHEMA_COL])) schemas.set(read.table, r[SCHEMA_COL]);
+    added.push(...rows);
     if (read.lot) noteGaps(gaps, read.table, read.lot, !isBlank(row[RESEND_COL]));
   }
   const removed = raw.map(r => r.id);
@@ -276,10 +282,11 @@ export function destProblem(plans, received) {
 // Colonnes que la destination reçoit : les colonnes de données (sans la clé, MajLe ni Supprime).
 export const destColumns = columns => columns.filter(c => ![KEY_COL, ORDER_COL, DELETE_COL].includes(c.id));
 
-// Colonnes envoyées, lues dans la dernière description reçue, sinon `fallback` (celles de l'invitation).
+// Colonnes envoyées, lues dans la dernière description reçue, sinon `fallback` (celles de
+// l'invitation).
 export function sentColumns(rows, fallback = []) {
   const cols = parseJson((latestSchemaRow(rows) || {})[SCHEMA_COL]);
-  return validColumns(cols) ? exportSchema(cols) : fallback;
+  return validColumns(cols) ? exportSchema(cols, true) : fallback;
 }
 
 // Dernière liste complète d'un seul tenant reçue (« ids:… », voir parseList).

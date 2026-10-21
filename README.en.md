@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.11.4 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.12.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -92,19 +92,30 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   code, the TARGET reads what the SOURCE publishes).
 - **Faithful copy**: additions, changes, deletions, values coming from another table (Reference,
   formula), undo (Ctrl+Z).
+- **Choice lists and formats**: a Choice column arrives with its list and colours, a choice added
+  later in the SOURCE is added here; number, date and currency formats are kept. A column the
+  TARGET chose is never changed.
 - **Attachments**: a ticked column arrives as a real Attachments column; each file is sent once
   per recipient, while the SOURCE page is open, and stored only once.
+- **Links between tables**: a Reference column that points at another table of the export
+  becomes, on the receiving side, a real Reference to the received table (“Keep the links between
+  tables” box, ticked by default), showing the same column.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET
   stays that way until the row changes again in the SOURCE, and the card flags it about ten
   seconds later, with the detail (row, value here, SOURCE value) and a “Fix” button that puts the
   exact SOURCE state back.
+- **Reception options** (not for Exchange): *archive* (a row deleted in the SOURCE stays here,
+  ticked “Deleted at the source”) and *read-only* (only owners write in the received tables).
 - **Large tables**: no row limit (tested with 21,000), big imports sent in batches, a stuck
   delivery queue is cleared and resent.
 - **Clear tracking**: one card per export and per reception, last delivery, errors explained,
   collapsed history of changes since the last visit, with row numbers, values before and after,
   and columns added to the export.
+- **Copyable diagnostic** (Settings): version, state of sends and receptions, recent errors,
+  with no table data, address or code; and a **send history** on each export (resends, catch-ups,
+  pauses, recipients).
 - **Built-in help**: picture tutorial, “Who does what?”, instructions ready to send by email.
   French and English, light or dark theme.
 

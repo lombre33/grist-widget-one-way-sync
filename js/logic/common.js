@@ -10,6 +10,10 @@ export const ORDER_COL = 'MajLe'; // heure de la dernière modification d'une va
 // valeur d'avant, mais Grist recalcule cette colonne : c'est ainsi que le lot repère une annulation.
 export const RECALC_COL = 'RecalculLe';
 export const DELETE_COL = 'Supprime'; // suppression logique, prise en compte si la table l'a
+// Clé de la ligne visée par une colonne Référence conservée, dans le bloc de données d'une version.
+export const LINK_PREFIX = 'Synchro_Cle_';
+// CIBLE, réception en archive : case cochée sur une ligne effacée à la SOURCE, gardée ici.
+export const ARCHIVE_COL = 'Supprimee_a_la_source';
 
 // SOURCE : la seule table technique du widget, quel que soit le nombre d'exports et de tables.
 // Chaque table d'un export y a ses lignes (voir KIND) ; le webhook d'un destinataire n'envoie que
@@ -121,7 +125,9 @@ export const sleep = ms => new Promise((resolve) => { setTimeout(resolve, ms); }
 
 export const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 export const randomHex = n => toHex(crypto.getRandomValues(new Uint8Array(n)));
-export const sha256 = async text => toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
+// Empreinte (`algo` : 'SHA-256', 'SHA-1') d'octets, en octets ; d'un texte, en hexadécimal.
+export const digest = async (algo, bytes) => new Uint8Array(await crypto.subtle.digest(algo, bytes));
+export const sha256 = async text => toHex(await digest('SHA-256', new TextEncoder().encode(text)));
 
 export const COL_ID = /^[A-Za-z_][A-Za-z0-9_]*$/; // identifiant de table ou de colonne Grist
 export const HEX16 = /^[0-9a-f]{16}$/; // identifiant d'export ou d'invitation

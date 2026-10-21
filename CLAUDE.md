@@ -274,7 +274,91 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.11.4 (21 octobre 2026)
+## État : V0.12.0 (21 octobre 2026)
+
+V0.12.0 (Antoine, 21 octobre : « vérifier si des features ne seraient pas manquantes » avant la bêta ;
+choix sur la carte de décision : F1 à F3, puis « les autres sauf F7 » ; propositions dans
+`/mnt/project-files/notes/beta-deploy/fonctions-proposees.md`) :
+- **F1, diagnostic à copier** (Réglages, `js/diagnostic.js` lit, `js/logic/diagnostic.js` choisit
+  et écrit) : version, instance, droits, navigateur, exports et destinataires (état d'envoi
+  de Grist sans leur adresse), réceptions (note sans secret, clés ni adresse), erreurs récentes
+  (`noteError` de `ui.js`, `maskKey`). **Jamais** : valeur de table, courriel, adresse de webhook ou
+  de formulaire, code, clé, identifiant de document. Testé (unit et e2e : « diagnostic sans adresse »).
+- **F2, version dans les codes** (`codes.js`, `f` = format, `v` = version) : un code dont le format
+  `f` dépasse celui d'ici (`CODE_FORMAT`) est refusé (`codeNewer`, deux versions dites) ; la version
+  `v` ne sert qu'à l'avertissement de la fiche (`versionNote`, code plus ancien ou plus récent de
+  même format). Toute version qui change le sens d'un champ doit donc augmenter `CODE_FORMAT`.
+- **F3, listes de choix et formats** (`js/logic/options.js`) : `opts` dans la description des
+  colonnes (`exportSchema`, signée avec les colonnes). Seules des clés connues aux valeurs
+  contrôlées passent (`columnOptions`). La CIBLE ne complète que les colonnes qu'elle a créées
+  (`own` de l'entrée de la note, `missingColumns`, `ownsColumn`) : un choix ajouté à la SOURCE
+  s'ajoute à la liste (`optionActions`, `fillOptions`), un format retouché ici reste. `refreshOptions`
+  (SOURCE) réécrit `Synchro_Colonnes` quand une liste change. **Piège vérifié** : un lot vide est
+  signé mais `unpackedRows` ne garde la description des colonnes que sur sa première ligne, donc un
+  lot sans ligne la perdait, et la liste vide des clés n'est pas signée (`bare`) ; `planUnpack`
+  garde maintenant une ligne sans clé qui porte seulement la description changée (`known`).
+- **F6, archive** (case à l'acceptation ou « Options » de la carte, `archive` dans la note, hors
+  Échange) : `planConsolidation({ archive })` n'efface rien ; une ligne partie de la SOURCE reste,
+  cochée `Supprimee_a_la_source` (`ARCHIVE_COL`, colonne Bool ajoutée à la destination au passage
+  suivant), n'est plus suivie par les listes (`followed`), ni signalée comme retouche ; une nouvelle
+  version de sa clé la décoche. Pas de vague de suppressions en archive.
+- **F5, tables reçues en lecture seule** (`verrou` dans la note, hors Échange) : règle
+  `user.Access != OWNER` → `-CUD` par table de destination (`lockAclRules`, mémo `LOCK_MEMO`, posée
+  par `syncRules` comme les autres). La recopie écrit avec les droits de la personne : un non-propriétaire
+  ne recopie pas (`copyTables`, `locked`, la carte dit « En lecture seule : la recopie attend… »).
+  Seul un propriétaire change ce réglage (`js/target/options.js`).
+- **F8, historique des envois** (SOURCE, sans table de plus) : `historique` dans la note SOURCE
+  (`{ <export>: [{ at, kind, who, n }] }`, 30 événements, `addEvent`/`eventsOf` dans `logic/notes.js`,
+  `recordEvent` dans `source/synchro.js`). Seuls les événements que le widget conduit y sont :
+  destinataire ajouté, envoi ou renvoi, rattrapage, file vidée, pause, reprise, révocation, export
+  modifié. Les envois ordinaires partent de Grist sans lui ; l'état de chaque destinataire les dit.
+- **F4, Références conservées** (`js/logic/links.js`, case « Garder les liens entre les tables » à
+  l'étape Colonnes, cochée d'emblée pour un nouvel export, hors Échange) : une colonne Référence
+  (pas Liste de références) qui vise une table de l'export, dont la colonne affichée part aussi
+  (`linkTables`, `aim`), reçoit `link` (et garde `visible`) dans la description des colonnes
+  (`exportSchema(…, true)`, signée avec elles ; cocher ou décocher renvoie la table). La formule du
+  lot ajoute à son bloc de données la clé de la ligne visée (`Synchro_Cle_<colonne>`, `LINK_PREFIX`
+  dans `common.js`, `data()` de `formulas.js`) ; la colonne part toujours comme son texte affiché.
+  CIBLE (`linkColumns` de `target/loop.js`) : une colonne créée par le widget (`own`), encore du
+  texte et **vide** devient une Référence vers la table reçue qui affiche la même colonne
+  (`ModifyColumn` + `visibleCol` + `SetDisplayFormula`, vérifié dans Grist) ; une colonne déjà remplie
+  reste du texte ; le sort est noté (`linked` dans l'entrée de la note) et plus relu. Les lignes du
+  journal prennent alors le numéro de la ligne d'ici qui porte la clé (`resolveLinks`, `keyIds`), 0
+  (vide de Grist) si elle n'est pas là ; `fillLinks` complète plus tard les cellules restées vides
+  (les tables qui gardent un lien sont recopiées après celles qu'elles visent ; une table qui se vise
+  elle-même est complétée au passage suivant). Une destination qui garde un lien est relue quand la
+  table visée change (`deps` de `settled`). Si la SOURCE ne garde plus le lien, la colonne redevient du
+  texte (`undo`, `unlinkActions` ; Grist garde l'affichage). **Limite** : l'historique et les
+  retouches signalées montrent les numéros de ligne d'une Référence ; une Liste de références reste
+  du texte ; une table visée doit être dans le même export.
+- Relecture indépendante de la 0.12 (`/mnt/project-files/notes/beta-deploy/audit-0.12-relecture.md`,
+  16 constats, aucun critique), corrigés : décocher l'archive n'efface plus les lignes déjà
+  archivées (`archived` se lit toujours, `uncheck` décoche une clé revenue) ; `fillLinks` refait une
+  cellule Référence qui vise une ligne effacée (`targetRows` : `keys` et `live`) ; la note du journal
+  ne garde ni `opts` ni `link` (`exportSchema(offer.columns)` dans `target/dest.js`) ; la liste de
+  choix d'une colonne reçue est bornée à 500 ; ni `HyperLink` ni `Markdown` repris ; journal de retour
+  d'Échange avec `own: []` ; règles de lecture seule limitées aux tables d'utilisateur qui portent
+  `id_sync` ; options non proposées en lien public ; `updateSourceNote` sous le verrou
+  `gristsync-source-note` ; `eventsOf` n'accepte que des événements bien formés ; le diagnostic
+  masque adresses, jetons et longs identifiants (`clip`) et ignore une date impossible (`when`).
+  **Limites dites, non corrigées** (SECURITY.md, « Risques acceptés ») : le verrou de lecture seule ne
+  protège pas d'un éditeur qui écrit dans le journal ou la note (droit de structure par défaut) ; un
+  export envoie la liste complète des choix d'une colonne Choix, filtre ou non ; l'archive garde
+  une ligne supprimée à la SOURCE (droit à l'effacement : à la charge de la CIBLE).
+- Test de bout en bout : `ONLY_OPTIONS=1` (archive, lecture seule, historique) et `ONLY_LINKS=1`
+  (Références conservées), inclus dans le parcours complet ; `ONLY_FILES=1` vérifie aussi les choix
+  repris.
+
+V0.11.5 (Antoine, 21 octobre : « traiter tous les points des anciens audits » avant la bêta) :
+reliquats de `/mnt/project-files/notes/audits-v0.8/code-constats.md`. Logique pure sortie et testée :
+`js/logic/report.js` (ce qu'un passage de recopie garde pour la carte, quittée de `target/loop.js`),
+`js/logic/received.js` (journaux reçus, destinations, clés de signature lus dans le schéma ;
+`target/journals.js` ne garde que les écritures), `exportDrift` (`logic/exports.js`), `dueRows`
+et `lotLate` (`logic/resend.js`). `offerDialog` passe par `run` (ses erreurs s'affichent) ;
+formulaire et ménage des pages de la CIBLE hors redessin périodique ; `smallButton` et boutons
+communs de `ui.js` partout ; `digest` commun ; `pageerror` vérifié par l'e2e. Un document sans
+table `Synchro` n'est plus relu toutes les 10 s par le rattrapage (`noSyncAt`, toutes les minutes).
+Reste : E1 (retirer l'invitation sans secret) à partir du 23 octobre.
 
 V0.11.4 (Antoine, 21 octobre : « oui tu peux corriger sur la beta », deux erreurs des consignes ;
 la V0.11.3, réécriture plus large des consignes, a été annulée à sa demande) :

@@ -29,6 +29,11 @@ export const icon = name => el('span', { class: `icon icon-${name}`, 'aria-hidde
 // Pastille d'état d'une carte ou d'une ligne (`tone` : ok, pending, err, off).
 export const pill = (text, tone) => el('span', { class: `pill pill-${tone}` }, text);
 
+// Petit bouton d'une carte, avec son icône ; `title` dit pourquoi il est grisé.
+export const smallButton = (label, iconName, onclick, { kind = '', disabled = false, title = null } = {}) => el('button', {
+  class: `btn btn-small ${kind}`, type: 'button', disabled, title, onclick,
+}, icon(iconName), label);
+
 export function message(kind, text) {
   return el('p', { class: `msg msg-${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
 }
@@ -166,6 +171,11 @@ export function copyField(value, label = t('common.code')) {
 // Code d'invitation ou de réponse : il vaut un mot de passe, on le dit sous le bouton Copier.
 export const codeField = value => el('div', {}, copyField(value), el('p', { class: 'muted small' }, t('common.codeSecret')));
 
+// Version du widget de l'autre document, lue dans son code (vide : d'avant la 0.12), dite si elle
+// n'est pas celle d'ici (`mine`).
+export const versionNote = (theirs, mine) => (theirs === mine ? null
+  : message('info', theirs ? t('common.otherVersion', { theirs, mine }) : t('common.olderVersion', { mine })));
+
 // Code de contrôle (voir trust.js), à comparer par téléphone avec l'autre personne.
 export const controlLine = (label, code) => el('p', { class: 'control-code' }, label, ' ', el('strong', {}, code), el('br'),
   el('span', { class: 'muted small' }, t('common.controlHelp')));
@@ -185,9 +195,10 @@ export function copyButton(text, label, onFail = () => {}) {
 // [{ value, label, hint, keywords }] (`hint` : type de la colonne ou nombre de lignes, en discret ;
 // `keywords` : texte cherché en plus du libellé). `checked` : valeurs cochées au départ. `onChange`
 // reçoit les valeurs cochées, dans l'ordre de la liste. `label` nomme la liste. « Tous » et « Aucun »
-// ne touchent que ce que la recherche trouve. `wide` : sur plusieurs colonnes quand la place le permet. Une longue liste
-// prend la hauteur de son contenu jusqu'à 45 % de la fenêtre, puis s'étire à la souris. Au-delà de
-// SHOWN_MAX éléments trouvés, les suivants attendent une recherche plus précise.
+// ne touchent que ce que la recherche trouve. `wide` : sur plusieurs colonnes quand la place le
+// permet. Une longue liste prend la hauteur de son contenu jusqu'à 45 % de la fenêtre, puis
+// s'étire à la souris. Au-delà de SHOWN_MAX éléments trouvés, les suivants attendent une
+// recherche plus précise.
 const LONG_LIST = 8;
 const SHOWN_MAX = 300;
 export function checkList({ items, checked = [], label = '', onChange, wide = false }) {
@@ -284,6 +295,14 @@ const known = e => t(`error.${e.message}`) !== `error.${e.message}`;
 export const errorText = e => (known(e) ? t(`error.${e.message}`, e.vars || {}) : t('error.generic', { detail: e.message || String(e) }));
 export const failure = (code, vars) => Object.assign(new Error(code), { vars });
 
+// Erreurs récentes, pour le diagnostic (Réglages) : les ERRORS_KEPT dernières, avec leur heure.
+const ERRORS_KEPT = 10;
+export const recentErrors = [];
+export function noteError(e) {
+  recentErrors.push({ at: Date.now(), text: errorText(e) });
+  if (recentErrors.length > ERRORS_KEPT) recentErrors.shift();
+}
+
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
 export async function run(button, out, fn) {
@@ -293,6 +312,7 @@ export async function run(button, out, fn) {
     return await fn();
   } catch (e) {
     if (!known(e)) console.error(e); // une erreur prévue (code mal copié, lien refusé) n'est qu'un message
+    noteError(e);
     if (out) out.replaceChildren(message('err', errorText(e)));
     return undefined;
   } finally {

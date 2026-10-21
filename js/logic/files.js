@@ -5,7 +5,7 @@
 // 'fichier' de son journal) ; le widget CIBLE les rassemble, dépose le fichier et remplit les
 // cellules. Un fichier se reconnaît des deux côtés au SHA-1 de son contenu : un fichier que la
 // CIBLE a déjà n'est pas déposé deux fois.
-import { APPLIED_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LOT_COL, RECEIVED_COL, SCHEMA_COL, TYPE_COL, chunk, groupBy, is, isTrue, parseJson, toHex } from './common.js';
+import { APPLIED_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LOT_COL, RECEIVED_COL, SCHEMA_COL, TYPE_COL, chunk, digest, groupBy, is, isTrue, parseJson, toHex } from './common.js';
 import { expandRows, latestByKey } from './journal.js';
 
 export const FILE_MAX = 25 * 1024 * 1024; // octets par fichier, au plus
@@ -41,9 +41,9 @@ export function neededFiles(rows) {
   return files;
 }
 
-// Ce que les destinataires d'un export ont reçu (note de Synchro, `fichiers` : { export: { f, h, p } }) :
-// chaque webhook de `h` a tous les fichiers de `f` ; `p` : ce qu'a reçu un webhook qui n'en est
-// pas encore là (nouveau destinataire, ou en pause quand un fichier est arrivé). Des empreintes
+// Ce que les destinataires d'un export ont reçu (note de Synchro, `fichiers` : { export: { f, h,
+// p } }) : chaque webhook de `h` a tous les fichiers de `f` ; `p` : ce qu'a reçu un webhook qui n'en
+// est pas encore là (nouveau destinataire, ou en pause quand un fichier est arrivé). Des empreintes
 // abrégées, séparées par une espace : la note grandit avec le nombre de fichiers, pas avec celui
 // des destinataires.
 export function readTracking(noted) {
@@ -225,7 +225,7 @@ export function joinParts(data) {
   return bytes;
 }
 
-export const sha1 = async bytes => toHex(new Uint8Array(await crypto.subtle.digest('SHA-1', bytes)));
+export const sha1 = async bytes => toHex(await digest('SHA-1', bytes));
 
 // Fichiers d'une cellule reçue (['L', [fileIdent, nom, taille], …]) : [{ sha, name, size }].
 export function fileList(value) {

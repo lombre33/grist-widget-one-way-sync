@@ -1,24 +1,25 @@
 // Onglet « Envoyer » (document SOURCE) : une carte par export (un nom, des tables et leurs
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
-import { EXPORT_COL, KIND, LOT_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
+import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
 import { maskKey, parseWebhookUrl } from '../logic/codes.js';
-import { conditionExport, exportEmail, exportStatus, exportTables, exportableColumns, hookErrorKey, hookLabel, hookStatus, hooksOf, readTables } from '../logic/exports.js';
+import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, hookErrorKey, hookLabel, hookStatus, hooksOf, readTables } from '../logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
 import { STATES, parseLot } from '../logic/journal.js';
+import { eventsOf } from '../logic/notes.js';
 import { exchangeRules } from '../logic/consolidation.js';
-import { listDue, parseCharge } from '../logic/resend.js';
+import { listDue, lotLate, parseCharge } from '../logic/resend.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
 import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
 import { reloading, syncRules } from '../acl.js';
-import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe } from './synchro.js';
+import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
 import { catchUp, chargeNotice, resendTables } from './resend.js';
 import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { confirmDialog, el, icon, message, pill, run } from '../ui.js';
+import { confirmDialog, el, icon, message, pill, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 
@@ -60,26 +61,12 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     // Renforcé : les éditeurs peuvent réécrire les formules de Synchro (droit de structure).
     structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
-    partial: recipients.some(h => h.fields.enabled) && mine.some(r => (r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0) || listDue(r)),
+    events: eventsOf(note, id),
+    partial: recipients.some(h => h.fields.enabled) && mine.some(r => lotLate(r) || listDue(r)),
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
     tooBig: mine.filter(r => r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
-    ...drift(schema, tables),
+    ...exportDrift(schema, tables),
   };
-}
-
-// Ce que la SOURCE a changé depuis l'enregistrement de l'export : tables introuvables (renommées
-// ou effacées : leurs lignes ne partent plus) et colonnes renommées, effacées ou d'un autre type
-// (elles partiraient vides ou fausses). « Modifier » remet l'export d'accord avec les tables.
-function drift(schema, tables) {
-  const lost = tables.filter(tb => !schema.has(tb.table)).map(tb => tb.table);
-  const changed = tables.filter(tb => schema.has(tb.table)).flatMap(({ table, columns }) => {
-    const current = new Map(exportableColumns(schema.columns(table)).map(c => [c.id, c]));
-    return columns.filter((c) => {
-      const cur = current.get(c.id);
-      return !cur || cur.source !== (c.source || c.type) || (cur.visible || '') !== (c.visible || '');
-    }).map(c => `${table}.${c.id}`);
-  });
-  return { lost, changed };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -121,6 +108,7 @@ async function upgradeSource(state) {
   let current = state;
   if (await ensureSyncTable(current.schema, current.rows)) current = await loadState();
   if (await refreshMajLe(current.schema, current.rows)) current = await loadState();
+  if (await refreshOptions(current.schema, current.rows)) current = await loadState();
   catchUp(refreshSource);
   return current;
 }
@@ -191,17 +179,12 @@ const openRecipient = (exp, pending = null) => {
 
 // Bouton d'une carte : grisé pour qui n'est pas propriétaire, ou avec la raison (`reason`).
 // L'action finie, l'onglet est redessiné.
-function actionButton(label, iconName, fn, ownerOnly, out, { kind = '', reason = '' } = {}) {
-  return el('button', {
-    class: `btn btn-small ${kind}`, type: 'button', disabled: ownerOnly || Boolean(reason), title: reason || null,
-    onclick: e => run(e.currentTarget, out, async () => { await fn(); await renderSource(); }),
-  }, icon(iconName), label);
-}
+const actionButton = (label, iconName, fn, ownerOnly, out, { kind = '', reason = '' } = {}) => smallButton(label, iconName,
+  e => run(e.currentTarget, out, async () => { await fn(); await renderSource(); }), { kind, disabled: ownerOnly || Boolean(reason), title: reason || null });
 
 // Bouton qui ouvre un assistant.
-const wizardButton = (label, iconName, onclick, { primary = false, ownerOnly = false, reason = '' } = {}) => el('button', {
-  class: `btn btn-small ${primary ? 'btn-primary' : ''}`, type: 'button', disabled: ownerOnly || Boolean(reason), title: reason || null, onclick,
-}, icon(iconName), label);
+const wizardButton = (label, iconName, onclick, { primary = false, ownerOnly = false, reason = '' } = {}) =>
+  smallButton(label, iconName, onclick, { kind: primary ? 'btn-primary' : '', disabled: ownerOnly || Boolean(reason), title: reason || null });
 
 const statusPill = (key, tone, vars) => pill(t(`send.status.${key}`, vars), tone);
 
@@ -251,12 +234,24 @@ function exportCard(exp, state, open, out) {
     el('p', { class: 'muted small' }, tablesLine(exp)),
     exportNotes(exp),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
+    eventsBlock(exp),
     el('div', { class: 'card-actions' },
       exp.retour ? null : wizardButton(t(exp.echange ? 'send.action.addParticipant' : 'send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: !rows.length, ownerOnly }),
       exp.retour ? null : wizardButton(t('send.action.edit'), 'edit', () => exportWizard(exp, renderSource), { ownerOnly }),
       actionButton(t('send.action.load'), 'send', load, ownerOnly, out, { reason: n ? '' : t('send.load.nobody') }),
       actionButton(t('send.action.delete'), 'trash', () => deleteExport(exp), ownerOnly, out, { kind: 'btn-danger-text' })));
 }
+
+// Historique des envois (voir addEvent), replié par défaut ; ce qu'on ouvre le reste d'un dessin à
+// l'autre.
+const eventsOpen = new Set();
+const eventLine = e => el('li', { class: 'send-event' },
+  el('time', { class: 'chg-time', datetime: new Date(e.at * 1000).toISOString() }, dateText(e.at * 1000)),
+  el('span', {}, t(`send.history.${e.kind}`, { who: e.who || '—', n: e.n || 0 })));
+const eventsBlock = exp => (exp.events.length ? el('details', {
+  class: 'history', open: eventsOpen.has(exp.id), ontoggle: e => (e.currentTarget.open ? eventsOpen.add(exp.id) : eventsOpen.delete(exp.id)),
+}, el('summary', {}, el('span', { class: 'history-title' }, t('send.history.title', { n: exp.events.length }))),
+  el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, exp.events.map(eventLine))) : null);
 
 // Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul.
 function personRow(exp, h, ownerOnly, out) {

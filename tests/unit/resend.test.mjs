@@ -1,7 +1,7 @@
 // Renvois (SOURCE) : marques reprenables, listes des clés, budget par document.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addSpent, BUDGET_WINDOW, budgetWait, chargeBusy, chunkMark, LEASE_S, listOverdue, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
+import { addSpent, BUDGET_WINDOW, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
 import { RESEND_ALL } from '../../js/logic/common.js';
 import { parseList } from '../../js/logic/journal.js';
 
@@ -53,4 +53,19 @@ test('renvois ménagés : un à la fois par document, budget par fenêtre de dix
   const full = { ...c, envoye: [[1200, RESEND_BUDGET / 2], [1260, RESEND_BUDGET / 2], [1320, 10]] };
   assert.equal(budgetWait(full, 1400), 1200 + BUDGET_WINDOW - 1400, 'attendre que la plus ancienne minute sorte');
   assert.equal(budgetWait(full, 1900), 0, 'plus rien dans la fenêtre au-delà du budget');
+});
+
+test('rattrapage : lots coupés, listes dues sauf celle d\'un lot coupé ou d\'un export qui change de forme', () => {
+  const rows = [
+    { id: 1, Synchro_Export: 'e1', Synchro_Table: 'A', Synchro_Type: 'lot', Sync_Etat: 5 },
+    { id: 2, Synchro_Export: 'e1', Synchro_Table: 'A', Synchro_Type: 'cles', Synchro_Renvoi: 'm' },
+    { id: 3, Synchro_Export: 'e1', Synchro_Table: 'B', Synchro_Type: 'cles', Synchro_Renvoi: 'm' },
+    { id: 4, Synchro_Export: 'e1', Synchro_Table: 'B', Synchro_Type: 'lot', Sync_Etat: 0 },
+    { id: 5, Synchro_Export: 'e2', Synchro_Table: 'C', Synchro_Type: 'cles', Synchro_Renvoi: 'm' },
+    { id: 6, Synchro_Export: 'e2', Synchro_Table: '', Synchro_Type: 'echange' },
+  ];
+  assert.deepEqual([lotLate(rows[0]), lotLate(rows[3]), lotLate(rows[1])], [true, false, false]);
+  const { late, lists } = dueRows(rows);
+  assert.deepEqual(late.map(r => r.id), [1]);
+  assert.deepEqual(lists.map(r => r.id), [3]);
 });

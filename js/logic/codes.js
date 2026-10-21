@@ -2,6 +2,7 @@
 // Grist qu'ils portent. Tout ce qui vient d'un code collé est contrôlé ici : identifiants, colonnes,
 // adresses réécrites à partir de leurs seuls éléments reconnus.
 import { HEX16, PUBLIC_KEY, SIG_KEY, is, isSafeId, parseJson } from './common.js';
+import { columnOptions } from './options.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;
@@ -27,18 +28,31 @@ function fromBase64Url(text) {
   }
 }
 
-const encodeCode = payload => CODE_PREFIX + toBase64Url(JSON.stringify(payload));
+// Forme des codes (`f`), et version du widget qui les a faits (`v`), depuis la 0.12. Une version qui
+// change la forme des codes augmente CODE_FORMAT : une version plus ancienne refuse alors ses codes
+// en nommant les deux versions, au lieu d'une erreur vague ou d'un envoi qui échoue plus tard. Un
+// code sans forme vient d'avant la 0.12 (même forme depuis la 0.10, contrôlée plus loin).
+const CODE_FORMAT = 1;
+const VERSION = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const encodeCode = (payload, version) => CODE_PREFIX + toBase64Url(JSON.stringify({ ...payload, f: CODE_FORMAT, ...(version ? { v: version } : {}) }));
 
 // Un code recopié d'un courriel peut avoir été coupé en plusieurs lignes : les blancs sont ôtés.
-export function decodeCode(text, kind) {
+// `version` : celle du widget qui lit le code.
+export function decodeCode(text, kind, version = '') {
   const raw = String(text || '').replace(/\s+/g, '');
   if (raw.startsWith('GRISTSYNC1.')) throw new Error('codeOld');
   if (!raw.startsWith(CODE_PREFIX)) throw new Error('codeFormat');
   const payload = parseJson(fromBase64Url(raw.slice(CODE_PREFIX.length)));
   if (!payload) throw new Error('codeFormat');
+  if (Number(payload.f) > CODE_FORMAT) {
+    throw Object.assign(new Error('codeNewer'), { vars: { theirs: is(VERSION, payload.v) ? payload.v : '?', mine: version || '?' } });
+  }
   if (payload.kind !== kind) throw new Error(kind === 'invitation' ? 'notInvitation' : 'notReply');
   return payload;
 }
+
+// Version du widget qui a fait un code, si elle y est (depuis la 0.12) ; '' sinon.
+const codeVersion = payload => (is(VERSION, payload.v) ? payload.v : '');
 
 // Colonnes envoyées, telles qu'un code ou un journal les décrit : [{ id, type, label, as }]. Dans un
 // Échange, `as` donne le nom de la colonne dans l'autre document (voir exchangeTables).
@@ -47,9 +61,14 @@ export function validColumns(cols) {
     cols.every(c => c && isSafeId(c.id) && is(SENT_TYPE, c.type) && (c.as === undefined || isSafeId(c.as)));
 }
 
-export const exportSchema = columns => columns.map(({ id, type, label, as }) => ({
-  id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}),
-}));
+// `withOpts` : avec leur liste de choix et leur format (voir options.js), contrôlés. Les codes ne
+// les portent pas (ils resteraient courts) : la CIBLE les lit dans la description reçue au journal.
+export const exportSchema = (columns, withOpts = false) => columns.map(({ id, type, label, as, opts, link, visible }) => {
+  const kept = withOpts && opts ? columnOptions(type, opts) : null;
+  // Référence conservée (voir links.js) : table visée et colonne qu'elle affichait, dans la SOURCE.
+  const aim = withOpts && isSafeId(link) ? { link, ...(isSafeId(visible) ? { visible } : {}) } : {};
+  return { id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}), ...aim, ...(kept ? { opts: kept } : {}) };
+});
 
 const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from[k] ?? '').slice(0, 200)]));
 
@@ -66,13 +85,13 @@ const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from
 // les instantanés de l'export elle-même, sans identifiant. Mode « Échange » (`retour` : adresse
 // d'écriture du journal de retour de la SOURCE) : la CIBLE renvoie ses modifications à cette
 // adresse, par un webhook à elle. Ce code-là est donc un droit d'écriture.
-export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '', expire = 0, renforce = false, pub = '' }) {
+export function buildInvitation({ id, exportId, name, origin, secret = '', from = {}, tables, base = '', retour = '', expire = 0, renforce = false, pub = '', version = '' }) {
   return encodeCode({
     kind: 'invitation', id, export: exportId, name, origin, secret, from,
     ...(expire ? { expire } : {}), ...(renforce ? { renforce: true } : {}), ...(pub ? { pub } : {}),
     ...(base ? { mode: 'public', base } : retour ? { mode: 'echange', retour } : {}),
     tables: tables.map(({ table, columns }) => ({ table, columns: exportSchema(columns) })),
-  });
+  }, version);
 }
 
 function validInvitation(inv) {
@@ -97,8 +116,8 @@ function invitationMode(inv) {
 
 // Une invitation à réponse ou d'Échange porte la clé publique de la SOURCE ; avant la 0.10, elle
 // portait la clé de signature de l'export (`cle`) : à refaire.
-export function parseInvitation(text) {
-  const inv = decodeCode(text, 'invitation');
+export function parseInvitation(text, version = '') {
+  const inv = decodeCode(text, 'invitation', version);
   const mode = validInvitation(inv) ? invitationMode(inv) : null;
   if (!mode) throw new Error('codeInvalid');
   if (mode.mode !== 'public' && !inv.pub) throw new Error(is(SIG_KEY, inv.cle) ? 'codeOld' : 'codeInvalid');
@@ -106,7 +125,7 @@ export function parseInvitation(text) {
   return {
     id: inv.id, export: inv.export, name: inv.name.slice(0, 200), secret: inv.secret || '', origin: String(inv.origin || ''), ...mode,
     expire: inv.expire || 0, renforce: inv.renforce === true, pub: inv.pub || '',
-    from: text200(from, ['email', 'docId']),
+    from: text200(from, ['email', 'docId']), version: codeVersion(inv),
     tables: inv.tables.map(tb => ({ table: tb.table, columns: exportSchema(tb.columns) })),
   };
 }
@@ -114,8 +133,8 @@ export function parseInvitation(text) {
 // `url` : l'adresse d'écriture du journal de l'export dans la CIBLE. Échange : `retour` dit où la
 // CIBLE a rangé chaque table ([{ table: table de la CIBLE, dest: table de la SOURCE }]).
 // `pub` : clé publique de la CIBLE pour cette invitation (voir linkKeys, trust.js).
-export function buildReply({ id, secret = '', recipient, url, retour = null, pub = '' }) {
-  return encodeCode({ kind: 'reponse', id, secret, recipient, url, pub, ...(retour ? { retour } : {}) });
+export function buildReply({ id, secret = '', recipient, url, retour = null, pub = '', version = '' }) {
+  return encodeCode({ kind: 'reponse', id, secret, recipient, url, pub, ...(retour ? { retour } : {}) }, version);
 }
 
 // Tables d'un Échange dans la réponse : chacune nommée, une seule fois de chaque côté.
@@ -134,13 +153,16 @@ function validReply({ id, secret, recipient, retour, pub }) {
 // `sourceOrigin` : origine de l'instance du document SOURCE. Le webhook ne part que vers la même
 // instance, à une adresse d'écriture par clé de formulaire, rien d'autre.
 // Une réponse sans clé publique répond à une invitation d'avant la 0.10, à refaire.
-export function parseReply(text, sourceOrigin) {
-  const reply = decodeCode(text, 'reponse');
+export function parseReply(text, sourceOrigin, version = '') {
+  const reply = decodeCode(text, 'reponse', version);
   if (reply.pub === undefined) throw new Error('inviteOld');
   const target = parseWebhookUrl(reply.url);
   if (!validReply(reply) || !target?.flat) throw new Error('codeInvalid');
   if (target.origin !== sourceOrigin) throw new Error('otherInstance');
-  const out = { id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url, pub: reply.pub };
+  const out = {
+    id: reply.id, secret: reply.secret || '', recipient: text200(reply.recipient, ['email', 'docId', 'team', 'at']), url: target.url, pub: reply.pub,
+    version: codeVersion(reply),
+  };
   return reply.retour === undefined ? out : { ...out, retour: reply.retour.map(({ table, dest }) => ({ table, dest })) };
 }
 

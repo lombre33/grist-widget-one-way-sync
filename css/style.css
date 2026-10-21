@@ -291,6 +291,9 @@ summary.chg-row:hover { background: var(--surface-sunken); }
 .chg-suppression .chg-label { text-decoration: line-through; color: var(--text-muted); }
 .chg-state { color: var(--chg); font-size: 12px; }
 .chg-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.send-event { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 4px 8px; font-size: 12.5px; }
+.send-event + .send-event { border-top: 1px solid var(--border); }
+.history > .small { margin: 6px 0; }
 
 /* Petit tableau de valeurs (avant/après de l'historique, valeurs retouchées), comme une vue Grist. */
 .mini-grid-wrap { overflow-x: auto; }

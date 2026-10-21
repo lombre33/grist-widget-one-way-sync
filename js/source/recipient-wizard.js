@@ -10,20 +10,23 @@
 // renforcée (`renforce`), il faut l'avoir comparé.
 import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
 import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../logic/codes.js';
-import { exportCondition, exportEmail, hookMemo, hookName, readTables } from '../logic/exports.js';
+import { exportCondition, exportEmail, hookLabel, hookMemo, hookName, readTables } from '../logic/exports.js';
 import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
 import { codeFacts, controlCode, expiresAt, isExpired, isPrivateKey, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
 import { hiddenTables } from '../logic/acl.js';
 import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo } from '../grist.js';
+import { VERSION } from '../config.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
-import { pruneKeys, putRecipientKey, saveExport, syncRows, updateSourceNote } from './synchro.js';
-import { createJournal, receivedDests, storeKey, updateJournalNote } from '../target/journals.js';
+import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
+import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
+import { receivedDests } from '../logic/received.js';
 import { resendTables } from './resend.js';
 import { publicCode } from './actions.js';
 import {
-  backButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, failure, laterButton, message, openWizard, run,
+  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, failure, laterButton, message, openWizard, run,
+  versionNote,
 } from '../ui.js';
 import { handoffButton, roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
@@ -78,7 +81,7 @@ function showOptions(ctx) {
       radio('echange', more ? t('send.mode.echange.more') : exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), more, !exchangeOk),
       radio('public', exp.public ? t('send.mode.publicDone') : exp.renforce ? t('send.mode.publicStrong') : t('send.mode.public'), false, exp.public || more || exp.renforce)),
     strongPart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
-  ], [{ label: t('common.cancel') }, { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(ctx, mode(), mode() !== 'public' && strongBox.checked)) }]);
+  ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(ctx, mode(), mode() !== 'public' && strongBox.checked)) }]);
 }
 
 // Colonnes qu'un lien public rend lisibles par tous, table par table.
@@ -130,7 +133,7 @@ async function showInvitation(ctx, entry, secret, retour = '') {
   const email = exportEmail(rows, exp.id);
   const code = buildInvitation({
     id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email, docId }, tables: exp.tables, retour,
-    expire: expiresAt(entry.at), renforce: Boolean(entry.renforce), pub: entry.pub,
+    expire: expiresAt(entry.at), renforce: Boolean(entry.renforce), pub: entry.pub, version: VERSION,
   });
   ctx.codes.set(entry.id, { secret, retour });
   const report = el('div', { class: 'report' });
@@ -235,7 +238,7 @@ function showReply(ctx, inv) {
 // destinataire sont tirées ici (`keys`) : une clé publique qui n'en est pas une rend la réponse
 // invalide avant toute approbation.
 async function checkReply(exp, inv, text) {
-  const reply = parseReply(text, (await docIdentity()).origin);
+  const reply = parseReply(text, (await docIdentity()).origin, VERSION);
   if (reply.id !== inv.id || inv.hash !== (reply.secret ? await sha256(reply.secret) : '')) throw new Error('unknownInvitation');
   if (!isPrivateKey(inv.prive)) throw new Error('inviteOld');
   if (isExpired(inv.at, nowS())) throw new Error('invitationExpired');
@@ -268,6 +271,7 @@ function replyFiche(reply, docId) {
     el('p', { class: 'muted small' }, t('send.reply.verified')),
     share.personal ? message('warn', t('send.reply.personal')) : null,
     reply.secret ? null : message('warn', t('send.reply.nosecret')),
+    versionNote(reply.version, VERSION),
     controlLine(t('send.reply.code'), reply.code),
     el('p', { class: 'muted small' }, maskKey(reply.url))].filter(Boolean);
 }
@@ -281,10 +285,9 @@ async function approve(ctx, inv, reply) {
   const { exp } = ctx;
   const r = reply.recipient;
   await putRecipientKey(exp.id, inv.id, reply.keys.down);
-  const hook = await createWebhook({
-    name: hookName(exp.name, exp.id), memo: hookMemo({ ...r, docName: reply.share.name }), url: reply.url,
-    tableId: SYNC_TABLE, condition: exportCondition(exp.id),
-  });
+  const memo = hookMemo({ ...r, docName: reply.share.name });
+  const hook = await createWebhook({ name: hookName(exp.name, exp.id), memo, url: reply.url, tableId: SYNC_TABLE, condition: exportCondition(exp.id) });
+  await recordEvent(exp.id, 'join', { who: hookLabel(memo) });
   await putRecipientKey(exp.id, hook, reply.keys.down, inv.id);
   if (inv.journal) {
     await addDeleteColumns(exp.tables.map(tb => tb.table));
@@ -293,8 +296,9 @@ async function approve(ctx, inv, reply) {
     // tirée de sa réponse : elle est rangée dans ses destinations, les tables de l'export (voir
     // receivedKey).
     await storeKey(exp.tables.map(tb => tb.table), inv.journal, reply.keys.up);
+    // `own` vide : les tables de l'export sont les nôtres, le widget n'y a créé aucune colonne.
     await updateJournalNote(inv.journal, n => ({
-      ...n, from: { email: r.email, docId: r.docId, docName: reply.share.name }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [] })),
+      ...n, from: { email: r.email, docId: r.docId, docName: reply.share.name }, hook, tables: reply.retour.map(b => ({ table: b.table, dest: b.dest, columns: [], own: [] })),
     }));
     await markHub(exp.id);
   }

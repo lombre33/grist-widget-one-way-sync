@@ -2,7 +2,7 @@
 // (docs/images, refaites par `CAPTURES=1 npm run test:e2e`). Affiché en entier dans l'onglet
 // Tutoriel, et par morceaux (`stepHelp`) en bas des étapes des assistants.
 import { LANG, frenchSpaces, t } from './i18n.js';
-import { el, openModal } from './ui.js';
+import { closeButtons, el, openModal } from './ui.js';
 import SECTIONS from '../i18n/tutorial.json' with { type: 'json' };
 
 const IMG = name => (name.startsWith('img/') ? name : `docs/images/${name}.png`);
@@ -21,7 +21,7 @@ function figure(name) {
   const img = el('img', { src: IMG(name), alt: '', loading: 'lazy' });
   return el('button', { class: 'tuto-shot', type: 'button', 'aria-label': t('tuto.zoom'),
     onclick: () => openModal({ title: t('tuto.zoom'), width: 'full', body: el('img', { class: 'tuto-full', src: IMG(name), alt: '' }),
-      buttons: [{ label: t('common.close'), kind: 'btn-primary' }] }) }, img);
+      buttons: closeButtons() }) }, img);
 }
 
 function section(s, number) {

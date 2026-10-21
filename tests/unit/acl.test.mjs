@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  JOURNAL_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, ownerAclRules, publicAclRules, ruleText,
+  JOURNAL_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, lockAclRules, ownerAclRules,
+  publicAclRules, ruleText,
 } from '../../js/logic/acl.js';
 
 const E = '0123456789abcdef';
@@ -42,6 +43,15 @@ test('journaux réservés aux éditeurs : un refus de lecture par journal, dans 
     ['Journal_A', '*', 'user.Access == VIEWER', '-R', JOURNAL_MEMO], ['Journal_B', '*', 'user.Access == VIEWER', '-R', JOURNAL_MEMO],
   ]);
   assert.deepEqual(journalAclRules([]), []);
+});
+
+test('tables reçues en lecture seule : seuls les propriétaires écrivent, une règle par table, reconnue comme celle du widget', () => {
+  const rules = lockAclRules(['Contacts', 'Annuaire', 'Contacts']);
+  assert.deepEqual(rules.map(r => [r.tableId, r.colIds, r.aclFormula, r.permissionsText, r.memo]), [
+    ['Annuaire', '*', 'user.Access != OWNER', '-CUD', LOCK_MEMO], ['Contacts', '*', 'user.Access != OWNER', '-CUD', LOCK_MEMO],
+  ]);
+  assert.ok(rules.every(isWidgetRule));
+  assert.deepEqual(lockAclRules([]), []);
 });
 
 test('règles du widget : remplacées seulement si elles diffèrent, avant toutes les autres', () => {

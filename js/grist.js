@@ -14,9 +14,11 @@ import { readShare } from './logic/trust.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).
-// Délais d'abandon : avis de fin envoyé juste avant d'effacer un webhook, fiche d'un partage.
+// Délais d'abandon : avis de fin envoyé juste avant d'effacer un webhook, fiche d'un partage, envoi
+// direct de lignes (morceau de fichier, test du lien).
 const SHORT_MS = 10000;
 const SHARE_MS = 15000;
+const POST_MS = 60000;
 
 async function gristFetch(url, options = {}) {
   if (!GRIST_ORIGINS.includes(new URL(url).origin)) throw new Error('otherInstance');
@@ -48,7 +50,8 @@ export async function readSchema() {
     tableIds: tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => tb.tableId).sort(),
     has: tableId => byId.has(tableId),
     table: tableId => byId.get(tableId),
-    // Nom exact d'une table nommée `tableId` aux majuscules près (Grist ne les distingue pas), ou null.
+    // Nom exact d'une table nommée `tableId` aux majuscules près (Grist ne les distingue pas), ou
+    // null.
     resolve: tableId => (tables.find(tb => tb.tableId.toLowerCase() === String(tableId).toLowerCase()) || {}).tableId || null,
     // Nom actuel de la table de numéro `ref` (il change si on la renomme), ou null.
     tableIdOf: ref => (tables.find(tb => tb.id === ref) || {}).tableId || null,
@@ -59,7 +62,7 @@ export async function readSchema() {
       if (!table) return null;
       return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
         id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, formula: c.formula, label: c.label, description: c.description,
-        displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps,
+        displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps, widgetOptions: c.widgetOptions,
         visible: (colById.get(c.visibleCol) || {}).colId || '',
       }));
     },
@@ -164,9 +167,7 @@ async function rest(method, path, body) {
   const text = await response.text();
   if (!response.ok) {
     // Une erreur de Grist peut citer l'adresse d'un webhook : sa clé n'est jamais montrée en entier.
-    const error = new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${text.slice(0, 200)}`));
-    error.status = response.status;
-    throw error;
+    throw new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${text.slice(0, 200)}`));
   }
   return text ? JSON.parse(text) : null;
 }
@@ -217,7 +218,7 @@ export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponen
 // Seulement vers l'instance du document, comme le webhook : une adresse d'une autre instance de la
 // liste (lien collé, webhook changé à la main) est refusée.
 let ownOrigin = '';
-export async function postRows(url, rows, timeout = 60000) {
+export async function postRows(url, rows, timeout = POST_MS) {
   ownOrigin ||= (await docIdentity()).origin;
   if (new URL(url).origin !== ownOrigin) throw new Error('otherInstance');
   const response = await gristFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows), signal: AbortSignal.timeout(timeout) });

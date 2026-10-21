@@ -3,17 +3,20 @@
 // document (donc le widget). Elles ne sont donc réécrites que si elles diffèrent, et jamais pendant
 // un assistant (un rechargement le fermerait). Rend vrai si elles ont changé : l'onglet attend
 // alors le rechargement (voir reloading).
-import { SYNC_TABLE } from './logic/common.js';
-import { aclActions, currentRules, isPublicRule, journalAclRules, ownerAclRules, publicAclRules } from './logic/acl.js';
+import { KEY_COL, SYNC_TABLE, isUserTable } from './logic/common.js';
+import { aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, ownerAclRules, publicAclRules } from './logic/acl.js';
 import { apply, fetchRows, readSchema } from './grist.js';
 import { message } from './ui.js';
 import { t } from './i18n.js';
-import { receivedJournals, updateJournalNote } from './target/journals.js';
+import { updateJournalNote } from './target/journals.js';
+import { receivedJournals } from './logic/received.js';
 import { readSourceNote } from './source/synchro.js';
 
 // `publicIds` : exports partagés par lien public, et `open` : le document est-il public (vrai,
 // faux, ou null si on ne sait pas). Sans eux (onglet Recevoir), les règles du lien public restent
-// telles quelles. Les journaux dont la note le demande (`reserve`) sont cachés aux lecteurs.
+// telles quelles. Les journaux dont la note le demande (`reserve`) sont cachés aux lecteurs, et les
+// tables reçues d'une réception verrouillée (`verrou`, jamais en Échange) en lecture seule pour
+// tous sauf les propriétaires.
 export async function syncRules({ publicIds = null, open = null } = {}) {
   if (document.querySelector('.scrim')) return false;
   const [schema, resources, rules] = await Promise.all([readSchema(), fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
@@ -23,7 +26,9 @@ export async function syncRules({ publicIds = null, open = null } = {}) {
     : publicAclRules(publicIds, { keepDeny: Boolean(open) && current.some(isPublicRule) });
   const journals = receivedJournals(schema).filter(r => r.note.reserve).map(r => r.journal);
   const exchanges = readSourceNote(schema).exports.filter(e => e.echange).map(e => e.id);
-  const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals)];
+  const locked = receivedJournals(schema).filter(r => r.note.verrou && r.note.mode !== 'echange').flatMap(r => r.note.tables.map(tb => tb.dest))
+    .filter(d => isUserTable(d) && schema.has(d) && schema.columns(d).some(c => c.colId === KEY_COL));
+  const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals), ...lockAclRules(locked)];
   const actions = aclActions(resources, rules, wanted, id => !schema.has(id));
   if (!actions.length) {
     // Règles en place : chaque journal réservé le note, pour l'onglet d'un éditeur (qui ne lit pas

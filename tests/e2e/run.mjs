@@ -167,6 +167,7 @@ const clean = () => page.addStyleTag({ content: '.dev_warning, .test-notifier-to
 // ou sur la première carte (`card`), pour le README (docs/images/readme) : lisible en vignette.
 const shot = async (name, part) => {
   if (!process.env.CAPTURES) return;
+  await page.waitForTimeout(400); // transitions finies (chevrons des parties repliables)
   await clean();
   await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) });
   if (!part) return;
@@ -221,6 +222,9 @@ page.on('console', (m) => {
   if (!where.startsWith(`http://localhost:${WIDGET_PORT}`) && !where.endsWith('grist-plugin-api.js')) return;
   errors.push(`${m.text()} (${where})`);
 });
+// Exception non rattrapée dans le widget (la console ne la voit pas toujours).
+const widgetCode = `http://localhost:${WIDGET_PORT}`;
+page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) errors.push(`${e.message} (pageerror)`); });
 await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
 
 const widget = () => page.frameLocator('iframe').first();
@@ -277,6 +281,26 @@ try {
     await dialog().getByLabel('Nom de l’export').fill(name);
     await dialogButton('Créer l’export').click();
   }
+  // SOURCE de test : une table Fiches de trois lignes (Anna, Basile, Céline).
+  const fichesDoc = name => newDocWithWidget(name, [
+    ['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }]],
+    ['BulkAddRecord', 'Fiches', [null, null, null], { Nom: ['Anna', 'Basile', 'Céline'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
+  ]);
+  // SOURCE : ouvre le widget de `src` et y crée un export de `table`, nommé `name`.
+  async function startExport(src, table, name) {
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await newExport(table, name);
+  }
+  // SOURCE : une invitation aux options par défaut pour l'export affiché ; rend son code, fenêtre refermée.
+  async function plainInvitation() {
+    await dialogButton('Ajouter un destinataire').click();
+    await dialogButton('Créer l’invitation').click();
+    await dialog().getByText('Transmettez ce code').waitFor();
+    const code = await dialog().locator('textarea.code').first().inputValue();
+    await dialogButton('Plus tard').click();
+    return code;
+  }
   // SOURCE : révoquer la personne de `where` (par défaut la seule affichée).
   async function revoke(where = widget()) {
     await where.getByRole('button', { name: 'Révoquer', exact: true }).click();
@@ -298,13 +322,14 @@ try {
 
   // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
   // publié, rendre la réponse.
-  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.') {
+  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = []) {
     await openWidget(url);
     await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
     await button('Accepter une invitation').click();
     await dialog().locator('textarea.code').first().fill(code);
     await dialogButton('Continuer').click();
     await dialog().getByText(tables).waitFor();
+    for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
     await dialogButton('Continuer').click();
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
@@ -355,14 +380,9 @@ try {
   // d'un côté à l'autre sans revenir (pas d'écho) ; la plus récente l'emporte ; la case Supprime
   // efface des deux côtés.
   async function exchangeSteps() {
-    const a = await newDocWithWidget('Échange A', [
-      ['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }]],
-      ['BulkAddRecord', 'Fiches', [null, null, null], { Nom: ['Anna', 'Basile', 'Céline'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
-    ]);
+    const a = await fichesDoc('Échange A');
     const b = await newDocWithWidget('Échange B');
-    await openWidget(a.url);
-    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
-    await newExport('Fiches', 'Partage');
+    await startExport(a, 'Fiches', 'Partage');
     await dialogButton('Ajouter un destinataire').click();
     await dialog().getByRole('radio', { name: /Échange/ }).check();
     await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
@@ -524,6 +544,154 @@ try {
     await seenIn(b, r => !r.Fanny, 'ajout refusé : effacé chez B');
     step('Échange administré : modification à valider, acceptée puis refusée (B reprend la version de A) ; ajout refusé, effacé chez B');
   }
+  // --- Options d'une réception : archive (une ligne effacée à la SOURCE reste ici, cochée) et
+  // tables en lecture seule (règle d'accès posée par un propriétaire) ; et historique des envois
+  // noté dans la SOURCE.
+  async function optionsSteps() {
+    const src = await fichesDoc('Options SOURCE');
+    const dst = await newDocWithWidget('Options CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.', [/^Archive/, /lecture seule/]);
+    await approve(answer, { url: src.url });
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    await openWidget(dst.url);
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    const column = (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Supprimee_a_la_source');
+    assert.equal(column && column.type, 'Bool', 'la case de l\'archive est créée dans la destination');
+    const lockRules = async () => (await records(dst.doc, '_grist_ACLRules')).filter(r => r.memo === 'Synchro : table reçue en lecture seule');
+    await waitFor(async () => (await lockRules()).length === 1, 'règle de lecture seule posée par un propriétaire', 60000);
+    assert.deepEqual(lockRules && (await lockRules()).map(r => [r.aclFormula, r.permissionsText]), [['user.Access != OWNER', '-CUD']]);
+    await openWidget(dst.url);
+    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    // Archive : Basile disparaît de la SOURCE, il reste ici, coché ; ni retouche ni suppression.
+    await applyActions(src.doc, [['RemoveRecord', 'Fiches', 2]]);
+    await waitFor(async () => (await fiches()).Basile?.Supprimee_a_la_source === true, 'ligne effacée à la SOURCE gardée ici, cochée', 90000);
+    const kept = await fiches();
+    assert.deepEqual([kept.Anna.Supprimee_a_la_source, kept.Céline.Supprimee_a_la_source], [false, false]);
+    assert.equal(Object.keys(kept).length, 3, 'rien n\'est effacé');
+    assert.equal(await widget().locator('.drift').count(), 0, 'une ligne gardée en archive n\'est pas une retouche');
+    await shot('27-cible-archive', 'card');
+    // Options de la carte : archive et verrou retirés, la règle part.
+    await button('Options').click();
+    await dialog().getByRole('checkbox', { name: /lecture seule/ }).uncheck();
+    await dialog().getByRole('checkbox', { name: /^Archive/ }).uncheck();
+    await dialog().getByText(/ne supprime pas les lignes déjà archivées/).waitFor();
+    await dialogButton('Enregistrer').click();
+    await waitFor(async () => (await lockRules()).length === 0, 'règle de lecture seule retirée', 60000);
+    // Archive décochée : la ligne déjà archivée reste, la suivante est effacée.
+    await applyActions(src.doc, [['RemoveRecord', 'Fiches', 3]]);
+    await waitFor(async () => !(await fiches()).Céline, 'ligne effacée à la SOURCE après l\'arrêt de l\'archive : effacée ici', 90000);
+    const after = await fiches();
+    assert.equal(after.Basile?.Supprimee_a_la_source, true, 'la ligne archivée reste, cochée');
+    assert.deepEqual(Object.keys(after).sort(), ['Anna', 'Basile']);
+    // Historique des envois, côté SOURCE : le destinataire, puis l'envoi de l'existant.
+    await openWidget(src.url);
+    const history = widget().locator('.history', { hasText: 'Historique des envois' });
+    await history.waitFor();
+    await history.locator('summary').click();
+    await history.getByText(/reçoit désormais cet export/).waitFor();
+    await history.getByText(/Envoi de 3 lignes à tous les destinataires actifs/).waitFor();
+    await shot('28-source-historique', 'card');
+    step('Options d\'une réception : archive (ligne effacée à la SOURCE gardée, cochée, sans alerte), tables en lecture seule (règle posée puis retirée), archive décochée (la ligne archivée reste) ; historique des envois dans la SOURCE');
+  }
+  // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
+  // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
+  // une ligne qui cite une ligne arrivée en même temps (la table vise elle-même) est complétée au
+  // passage suivant ; la case décochée rend le texte.
+  async function linksSteps() {
+    const src = await newDocWithWidget('Liens SOURCE', [
+      ['AddTable', 'Villes', [{ id: 'Nom', type: 'Text' }]],
+      ['BulkAddRecord', 'Villes', [null, null], { Nom: ['Lyon', 'Paris'] }],
+      ['AddTable', 'Gens', [{ id: 'Prenom', type: 'Text' }]],
+      ['BulkAddRecord', 'Gens', [null, null, null], { Prenom: ['Anna', 'Basile', 'Céline'] }],
+    ]);
+    const column = async (doc, table, colId) => {
+      const parentId = await tableRef(doc, table);
+      return (await records(doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === parentId);
+    };
+    // Lieu : Référence vers Villes (nom de la ville) ; Chef : Référence vers Gens elle-même (prénom).
+    const addRef = async (table, colId, target, shown, values) => {
+      await applyActions(src.doc, [['AddColumn', table, colId, { type: `Ref:${target}` }]]);
+      const ref = (await column(src.doc, table, colId)).id;
+      await applyActions(src.doc, [['UpdateRecord', '_grist_Tables_column', ref, { visibleCol: (await column(src.doc, target, shown)).id }],
+        ['SetDisplayFormula', table, null, ref, `$${colId}.${shown}`], ['BulkUpdateRecord', table, values.map((_, i) => i + 1), { [colId]: values }]]);
+    };
+    await addRef('Gens', 'Lieu', 'Villes', 'Nom', [1, 2, 0]);
+    await addRef('Gens', 'Chef', 'Gens', 'Prenom', [0, 1, 2]);
+    const dst = await newDocWithWidget('Liens CIBLE');
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Gens' }).check();
+    await dialog().getByRole('checkbox', { name: 'Villes' }).check();
+    await dialogButton('Continuer').click();
+    const keep = dialog().getByRole('checkbox', { name: 'Garder les liens entre les tables' });
+    assert.ok(await keep.isChecked(), 'cochée d\'emblée pour un nouvel export');
+    await shot('29-source-liens', 'modal');
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Annuaire');
+    await dialogButton('Créer l’export').click();
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, /Annuaire\s»\s:\stables/);
+    await approve(answer, { url: src.url });
+    await openWidget(dst.url);
+    const byName = async (table, key) => Object.fromEntries((await records(dst.doc, table)).map(r => [r[key], r]));
+    const settled = async () => {
+      const gens = await byName('Gens', 'Prenom');
+      const villes = await byName('Villes', 'Nom');
+      return Object.keys(gens).length === 3 && Object.keys(villes).length === 2 && { gens, villes };
+    };
+    await waitFor(settled, 'tables reçues', 90000);
+    const lieu = await column(dst.doc, 'Gens', 'Lieu');
+    const chef = await column(dst.doc, 'Gens', 'Chef');
+    assert.deepEqual([lieu.type, chef.type], ['Ref:Villes', 'Ref:Gens'], 'des vraies Références chez le destinataire');
+    assert.equal(lieu.visibleCol, (await column(dst.doc, 'Villes', 'Nom')).id, 'elles affichent la colonne de la SOURCE');
+    const links = async () => {
+      const { gens, villes } = await settled();
+      return { lieu: [gens.Anna.Lieu, gens.Basile.Lieu, gens.Céline.Lieu], chef: [gens.Anna.Chef, gens.Basile.Chef, gens.Céline.Chef], gens, villes };
+    };
+    // La ligne visée est dans la même table et arrive en même temps : complétée au passage suivant.
+    await waitFor(async () => {
+      const now = await links();
+      return now.chef[1] === now.gens.Anna.id && now.chef[2] === now.gens.Basile.id;
+    }, 'Chef : la ligne visée arrivée en même temps est retrouvée', 90000);
+    let now = await links();
+    assert.deepEqual(now.lieu, [now.villes.Lyon.id, now.villes.Paris.id, 0], 'Lieu : le numéro de la ligne reçue, vide si la SOURCE est vide');
+    assert.equal(now.chef[0], 0);
+    assert.equal(await widget().locator('.drift').count(), 0, 'les Références ne sont pas des retouches');
+    // Une ville renommée dans la SOURCE : la ligne reste la même, la Référence aussi.
+    await applyActions(src.doc, [['UpdateRecord', 'Villes', 1, { Nom: 'Villeurbanne' }]]);
+    await waitFor(async () => (await records(dst.doc, 'Villes')).some(r => r.Nom === 'Villeurbanne'), 'ville renommée reçue', 90000);
+    now = await links();
+    assert.equal(now.lieu[0], now.villes.Villeurbanne.id, 'la Référence suit la ligne renommée');
+    // Une Référence changée dans la SOURCE : la cellule suit.
+    await applyActions(src.doc, [['UpdateRecord', 'Gens', 2, { Lieu: 1 }], ['UpdateRecord', 'Gens', 3, { Lieu: 2 }]]);
+    await waitFor(async () => {
+      const next = await links();
+      return next.lieu[1] === next.villes.Villeurbanne.id && next.lieu[2] === next.villes.Paris.id;
+    }, 'Référence changée dans la SOURCE', 90000);
+    assert.equal(await widget().locator('.drift').count(), 0, 'toujours aucune retouche');
+    step('Références conservées : vraies Références chez le destinataire (colonne affichée reprise), ligne visée arrivée en même temps retrouvée, ville renommée et Référence changée suivies');
+
+    // Case décochée dans « Modifier » : les colonnes redeviennent du texte.
+    await openWidget(src.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    const keepAgain = dialog().getByRole('checkbox', { name: 'Garder les liens entre les tables' });
+    assert.ok(await keepAgain.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
+    await keepAgain.uncheck();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
+    await dialogButton('Fermer').click();
+    await openWidget(dst.url);
+    await waitFor(async () => (await column(dst.doc, 'Gens', 'Lieu')).type === 'Text', 'colonne rendue au texte', 90000);
+    await waitFor(async () => (await records(dst.doc, 'Gens')).some(r => r.Lieu === 'Paris'), 'texte affiché reçu', 90000);
+    now = await byName('Gens', 'Prenom');
+    assert.deepEqual([now.Anna.Lieu, now.Basile.Lieu, now.Céline.Lieu], ['Villeurbanne', 'Villeurbanne', 'Paris']);
+    step('Références conservées : case décochée, les colonnes redeviennent du texte');
+  }
   // --- Pièces jointes : la liste des fichiers part avec les lignes, leur contenu quand la page
   // SOURCE est ouverte, une fois par destinataire, en morceaux ; la CIBLE dépose chaque fichier une
   // seule fois et remplit les cellules dès son arrivée.
@@ -538,10 +706,13 @@ try {
     const sha = bytes => createHash('sha1').update(bytes).digest('hex').slice(0, 16);
     const small = new TextEncoder().encode('bonjour');
     const big = Uint8Array.from({ length: 1300000 }, (_, i) => (i * 31 + (i >> 8)) % 251); // trois morceaux
+    // Etat : liste de choix, que la CIBLE reprend (choix ajoutés plus tard compris).
+    const etat = { choices: ['Ouvert', 'Clos'], choiceOptions: { Clos: { fillColor: '#FF0000' } } };
     const src = await newDocWithWidget('Fichiers SOURCE', [
-      ['AddTable', 'Dossiers', [{ id: 'Nom', type: 'Text' }, { id: 'Piece', type: 'Attachments' }]],
-      ['BulkAddRecord', 'Dossiers', [null, null, null], { Nom: ['Un', 'Deux', 'Trois'] }],
+      ['AddTable', 'Dossiers', [{ id: 'Nom', type: 'Text' }, { id: 'Piece', type: 'Attachments' }, { id: 'Etat', type: 'Choice', widgetOptions: JSON.stringify(etat) }]],
+      ['BulkAddRecord', 'Dossiers', [null, null, null], { Nom: ['Un', 'Deux', 'Trois'], Etat: ['Ouvert', 'Clos', 'Ouvert'] }],
     ]);
+    const etatOf = async doc => JSON.parse((await records(doc, '_grist_Tables_column')).find(c => c.colId === 'Etat').widgetOptions || '{}');
     const dst = await newDocWithWidget('Fichiers CIBLE');
     const dst2 = await newDocWithWidget('Fichiers CIBLE 2');
     // Trois ne cite pas le même dépôt que Un, mais le même contenu : un seul fichier part.
@@ -581,7 +752,8 @@ try {
     assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Deux'))[1]), big, 'gros fichier reconstitué à l\'identique');
     assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Trois'))[1]), small);
     assert.equal((await rawRows(dst.doc, 'Journal_Dossiers')).length, 0, 'morceaux effacés du journal');
-    step('Pièces jointes : liste des fichiers avec les lignes, contenu envoyé page SOURCE ouverte (gros fichier en trois morceaux), déposé une fois, cellules remplies');
+    assert.deepEqual(await etatOf(dst.doc), etat, 'liste de choix et couleurs reprises par la colonne créée ici');
+    step('Pièces jointes : liste des fichiers avec les lignes, contenu envoyé page SOURCE ouverte (gros fichier en trois morceaux), déposé une fois, cellules remplies ; liste de choix reprise');
 
     // Page SOURCE fermée : un fichier remplacé est attendu, un fichier retiré l'est aussi ici.
     const later = new TextEncoder().encode('bonsoir');
@@ -592,13 +764,17 @@ try {
     assert.equal(await piece(dst.doc, 'Deux'), null, 'fichier retiré dans la SOURCE : retiré ici');
     assert.equal(await piece(dst.doc, 'Un'), null, 'fichier remplacé, pas encore arrivé');
     await shot('26-cible-fichiers-attendus', 'card');
+    // Un choix ajouté à la SOURCE s'ajoute ici, sans renvoi des lignes.
+    const etatCol = (await records(src.doc, '_grist_Tables_column')).find(c => c.colId === 'Etat');
+    await applyActions(src.doc, [['UpdateRecord', '_grist_Tables_column', etatCol.id, { widgetOptions: JSON.stringify({ ...etat, choices: [...etat.choices, 'Archivé'] }) }]]);
     await openWidget(src.url);
     await waitFor(async () => (await sent()).f.includes(sha(later)), 'fichier envoyé à l\'ouverture de la page SOURCE', 60000);
     await openWidget(dst.url);
     await waitFor(async () => { const p = await piece(dst.doc, 'Un'); return Array.isArray(p) && p.length === 2; }, 'cellule complétée à l\'arrivée du fichier', 60000);
     assert.deepEqual(await download(dst.doc, (await piece(dst.doc, 'Un'))[1]), later);
     await widget().getByText(/fichier attendu/).waitFor({ state: 'detached' });
-    step('Pièces jointes : page SOURCE fermée, fichier remplacé attendu (signalé), retiré ici ; envoyé à l\'ouverture, cellule complétée');
+    await waitFor(async () => (await etatOf(dst.doc)).choices.join() === 'Ouvert,Clos,Archivé', 'choix ajouté à la SOURCE repris ici');
+    step('Pièces jointes : page SOURCE fermée, fichier remplacé attendu (signalé), retiré ici ; envoyé à l\'ouverture, cellule complétée ; choix ajouté repris');
 
     // Nouveau destinataire : il reçoit tous les fichiers, le premier rien de plus.
     await openWidget(src.url);
@@ -612,13 +788,10 @@ try {
     assert.equal((await records(dst.doc, '_grist_Attachments')).length, 3, 'le premier destinataire ne reçoit rien de plus');
     step('Pièces jointes : un nouveau destinataire reçoit tous les fichiers');
   }
-  if (process.env.ONLY_EXCHANGE) {
-    await exchangeSteps();
-    assert.deepEqual(errors, [], 'aucune erreur dans la console');
-    process.exit(0);
-  }
-  if (process.env.ONLY_FILES) {
-    await filesSteps();
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_LINKS=1, ONLY_FILES=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, LINKS: linksSteps, FILES: filesSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  if (only) {
+    await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
     process.exit(0);
   }
@@ -750,7 +923,14 @@ try {
   await waitFor(async () => (await records(target.doc, 'Journal_Annuaire')).length >= 2, 'liste et lot reçus dans le journal');
   const charge = JSON.parse((await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'charge').Synchro_Renvoi);
   assert.ok(!charge.par && charge.envoye.length && charge.envoye[0][1] > 0, 'renvoi compté dans la charge du document, la main rendue');
-  step('SOURCE : un webhook filtré sur l\'export, lignes existantes envoyées');
+  // Diagnostic (Réglages) : l'export et son destinataire, sans l'adresse de son webhook.
+  await widget().locator('#settings').click();
+  const diag = dialog().getByLabel('Diagnostic', { exact: true });
+  const diagText = await waitFor(async () => { const v = await diag.inputValue(); return v.includes('== Erreurs récentes') && v; }, 'diagnostic relu');
+  assert.ok(diagText.includes(`destinataire ${hooks[0].id.slice(0, 8)} : actif`) && diagText.includes('Droits : propriétaire'), diagText);
+  assert.ok(!diagText.includes(hooks[0].fields.url.split('/api/s/')[1].slice(4, 12)), 'pas de clé de formulaire dans le diagnostic');
+  await dialogButton('Fermer').click();
+  step('SOURCE : un webhook filtré sur l\'export, lignes existantes envoyées ; diagnostic sans adresse');
 
   // --- Une autre page renvoie déjà (signe de vie récent) : « Tout renvoyer » ne lance rien et
   // note le lot ; la main rendue, le rattrapage l'envoie seul
@@ -1467,6 +1647,8 @@ try {
 
   await exchangeSteps();
   await filesSteps();
+  await optionsSteps();
+  await linksSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

@@ -5,13 +5,14 @@
 // notés dans la description de sa colonne Synchro_Export : des métadonnées, que le webhook
 // n'envoie pas. Synchro n'a pas de page : elle reste dans « Données source ».
 import {
-  EXPORT_COL, KIND, LIST_COL, LOT_COL, SIG_KEY, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction,
+  EXPORT_COL, KIND, LIST_COL, LOT_COL, SIG_KEY, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction, nowS,
 } from '../logic/common.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
-import { endNotice, exportRowsActions, exportTables, hooksOf } from '../logic/exports.js';
+import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } from '../logic/exports.js';
 import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
-import { apply, fetchRows, listWebhooks, readSchema, webhookConditions } from '../grist.js';
+import { addEvent } from '../logic/notes.js';
+import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../grist.js';
 import { dropPages, removeTechnicalTables } from '../pages.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
@@ -43,12 +44,18 @@ const exportColumn = schema => (schema.columns(SYNC_TABLE) || []).find(c => c.co
 
 export const readSourceNote = schema => ({ exports: [], invitations: [], pauses: [], ...columnNote(exportColumn(schema)) });
 
-// Relit la note, la change (`change` rend la nouvelle note, voir logic/notes.js) et l'écrit.
-export async function updateSourceNote(change) {
+// Relit la note, la change (`change` rend la nouvelle note, voir logic/notes.js) et l'écrit. Une
+// seule lecture-modification-écriture à la fois entre les onglets du navigateur (le rattrapage, une
+// action et l'historique écrivent tous dans cette note : la dernière écriture ferait perdre l'autre).
+export const updateSourceNote = change => withLock('gristsync-source-note', async () => {
   const schema = await readSchema();
   const column = exportColumn(schema);
   if (column) await apply([noteAction(column, change(readSourceNote(schema)))]);
-}
+});
+
+// Événement d'envoi noté pour l'historique de l'export (voir addEvent) ; un échec de la note ne
+// fait jamais échouer l'action qu'il raconte.
+export const recordEvent = (exportId, kind, fields = {}) => updateSourceNote(note => addEvent(note, exportId, { at: nowS(), kind, ...fields })).catch(console.warn);
 
 // Les formules de Synchro nomment les tables qu'elles lisent : réécrites quand l'ensemble change.
 // Une table renommée ou effacée dans la SOURCE n'y figure plus (la carte de l'export le signale) :
@@ -68,8 +75,8 @@ async function refreshFormulas(schema, rows) {
 // consolidation d'un Échange) accepte du texte et surveille le lot, la liste et la demande de
 // renvoi (dépendances posées après coup : Grist les refuse à la création), et les formules
 // sont celles de cette version, pour les tables de `rows` (lignes de Synchro, ou à venir ; lues
-// ici si absentes). `schema` : déjà lu par l'appelant. Synchro n'a pas de colonne manualSort : le webhook
-// l'enverrait, et chaque ligne reçue se placerait au même rang dans le journal ; au bout d'une
+// ici si absentes). `schema` : déjà lu par l'appelant. Synchro n'a pas de colonne manualSort : le
+// webhook l'enverrait, et chaque ligne reçue se placerait au même rang dans le journal ; au bout d'une
 // cinquantaine d'envois en attente (page de la CIBLE fermée), Grist renumérote les lignes voisines,
 // ce que la clé du formulaire n'a pas le droit de faire (403), et la file se bloque (vérifié). Rend
 // vrai si quelque chose a changé.
@@ -91,6 +98,14 @@ export async function ensureSyncTable(schema = null, rows = null) {
   if (depsChanged) await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
   const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
   return missing.length > 0 || sorted || depsChanged || formulasChanged;
+}
+
+// Listes de choix et formats changés dans les tables des exports (voir optionsActions). Rend vrai
+// si quelque chose a changé.
+export async function refreshOptions(schema, rows) {
+  const actions = optionsActions(rows, schema);
+  await apply(actions);
+  return actions.length > 0;
 }
 
 // MajLe de chaque table envoyée suit les colonnes que ses exports envoient (voir majleAction), et

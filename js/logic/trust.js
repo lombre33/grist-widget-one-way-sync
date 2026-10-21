@@ -4,7 +4,7 @@
 // chaque destinataire, tirée d'un échange de clés publiques : seuls la SOURCE et lui la connaissent).
 import {
   DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, ORDER_COL, SCHEMA_COL, SEAL_COL, SIG_KEY, TABLE_COL, TYPE_COL, is, isBlank,
-  isTrue, sha256, toHex,
+  digest, isTrue, sha256, toHex,
 } from './common.js';
 import { parseWebhookUrl } from './codes.js';
 
@@ -50,7 +50,7 @@ const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // sans 0, 1, I, L, O
 export async function controlCode(url, secret, seen = []) {
   const subject = (parseWebhookUrl(url) || {}).key || url;
   const text = [subject, secret || '', ...seen].join('\n');
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  const bytes = await digest('SHA-256', new TextEncoder().encode(text));
   const chars = Array.from(bytes.slice(0, 6), b => ALPHABET[b % ALPHABET.length]).join('');
   return `${chars.slice(0, 3)}-${chars.slice(3)}`;
 }

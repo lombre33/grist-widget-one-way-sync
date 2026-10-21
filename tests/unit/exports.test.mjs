@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  conditionExport, exchangeColumns, exchangeTables, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, ownJournal, readTables, tooLarge,
+  conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
+  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, readTables, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { memoMatches } from '../../js/logic/trust.js';
@@ -181,4 +181,38 @@ test('tables lues pour un export : les siennes et celles qu\'affichent ses Réf�
     { table: 'Villes', columns: [{ id: 'Nom', type: 'Text' }] },
   ];
   assert.deepEqual(readTables(tables), ['Contacts', 'Villes', 'Tags']);
+});
+
+test('écart d\'un export : table perdue, colonnes renommées, effacées, d\'un autre type ou affichage changé', () => {
+  const cols = { Contacts: [{ colId: 'Nom', type: 'Text' }, { colId: 'Ville', type: 'Ref:Villes', visible: 'Code' }, { colId: 'Age', type: 'Text' }] };
+  const schema = { has: t => t in cols, columns: t => cols[t] };
+  const tables = [
+    { table: 'Contacts', columns: [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text', source: 'Ref:Villes', visible: 'Nom' }, { id: 'Age', type: 'Numeric', source: 'Numeric' }, { id: 'Tel', type: 'Text' }] },
+    { table: 'Perdue', columns: [{ id: 'X', type: 'Text' }] },
+  ];
+  assert.deepEqual(exportDrift(schema, tables), { lost: ['Perdue'], changed: ['Contacts.Ville', 'Contacts.Age', 'Contacts.Tel'] });
+  assert.deepEqual(exportDrift(schema, [{ table: 'Contacts', columns: [{ id: 'Nom', type: 'Text' }] }]), { lost: [], changed: [] });
+});
+
+test('choix et formats : envoyés avec les colonnes, réécrits quand ils changent, sans renvoi des lignes', () => {
+  const E = '0123456789abcdef';
+  const cols = { Contacts: [{ colId: 'Etat', type: 'Choice', widgetOptions: '{"choices":["A"]}' }, { colId: 'Ville', type: 'Ref:Villes', widgetOptions: '{"alignment":"right","widget":"Reference"}' }, { colId: 'Nom', type: 'Text' }] };
+  const schema = { has: t => t in cols, columns: t => cols[t] };
+  const columns = exportableColumns(cols.Contacts);
+  assert.deepEqual(columns.map(c => c.opts || null), [{ choices: ['A'] }, { alignment: 'right' }, null]);
+  const { actions } = exportRowsActions([], E, [{ table: 'Contacts', columns }]);
+  const values = actions[0][3];
+  const rows = values.Synchro_Type.map((type, i) => ({ id: i + 1, ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v[i]])) }));
+  assert.deepEqual(optionsActions(rows, schema), [], 'rien n\'a changé');
+  cols.Contacts[0].widgetOptions = '{"choices":["A","B"]}';
+  const update = optionsActions(rows, schema);
+  assert.equal(update.length, 1);
+  assert.deepEqual(update[0][2], [1, 2, 3], 'liste, lot et suivi');
+  assert.ok(update[0][3].Synchro_Colonnes.every(v => JSON.parse(v)[0].opts.choices.join() === 'A,B'));
+  const after = rows.map((r, i) => ({ ...r, Synchro_Colonnes: update[0][3].Synchro_Colonnes[i] }));
+  assert.deepEqual(optionsActions(after, schema), []);
+  const again = exportRowsActions(rows, E, [{ table: 'Contacts', columns: exportableColumns(cols.Contacts) }]);
+  assert.deepEqual(again.changed, [], 'une liste de choix changée ne renvoie pas la table');
+  assert.equal(again.actions.length, 1);
+  assert.deepEqual(optionsActions([...rows, { id: 9, Synchro_Export: E, Synchro_Table: 'Perdue', Synchro_Type: 'cles', Synchro_Colonnes: '[]' }], { has: t => t === 'Contacts', columns: t => cols[t] }).length, 1, 'table introuvable laissée');
 });

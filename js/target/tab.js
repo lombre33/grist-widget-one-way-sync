@@ -8,18 +8,26 @@ import { fetchRows, isOwner, isReadOnly, readSchema } from '../grist.js';
 import { reloading, syncRules } from '../acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { closeExport } from '../exchange.js';
-import { receivedJournals, receivedKey, updateJournalNote } from './journals.js';
-import { SHOWN, consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { updateJournalNote } from './journals.js';
+import { receivedJournals, receivedKey } from '../logic/received.js';
+import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
+import { SHOWN } from '../logic/report.js';
 import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
+import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
-import { confirmDialog, el, errorText, icon, message, openModal, pickField, pill, run } from '../ui.js';
+import { cancelButton, confirmDialog, el, errorText, icon, message, noteError, openModal, pickField, pill, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 
 const HISTORY_MAX = 20;
 let container;
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
+// Avis de la dernière action (lien coupé), gardé une minute : le passage de recopie qui suit
+// l'action redessine l'onglet (vu au test : l'avis disparaissait aussitôt).
+let notice = null; // { node, until }
+const NOTICE_MS = 60000;
+const lastNotice = () => (notice && Date.now() < notice.until ? notice.node : null);
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
 // Historiques et lignes d'historique ouverts : repliés par défaut, ils le restent d'un dessin à
 // l'autre de l'onglet (un passage qui change quelque chose le redessine).
@@ -48,12 +56,12 @@ async function receivedGroups(schema, owner) {
     // recopie, voir sealing dans loop.js).
     const unsigned = note.mode !== 'public' && !note.sceau && !receivedKey(schema, journal, note);
     const unreserved = Boolean(note.reserve) && !note.reserved && !owner;
-    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, shared: (forms.get(journal) || {}).shared || 0 });
+    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, owner, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
 }
 
-const button = (label, iconName, onclick, kind = '') => el('button', { class: `btn btn-small ${kind}`, type: 'button', disabled: state.readOnly, onclick }, icon(iconName), label);
+const button = (label, iconName, onclick, kind = '') => smallButton(label, iconName, onclick, { kind, disabled: state.readOnly });
 
 export async function renderTarget(root = container, { periodic = false } = {}) {
   if (!container) state.viewer = isReadOnly();
@@ -68,10 +76,11 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   }
   const schema = await readSchema();
   const groups = await receivedGroups(schema, owner || state.viewer);
-  // Formulaire des exports en attente, chacun sur sa page.
-  const out = el('div', { class: 'out' });
+  // Formulaire des exports en attente, chacun sur sa page (l'assistant le crée ; remis s'il a été
+  // effacé, pas à chaque redessin périodique).
+  const out = el('div', { class: 'out' }, lastNotice());
   try {
-    for (const group of groups.filter(g => g.waiting)) await ensureForm(group.journal);
+    for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal);
   } catch (e) {
     if (isAccessError(e)) state.readOnly = true; // un lecteur ne peut pas publier le formulaire
     else out.append(message('err', errorText(e)));
@@ -86,13 +95,14 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
     out,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
     roleGuide({ you: 'target' })].filter(Boolean));
-  if (!state.readOnly) await openPending(groups);
+  if (!state.readOnly) await openPending(groups, periodic);
 }
 
 // Ouvre seul, une fois par chargement : l'assistant d'une réception qui attend son lien, sinon la
-// fenêtre d'une table ajoutée par la SOURCE.
-async function openPending(groups) {
-  dropPages(groups.map(g => g.journal)).catch(() => {});
+// fenêtre d'une table ajoutée par la SOURCE. Les journaux n'ont pas de page (ménage hors redessin
+// périodique).
+async function openPending(groups, periodic) {
+  if (!periodic) dropPages(groups.map(g => g.journal)).catch(() => {});
   if (document.querySelector('.scrim')) return;
   const waiting = groups.find(g => g.waiting);
   if (waiting && !wizardOpened) {
@@ -104,7 +114,7 @@ async function openPending(groups) {
     const offer = (state.offers.get(group.journal) || []).find(o => !offered.has(tableKey(group.journal, o.table)));
     if (!offer) continue;
     offered.add(tableKey(group.journal, offer.table));
-    offerDialog(group, offer, renderTarget);
+    run(null, container.querySelector('.out'), () => offerDialog(group, offer, renderTarget));
     return;
   }
 }
@@ -121,7 +131,8 @@ function cardStatus(group) {
 }
 
 // Pièces jointes d'une table reçue : fichiers attendus (ils partent quand un propriétaire de la
-// SOURCE ouvre la page du widget), trop gros pour partir, refusés par Grist ici ; aucun par lien public.
+// SOURCE ouvre la page du widget), trop gros pour partir, refusés par Grist ici ; aucun par lien
+// public.
 const MB = 1024 * 1024;
 const megabytes = bytes => (bytes / MB).toLocaleString(LANG, { maximumFractionDigits: 1 });
 function filesNotes(group, entry) {
@@ -152,13 +163,14 @@ function cardNotes(group) {
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
     group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
+    note.tables.some(entry => (state.results.get(tableKey(group.journal, entry.table)) || {}).locked) ? message('info', t('recv.lock.waiting')) : null,
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
     group.shared && !group.public ? alertBlock(t('recv.shared.title'), [t('recv.shared.body', { n: group.shared })], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text')]) : null,
     note.suspect ? suspectBlock(group) : null,
     (state.offers.get(group.journal) || []).map(o => el('div', { class: 'offer' }, el('span', { class: 'small' }, t('recv.offer.line', { table: o.table, n: o.n })),
-      button(t('recv.offer.place'), 'plus', () => offerDialog(group, o, renderTarget), 'btn-primary'))),
+      button(t('recv.offer.place'), 'plus', e => run(e.currentTarget, container.querySelector('.out'), () => offerDialog(group, o, renderTarget)), 'btn-primary'))),
     note.refused.length ? el('p', { class: 'muted small' }, t('recv.offer.refusedList', { tables: note.refused.join(', ') })) : null,
   ];
 }
@@ -177,6 +189,7 @@ function syncCard(group) {
     group.waiting ? null : history(group),
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : linkButton(group),
+      group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
 
@@ -203,6 +216,7 @@ function safeCard(group) {
     return syncCard(group);
   } catch (e) {
     console.error(e);
+    noteError(e);
     return el('article', { class: 'card', 'data-journal': group.journal },
       el('div', { class: 'card-head' }, el('strong', {}, String(group.note.name || group.journal)), pill(t('recv.status.error'), 'err')),
       message('err', errorText(e)),
@@ -238,8 +252,8 @@ async function cutLink(group) {
   if (!(await confirmDialog({ title: t('recv.cut.title'), body: t('recv.cut.body'), confirmLabel: t('recv.suspect.cut') }))) return;
   await updateJournalNote(group.journal, ({ suspect, ...note }) => note);
   await renewFormLink(group.journal);
+  notice = { node: message('ok', t('recv.cut.done')), until: Date.now() + NOTICE_MS };
   await renderTarget();
-  container.querySelector('.out').replaceChildren(message('ok', t('recv.cut.done')));
 }
 
 // Arrêter de recevoir : efface le journal (et son formulaire, donc la clé d'écriture) ; les tables
@@ -520,6 +534,6 @@ function labelDialog(group) {
   openModal({
     title: t('recv.label.title'), width: 400,
     body: [el('p', { class: 'small' }, t('recv.label.help')), ...pickers.map(p => el('div', { class: 'dest-row' }, el('span', {}, p.entry.dest), p.field)), report],
-    buttons: [{ label: t('common.cancel') }, { label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, () => save(m)) }],
+    buttons: [cancelButton(), { label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, () => save(m)) }],
   });
 }

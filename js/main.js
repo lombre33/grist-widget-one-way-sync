@@ -6,8 +6,9 @@ import { applyTheme, readPref, writePref } from './prefs.js';
 import { SYNC_TABLE, sleep } from './logic/common.js';
 import { readSchema } from './grist.js';
 import { readSourceNote } from './source/synchro.js';
-import { receivedJournals } from './target/journals.js';
-import { copyField, el, errorText, message, openModal } from './ui.js';
+import { receivedJournals } from './logic/received.js';
+import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
+import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
 import { tutorialView } from './tutorial.js';
 import { refreshSource, renderSource } from './source/tab.js';
@@ -62,6 +63,7 @@ async function select(tab, retry = true) {
     // la trace.
     if (!unreachable(e)) console.error(e);
     else console.warn(e);
+    noteError(e);
     if (unreachable(e) && retry) {
       await sleep(RETRY_MS);
       return view.isConnected ? select(tab, false) : undefined;
@@ -102,9 +104,33 @@ function openSettings() {
       el('h3', {}, t('settings.theme')),
       radios('theme', t('settings.theme'), [['system', t('settings.theme.system')], ['light', t('settings.theme.light')], ['dark', t('settings.theme.dark')]],
         readPref('theme') || 'system', (theme) => { writePref('theme', theme); applyTheme(); }),
+      diagnosticBlock(),
       el('h3', {}, t('settings.credits')),
       el('dl', { class: 'fiche small' }, credits.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]))),
   });
+}
+
+// Diagnostic à copier (voir diagnostic.js) : relu à l'ouverture des Réglages, visible avant d'être
+// copié. Copie refusée par le navigateur : le texte s'ouvre, sélectionné.
+function diagnosticBlock() {
+  const area = el('textarea', { class: 'code', readonly: true, rows: 8, spellcheck: 'false', 'aria-label': t('settings.diag') });
+  const shown = el('details', {}, el('summary', { class: 'small' }, t('settings.diag.show')), area);
+  const out = el('div', { class: 'out' });
+  const text = diagnostic().catch((e) => { out.append(message('err', errorText(e))); return ''; });
+  text.then((value) => { area.value = value; });
+  const copy = el('button', { class: 'btn', type: 'button', onclick: async () => {
+    const value = await text;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      copy.lastChild.textContent = t('common.copied');
+      setTimeout(() => { copy.lastChild.textContent = t('settings.diag.copy'); }, 1500);
+    } catch (e) {
+      shown.open = true;
+      area.select();
+    }
+  } }, icon('copy'), t('settings.diag.copy'));
+  return [el('h3', {}, t('settings.diag')), el('p', { class: 'muted small' }, t('settings.diag.help')), copy, out, shown];
 }
 
 async function start() {

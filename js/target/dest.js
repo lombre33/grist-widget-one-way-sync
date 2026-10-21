@@ -3,13 +3,15 @@
 // Aussi : la fenêtre d'une table que la SOURCE ajoute à un export déjà reçu.
 import { EXPORT_COL, KEY_COL, TABLE_COL, isUserTable, toTableId } from '../logic/common.js';
 import { docIdentity, isOwner, readSchema } from '../grist.js';
+import { exportSchema } from '../logic/codes.js';
 import { exportableColumns } from '../logic/exports.js';
 import { syncRows } from '../source/synchro.js';
 import { wireExchange } from '../exchange.js';
 import { destColumns, destProblem } from '../logic/journal.js';
-import { keySlot, prepareDest, receivedDests, receivedJournals, receivedKey, storeKey, updateJournalNote } from './journals.js';
+import { prepareDest, storeKey, updateJournalNote } from './journals.js';
+import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../logic/received.js';
 import { consolidateAll } from './loop.js';
-import { confirmDialog, el, failure, message, openModal, pickField, run } from '../ui.js';
+import { backButton, confirmDialog, el, failure, laterButton, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';
 
@@ -101,7 +103,8 @@ export async function offerDialog(group, offer, onDone) {
     await consolidateAll();
     await onDone();
   };
-  const accept = async (entry, m) => {
+  const accept = async (picked, m) => {
+    const entry = { ...picked, own: missingColumns(await readSchema(), picked.dest, offer.columns, picked.map || {}) };
     await prepareDest({ dest: entry.dest, columns: offer.columns, map: entry.map });
     await storeKey([entry.dest], keySlot(group.journal, group.note), receivedKey(await readSchema(), group.journal, group.note));
     // Deux éditeurs qui rangent la même table : la première réponse compte.
@@ -120,13 +123,15 @@ export async function offerDialog(group, offer, onDone) {
   const choose = async (m) => {
     const dest = pick.dest();
     await checkDests(schema, [{ table: offer.table, dest }], (group.note.from || {}).docId, exchange ? group.note.export : null);
-    const entry = { table: offer.table, dest, columns: offer.columns };
+    // La note du journal (lisible avec la clé du formulaire tant qu'il n'est pas réservé) ne garde
+    // ni les listes de choix ni les liens des colonnes : ils restent dans les lots reçus.
+    const entry = { table: offer.table, dest, columns: exportSchema(offer.columns) };
     if (!schema.has(dest)) return accept(entry, m);
     const from = group.note.from || {};
     if (exchange && !(await confirmOutgoing(schema, [dest], from.docName || from.docId || group.note.name))) return null;
     const mapping = mappingBlock(schema, offer.table, dest, offer.columns);
     step.replaceChildren(el('p', {}, t('recv.existing')), mapping.node);
-    m.setButtons([{ label: t('common.back'), onClick: () => { step.replaceChildren(first); m.setButtons(buttons); } },
+    m.setButtons([backButton(() => { step.replaceChildren(first); m.setButtons(buttons); }),
       { label: t('recv.offer.accept'), kind: 'btn-primary', onClick: mm => run(null, report, () => {
         const { map, match } = mapping.read();
         return accept({ ...entry, map, ...(match ? { match } : {}) }, mm);
@@ -138,7 +143,7 @@ export async function offerDialog(group, offer, onDone) {
     el('label', {}, t('recv.offer.where')), pick.node, stepHelp(['t-offer']));
   step.replaceChildren(first);
   const buttons = [
-    { label: t('common.later') },
+    laterButton(),
     { label: t('recv.offer.refuse'), kind: 'btn-danger-text', onClick: m => run(null, report, () => refuse(m)) },
     { label: t('recv.offer.accept'), kind: 'btn-primary', onClick: m => run(null, report, () => choose(m)) },
   ];

@@ -2,7 +2,7 @@
 // envoyées (clé, MajLe, RecalculLe, Supprime).
 import {
   AUTHOR_COL, BUCKETS, COL_ID, DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL,
-  SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, chunk, isBlank,
+  LINK_PREFIX, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, chunk, isBlank,
 } from './common.js';
 
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
@@ -101,6 +101,16 @@ const READ = [
   '    return v(x)',
   '  except Exception:',
   '    return None',
+  // Colonne Référence conservée : la clé de la ligne visée part avec le texte (voir links.js).
+  'def data(r, cols):',
+  '  out = {c["id"]: g(r, c) for c in cols}',
+  '  for c in cols:',
+  '    if c.get("link"):',
+  '      try:',
+  `        out["${LINK_PREFIX}" + c["id"]] = getattr(r, c["id"]).${KEY_COL} or None`,
+  '      except Exception:',
+  '        out["' + LINK_PREFIX + '" + c["id"]] = None',
+  '  return out',
   'def txt(x):',
   '  if isinstance(x, bool): return "oui" if x else "non"',
   '  if isinstance(x, float) and x.is_integer(): x = int(x)',
@@ -246,14 +256,15 @@ function lotFormula(pick) {
     `  if r.id in undone: return v(getattr(r, "${RECALC_COL}"))`,
     `  if r.id in again and $${TYPE_COL} == "${KIND.lot}" and not swap.id: return max(v(r.${ORDER_COL}) or 0, v(getattr(r, "${RECALC_COL}", None)) or 0)`,
     `  return v(r.${ORDER_COL})`,
-    // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles laissent.
+    // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles
+    // laissent.
     `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
     `room = ${POST_MAX} - sum(len(r.${LIST_COL} or "") for r in lists)`,
     `budget = max(${LOT_MIN}, min(${LOT_MAX}, room // max(1, len(lists))))`,
     `capped = $${TYPE_COL} == "${KIND.lot}"`,
     'out, size, big = [], 0, []',
     `for r in sorted(rows, key=lambda r: when(r) or 0, reverse=True):`,
-    `  line = [r.${KEY_COL}, when(r), v(getattr(r, "${DELETE_COL}", False)), {c["id"]: g(r, c) for c in cols}]`,
+    `  line = [r.${KEY_COL}, when(r), v(getattr(r, "${DELETE_COL}", False)), data(r, cols)]`,
     '  n = len(json.dumps(line, ensure_ascii=False))',
     // Une ligne plus grosse qu'un envoi ne partira jamais : signalée, pas renvoyée sans fin.
     `  if capped and n > max(budget, room):`,
@@ -330,7 +341,8 @@ export function syncColumns(tables) {
     { id: RESEND_COL, type: 'Text', isFormula: false },
     { id: LIST_COL, type: 'Text', isFormula: true, formula: keys },
     { id: LOT_COL, type: 'Text', isFormula: true, formula: lot },
-    // Formule de déclenchement : ses dépendances (Synchro_Lot, Synchro_Ids, Synchro_Renvoi) sont posées après coup.
+    // Formule de déclenchement : ses dépendances (Synchro_Lot, Synchro_Ids, Synchro_Renvoi) sont
+    // posées après coup.
     { id: TRACK_COL, type: 'Any', isFormula: false, formula: state, recalcWhen: 0 },
     // E-mail de la personne qui crée l'export : présenté à la CIBLE comme propriétaire.
     { id: AUTHOR_COL, type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0 },

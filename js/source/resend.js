@@ -5,19 +5,20 @@ import { EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, RESEND_ALL, RESEND_CO
 import { hookStatus, swapExports, tooLarge } from '../logic/exports.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
-  RESEND_CHUNK, addSpent, budgetWait, chargeBusy, chunkMark, listDue, listRequest, parseCharge, resendValue, rowsSince, trackState,
+  RESEND_CHUNK, addSpent, budgetWait, chargeBusy, chunkMark, dueRows, listRequest, parseCharge, resendValue, rowsSince, trackState,
 } from '../logic/resend.js';
 import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../grist.js';
-import { chargeRow, isCharge, readHooks, syncRows, writeSync } from './synchro.js';
+import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
-import { message } from '../ui.js';
+import { message, noteError } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
 
 // Rythmes : file d'envoi relue (60 fois au plus, rapprochées au début : un envoi met en général
 // moins d'une seconde) ; rattrapage toutes les 10 s, la minute quand l'onglet est caché ; file
 // bloquée par un envoi trop gros vidée au plus une fois en 10 minutes ; signe de vie d'un renvoi
-// toutes les 20 s ; attente du budget par pas de 30 s au plus.
+// toutes les 20 s ; attente du budget par pas de 30 s au plus. Un document sans table Synchro (qui
+// ne fait que recevoir) n'est relu qu'à ce dernier rythme (HIDDEN_MS).
 const QUEUE_READS = 60;
 const QUEUE_FIRST_MS = 500;
 const QUEUE_MS = 1500;
@@ -43,8 +44,9 @@ async function waitForQueue(hookIds) {
 export async function clearAndMark() {
   await clearWebhookQueue();
   const [rows, hooks] = await Promise.all([syncRows(), readHooks()]);
-  const lots = rows.filter(r => r[TYPE_COL] === KIND.lot && hooks.of(r[EXPORT_COL]).some(h => h.fields.enabled)).map(r => r.id);
-  await writeSync(lots, { [MISSING_COL]: RESEND_ALL });
+  const served = rows.filter(r => r[TYPE_COL] === KIND.lot && hooks.of(r[EXPORT_COL]).some(h => h.fields.enabled));
+  await writeSync(served.map(r => r.id), { [MISSING_COL]: RESEND_ALL });
+  for (const id of new Set(served.map(r => r[EXPORT_COL]))) await recordEvent(id, 'unblock');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -57,7 +59,8 @@ export async function clearAndMark() {
 // plus ancienne l'emporte. Rend le nombre de lignes renvoyées. Un renvoi à la fois, tous onglets
 // confondus, et un seul par document (voir withCharge) : si une autre page renvoie déjà, les lots
 // sont seulement marqués, et le rattrapage les enverra ensuite (rend alors null). `out` reçoit
-// l'avancement.
+// l'avancement. Un renvoi est noté dans l'historique de l'export (`kind` : 'resend', ou 'catchup'
+// pour le rattrapage automatique).
 const startOf = (lot, since) => (lot[MISSING_COL] > 0 ? Math.min(lot[MISSING_COL], since) : since);
 const lotsOf = async (exportId, tables) => (await syncRows()).filter(r => r[EXPORT_COL] === exportId && tables.includes(r[TABLE_COL]) && r[TYPE_COL] === KIND.lot);
 
@@ -73,7 +76,7 @@ export function resendTables(exportId, tables, out, since = RESEND_ALL) {
   });
 }
 
-async function resendLocked(exportId, tables, out, since) {
+async function resendLocked(exportId, tables, out, since, kind = 'resend') {
   const hookIds = (await readHooks()).of(exportId).filter(h => h.fields.enabled).map(h => h.id);
   if (!hookIds.length) return 0;
   const plans = await markLots(exportId, tables, since);
@@ -90,6 +93,7 @@ async function resendLocked(exportId, tables, out, since) {
     if (!swapExports(await syncRows()).has(exportId)) await sendList(exportId, plan.table, hookIds);
   }
   if (out) out.replaceChildren();
+  if (total) await recordEvent(exportId, kind, { n: total });
   return total;
 }
 
@@ -180,7 +184,10 @@ export async function catchUp(onDone = () => {}) {
     if (await withLock('gristsync-resend', catchUpLocked)) await onDone();
   } catch (e) {
     if (e.message === 'ownerOnly') notOwner = true;
-    else if (e.message !== 'resendBusy') console.warn(e);
+    else if (e.message !== 'resendBusy') {
+      console.warn(e);
+      noteError(e);
+    }
   } finally {
     catching = false;
   }
@@ -208,10 +215,7 @@ async function catchUpLocked() {
     rows = await lightRows();
   }
   if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) return 0;
-  const late = rows.filter(r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0);
-  const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
-  const swaps = swapExports(rows);
-  const lists = rows.filter(r => listDue(r) && !late.some(l => same(l, r)) && !swaps.has(r[EXPORT_COL]));
+  const { late, lists } = dueRows(rows);
   const files = rows.some(r => r[TYPE_COL] === KIND.files) ? await planFiles(hooks, conditions, h => h.fields.enabled && hookStatus(h)[0] !== 'error') : [];
   if (!late.length && !lists.length && !files.length) return 0;
   const active = row => recipients(row[EXPORT_COL]).filter(h => h.fields.enabled).map(h => h.id);
@@ -219,7 +223,7 @@ async function catchUpLocked() {
   await withCharge(async () => {
     for (const row of late) {
       if (!recipients(row[EXPORT_COL]).length) await writeSync([row.id], { [MISSING_COL]: 0 });
-      else if (active(row).length) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL]);
+      else if (active(row).length) await resendLocked(row[EXPORT_COL], [row[TABLE_COL]], null, row[MISSING_COL], 'catchup');
     }
     for (const row of lists) {
       if (!recipients(row[EXPORT_COL]).length) await writeSync([row.id], { [RESEND_COL]: row[TYPE_COL] === KIND.keys ? '' : trackState(row).trop });
@@ -232,10 +236,14 @@ async function catchUpLocked() {
 
 // Lignes de Synchro utiles au rattrapage, sans les lots ni les listes (de grosses cellules), car
 // lues toutes les 10 secondes. Null sans la table.
+let noSyncAt = 0;
 async function lightRows() {
+  if (Date.now() - noSyncAt < HIDDEN_MS) return null;
   const rows = await selectRows(SYNC_TABLE, [EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, STATE_COL]);
   if (rows) return rows.filter(r => !isCharge(r));
-  return (await readSchema()).has(SYNC_TABLE) ? syncRows() : null;
+  if ((await readSchema()).has(SYNC_TABLE)) return syncRows();
+  noSyncAt = Date.now();
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------------

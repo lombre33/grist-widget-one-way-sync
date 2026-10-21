@@ -311,6 +311,46 @@ arrivée :
 - Les fichiers ne passent pas par le **lien public**, et ne vont, dans un **Échange**, que du
   document qui invite vers les autres.
 
+### Options d'une réception, liens entre tables, historique des envois
+
+**Options d'une réception** (hors Échange), à l'acceptation ou par le bouton **Options** de la
+carte :
+
+![Options choisies à l'acceptation](images/08-cible-destinations.png)
+
+- **Archive** : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et
+  n'est plus suivie ni signalée comme retouche. Une nouvelle version de la ligne la décoche.
+
+  ![Ligne gardée en archive](images/27-cible-archive.png)
+
+- **Tables en lecture seule** : seuls les propriétaires du document écrivent dans les tables
+  reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
+  personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.
+
+**Liens entre tables.** Dans un export de plusieurs tables, une colonne Référence qui vise une autre
+table de l'export (dont la colonne affichée part aussi) devient, chez le destinataire, une vraie
+Référence vers la table reçue, qui affiche la même colonne : case **Garder les liens entre les
+tables** à l'étape Colonnes, cochée d'emblée.
+
+![Case « Garder les liens entre les tables »](images/29-source-liens.png)
+
+Une colonne déjà remplie chez le destinataire reste du texte ; décocher la case, dans
+**Modifier**, rend le texte. Une Liste de références reste du texte. Une ligne qui arrive avant la
+ligne qu'elle vise est complétée à l'arrivée de celle-ci.
+
+**Listes de choix et formats** (Choix, dates, nombres) : la colonne reçue les reprend ; un choix
+ajouté dans la SOURCE s'ajoute ici, et une mise en forme retouchée ici reste.
+
+**Historique des envois**, sur la carte de l'export (replié) : destinataires ajoutés, envois et
+renvois, rattrapages, pauses, révocations, modifications. Les envois ordinaires partent de Grist
+sans le widget : l'état de chaque destinataire dit s'ils réussissent.
+
+![Historique des envois](images/28-source-historique.png)
+
+**Diagnostic** (Réglages, **Copier le diagnostic**) : version, état des exports et des réceptions,
+erreurs récentes. Il ne contient aucune donnée de vos tables, ni courriel, code ou lien : on peut le
+joindre à un message d'aide.
+
 ### Arrivées suspectes, couper le lien
 
 Si des lignes arrivent dans le journal sans pouvoir venir de la SOURCE (autre export, contenu

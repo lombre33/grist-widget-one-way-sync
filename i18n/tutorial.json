@@ -304,6 +304,31 @@
     "images": ["25-source-pieces-jointes", "26-cible-fichiers-attendus"]
   },
   {
+    "id": "options",
+    "role": "both",
+    "title": {
+      "fr": "Options, liens entre tables et historique des envois",
+      "en": "Options, links between tables and send history"
+    },
+    "text": {
+      "fr": [
+        "Options d’une réception (hors Échange), à l’acceptation ou par le bouton Options de la carte. Archive : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et n’est plus suivie. Tables en lecture seule : seuls les propriétaires du document écrivent dans les tables reçues (la recopie attend qu’un propriétaire ouvre la page).",
+        "Liens entre tables : dans un export de plusieurs tables, « Garder les liens entre les tables » (cochée d’emblée, à l’étape Colonnes) fait d’une colonne Référence qui vise une autre table de l’export une vraie Référence chez le destinataire, qui affiche la même colonne. Une colonne déjà remplie là-bas reste du texte ; décocher la case rend le texte.",
+        "Les listes de choix et les formats (dates, nombres) suivent les colonnes : un choix ajouté dans la SOURCE s’ajoute ici, une mise en forme retouchée ici reste.",
+        "Historique des envois : sur la carte de l’export (replié), les destinataires ajoutés, les envois et renvois, rattrapages, pauses, révocations et modifications. Les envois ordinaires partent de Grist sans le widget : l’état de chaque destinataire dit s’ils réussissent.",
+        "Réglages, Copier le diagnostic : version, état des exports et des réceptions, erreurs récentes, sans donnée de vos tables, courriel, code ni lien, à joindre à un message d’aide."
+      ],
+      "en": [
+        "Reception options (not for Exchange), when accepting or with the Options button on the card. Archive: a row deleted in the SOURCE stays here, ticked “Deleted at the source”, and is no longer followed. Read-only tables: only the document owners write in the received tables (copying waits for an owner to open the page).",
+        "Links between tables: in an export of several tables, “Keep the links between tables” (ticked by default, at the Columns step) turns a Reference column that points at another table of the export into a real Reference on the receiving side, showing the same column. A column that already holds data there stays text; unticking the box gives the text back.",
+        "Choice lists and formats (dates, numbers) follow the columns: a choice added in the SOURCE is added here, a format changed here stays.",
+        "Send history: on the export card (collapsed), recipients added, sends and resends, catch-ups, pauses, revocations and edits. Ordinary sends leave Grist without the widget: each recipient's status says whether they succeed.",
+        "Settings, Copy the diagnostic: version, state of the exports and receptions, recent errors, with no table data, email, code or link, to attach to a help message."
+      ]
+    },
+    "images": ["08-cible-destinations", "29-source-liens", "28-source-historique", "27-cible-archive"]
+  },
+  {
     "id": "exchange",
     "role": "both",
     "title": {

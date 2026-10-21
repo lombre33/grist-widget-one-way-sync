@@ -411,6 +411,42 @@ test('vague de suppressions : retenue au-delà de 10 lignes et de 20 % ; Appliqu
   assert.equal(plan(journalRows, destRows).held, null, 'sans seuil (Échange) : rien n\'est retenu');
 });
 
+test('archive : rien n\'est effacé, les lignes parties restent cochées ; plus suivies ensuite, décochées si elles reviennent', () => {
+  const run = (journalRows, destRows, options = {}) => planConsolidation({ journalRows, destRows, copyCols: [['Nom', 'Nom']], destTable: 'Dest', journalTable: 'J', archive: true, hold: WAVE_STRICT, ...options });
+  const versions = ['a', 'b', 'c', 'd'].map((k, i) => j(i + 1, k, 10, done));
+  const destRows = versions.map(v => ({ id: v.id, id_sync: v.id_sync, manualSort: v.id, Nom: v.Nom, Supprimee_a_la_source: false }));
+  const first = run([...versions, list(10, ['a', 'd'], { Sync_Recu: 50 }), j(11, 'd', 20, { Supprime: true })], destRows);
+  assert.equal(first.held, null, 'aucune vague : rien n\'est effacé');
+  assert.equal(first.stats.removed, 3);
+  assert.ok(!first.actions.some(a => a[0] === 'BulkRemoveRecord'));
+  assert.deepEqual(first.actions[0], ['BulkUpdateRecord', 'Dest', [2, 3, 4], { Supprimee_a_la_source: [true, true, true] }]);
+  // Passage suivant : les lignes gardées ne sont plus suivies par les listes.
+  const settledRows = [...versions.map(v => (v.id === 2 || v.id === 3 ? { ...v, Sync_Etat: 'suppression' } : v)), { ...list(10, ['a', 'd']), ...done }, j(11, 'd', 20, { Supprime: true, ...done, Sync_Etat: 'suppression' })];
+  const archived = destRows.map(r => (r.id === 1 ? r : { ...r, Supprimee_a_la_source: true }));
+  const again = run([...settledRows, list(12, ['a'], { Sync_Recu: 60 })], archived);
+  assert.deepEqual(again.actions, [marked([12], [''])]);
+  assert.deepEqual(again.stats, { added: 0, updated: 0, removed: 0 });
+  // Une nouvelle version de la clé (même valeurs) fait revenir la ligne.
+  const back = run([...settledRows, j(13, 'b', 30, { Nom: 'n2' })], archived);
+  assert.deepEqual(back.actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b'] }, { Nom: ['n2'], Supprimee_a_la_source: [false] }, { on_many: 'all' }]);
+  assert.deepEqual(back.stats, { added: 0, updated: 1, removed: 0 });
+  // Une ligne gardée en archive n'est pas une retouche, même modifiée ici.
+  const edited = archived.map(r => (r.id === 3 ? { ...r, Nom: 'retouche' } : r));
+  assert.deepEqual(manualEdits({ journalRows: settledRows, destRows: edited, copyCols: [['Nom', 'Nom']] }), []);
+  // Sans archive, les mêmes versions effacent.
+  assert.deepEqual(run([...versions, list(10, ['a', 'd'], { Sync_Recu: 50 })], destRows, { archive: false, hold: null }).actions[0], ['BulkRemoveRecord', 'Dest', [2, 3]]);
+  // Archive décochée plus tard : les lignes déjà archivées restent, cochées (jamais effacées sans le dire).
+  const off = run([...settledRows, list(12, ['a'], { Sync_Recu: 60 })], archived, { archive: false, hold: null });
+  assert.deepEqual(off.actions, [marked([12], [''])]);
+  assert.equal(off.stats.removed, 0);
+  const offBack = run([...settledRows, j(13, 'b', 30, { Nom: 'n2' })], archived, { archive: false, hold: null });
+  assert.deepEqual(offBack.actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b'] }, { Nom: ['n2'], Supprimee_a_la_source: [false] }, { on_many: 'all' }], 'une clé revenue décoche la ligne');
+  // Une ligne partie après l'arrêt de l'archive est effacée, l'archivée reste.
+  const mixed = run([...versions, list(14, ['a', 'c'], { Sync_Recu: 70 })], destRows.map(r => ({ ...r, Supprimee_a_la_source: r.id === 2 })), { archive: false, hold: null });
+  assert.deepEqual(mixed.actions[0], ['BulkRemoveRecord', 'Dest', [4]]);
+  assert.equal(mixed.stats.removed, 1);
+});
+
 test('colonnes reçues : une colonne nouvelle prend un nom libre et est notée ; en Échange, seules les colonnes envoyées d\'ici', () => {
   assert.deepEqual(newColumnsMap({ columns: [] }, [{ id: 'nom' }], ['Nom']), { nom: 'nom_2' }, 'une colonne nouvelle ne prend pas la place d\'une autre');
   const schema = { columns: () => [{ colId: 'Nom' }, { colId: 'Note' }, { colId: 'id_sync' }] };

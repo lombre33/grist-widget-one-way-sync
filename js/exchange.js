@@ -13,7 +13,7 @@ import { removeTechnicalTables } from './pages.js';
 import {
   endRows, exportHooks, pruneKeys, putRecipientKey, readSourceNote, removeExport, saveExport, setOnlyKey, syncRows, updateSourceNote,
 } from './source/synchro.js';
-import { receivedJournals } from './target/journals.js';
+import { receivedJournals } from './logic/received.js';
 
 const PENDING_LABEL = 'retour'; // clé de retour, le temps de créer son webhook
 

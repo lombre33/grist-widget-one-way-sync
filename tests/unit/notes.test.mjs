@@ -1,7 +1,7 @@
 // Note SOURCE : chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clearExport, dropExport, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/logic/notes.js';
+import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/logic/notes.js';
 
 const note = () => ({
   exports: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
@@ -33,4 +33,27 @@ test('invitations, pauses et suivi des fichiers', () => {
   assert.deepEqual(files.fichiers, { a: { f: ['x'], h: [], p: {} } });
   assert.equal('fichiers' in setFiles(files, {}), false, 'retiré quand il est vide');
   assert.equal('fichiers' in before, false);
+});
+
+test('historique des envois : plus récent d\'abord, borné, par export, effacé avec l\'export', () => {
+  const before = note();
+  const frozen = JSON.stringify(before);
+  let next = addEvent(before, 'a', { at: 10, kind: 'resend', n: 120 });
+  next = addEvent(next, 'a', { at: 20, kind: 'pause', who: 'x'.repeat(200) });
+  next = addEvent(next, 'b', { at: 30, kind: 'unblock' });
+  assert.equal(JSON.stringify(before), frozen);
+  assert.deepEqual(eventsOf(next, 'a').map(e => [e.kind, e.at]), [['pause', 20], ['resend', 10]]);
+  assert.equal(eventsOf(next, 'a')[0].who.length, 80, 'le nom du destinataire est borné');
+  assert.deepEqual(eventsOf(next, 'a')[1], { at: 10, kind: 'resend', n: 120 }, 'sans destinataire ni nombre : rien de plus');
+  assert.deepEqual(eventsOf(next, 'b'), [{ at: 30, kind: 'unblock' }]);
+  for (let i = 0; i < EVENTS_KEPT + 5; i++) next = addEvent(next, 'a', { at: 100 + i, kind: 'catchup', n: 1 });
+  assert.equal(eventsOf(next, 'a').length, EVENTS_KEPT);
+  assert.equal(eventsOf(next, 'a')[0].at, 100 + EVENTS_KEPT + 4, 'les plus anciens partent');
+  assert.deepEqual(Object.keys(dropExport(next, 'a').historique), ['b']);
+  assert.equal('historique' in dropExport(dropExport(next, 'a'), 'b'), false, 'plus rien à garder : la clé disparaît');
+  assert.deepEqual(eventsOf({ historique: { a: [null, { kind: 3, at: 1 }, { kind: 'resend', at: 'x' }, { kind: 'resend', at: 5 }] } }, 'a'), [{ kind: 'resend', at: 5 }], 'entrées abîmées écartées');
+  assert.deepEqual(eventsOf(before, 'a'), []);
+  for (const bad of [{ x: 1 }, 'texte', 7, null]) assert.deepEqual(eventsOf({ historique: { a: bad } }, 'a'), [], 'ce n\'est pas une liste');
+  assert.deepEqual(eventsOf({ historique: { a: [{ kind: 'resend', at: 1e20 }, { kind: 'resend', at: -3 }, { kind: 'inconnu', at: 5 }, { kind: 'edit', at: 7, who: 42, n: 'x' }] } }, 'a'),
+    [{ kind: 'edit', at: 7, who: '42' }], 'date impossible, genre inconnu et nombre faux écartés');
 });

@@ -121,6 +121,7 @@ test('signature : la même en Python (formule) et ici, sur l\'export, la table, 
   assert.equal(await signature(row({ Synchro_Lot: BODY }), KEY), 'bad', 'non signé');
   assert.equal(await signature(row({ Synchro_Lot: '' }), KEY), 'bad', 'lot vide');
   assert.equal(await signature(row({ Synchro_Lot: `${BODY.slice(0, -1)}, "sigs": {"3eb1bd43": 1}}` }), KEY), 'bad');
+  assert.equal(await signature(row({ Synchro_Lot: `${BODY.slice(0, -1)}, "sigs": {"3eb1bd43": }}` }), KEY), 'bad', 'signatures illisibles');
   assert.equal(await signText(KEY, row(), BODY), SIGNED_ONE, 'le widget signe comme la formule');
   assert.equal(await signature(row({ Synchro_Lot: LEGACY }), KEY), 'ok', 'format d\'avant la 0.10 : une clé par export');
   assert.equal(await signature(row({ Synchro_Lot: LEGACY }), KEY2), 'bad');

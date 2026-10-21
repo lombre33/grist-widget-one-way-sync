@@ -87,12 +87,13 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
   assert.deepEqual(resent, ['Villes']);
   assert.equal(actions.length, 2);
   const [, , ids, values] = actions[0];
-  assert.equal(ids.length, 4);
-  assert.deepEqual(values.id_sync, ['a', 'c', 'b', '']);
-  assert.deepEqual(values.Synchro_Ids, ['', '', '', 'ids:a b']);
-  assert.deepEqual(values.Supprime, [false, true, false, false]);
-  assert.deepEqual(values.Synchro_Colonnes, [schema, '', schema, schema], 'la première version de chaque lot porte les colonnes');
-  assert.deepEqual(values.Sync_Recu, [102, 102, 103, 104]);
+  assert.equal(ids.length, 5);
+  assert.deepEqual(values.id_sync, ['a', 'c', 'b', '', '']);
+  assert.deepEqual(values.Synchro_Ids, ['', '', '', 'ids:a b', '']);
+  assert.deepEqual(values.Supprime, [false, true, false, false, false]);
+  assert.deepEqual(values.Synchro_Colonnes, [schema, '', schema, schema, schema], 'la première version de chaque lot porte les colonnes, un lot vide les siennes si elles sont nouvelles');
+  assert.deepEqual(values.Synchro_Table, ['Contacts', 'Contacts', 'Contacts', 'Contacts', 'Villes']);
+  assert.deepEqual(values.Sync_Recu, [102, 102, 103, 104, 105]);
   assert.deepEqual(values.Synchro_Donnees.slice(0, 3), ['{"Nom":"A"}', '{"Nom":"C"}', '{"Nom":"B"}']);
   assert.deepEqual(actions[1], ['BulkRemoveRecord', 'J', [2, 3, 4, 5, 6]]);
   assert.deepEqual(planUnpack(rows.slice(0, 1), 'J'), { added: [], removed: [], actions: [], missing: {}, big: {}, arrived: {}, resent: [], rejected: 0, left: 0 });
@@ -104,6 +105,18 @@ test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes
   const again = raw(8, 'lot', { Synchro_Renvoi: 'm:1', Synchro_Lot: JSON.stringify({ lignes: [], total: 1 }) });
   assert.deepEqual(planUnpack([cut, again], 'J').missing, { Contacts: 0 }, 'coupé puis renvoyé');
   assert.deepEqual(planUnpack([again, { ...cut, id: 9 }], 'J').missing, { Contacts: 4 }, 'renvoyé puis coupé');
+});
+
+test('CIBLE : un lot vide garde une description des colonnes changée, pas la même', () => {
+  const was = '[{"id":"Etat","type":"Choice","label":"Etat","opts":{"choices":["A"]}}]';
+  const now = '[{"id":"Etat","type":"Choice","label":"Etat","opts":{"choices":["A","B"]}}]';
+  const known = { id: 1, id_sync: 'k', Synchro_Table: 'Contacts', Synchro_Type: '', Synchro_Colonnes: was };
+  const lot = (id, schema) => ({ id, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: 'lot', Synchro_Colonnes: schema, Synchro_Renvoi: '', Sync_Recu: 100, Synchro_Lot: '{"lignes": [], "total": 1}' });
+  assert.deepEqual(planUnpack([known, lot(2, was)], 'J').added, [], 'description connue : rien à garder');
+  const { added } = planUnpack([known, lot(2, now), lot(3, now)], 'J');
+  assert.equal(added.length, 1, 'une seule fois pour deux lots pareils');
+  assert.deepEqual([added[0].Synchro_Colonnes, added[0].id_sync || '', added[0].Synchro_Ids], [now, '', '']);
+  assert.equal(sentColumns([known, ...added.map((r, i) => ({ id: 10 + i, ...r }))], [])[0].opts.choices.length, 2, 'la description reçue est la dernière');
 });
 
 test('CIBLE : lignes forgées par le lien du formulaire effacées et comptées, passage limité', () => {

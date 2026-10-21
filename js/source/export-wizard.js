@@ -3,17 +3,18 @@
 // ses destinataires.
 import { SYNC_TABLE, isUserTable, nowS, randomHex } from '../logic/common.js';
 import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../logic/exports.js';
+import { linkTables, linkable } from '../logic/links.js';
 import { hiddenTables } from '../logic/acl.js';
 import { putExport } from '../logic/notes.js';
 import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
 import { STATES } from '../logic/journal.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
 import { apply, fetchRows, readSchema, renameWebhook } from '../grist.js';
-import { saveExport, syncRows, updateSourceNote } from './synchro.js';
-import { receivedDests } from '../target/journals.js';
+import { recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
+import { receivedDests } from '../logic/received.js';
 import { resendTables } from './resend.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { cancelButton, checkList, el, failure, message, openWizard, pickField, run } from '../ui.js';
+import { backButton, cancelButton, checkList, closeButtons, el, failure, laterButton, message, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
@@ -54,7 +55,8 @@ async function showTables(ctx) {
 // Bloc d'une table à l'étape Colonnes : par défaut toutes ses colonnes et toutes ses lignes, dit
 // en une ligne ; deux boutons ouvrent le choix des colonnes et le filtre des lignes (ouverts
 // d'emblée quand l'export modifié les précise déjà). Une colonne Pièces jointes ne part que cochée
-// (ses fichiers partent page ouverte, et peuvent peser lourd) : le choix des colonnes est alors ouvert.
+// (ses fichiers partent page ouverte, et peuvent peser lourd) : le choix des colonnes est alors
+// ouvert.
 function columnsBlock(ctx, schema, table, relayed) {
   const usable = exportableColumns(schema.columns(table));
   if (!ctx.selected.has(table)) ctx.selected.set(table, usable.filter(c => !isFileColumn(c)).map(c => c.id));
@@ -97,6 +99,20 @@ function togglePart(part, label, open, onOpen = () => {}) {
   return button;
 }
 
+// Case « Garder les liens » (voir links.js), proposée quand une colonne Référence vise une autre
+// table de l'export (hors Échange, où les colonnes vont dans les deux sens par leur nom). Cochée
+// d'emblée pour un nouvel export ; pour un export modifié, telle que l'export l'est déjà.
+function linksBlock(ctx, schema) {
+  const usable = ctx.chosen.map(table => ({ table, columns: exportableColumns(schema.columns(table)) }));
+  if (ctx.exp?.echange || !linkable(usable)) {
+    ctx.links = false;
+    return null;
+  }
+  if (ctx.links === undefined) ctx.links = ctx.exp ? ctx.exp.tables.some(tb => tb.columns.some(c => c.link)) : true;
+  const box = el('input', { type: 'checkbox', checked: ctx.links, onchange: () => { ctx.links = box.checked; } });
+  return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t('send.links')), el('p', { class: 'muted small' }, t('send.links.help')));
+}
+
 // 2. Colonnes, par table, et ce que le widget ajoutera pour la synchro.
 async function showColumns(ctx) {
   const schema = await readSchema();
@@ -112,9 +128,9 @@ async function showColumns(ctx) {
   };
   ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
     removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
-    ...blocks,
+    ...blocks, linksBlock(ctx, schema),
     adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
-    { label: t('common.back'), back: true, onClick: () => showTables(ctx) },
+    backButton(() => showTables(ctx)),
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
 
@@ -147,7 +163,7 @@ function showName(ctx) {
   const hub = ctx.exp && ctx.exp.echange && !ctx.exp.retour;
   ctx.wizard.show(2, [el('label', { for: 'gristsync-export-name' }, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')),
     hub ? rulesBlock(ctx) : null, report], [
-    { label: t('common.back'), back: true, onClick: () => run(null, report, () => showColumns(ctx)) },
+    backButton(() => run(null, report, () => showColumns(ctx))),
     { label: ctx.exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(ctx, nameInput.value.trim() || fallback, report)) }]);
 }
 
@@ -166,7 +182,7 @@ async function prepareTables(ctx) {
     const columns = exportableColumns(schema.columns(table)).filter(c => ctx.selected.get(table).includes(c.id));
     tables.push({ table, columns, filter: ctx.filters.get(table) || null });
   }
-  return tables;
+  return linkTables(tables, Boolean(ctx.links));
 }
 
 async function save(ctx, name, report) {
@@ -191,7 +207,7 @@ async function refuseHidden(tables) {
 async function noteExport({ exp, rules: chosen }, id, name) {
   const rules = chosen ? exchangeRules({ regles: chosen, refus: chosen.refus }) : undefined;
   await updateSourceNote((note) => {
-    const entry = { ...note.exports.find(e => e.id === id), id, name, at: exp ? exp.at : nowS() };
+    const entry = { at: nowS(), ...note.exports.find(e => e.id === id), id, name };
     if (chosen) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules?.refus });
     return putExport(note, JSON.parse(JSON.stringify(entry)));
   });
@@ -201,17 +217,18 @@ async function noteExport({ exp, rules: chosen }, id, name) {
 async function showCreated({ wizard, onClose }, { id, name, tables }) {
   const created = { id, name, tables, recipients: [], invitations: [], public: false, email: exportEmail(await syncRows(), id) };
   wizard.show(3, [message('ok', t('send.created', { name })), el('p', {}, t('send.created.next'))], [
-    { label: t('common.later') },
+    laterButton(),
     { label: t('send.action.addPerson'), kind: 'btn-primary', onClick: () => { wizard.close(); recipientWizard(created, null, onClose); } }]);
 }
 
 // Export modifié : webhooks renommés, tables changées renvoyées. Fenêtre fermée pendant le
 // renvoi, qui continue : l'onglet se redessine à la fin.
 async function showEdited({ exp, wizard, onClose }, { name, changed, report }) {
+  await recordEvent(exp.id, changed.length ? 'editSent' : 'edit', { n: changed.length });
   if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, exp.id));
-  if (changed.length) wizard.show(3, [report, el('p', { class: 'muted small' }, t('send.load.background'))], [{ label: t('common.close'), kind: 'btn-primary' }]);
+  if (changed.length) wizard.show(3, [report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
   const n = changed.length ? await resendTables(exp.id, changed, report) : 0;
   if (changed.length && !report.isConnected) return onClose && onClose();
   const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
-  return wizard.show(3, saved, [{ label: t('common.close'), kind: 'btn-primary' }]);
+  return wizard.show(3, saved, closeButtons());
 }

@@ -3,6 +3,7 @@
 // règles d'accès du lien public sont dans acl.js.
 import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
 import { rowFilter } from './filters.js';
+import { columnOptions } from './options.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -11,12 +12,16 @@ export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND
 
 // Colonnes qu'une table SOURCE peut envoyer : toutes ses colonnes de données et formules, hors
 // colonnes de la synchro et colonnes internes de Grist. Une Référence part comme le texte qu'elle
-// affiche ; une colonne Pièces jointes, comme la liste de ses fichiers (voir files.js).
+// affiche (et, avec `link`, la clé de la ligne visée, voir links.js) ; une colonne Pièces jointes,
+// comme la liste de ses fichiers (voir files.js). `opts` : liste de choix et format de la colonne
+// (voir options.js), s'il y en a.
 export function exportableColumns(cols) {
   const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
-  return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map(c => ({
-    id: c.colId, label: c.label || c.colId, type: /^Ref(List)?:/.test(c.type) ? 'Text' : c.type, source: c.type, visible: c.visible || '',
-  }));
+  return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map((c) => {
+    const type = /^Ref(List)?:/.test(c.type) ? 'Text' : c.type;
+    const opts = columnOptions(type, c.widgetOptions);
+    return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}) };
+  });
 }
 
 // Tables que lisent les formules de Synchro pour les tables d'un export (`tables`, voir
@@ -27,6 +32,21 @@ export const readTables = tables => [...new Set(tables.flatMap(({ table, columns
 // Colonne Pièces jointes (envoyée ou reçue).
 export const isFileColumn = c => c.type === 'Attachments';
 
+// Ce que la SOURCE a changé depuis l'enregistrement de l'export : tables introuvables (renommées
+// ou effacées : leurs lignes ne partent plus) et colonnes renommées, effacées ou d'un autre type
+// (elles partiraient vides ou fausses). « Modifier » remet l'export d'accord avec les tables.
+export function exportDrift(schema, tables) {
+  const lost = tables.filter(tb => !schema.has(tb.table)).map(tb => tb.table);
+  const changed = tables.filter(tb => schema.has(tb.table)).flatMap(({ table, columns }) => {
+    const current = new Map(exportableColumns(schema.columns(table)).map(c => [c.id, c]));
+    return columns.filter((c) => {
+      const cur = current.get(c.id);
+      return !cur || cur.source !== (c.source || c.type) || (cur.visible || '') !== (c.visible || '');
+    }).map(c => `${table}.${c.id}`);
+  });
+  return { lost, changed };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Lignes Synchro d'un export
 
@@ -34,16 +54,21 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link }) => ({
+  id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
+})));
 function wantedValues({ columns, filter }, kinds) {
-  const schema = JSON.stringify(columns.map(({ id, type, label, source, visible, as }) => ({ id, type, label, source, visible, ...(as ? { as } : {}) })));
+  const schema = schemaText(columns);
   const kept = rowFilter(filter);
   return new Map([...kinds.map(kind => [kind, schema]), ...(kept ? [[KIND.filter, JSON.stringify(kept)]] : [])]);
 }
 
-// Table nouvelle, aux colonnes changées ou au filtre changé : ses lignes sont à renvoyer.
+// Table nouvelle, aux colonnes changées ou au filtre changé : ses lignes sont à renvoyer. Une liste
+// de choix ou un format changé ne renvoie rien : la description des colonnes suffit.
+const withoutOpts = text => schemaText(parseJson(text, []) || [], false);
 function tableChanged(here, values) {
   const filterWas = (here.find(r => r[TYPE_COL] === KIND.filter) || {})[SCHEMA_COL] || '';
-  return !here.length || here.some(r => r[TYPE_COL] !== KIND.filter && r[SCHEMA_COL] !== values.get(KIND.keys))
+  return !here.length || here.some(r => r[TYPE_COL] !== KIND.filter && withoutOpts(r[SCHEMA_COL]) !== withoutOpts(values.get(KIND.keys)))
     || filterWas !== (values.get(KIND.filter) || '');
 }
 
@@ -87,6 +112,29 @@ export function exportTables(rows, exportId) {
   }
   const filterOf = table => rowFilter(parseJson((mine.find(r => r[TABLE_COL] === table && r[TYPE_COL] === KIND.filter) || {})[SCHEMA_COL], null));
   return [...tables].map(([table, columns]) => ({ table, columns, filter: filterOf(table) }));
+}
+
+// Listes de choix et formats changés dans les tables d'un export depuis son enregistrement : la
+// description des colonnes de ses lignes Synchro est réécrite, sans renvoi de lignes (la CIBLE la
+// lit à la prochaine ligne reçue). Les options se lisent pour le type envoyé (voir options.js).
+const SCHEMA_KINDS = [KIND.keys, KIND.lot, KIND.track, KIND.full, KIND.mark, KIND.files];
+export function optionsActions(rows, schema) {
+  const ids = [];
+  const values = [];
+  for (const exportId of new Set(rows.map(r => r[EXPORT_COL]))) {
+    for (const { table, columns } of exportTables(rows, exportId).filter(tb => schema.has(tb.table))) {
+      const here = new Map(schema.columns(table).map(c => [c.colId, c.widgetOptions]));
+      const value = schemaText(columns.map(({ opts, ...c }) => {
+        const next = here.has(c.id) ? columnOptions(c.type, here.get(c.id)) : opts;
+        return next ? { ...c, opts: next } : c;
+      }));
+      for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
+        ids.push(r.id);
+        values.push(value);
+      }
+    }
+  }
+  return ids.length ? [['BulkUpdateRecord', SYNC_TABLE, ids, { [SCHEMA_COL]: values }]] : [];
 }
 
 // Exports en Échange : ceux qui ont une ligne 'echange'.

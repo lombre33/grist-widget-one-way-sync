@@ -8,7 +8,8 @@ import { chunk, nowS } from '../logic/common.js';
 import { fileArrivals, joinParts, parkedOverflow, sha1, shaOf, short } from '../logic/files.js';
 
 // Dépôt refusé par Grist (taille maximale de l'instance, droits) : ses morceaux restent, et il
-// n'est retenté qu'au bout de RETRY_MS. Gardé ici pour la carte : journal -> Map(empreinte -> { name, error, at }).
+// n'est retenté qu'au bout de RETRY_MS. Gardé ici pour la carte : journal -> Map(empreinte ->
+// { name, error, at }).
 const RETRY_MS = 600000;
 const refused = new Map();
 export const uploadErrors = journal => [...(refused.get(journal) || new Map()).values()];

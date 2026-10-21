@@ -3,16 +3,19 @@ import { ORDER_COL, RESEND_ALL } from '../logic/common.js';
 import { buildInvitation } from '../logic/codes.js';
 import { rowsSince } from '../logic/resend.js';
 import { docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
+import { VERSION } from '../config.js';
 import { removeTechnicalTables } from '../pages.js';
 import { dropInvitation, setExport, setPause } from '../logic/notes.js';
 import { closeExport, removeRecipient } from '../exchange.js';
-import { readSourceNote, saveExport, updateSourceNote } from './synchro.js';
+import { hookLabel } from '../logic/exports.js';
+import { readSourceNote, recordEvent, saveExport, updateSourceNote } from './synchro.js';
 import { clearAndMark, resendTables } from './resend.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
 import { handoffButton } from '../guide.js';
 import { t } from '../i18n.js';
 
 const AFTER_S = 0.0001; // juste après l'heure de la pause (MajLe en secondes)
+const who = h => hookLabel(h.fields.memo);
 
 // Mise en pause : un webhook désactivé perd son historique d'envoi (Grist remet son état à zéro),
 // il ne peut donc pas dire depuis quand il ne livre plus. On note la plus récente MajLe des tables
@@ -22,6 +25,7 @@ export async function pause(exp, h) {
   for (const { table } of exp.tables) for (const r of await fetchRows(table)) at = Math.max(at, r[ORDER_COL] || 0);
   await updateSourceNote(note => setPause(note, h.id, { hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }));
   await setWebhookEnabled(h.id, false);
+  await recordEvent(exp.id, 'pause', { who: who(h) });
 }
 
 // Choix de reprise : rattraper (par défaut) ou reprendre tel quel. Rend 'catchup', 'as-is' ou null.
@@ -57,6 +61,7 @@ export async function resume(exp, h, out) {
   if (!picked) return;
   await setWebhookEnabled(h.id, true);
   await updateSourceNote(note => setPause(note, h.id));
+  await recordEvent(exp.id, 'resume', { who: who(h) });
   // Le renvoi pose sa marque avant tout : s'il s'interrompt, le rattrapage automatique le finit.
   if (picked === 'catchup') await resendTables(exp.id, exp.tables.map(tb => tb.table), out, since);
 }
@@ -68,6 +73,7 @@ export async function revoke(exp, h) {
   const one = exp.echange && !exp.retour && exp.recipients.length > 1;
   const body = t(one ? 'send.revoke.participant' : exp.echange ? 'send.revoke.exchange' : 'send.revoke.body');
   if (!(await confirmDialog({ title: t('send.revoke.title', { name: h.fields.memo || exp.name }), body, confirmLabel: t('send.action.revoke') }))) return;
+  await recordEvent(exp.id, 'revoke', { who: who(h) });
   if (exp.echange && !one) await closeExport(exp.id, { keepExport: !exp.retour });
   else await removeRecipient(exp.id, h);
 }
@@ -100,7 +106,7 @@ export async function deleteExport(exp) {
 
 export async function publicCode(exp) {
   const { origin, docId, baseUrl } = await docIdentity();
-  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables });
+  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables, version: VERSION });
 }
 
 export async function showPublicCode(exp) {

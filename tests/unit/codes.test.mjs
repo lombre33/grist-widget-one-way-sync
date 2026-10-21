@@ -200,3 +200,17 @@ test('masque : toutes les clés d\'un texte, adresses d\'envoi et liens de formu
   assert.equal(maskKey('https://g.fr/o/eq/forms/AbCdEfGh/3'), 'https://g.fr/o/eq/forms/AbCd…/3');
   assert.equal(maskKey(42), '42');
 });
+
+test('version : portée par les codes, un code d\'une forme plus récente refusé en nommant les deux versions', () => {
+  assert.equal(parseInvitation(invitation({ version: '0.12.0' }), '0.12.0').version, '0.12.0');
+  assert.equal(parseInvitation(invitation(), '0.12.0').version, '', 'code sans version : d\'avant la 0.12');
+  assert.equal(parseInvitation(invitation({ version: 'x.y' })).version, '');
+  const url = 'https://g.fr/api/s/Abc123/tables/Journal_A/records?flat=1';
+  const reply = buildReply({ pub: PUB, id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, version: '0.12.1' });
+  assert.equal(parseReply(reply, 'https://g.fr', '0.12.0').version, '0.12.1', 'une autre version de même forme est lue');
+  const raw = JSON.parse(Buffer.from(invitation({ version: '0.12.0' }).slice('GRISTSYNC2.'.length), 'base64url').toString());
+  assert.equal(raw.f, 1);
+  assert.throws(() => parseInvitation(forge({ ...raw, f: 2, v: '0.14.0' }), '0.12.0'), e => e.message === 'codeNewer' && e.vars.theirs === '0.14.0' && e.vars.mine === '0.12.0');
+  assert.throws(() => parseReply(forge({ kind: 'reponse', f: 9, v: 'bizarre' }), 'https://g.fr'), e => e.message === 'codeNewer' && e.vars.theirs === '?' && e.vars.mine === '?');
+  assert.throws(() => decodeCode(forge({ ...raw, f: 2 }), 'reponse'), /codeNewer/, 'la forme est lue avant le type');
+});

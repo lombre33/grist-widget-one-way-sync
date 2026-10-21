@@ -1,6 +1,7 @@
 // SOURCE : renvois de lignes et de listes des clés, ménagés pour l'instance (un renvoi à la fois par
 // document, un budget d'octets par fenêtre de temps).
-import { KIND, ORDER_COL, RESEND_ALL, RESEND_COL, TRACK_COL, TYPE_COL, parseJson } from './common.js';
+import { EXPORT_COL, KIND, MISSING_COL, ORDER_COL, RESEND_ALL, RESEND_COL, TABLE_COL, TRACK_COL, TYPE_COL, parseJson } from './common.js';
+import { swapExports } from './exports.js';
 
 export const RESEND_CHUNK = 200; // lignes par tranche de renvoi
 
@@ -32,6 +33,19 @@ export const listOverdue = (row) => {
 // Ligne Synchro qui demande d'envoyer la liste complète de sa table : renvoi de la liste interrompu
 // (la demande est restée dans la ligne 'cles'), ou trop de clés parties d'un coup (suivi).
 export const listDue = r => (r[TYPE_COL] === KIND.keys && Boolean(r[RESEND_COL])) || listOverdue(r);
+
+// Lot d'une table dont des lignes ne sont pas parties (lot coupé, voir Sync_Etat).
+export const lotLate = r => r[TYPE_COL] === KIND.lot && r[MISSING_COL] > 0;
+
+// Ce que le rattrapage SOURCE doit renvoyer : les lots coupés (`late`), et les listes des clés dues
+// (`lists`), sauf celles d'une table dont le lot est coupé (son renvoi porte la liste) ou d'un
+// export qui change de forme (ligne `swap`).
+export function dueRows(rows) {
+  const late = rows.filter(lotLate);
+  const same = (a, b) => a[EXPORT_COL] === b[EXPORT_COL] && a[TABLE_COL] === b[TABLE_COL];
+  const swaps = swapExports(rows);
+  return { late, lists: rows.filter(r => listDue(r) && !late.some(l => same(l, r)) && !swaps.has(r[EXPORT_COL])) };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Renvois ménagés (ligne 'charge' de Synchro, colonne Synchro_Renvoi, en JSON) : un renvoi à la

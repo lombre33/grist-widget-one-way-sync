@@ -19,8 +19,8 @@ export const linkFigures = () => [['recv.link.step1', 'img/aide-partager.png'], 
 // Le lien écrit-il dans ce journal-ci ? Une ligne marquée d'un nombre tiré au hasard part par la
 // clé, comme le fera le webhook (ce qui valide d'un coup la clé, la publication, le nom de la table
 // et `?flat=1`), et doit arriver dans `journal`. Le lien d'un autre formulaire, d'un autre
-// document ou d'une autre instance est refusé : la réponse enverrait les données ailleurs. Le nettoyage du journal efface
-// la ligne ; le verrou de la recopie l'en empêche avant la vérification.
+// document ou d'une autre instance est refusé : la réponse enverrait les données ailleurs. Le
+// nettoyage du journal efface la ligne ; le verrou de la recopie l'en empêche avant la vérification.
 export function testUrl(url, journal) {
   const probe = randomHex(8);
   return withLock('gristsync-consolidation', async () => {

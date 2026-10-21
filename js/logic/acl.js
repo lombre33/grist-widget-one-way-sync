@@ -13,12 +13,16 @@
 //  - Journaux réservés aux éditeurs : un journal garde les versions reçues et ce qu'elles ont
 //    remplacé, quelles que soient les règles des tables de destination. La clé du formulaire y
 //    écrit toujours (vérifié).
+//  - Tables reçues en lecture seule (option d'une réception) : seuls les propriétaires y écrivent.
+//    La recopie écrit avec les droits de la personne qui a la page ouverte : elle attend donc un
+//    propriétaire (voir consolidate dans target/loop.js).
 import { EXPORT_COL, HEX16, KIND, LIST_COL, LOT_COL, AUTHOR_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TYPE_COL } from './common.js';
 
 export const PUBLIC_MEMO = 'Synchro : lecture limitée aux exports publics';
 export const OWNER_MEMO = 'Synchro : réservée aux propriétaires';
 export const JOURNAL_MEMO = 'Synchro : journaux réservés aux éditeurs';
-const MEMOS = [PUBLIC_MEMO, OWNER_MEMO, JOURNAL_MEMO];
+export const LOCK_MEMO = 'Synchro : table reçue en lecture seule';
+const MEMOS = [PUBLIC_MEMO, OWNER_MEMO, JOURNAL_MEMO, LOCK_MEMO];
 
 export const isWidgetRule = r => MEMOS.includes(r.memo);
 export const isPublicRule = r => r.memo === PUBLIC_MEMO;
@@ -57,6 +61,9 @@ export function ownerAclRules(exchangeIds = []) {
 
 export const journalAclRules = journals => [...journals].sort()
   .map(tableId => ({ tableId, colIds: '*', aclFormula: VIEWER, permissionsText: '-R', memo: JOURNAL_MEMO }));
+
+export const lockAclRules = tables => [...new Set(tables)].sort()
+  .map(tableId => ({ tableId, colIds: '*', aclFormula: 'user.Access != OWNER', permissionsText: '-CUD', memo: LOCK_MEMO }));
 
 // Une règle, telle que la compare syncRules (sa ressource lue dans `resources` si besoin).
 export const ruleText = ({ tableId, colIds, aclFormula, permissionsText, memo }) => `${tableId}|${colIds}|${aclFormula}|${permissionsText}|${memo || ''}`;
