@@ -243,6 +243,9 @@ export function latestByKey(journalRows) {
   return latest;
 }
 
+// Valeurs de la dernière version reçue de chaque clé, hors suppressions.
+export const currentRows = journalRows => [...latestByKey(journalRows).values()].filter(v => !isTrue(v.row[DELETE_COL])).map(v => v.row);
+
 // Lignes dépliées du journal, par table d'origine.
 export const rowsByTable = journalRows => groupBy(journalRows.filter(r => !isRaw(r) && !isBlank(r[TABLE_COL])), r => r[TABLE_COL]);
 

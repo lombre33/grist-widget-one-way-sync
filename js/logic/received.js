@@ -3,7 +3,7 @@
 // target/journals.js.
 import { JOURNAL_PREFIX, KEY_COL, LIST_COL, SIG_KEY, columnNote, noteAction } from './common.js';
 import { destColumns } from './journal.js';
-import { columnOptions, fillOptions, ownsColumn } from './options.js';
+import { columnOptions, fillOptions, isChoice, ownsColumn, receivedChoices } from './options.js';
 
 // Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
@@ -69,6 +69,20 @@ export function optionActions(schema, entry, columns) {
     const column = here.get((entry.map || {})[c.id] || c.id);
     if (!column || !ownsColumn(entry.own, c.id, column)) return [];
     const text = fillOptions(column.type, column.widgetOptions, c.opts);
+    return text ? [['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: text }]] : [];
+  });
+}
+
+// Colonnes de choix d'ici créées par le widget, dont la SOURCE n'envoie pas de liste (export filtré,
+// ou colonne sans liste) : la liste se complète des valeurs reçues (voir receivedChoices).
+// `rows` : fonction qui rend les dernières versions reçues, lues seulement s'il y a une colonne.
+export function valueChoiceActions(schema, entry, columns, rows) {
+  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  const wanted = destColumns(columns).filter(c => isChoice(c.type) && !(c.opts && c.opts.choices)).map(c => ({ c, column: here.get((entry.map || {})[c.id] || c.id) }))
+    .filter(({ c, column }) => column && isChoice(column.type) && ownsColumn(entry.own, c.id, column));
+  const received = wanted.length ? rows() : [];
+  return wanted.flatMap(({ c, column }) => {
+    const text = receivedChoices(column.widgetOptions, received.map(row => row[c.id]));
     return text ? [['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: text }]] : [];
   });
 }

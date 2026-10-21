@@ -7,7 +7,7 @@ import {
 } from '../logic/common.js';
 import { exportTables, returnExportTables } from '../logic/exports.js';
 import {
-  awaitingPartner, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, rowsByTable, sentColumns, touchedTables, unpackActions,
+  awaitingPartner, currentRows, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, rowsByTable, sentColumns, touchedTables, unpackActions,
 } from '../logic/journal.js';
 import {
   WAVE, WAVE_STRICT, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, planConsolidation, receivedColumns, refusedGaps,
@@ -19,7 +19,7 @@ import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRow
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, publicRecords, readSchema, withLock } from '../grist.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
-import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey } from '../logic/received.js';
+import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
 import { attachments, receiveFiles } from './files.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
@@ -255,6 +255,12 @@ async function prepareColumns(ctx, noted, tableRows) {
   const options = optionActions(ctx.schema, { ...received.entry, own }, kept);
   if (options.length) {
     await apply(options);
+    ctx.schema = await readSchema();
+  }
+  // Pas de liste envoyée (export filtré) : les choix sont les valeurs reçues.
+  const values = valueChoiceActions(ctx.schema, { ...received.entry, own }, kept, () => currentRows(tableRows));
+  if (values.length) {
+    await apply(values);
     ctx.schema = await readSchema();
   }
   const linked = await linkColumns(ctx, { ...received.entry, own }, kept, tableRows);

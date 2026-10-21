@@ -198,7 +198,7 @@
   "send.op.date.ge": "is on or after",
   "send.op.date.between": "is between",
   "send.filter.value": "Value of condition {n}",
-  "send.filter.help": "Only rows matching these conditions are sent (case does not matter). A Reference is chosen by its record: renamed, it stays in the filter. A row that leaves the filter is deleted at the recipients.",
+  "send.filter.help": "Only rows matching these conditions are sent (case does not matter). A Reference is chosen by its record: renamed, it stays in the filter. A row that leaves the filter is deleted at the recipients. The list of choices of a Choice column is not sent: each recipient only gets the values of the rows sent.",
   "send.export.partial": "A delivery is not finished (big change, many deletions, interrupted resend): the widget is sending the rest. Keep this page open until it is done.",
   "send.files.pending": "{n} {n|file|files} to send: {n|it goes|they go} out while this page stays open.",
   "send.export.lost": "Table not found (renamed or deleted): {tables}. Its rows are no longer sent. Give it back its name, or remove it from the export (Edit).",

@@ -272,11 +272,12 @@ try {
   const pagesOf = async doc => (await api('POST', `/docs/${doc}/sql`, {
     sql: 'select p.indentation, p.options, v.name from _grist_Pages p join _grist_Views v on v.id = p.viewRef order by p.pagePos' })).records.map(r => r.fields);
 
-  // SOURCE : un export d'une table, toutes ses colonnes.
-  async function newExport(table, name) {
+  // SOURCE : un export d'une table, toutes ses colonnes (ou ce que `columns` règle à l'étape des colonnes).
+  async function newExport(table, name, columns = async () => {}) {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: table }).check();
     await dialogButton('Continuer').click();
+    await columns();
     await dialogButton('Continuer').click();
     await dialog().getByLabel('Nom de l’export').fill(name);
     await dialogButton('Créer l’export').click();
@@ -287,10 +288,10 @@ try {
     ['BulkAddRecord', 'Fiches', [null, null, null], { Nom: ['Anna', 'Basile', 'Céline'], Ville: ['Lyon', 'Paris', 'Nantes'] }],
   ]);
   // SOURCE : ouvre le widget de `src` et y crée un export de `table`, nommé `name`.
-  async function startExport(src, table, name) {
+  async function startExport(src, table, name, columns) {
     await openWidget(src.url);
     await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
-    await newExport(table, name);
+    await newExport(table, name, columns);
   }
   // SOURCE : une invitation aux options par défaut pour l'export affiché ; rend son code, fenêtre refermée.
   async function plainInvitation() {
@@ -572,7 +573,21 @@ try {
     assert.equal(Object.keys(kept).length, 3, 'rien n\'est effacé');
     assert.equal(await widget().locator('.drift').count(), 0, 'une ligne gardée en archive n\'est pas une retouche');
     await shot('27-cible-archive', 'card');
-    // Options de la carte : archive et verrou retirés, la règle part.
+    // La note du journal, réécrite par quelqu'un d'autre (un éditeur peut le faire), ne retire pas la
+    // règle de lecture seule : le passage d'un propriétaire remet la note d'accord avec la règle.
+    const journalNote = async () => {
+      const journal = (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_'));
+      const column = (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Ids' && c.parentId === journal.id);
+      return { column, note: JSON.parse(column.description) };
+    };
+    const tampered = await journalNote();
+    assert.equal(tampered.note.verrou, true);
+    await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', tampered.column.id, { description: JSON.stringify({ ...tampered.note, verrou: false }) }]]);
+    await openWidget(dst.url);
+    await waitFor(async () => (await journalNote()).note.verrou === true, 'note remise d\'accord avec la règle de lecture seule', 60000);
+    assert.equal((await lockRules()).length, 1, 'la règle reste en place');
+    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    // Options de la carte : archive et verrou retirés, la règle part (seul un propriétaire la lève).
     await button('Options').click();
     await dialog().getByRole('checkbox', { name: /lecture seule/ }).uncheck();
     await dialog().getByRole('checkbox', { name: /^Archive/ }).uncheck();
@@ -594,6 +609,43 @@ try {
     await history.getByText(/Envoi de 3 lignes à tous les destinataires actifs/).waitFor();
     await shot('28-source-historique', 'card');
     step('Options d\'une réception : archive (ligne effacée à la SOURCE gardée, cochée, sans alerte), tables en lecture seule (règle posée puis retirée), archive décochée (la ligne archivée reste) ; historique des envois dans la SOURCE');
+  }
+  // --- Export filtré : la liste des choix d'une colonne Choix ne part pas (elle montrerait des
+  // valeurs de lignes que le filtre retient pas) ; la CIBLE n'apprend que les valeurs qu'elle reçoit.
+  async function choicesSteps() {
+    const etat = { choices: ['Ouvert', 'Clos', 'Secret'], choiceOptions: { Clos: { fillColor: '#FF0000' } } };
+    const src = await newDocWithWidget('Choix SOURCE', [
+      ['AddTable', 'Dossiers', [{ id: 'Nom', type: 'Text' }, { id: 'Etat', type: 'Choice', widgetOptions: JSON.stringify(etat) }]],
+      ['BulkAddRecord', 'Dossiers', [null, null, null], { Nom: ['Un', 'Deux', 'Trois'], Etat: ['Ouvert', 'Clos', 'Secret'] }],
+    ]);
+    const dst = await newDocWithWidget('Choix CIBLE');
+    await startExport(src, 'Dossiers', 'Annuaire', async () => {
+      const block = dialog().locator('.table-block').filter({ has: widget().locator('h3', { hasText: /^Dossiers$/ }) });
+      await block.getByRole('button', { name: 'Filtrer les lignes', exact: true }).click();
+      await block.getByRole('button', { name: 'Ajouter une condition', exact: true }).click();
+      const values = block.getByRole('group', { name: 'Valeur de la condition 1' });
+      await values.getByRole('checkbox', { name: /^Un/ }).check();
+      await values.getByRole('checkbox', { name: /^Deux/ }).check();
+    });
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, '« Annuaire » : table Dossiers.'), { url: src.url });
+    await openWidget(dst.url);
+    const dossiers = async () => (await records(dst.doc, 'Dossiers')).map(r => r.Nom).sort().join();
+    await waitFor(async () => (await dossiers()) === 'Deux,Un', 'lignes du filtre reçues', 60000);
+    const etatOf = async () => JSON.parse((await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Etat').widgetOptions || '{}');
+    await waitFor(async () => (await etatOf()).choices?.length === 2, 'choix reçus', 60000);
+    const received = await etatOf();
+    assert.deepEqual([...received.choices].sort(), ['Clos', 'Ouvert'], 'seules les valeurs reçues');
+    assert.equal(received.choiceOptions, undefined, 'les couleurs de la liste ne partent pas');
+    const sent = (await records(src.doc, 'Synchro')).map(r => r.Synchro_Colonnes || '').join();
+    assert.ok(!sent.includes('Secret') && !sent.includes('choices'), 'la SOURCE n\'envoie pas sa liste de choix');
+    const journal = (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_'));
+    const note = (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Ids' && c.parentId === journal.id).description;
+    assert.ok(!note.includes('Secret'), 'la note du journal ne garde aucune liste');
+    // Une ligne qui entre dans le filtre apporte sa valeur, et seulement elle.
+    await applyActions(src.doc, [['UpdateRecord', 'Dossiers', 3, { Nom: 'Un' }]]);
+    await waitFor(async () => (await etatOf()).choices?.includes('Secret'), 'valeur d\'une ligne entrée dans le filtre reprise', 90000);
+    step('Export filtré : la liste des choix ne part pas, la CIBLE reprend les valeurs reçues (une ligne entrée dans le filtre apporte la sienne)');
   }
   // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
   // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
@@ -718,17 +770,11 @@ try {
     // Trois ne cite pas le même dépôt que Un, mais le même contenu : un seul fichier part.
     const ids = [await upload(src.doc, 'bonjour.txt', small), await upload(src.doc, 'gros.bin', big), await upload(src.doc, 'copie.txt', small)];
     await applyActions(src.doc, [['BulkUpdateRecord', 'Dossiers', [1, 2, 3], { Piece: ids.map(id => ['L', id]) }]]);
-    await openWidget(src.url);
-    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
-    await button('Nouvel export').click();
-    await dialog().getByRole('checkbox', { name: 'Dossiers' }).check();
-    await dialogButton('Continuer').click();
-    await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
-    await dialog().getByRole('checkbox', { name: /Piece/ }).check();
-    await shot('25-source-pieces-jointes', 'modal');
-    await dialogButton('Continuer').click();
-    await dialog().getByLabel('Nom de l’export').fill('Dossiers');
-    await dialogButton('Créer l’export').click();
+    await startExport(src, 'Dossiers', 'Dossiers', async () => {
+      await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
+      await dialog().getByRole('checkbox', { name: /Piece/ }).check();
+      await shot('25-source-pieces-jointes', 'modal');
+    });
     await dialogButton('Ajouter un destinataire').waitFor();
     const exportId = (await records(src.doc, 'Synchro'))[0].Synchro_Export;
     assert.deepEqual((await records(src.doc, 'Synchro')).map(r => r.Synchro_Type), ['cles', 'lot', 'suivi', 'fichiers'], 'une liste des fichiers, dans Synchro');
@@ -788,8 +834,8 @@ try {
     assert.equal((await records(dst.doc, '_grist_Attachments')).length, 3, 'le premier destinataire ne reçoit rien de plus');
     step('Pièces jointes : un nouveau destinataire reçoit tous les fichiers');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_LINKS=1, ONLY_FILES=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, LINKS: linksSteps, FILES: filesSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -1648,6 +1694,7 @@ try {
   await exchangeSteps();
   await filesSteps();
   await optionsSteps();
+  await choicesSteps();
   await linksSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');

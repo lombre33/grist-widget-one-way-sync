@@ -41,7 +41,7 @@ const parse = (value) => {
     return {};
   }
 };
-const isChoice = type => type === 'Choice' || type === 'ChoiceList';
+export const isChoice = type => type === 'Choice' || type === 'ChoiceList';
 
 function choicesOf(raw) {
   const choices = Array.isArray(raw.choices) ? [...new Set(raw.choices.filter(c => typeof c === 'string' && c && c.length <= CHOICE_LEN))].slice(0, CHOICES_MAX) : [];
@@ -85,6 +85,26 @@ export function fillOptions(type, current, sent) {
     if (styles.length) next.choiceOptions = { ...(here.choiceOptions || {}), ...Object.fromEntries(styles) };
   }
   return JSON.stringify(next) === JSON.stringify(here) ? null : JSON.stringify(next);
+}
+
+// Choix d'une colonne de choix d'ici complétés des valeurs reçues (`values` : texte d'une cellule Choix,
+// ou liste ['L', …] d'une Liste de choix). Sert quand la SOURCE n'envoie pas de liste (export filtré,
+// colonne sans liste) : la CIBLE n'apprend que les valeurs qu'elle reçoit. Les nouveaux choix
+// s'ajoutent en fin de liste, bornés comme une liste envoyée. Rend le texte à écrire, ou null.
+export function receivedChoices(current, values) {
+  const here = parse(current);
+  const had = Array.isArray(here.choices) ? here.choices : [];
+  const known = new Set(had);
+  const added = [];
+  for (const cell of values) {
+    for (const choice of Array.isArray(cell) ? cell.slice(1) : [cell]) {
+      if (typeof choice === 'string' && choice && choice.length <= CHOICE_LEN && !known.has(choice) && had.length + added.length < CHOICES_MAX) {
+        known.add(choice);
+        added.push(choice);
+      }
+    }
+  }
+  return added.length ? JSON.stringify({ ...here, choices: [...had, ...added] }) : null;
 }
 
 // Colonne d'ici qu'on peut compléter : créée par le widget (`own`, colonnes envoyées notées à la

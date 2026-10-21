@@ -194,6 +194,25 @@ test('écart d\'un export : table perdue, colonnes renommées, effacées, d\'un 
   assert.deepEqual(exportDrift(schema, [{ table: 'Contacts', columns: [{ id: 'Nom', type: 'Text' }] }]), { lost: [], changed: [] });
 });
 
+test('choix avec un filtre de lignes : la liste ne part pas, le format part ; sans filtre elle revient seule', () => {
+  const E = '0123456789abcdef';
+  const cols = { Contacts: [{ colId: 'Etat', type: 'Choice', widgetOptions: '{"choices":["A","B"],"choiceOptions":{"A":{"fillColor":"#FF0000"}},"alignment":"center"}' }, { colId: 'Nom', type: 'Text' }] };
+  const schema = { has: t => t in cols, columns: t => cols[t] };
+  const columns = exportableColumns(cols.Contacts);
+  const filter = { mode: 'all', conds: [{ id: 'Nom', source: 'Text', visible: '', op: 'eq', values: ['x'] }] };
+  const { actions } = exportRowsActions([], E, [{ table: 'Contacts', columns, filter }]);
+  const sentOpts = text => JSON.parse(text)[0].opts;
+  assert.deepEqual(sentOpts(actions[0][3].Synchro_Colonnes[0]), { alignment: 'center' }, 'format seul');
+  const rows = actions[0][3].Synchro_Type.map((type, i) => ({ id: i + 1, ...Object.fromEntries(Object.entries(actions[0][3]).map(([k, v]) => [k, v[i]])) }));
+  assert.deepEqual(rows.map(r => r.Synchro_Type), ['cles', 'lot', 'suivi', 'filtre']);
+  assert.deepEqual(optionsActions(rows, schema), [], 'le contrôle périodique ne remet pas la liste');
+  const unfiltered = rows.filter(r => r.Synchro_Type !== 'filtre');
+  assert.equal(optionsActions(unfiltered, schema).length, 1, 'filtre retiré : la liste revient à la prochaine lecture');
+  assert.deepEqual(sentOpts(optionsActions(unfiltered, schema)[0][3].Synchro_Colonnes[0]).choices, ['A', 'B']);
+  const plain = exportRowsActions([], E, [{ table: 'Contacts', columns }]).actions[0][3];
+  assert.deepEqual(sentOpts(plain.Synchro_Colonnes[0]).choices, ['A', 'B'], 'sans filtre : la liste part');
+});
+
 test('choix et formats : envoyés avec les colonnes, réécrits quand ils changent, sans renvoi des lignes', () => {
   const E = '0123456789abcdef';
   const cols = { Contacts: [{ colId: 'Etat', type: 'Choice', widgetOptions: '{"choices":["A"]}' }, { colId: 'Ville', type: 'Ref:Villes', widgetOptions: '{"alignment":"right","widget":"Reference"}' }, { colId: 'Nom', type: 'Text' }] };

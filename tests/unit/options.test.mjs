@@ -2,7 +2,7 @@
 // complétés sans rien écraser.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { columnOptions, fillOptions, ownsColumn } from '../../js/logic/options.js';
+import { columnOptions, fillOptions, ownsColumn, receivedChoices } from '../../js/logic/options.js';
 
 const CHOICES = JSON.stringify({
   choices: ['Oui', 'Non', 'Oui', 3, '', 'x'.repeat(201)], choiceOptions: { Oui: { fillColor: '#00FF00', textColor: 'red', fontBold: true }, Peut: { fillColor: '#000000' } },
@@ -43,6 +43,15 @@ test('colonne d\'ici complétée : clés absentes et choix nouveaux, rien d\'éc
   assert.equal(fillOptions('Text', here, sent), null, 'colonne d\'un autre type : rien de propre aux choix, alignement d\'ici gardé');
   assert.equal(fillOptions('Choice', '', null), null);
   assert.equal(fillOptions('Choice', JSON.stringify({ choices: ['Oui'] }), { choices: ['Oui'], choiceOptions: { Oui: { fillColor: '#00FF00' } } }), null, 'couleur d\'un choix déjà là : gardée telle quelle');
+});
+
+test('choix reçus : valeurs nouvelles ajoutées en fin de liste, bornées, rien d\'autre touché', () => {
+  assert.equal(receivedChoices('', ['Oui', 'Non', 'Oui']), '{"choices":["Oui","Non"]}');
+  assert.equal(receivedChoices('{"choices":["Oui"],"alignment":"center"}', ['Oui', ['L', 'Non', 'Oui'], '', null, 5, 'x'.repeat(201)]), '{"choices":["Oui","Non"],"alignment":"center"}');
+  assert.equal(receivedChoices('{"choices":["Oui"]}', ['Oui', ['L']]), null, 'rien de nouveau');
+  const many = Array.from({ length: 600 }, (_, i) => `c${i}`);
+  assert.equal(JSON.parse(receivedChoices('', many)).choices.length, 500);
+  assert.equal(receivedChoices(JSON.stringify({ choices: many.slice(0, 500) }), ['autre']), null, 'liste pleine');
 });
 
 test('liste de choix d\'ici : bornée, les nouveaux choix s\'arrêtent à la limite', () => {

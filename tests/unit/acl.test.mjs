@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  JOURNAL_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, lockAclRules, ownerAclRules,
+  JOURNAL_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules,
   publicAclRules, ruleText,
 } from '../../js/logic/acl.js';
 
@@ -52,6 +52,27 @@ test('tables reçues en lecture seule : seuls les propriétaires écrivent, une 
   ]);
   assert.ok(rules.every(isWidgetRule));
   assert.deepEqual(lockAclRules([]), []);
+});
+
+test('lecture seule : la règle en place ne part pas avec la note, seul un propriétaire la lève', () => {
+  const received = new Set(['Contacts', 'Annuaire']);
+  // Demandée par la note : posée.
+  assert.deepEqual(lockedTables({ asked: ['Contacts'], current: [], received }), ['Contacts']);
+  // Note réécrite (plus rien demandé) : la règle déjà posée reste.
+  assert.deepEqual(lockedTables({ asked: [], current: ['Contacts', 'Annuaire'], received }), ['Annuaire', 'Contacts']);
+  // Un propriétaire la lève : elle part, même si la note la demande encore.
+  assert.deepEqual(lockedTables({ asked: ['Contacts'], current: ['Contacts', 'Annuaire'], received, released: ['Contacts'] }), ['Annuaire']);
+  // La table n'est plus reçue (réception arrêtée) : la règle part avec elle.
+  assert.deepEqual(lockedTables({ asked: [], current: ['Ancienne', 'Contacts'], received }), ['Contacts']);
+  assert.deepEqual(lockedTables({ asked: [], current: [], received }), []);
+  // Note remise d'accord avec la règle.
+  const journals = [
+    { journal: 'Journal_a', note: { verrou: true, tables: [{ dest: 'Contacts' }] } },
+    { journal: 'Journal_b', note: { tables: [{ dest: 'Annuaire' }] } },
+    { journal: 'Journal_c', note: { tables: [{ dest: 'Autre' }] } },
+  ];
+  assert.deepEqual(lockMirrors(journals, ['Contacts', 'Annuaire']), ['Journal_b']);
+  assert.deepEqual(lockMirrors(journals, []), []);
 });
 
 test('règles du widget : remplacées seulement si elles diffèrent, avant toutes les autres', () => {

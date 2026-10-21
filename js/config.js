@@ -16,4 +16,4 @@ export const widgetUrl = () => (servedAt() === BETA_URL ? BETA_URL : WIDGET_URL)
 // D'où cette copie est servie, pour le diagnostic.
 export const servedFrom = () => ({ [BETA_URL]: 'bêta', [WIDGET_URL]: 'officielle' }[servedAt()] || servedAt());
 
-export const VERSION = '0.12.0';
+export const VERSION = '0.12.1';

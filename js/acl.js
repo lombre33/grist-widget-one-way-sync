@@ -4,7 +4,7 @@
 // un assistant (un rechargement le fermerait). Rend vrai si elles ont changé : l'onglet attend
 // alors le rechargement (voir reloading).
 import { KEY_COL, SYNC_TABLE, isUserTable } from './logic/common.js';
-import { aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, ownerAclRules, publicAclRules } from './logic/acl.js';
+import { LOCK_MEMO, aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules, publicAclRules } from './logic/acl.js';
 import { apply, fetchRows, readSchema } from './grist.js';
 import { message } from './ui.js';
 import { t } from './i18n.js';
@@ -17,7 +17,7 @@ import { readSourceNote } from './source/synchro.js';
 // telles quelles. Les journaux dont la note le demande (`reserve`) sont cachés aux lecteurs, et les
 // tables reçues d'une réception verrouillée (`verrou`, jamais en Échange) en lecture seule pour
 // tous sauf les propriétaires.
-export async function syncRules({ publicIds = null, open = null } = {}) {
+export async function syncRules({ publicIds = null, open = null, release = [] } = {}) {
   if (document.querySelector('.scrim')) return false;
   const [schema, resources, rules] = await Promise.all([readSchema(), fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
   const current = currentRules(resources, rules);
@@ -26,8 +26,13 @@ export async function syncRules({ publicIds = null, open = null } = {}) {
     : publicAclRules(publicIds, { keepDeny: Boolean(open) && current.some(isPublicRule) });
   const journals = receivedJournals(schema).filter(r => r.note.reserve).map(r => r.journal);
   const exchanges = readSourceNote(schema).exports.filter(e => e.echange).map(e => e.id);
-  const locked = receivedJournals(schema).filter(r => r.note.verrou && r.note.mode !== 'echange').flatMap(r => r.note.tables.map(tb => tb.dest))
-    .filter(d => isUserTable(d) && schema.has(d) && schema.columns(d).some(c => c.colId === KEY_COL));
+  const lockable = receivedJournals(schema).filter(r => r.note.mode !== 'echange');
+  const eligible = d => isUserTable(d) && schema.has(d) && schema.columns(d).some(c => c.colId === KEY_COL);
+  const destsOf = list => list.flatMap(r => r.note.tables.map(tb => tb.dest)).filter(eligible);
+  const locked = lockedTables({
+    asked: destsOf(lockable.filter(r => r.note.verrou)), current: current.filter(r => r.memo === LOCK_MEMO).map(r => r.tableId),
+    received: new Set(destsOf(lockable)), released: release,
+  });
   const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals), ...lockAclRules(locked)];
   const actions = aclActions(resources, rules, wanted, id => !schema.has(id));
   if (!actions.length) {
@@ -36,6 +41,9 @@ export async function syncRules({ publicIds = null, open = null } = {}) {
     for (const { journal } of receivedJournals(schema).filter(r => r.note.reserve && !r.note.reserved)) {
       await updateJournalNote(journal, n => ({ ...n, reserved: true }));
     }
+    // La lecture seule se lit aussi dans la note (la carte d'un éditeur ne lit pas les règles) : une
+    // note réécrite par un éditeur est remise d'accord avec la règle.
+    for (const journal of lockMirrors(lockable, locked)) await updateJournalNote(journal, n => ({ ...n, verrou: true }));
     return false;
   }
   try {

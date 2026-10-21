@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.12.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.12.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -96,7 +96,8 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   (Référence, formule), annulation (Ctrl+Z).
 - **Listes de choix et formats** : une colonne Choix arrive avec sa liste et ses couleurs, un
   choix ajouté plus tard dans la SOURCE s'ajoute ici ; formats de nombre, de date et de devise
-  repris. Rien n'est changé dans une colonne que la CIBLE a choisie.
+  repris. Rien n'est changé dans une colonne que la CIBLE a choisie. Avec un filtre de lignes, la liste
+  ne part pas : chaque destinataire ne reçoit que les valeurs des lignes envoyées.
 - **Pièces jointes** : une colonne cochée arrive comme une vraie colonne Pièces jointes ; chaque
   fichier part une fois par destinataire, quand la page SOURCE est ouverte, et n'est déposé
   qu'une fois.

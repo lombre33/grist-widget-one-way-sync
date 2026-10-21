@@ -57,8 +57,15 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
 })));
+// Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
+// valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des
+// valeurs qu'elle reçoit (voir receivedChoices).
+const filteredColumns = ({ columns, filter }) => (rowFilter(filter) ? columns.map(({ opts, ...c }) => {
+  const { choices, choiceOptions, ...format } = opts || {};
+  return Object.keys(format).length ? { ...c, opts: format } : c;
+}) : columns);
 function wantedValues({ columns, filter }, kinds) {
-  const schema = schemaText(columns);
+  const schema = schemaText(filteredColumns({ columns, filter }));
   const kept = rowFilter(filter);
   return new Map([...kinds.map(kind => [kind, schema]), ...(kept ? [[KIND.filter, JSON.stringify(kept)]] : [])]);
 }
@@ -122,11 +129,14 @@ export function optionsActions(rows, schema) {
   const ids = [];
   const values = [];
   for (const exportId of new Set(rows.map(r => r[EXPORT_COL]))) {
-    for (const { table, columns } of exportTables(rows, exportId).filter(tb => schema.has(tb.table))) {
+    for (const { table, columns, filter } of exportTables(rows, exportId).filter(tb => schema.has(tb.table))) {
       const here = new Map(schema.columns(table).map(c => [c.colId, c.widgetOptions]));
-      const value = schemaText(columns.map(({ opts, ...c }) => {
-        const next = here.has(c.id) ? columnOptions(c.type, here.get(c.id)) : opts;
-        return next ? { ...c, opts: next } : c;
+      const value = schemaText(filteredColumns({
+        columns: columns.map(({ opts, ...c }) => {
+          const next = here.has(c.id) ? columnOptions(c.type, here.get(c.id)) : opts;
+          return next ? { ...c, opts: next } : c;
+        }),
+        filter,
       }));
       for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
         ids.push(r.id);

@@ -15,7 +15,8 @@
 //    écrit toujours (vérifié).
 //  - Tables reçues en lecture seule (option d'une réception) : seuls les propriétaires y écrivent.
 //    La recopie écrit avec les droits de la personne qui a la page ouverte : elle attend donc un
-//    propriétaire (voir consolidate dans target/loop.js).
+//    propriétaire (voir consolidate dans target/loop.js). Seul un propriétaire peut lever la règle :
+//    une note de journal réécrite par un éditeur ne la retire pas (voir lockedTables).
 import { EXPORT_COL, HEX16, KIND, LIST_COL, LOT_COL, AUTHOR_COL, MISSING_COL, RESEND_COL, SYNC_TABLE, TYPE_COL } from './common.js';
 
 export const PUBLIC_MEMO = 'Synchro : lecture limitée aux exports publics';
@@ -64,6 +65,19 @@ export const journalAclRules = journals => [...journals].sort()
 
 export const lockAclRules = tables => [...new Set(tables)].sort()
   .map(tableId => ({ tableId, colIds: '*', aclFormula: 'user.Access != OWNER', permissionsText: '-CUD', memo: LOCK_MEMO }));
+
+// Tables en lecture seule voulues. La règle déjà posée fait foi : la note d'un journal, qu'un éditeur
+// peut réécrire, peut en demander (`asked`) mais pas en retirer, tant que la table est reçue
+// (`received`). Seul un propriétaire lève la lecture seule (`released`, par l'option de la carte). Une
+// table qui n'est plus reçue perd sa règle.
+export function lockedTables({ asked, current, received, released = [] }) {
+  const lifted = new Set(released);
+  return [...new Set([...asked, ...current.filter(table => received.has(table))])].filter(table => !lifted.has(table)).sort();
+}
+
+// Journaux dont la note ne demande plus la lecture seule alors que la règle de l'une de leurs
+// destinations est en place (note réécrite par un éditeur) : la note est remise d'accord.
+export const lockMirrors = (journals, locked) => journals.filter(({ note }) => !note.verrou && note.tables.some(tb => locked.includes(tb.dest))).map(r => r.journal);
 
 // Une règle, telle que la compare syncRules (sa ressource lue dans `resources` si besoin).
 export const ruleText = ({ tableId, colIds, aclFormula, permissionsText, memo }) => `${tableId}|${colIds}|${aclFormula}|${permissionsText}|${memo || ''}`;

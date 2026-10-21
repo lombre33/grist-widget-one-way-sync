@@ -274,7 +274,31 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.0 (21 octobre 2026)
+## État : V0.12.1 (21 octobre 2026)
+
+V0.12.1 (Antoine, 21 octobre : « oui faire les corrections necessaire », après la liste des limites
+non corrigées de la 0.12) :
+- **Lecture seule, la règle seule fait foi** (`lockedTables`, `lockMirrors` de `logic/acl.js`,
+  `syncRules({ release })` de `js/acl.js`) : la note du journal (`verrou`) peut demander un verrou,
+  jamais le retirer ; la règle posée (`LOCK_MEMO`) reste tant qu'un propriétaire ne la lève pas par
+  « Options » de la carte (`release`, `js/target/options.js`) ; un passage de propriétaire remet
+  `verrou: true` dans une note retouchée ; une règle dont la table n'est plus reçue est retirée.
+  Testé de bout en bout (`optionsSteps` : note retouchée à `verrou:false`, règle toujours là, note
+  remise ; la levée par la boîte de dialogue marche toujours). **Reste vrai** : un éditeur (droit de
+  structure par défaut, descriptions de colonnes lisibles, clé de signature dedans) peut toujours
+  écrire une version dans le journal ; Grist ne permet pas de l'empêcher.
+- **Listes de choix et filtre de lignes** : avec un filtre (`rowFilter` non nul), la SOURCE n'envoie ni
+  `choices` ni `choiceOptions` (le format part ; `filteredColumns` de `logic/exports.js`, dans
+  `wantedValues` et `optionsActions`) ; la CIBLE complète les colonnes Choix et Liste de choix **qu'elle
+  a créées** et qui n'ont pas reçu de liste avec les valeurs des lignes reçues
+  (`valueChoiceActions` de `logic/received.js`, `receivedChoices` de `logic/options.js`, 500 valeurs
+  de 200 caractères au plus, sans couleur ; `currentRows` de `logic/journal.js` : dernière version non
+  supprimée de chaque clé ; appelé dans `prepareColumns` de `target/loop.js`). Une ligne qui entre
+  dans le filtre apporte sa valeur. Testé de bout en bout : `ONLY_CHOICES=1` (`choicesSteps` ; sans
+  le correctif le test échoue). Texte du filtre (`send.filter.help`) mis à jour.
+- Archive : inchangée, par choix (option de la CIBLE ; la SOURCE ne voit ni n'empêche la ligne gardée ;
+  droit à l'effacement à la charge du propriétaire de la CIBLE).
+- Tous les autres points de la 0.12.0 ci-dessous restent vrais.
 
 V0.12.0 (Antoine, 21 octobre : « vérifier si des features ne seraient pas manquantes » avant la bêta ;
 choix sur la carte de décision : F1 à F3, puis « les autres sauf F7 » ; propositions dans
@@ -341,13 +365,14 @@ choix sur la carte de décision : F1 à F3, puis « les autres sauf F7 » ; prop
   `id_sync` ; options non proposées en lien public ; `updateSourceNote` sous le verrou
   `gristsync-source-note` ; `eventsOf` n'accepte que des événements bien formés ; le diagnostic
   masque adresses, jetons et longs identifiants (`clip`) et ignore une date impossible (`when`).
-  **Limites dites, non corrigées** (SECURITY.md, « Risques acceptés ») : le verrou de lecture seule ne
-  protège pas d'un éditeur qui écrit dans le journal ou la note (droit de structure par défaut) ; un
-  export envoie la liste complète des choix d'une colonne Choix, filtre ou non ; l'archive garde
-  une ligne supprimée à la SOURCE (droit à l'effacement : à la charge de la CIBLE).
-- Test de bout en bout : `ONLY_OPTIONS=1` (archive, lecture seule, historique) et `ONLY_LINKS=1`
-  (Références conservées), inclus dans le parcours complet ; `ONLY_FILES=1` vérifie aussi les choix
-  repris.
+  **Limites dites** (SECURITY.md, « Risques acceptés ») : le verrou de lecture seule ne protège pas
+  d'un éditeur qui écrit dans le journal (corrigé en 0.12.1 pour la note : la règle fait foi) ; un
+  export sans filtre envoie la liste complète des choix d'une colonne Choix (avec un filtre, corrigé en
+  0.12.1) ; l'archive garde une ligne supprimée à la SOURCE (droit à l'effacement : à la charge de la
+  CIBLE).
+- Test de bout en bout : `ONLY_OPTIONS=1` (archive, lecture seule, historique), `ONLY_CHOICES=1`
+  (filtre et listes de choix, 0.12.1) et `ONLY_LINKS=1` (Références conservées), inclus dans le
+  parcours complet ; `ONLY_FILES=1` vérifie aussi les choix repris.
 
 V0.11.5 (Antoine, 21 octobre : « traiter tous les points des anciens audits » avant la bêta) :
 reliquats de `/mnt/project-files/notes/audits-v0.8/code-constats.md`. Logique pure sortie et testée :

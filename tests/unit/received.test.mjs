@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addDestColumnsActions, journalNote, journalNoteAction, keySlot, missingColumns, optionActions, optionsNote, receivedDests, receivedJournals, receivedKey, storeKeyActions,
+  addDestColumnsActions, journalNote, journalNoteAction, keySlot, missingColumns, optionActions, optionsNote, receivedDests, receivedJournals, receivedKey, storeKeyActions, valueChoiceActions,
 } from '../../js/logic/received.js';
 
 const K1 = '1'.repeat(32);
@@ -72,6 +72,21 @@ test('choix et formats : colonnes créées avec ceux de la SOURCE, colonnes d\'i
   assert.deepEqual(optionActions(dest, entry, sent), [['UpdateRecord', '_grist_Tables_column', 1, { widgetOptions: '{"choices":["A","B"],"alignment":"center"}' }]]);
   assert.deepEqual(optionActions(dest, { ...entry, own: undefined }, sent), [], 'réception d\'avant la 0.12 : colonnes qui ont déjà des choix laissées');
   assert.deepEqual(optionActions(schemaOf({}), entry, sent), [], 'destination absente');
+});
+
+test('choix sans liste envoyée (export filtré) : la liste d\'une colonne créée ici prend les valeurs reçues', () => {
+  const dest = schemaOf({ Annuaire: [['Statut'], ['Tags'], ['Choix']] });
+  dest.columns('Annuaire').forEach((c, i) => { c.type = i === 1 ? 'ChoiceList' : 'Choice'; c.widgetOptions = i === 0 ? '{"choices":["A"],"alignment":"left"}' : ''; });
+  const sent = [{ id: 'Etat', type: 'Choice' }, { id: 'Tags', type: 'ChoiceList', opts: { alignment: 'center' } }, { id: 'Choix', type: 'Choice' }, { id: 'Avec', type: 'Choice', opts: { choices: ['X'] } }];
+  const entry = { dest: 'Annuaire', map: { Etat: 'Statut' }, own: ['Etat', 'Tags', 'Avec'] };
+  const rows = [{ Etat: 'A', Tags: ['L', 'x', 'y'], Choix: 'z', Avec: 'W' }, { Etat: 'B', Tags: ['L', 'y'], Choix: '', Avec: 'X' }, { Etat: '', Tags: null }];
+  assert.deepEqual(valueChoiceActions(dest, entry, sent, () => rows), [
+    ['UpdateRecord', '_grist_Tables_column', 1, { widgetOptions: '{"choices":["A","B"],"alignment":"left"}' }],
+    ['UpdateRecord', '_grist_Tables_column', 2, { widgetOptions: '{"choices":["x","y"]}' }],
+  ], 'Choix n\'est pas à nous, Avec a une liste envoyée');
+  let read = 0;
+  assert.deepEqual(valueChoiceActions(dest, { ...entry, own: [] }, sent, () => { read++; return rows; }), []);
+  assert.equal(read, 0, 'les lignes ne sont lues que s\'il y a une colonne à compléter');
 });
 
 test('options d\'une réception : seules les options cochées sont notées', () => {

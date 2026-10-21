@@ -3,8 +3,10 @@
 //    planConsolidation) ;
 //  - verrou : les tables reçues sont en lecture seule pour tous sauf les propriétaires (règle
 //    posée par un propriétaire, voir acl.js) ; la recopie attend alors qu'un propriétaire ouvre
-//    la page. Seul un propriétaire change ce réglage sur la carte : un éditeur qui le retirerait
-//    resterait bloqué par la règle jusqu'à la visite d'un propriétaire.
+//    la page. Seul un propriétaire change ce réglage sur la carte, et seul un propriétaire retire la
+//    règle (`release` de syncRules) : une note réécrite par un éditeur est remise d'accord avec la
+//    règle au passage suivant d'un propriétaire.
+import { syncRules } from '../acl.js';
 import { updateJournalNote } from './journals.js';
 import { optionsNote } from '../logic/received.js';
 import { cancelButton, el, openModal, run } from '../ui.js';
@@ -34,8 +36,12 @@ export function optionsDialog(group, owner, render) {
   const report = el('div', { class: 'report' });
   const save = async (m) => {
     const { archive, verrou } = options.read();
+    // Seul un propriétaire lève la lecture seule : la règle en place ne part pas avec la note, que
+    // d'autres peuvent réécrire (voir lockedTables).
+    const release = owner && note.verrou && !verrou ? note.tables.map(tb => tb.dest) : [];
     await updateJournalNote(group.journal, ({ archive: a, verrou: v, ...rest }) => ({ ...rest, ...optionsNote({ archive, verrou: owner ? verrou : v }) }));
     m.close();
+    if (release.length) await syncRules({ release });
     await render();
   };
   openModal({

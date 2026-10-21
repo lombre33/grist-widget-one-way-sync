@@ -388,17 +388,27 @@ Pour un usage en production :
 - Sans Redis, la file d'envoi de Grist vit en mémoire : un redémarrage du serveur la perd (le
   widget renvoie ce qui manque à la prochaine ouverture par un propriétaire).
 - **Lecture seule (0.12)** : le verrou d'une réception protège ses tables des retouches à la main des
-  non-propriétaires, pas d'un éditeur du document CIBLE. Un éditeur écrit dans le journal de
-  réception et lit la clé de signature des destinations : il peut y forger une version que la
-  recopie d'un propriétaire écrira ; et, avec le droit de structure que Grist lui laisse par défaut,
-  il peut modifier la note du journal et faire retirer la règle au prochain passage d'un propriétaire.
-  Les options d'une réception ne sont proposées ni en Échange ni en lien public.
-- **Listes de choix (0.12)** : la liste complète des choix d'une colonne Choix ou Liste de choix
-  envoyée (500 choix au plus) part avec la description des colonnes, y compris les choix dont aucune
-  ligne n'est envoyée (un filtre ne les retire pas). Elle reste dans les lots du journal (réservé aux
-  éditeurs) et dans les colonnes créées par le widget, pas dans la note du journal. Ne pas envoyer
-  une colonne Choix dont la liste est confidentielle. La liste d'une colonne reçue est bornée à
-  500 choix ; ni `HyperLink` ni `Markdown` ne sont repris comme affichage d'une colonne de texte.
+  non-propriétaires, pas d'un éditeur du document CIBLE. La règle posée dans les règles d'accès
+  (mémo `LOCK_MEMO`) est la seule référence : la note du journal peut demander un verrou (`verrou`),
+  jamais le retirer ; seul un propriétaire le lève, par les options de la réception
+  (`syncRules({ release })`), et le passage suivant d'un propriétaire remet dans la note ce que la
+  règle dit (`lockMirrors`). Une règle dont la table n'est plus reçue est retirée. Reste qu'un
+  éditeur écrit dans le journal de réception et lit la clé de signature des destinations : il peut y
+  forger une version que la recopie d'un propriétaire écrira. Grist ne cache pas aux éditeurs les
+  descriptions de colonnes ni ne leur retire le droit de structure par défaut : aucune règle du
+  widget n'arrête un éditeur malveillant. Les options d'une réception ne sont proposées ni en
+  Échange ni en lien public.
+- **Listes de choix (0.12)** : sans filtre de lignes, la liste complète des choix d'une colonne Choix
+  ou Liste de choix envoyée (500 choix au plus) part avec la description des colonnes, y compris les
+  choix dont aucune ligne n'est envoyée ; elle reste dans les lots du journal (réservé aux
+  éditeurs) et dans les colonnes créées par le widget, pas dans la note du journal. **Avec un filtre
+  de lignes** (`filteredColumns`), ni la liste ni les couleurs ne partent (le format part) : la
+  CIBLE complète les colonnes qu'elle a créées avec les valeurs des lignes reçues
+  (`valueChoiceActions`, `receivedChoices`, 500 valeurs de 200 caractères au plus), donc un choix
+  n'apparaît chez un destinataire que si une ligne reçue le porte ; une ligne qui entre dans le
+  filtre apporte le sien. Ne pas envoyer sans filtre une colonne Choix dont la liste est
+  confidentielle. La liste d'une colonne reçue est bornée à 500 choix ; ni `HyperLink` ni
+  `Markdown` ne sont repris comme affichage d'une colonne de texte.
 - **Archive et effacement (0.12)** : une réception en archive garde les lignes que la SOURCE a
   supprimées, cochées `Supprimee_a_la_source` : la SOURCE ne peut ni le voir ni l'empêcher. Pour un
   droit à l'effacement, le propriétaire de la CIBLE doit supprimer ces lignes lui-même. Décocher
