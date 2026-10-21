@@ -1,7 +1,7 @@
 // Mode d'emploi à deux rôles : qui fait quoi, dans quel document. Affiché sur l'accueil et en bas
 // des assistants, pour que chacun sache ce qu'il fait et ce que l'autre document doit faire, et
 // texte de consignes à transmettre avec un code.
-import { WIDGET_URL } from './config.js';
+import { widgetUrl } from './config.js';
 import { t } from './i18n.js';
 import { copyButton, copyField, el } from './ui.js';
 
@@ -22,7 +22,7 @@ export function roleGuide({ you = null, mode = 'reponse', current = -1, open = f
     el('summary', {}, t('guide.title')),
     el('ol', { class: 'guide-steps' }, steps),
     mode === 'public' ? null : el('p', { class: 'muted small' }, t('guide.publicNote')),
-    el('p', { class: 'small' }, t('guide.install')), copyField(WIDGET_URL));
+    el('p', { class: 'small' }, t('guide.install')), copyField(widgetUrl()));
 }
 
 // Bouton « Copier avec les consignes » : le code et les étapes de l'autre document (`role`, à partir
@@ -34,5 +34,5 @@ export const handoffButton = (role, mode, from, code) => el('div', { class: 'han
 // courriel avec le code.
 function handoffText(role, mode, from, code) {
   const lines = STEPS[mode].slice(from).filter(([r]) => r === role).map(([, key], i) => `${i + 1}. ${t(key)}`);
-  return [t(`guide.handoff.${role}`), '', ...lines, '', t('guide.install'), WIDGET_URL, '', t('guide.handoff.code'), code].join('\n');
+  return [t(`guide.handoff.${role}`), '', ...lines, '', t('guide.install'), widgetUrl(), '', t('guide.handoff.code'), code].join('\n');
 }

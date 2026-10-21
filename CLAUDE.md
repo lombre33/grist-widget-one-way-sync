@@ -274,7 +274,16 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.11.2 (20 octobre 2026)
+## État : V0.11.4 (21 octobre 2026)
+
+V0.11.4 (Antoine, 21 octobre : « oui tu peux corriger sur la beta », deux erreurs des consignes ;
+la V0.11.3, réécriture plus large des consignes, a été annulée à sa demande) :
+- **Vérifié dans Grist** : le réglage du lien public s'appelle Partager, Gérer les utilisateurs,
+  « Accès public » Activé, en « Lecture seule », puis Confirmer (ni « Lien public » ni « Lecture »
+  n'existent dans Grist). Textes du widget, tutoriels et `docs/04-tutoriel.md` corrigés.
+- Adresse des consignes : `widgetUrl()` (`js/config.js`) rend `BETA_URL` quand le widget est
+  servi depuis la bêta (ses codes ne se lisent pas par l'Alpha publiée), sinon `WIDGET_URL` ;
+  jamais l'adresse d'une autre copie. Le test vérifie le texte copié.
 
 V0.11.2 (Antoine, 20 octobre : « un message relou » en rangeant une table ajoutée à l'export dans
 une table déjà reçue) : `destProblem` (`js/logic/journal.js`) dit quelle table pose problème

@@ -686,6 +686,13 @@ try {
   assert.ok(!(await dialog().locator('.guide-steps').isVisible()), '« Qui fait quoi ? » replié dans la fenêtre');
   await dialogButton('Copier avec les consignes').waitFor();
   await shot('05-source-invitation');
+  // Consignes copiées : les étapes de la CIBLE, l'adresse officielle (widget servi d'ailleurs) et le code.
+  const sourceFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
+  await sourceFrame.evaluate(() => { navigator.clipboard.writeText = async (text) => { window.copiedText = text; }; });
+  await dialogButton('Copier avec les consignes').click();
+  const handoff = await sourceFrame.evaluate(() => window.copiedText);
+  assert.ok(/«\sAccepter une invitation\s»/.test(handoff) && handoff.includes('\nhttps://grist-factory.github.io/grist-widget-syncPlus/\n'), handoff);
+  assert.ok(handoff.endsWith(`\n${invitation}`));
   await dialogButton('Plus tard').click();
   await widget().locator('.person').getByText('En attente de réponse').waitFor();
   await shot('06-source-attente');

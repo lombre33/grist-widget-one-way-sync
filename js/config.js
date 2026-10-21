@@ -8,4 +8,9 @@ export const GRIST_ORIGINS = ['https://grist.numerique.gouv.fr', 'https://docs.g
 // propre copie, ou la publie dans sa galerie de widgets, met ici son adresse.
 export const WIDGET_URL = 'https://grist-factory.github.io/grist-widget-syncPlus/';
 
-export const VERSION = '0.11.2';
+// Version de test (bêta), servie depuis sa propre adresse : ses codes ne se lisent pas par la
+// version officielle, donc ses consignes donnent la sienne. Partout ailleurs, l'officielle.
+const BETA_URL = 'https://lombre33.github.io/grist-widget-one-way-sync/';
+export const widgetUrl = () => (`${location.origin}${location.pathname}`.replace(/index\.html$/, '') === BETA_URL ? BETA_URL : WIDGET_URL);
+
+export const VERSION = '0.11.4';
