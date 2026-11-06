@@ -147,8 +147,9 @@ Quatre relevés qui se lisent bien en quelques mots :
 - La table `Synchro` est la mémoire du widget (liste des exports, colonnes, clés). La supprimer ou la rendre
   illisible à tous, propriétaires compris, est irréparable : la SOURCE revient au premier écran, sans rien dire.
 - Les erreurs passagères (429, 5xx, réseau) ne mettent pas en pause toutes seules : Grist réessaie pendant
-  15 minutes et les autres destinataires attendent. Choix à faire : étendre la pause automatique à ces erreurs
-  (au risque de couper un destinataire qui allait reprendre).
+  15 minutes et les autres destinataires attendent. Choix d'Antoine (6 novembre, carte de décision) : on laisse comme
+  ça, car une pause fait perdre les changements faits pendant qu'elle dure, sauf renvoi, et peut couper un
+  destinataire qui allait reprendre ; à rouvrir si un cas réel le demande.
 - Une ligne de plus de 1 Mo à elle seule (quelques cellules géantes) ne peut pas partir : la CIBLE le dit (« 1 ligne
   ne peut pas arriver »), les autres lignes arrivent. La limite de Grist (1 Mo par envoi) reste celle du format du
   lot. Les tables de 100 000 lignes passent (voir `grandeTable`).

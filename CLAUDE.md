@@ -314,7 +314,8 @@ destinataires sur dix lignes, une quarantaine de bêtises. À retenir :
   3 min (`SLOW_MS`) est mis en pause par le widget après 60 s vu ainsi, page d'un propriétaire ouverte
   (`pauseDeadLinks`, dans `catchUpLocked`), note `auto` + `why` (`link` ou `slow`), événement `autopause`, la carte
   le dit. Les erreurs qui passent seules (429, 5xx, connexion coupée) ne sont **jamais** mises en pause d'office :
-  l'étendre est un choix à poser à Antoine. « Débloquer la file » n'est plus proposé pour ces erreurs (`NO_UNBLOCK`).
+  Antoine a tranché le 6 novembre (carte de décision) : **on laisse comme ça** (une pause fait perdre les
+  changements faits pendant qu'elle dure, sauf renvoi) ; à rouvrir si un cas réel le demande. « Débloquer la file » n'est plus proposé pour ces erreurs (`NO_UNBLOCK`).
 - **Textes d'erreur** (`hookErrorKey`) : un par cause (`size`, `column`, `link`, `journal`, `rate`, `server`,
   `network`, `slow`, `other`), qui disent aussi que les autres destinataires attendent et quoi faire ; un seul avis
   « N destinataires attendent derrière… » par export (`behindNotice`) ; la carte se relit toute seule tant qu'un
