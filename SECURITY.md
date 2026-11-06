@@ -416,4 +416,11 @@ Pour un usage en production :
 - **Diagnostic (0.12)** : il ne contient aucune valeur de table, aucun courriel, aucune adresse de
   webhook ou de formulaire, code ni clé ; les messages d'erreur de Grist qu'il cite sont filtrés
   (adresses, jetons, longs identifiants retirés). La personne le relit avant de le coller.
+- **Table Synchro d'une autre personne, colonnes en trop (0.12.2)** : le widget ne reprend plus une
+  table nommée `Synchro` qui n'a pas sa colonne `Synchro_Export` (`foreignSync`) : il n'y écrit rien et
+  n'envoie rien tant qu'elle ne porte pas un autre nom. Il ne la renomme (`RenameTable`, rien d'effacé) ni
+  ne retire des colonnes de `Synchro` (`RemoveColumn`, après une fenêtre qui nomme les colonnes, ce
+  qu'elles contiennent, et demande de sauvegarder) qu'à la demande d'un propriétaire. Un envoi bloqué
+  par ces colonnes est débloqué ensuite (file vidée, exports renvoyés). La table Synchro n'est pas
+  effacée avec le dernier export quand une page la montre (`isOnPage` : le widget posé sur elle).
 - Le paramètre `?flat=1` n'est pas documenté par Grist (couvert par ses tests depuis 2023).

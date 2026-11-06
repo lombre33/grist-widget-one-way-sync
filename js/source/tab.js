@@ -11,15 +11,17 @@ import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, lotLate, parseCharge } from '../logic/resend.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
 import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
+import { columnFault, foreignSync, hasContent, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
 import { reloading, syncRules } from '../acl.js';
 import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
 import { catchUp, chargeNotice, resendTables } from './resend.js';
 import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
+import { foreignDialog, strayDialog } from './strays.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { confirmDialog, el, icon, message, pill, run, smallButton } from '../ui.js';
+import { confirmDialog, el, icon, message, noteError, pill, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 
@@ -37,7 +39,8 @@ async function loadState() {
   try { hooks = await listWebhooks(); } catch (e) { if (e.message !== 'ownerOnly') throw e; ownerOnly = true; }
   const conditions = ownerOnly ? new Map() : await webhookConditions();
   const schema = await readSchema();
-  const all = schema.has(SYNC_TABLE) ? await fetchRows(SYNC_TABLE) : [];
+  // Une table nommée Synchro qui n'est pas celle du widget n'est pas lue (voir foreignSync).
+  const all = ownsSync(schema) ? await fetchRows(SYNC_TABLE) : [];
   const rows = all.filter(r => !isCharge(r));
   const note = readSourceNote(schema);
   // Règles d'accès (lisibles par un propriétaire seulement) : revérifiées à chaque affichage.
@@ -47,7 +50,10 @@ async function loadState() {
   const exports = ids.map(id => exportState(id, { note, rows, schema, acl, recipients: hooksOf(hooks, conditions, id) }));
   const unsafe = hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id)));
   const charge = parseCharge((all.find(isCharge) || {})[RESEND_COL]);
-  return { ownerOnly, schema, rows, note, exports, unsafe, charge };
+  // Colonnes de Synchro qui ne sont pas au widget : un envoi les emporte, un journal les refuse.
+  const syncCols = ownsSync(schema) ? schema.columns(SYNC_TABLE).map(c => c.colId) : [];
+  const strays = ownerOnly || !syncCols.length ? [] : strayColumns(schema.columns(SYNC_TABLE), all);
+  return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, foreign: !ownerOnly && foreignSync(schema) };
 }
 
 function exportState(id, { note, rows, schema, acl, recipients }) {
@@ -97,6 +103,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   container.replaceChildren(...sourceView(state, access, open));
   if (state.ownerOnly) return;
   resumeExchange(state);
+  if (!periodic) askAboutSync(state);
   if (await checkHooks(state.exports.flatMap(exp => exp.recipients))) await renderSource(root, { periodic });
 }
 
@@ -104,7 +111,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
 // rattrapage d'un envoi coupé. Les lectures de loadState servent aux deux : l'état n'est relu
 // qu'après une écriture.
 async function upgradeSource(state) {
-  if (state.ownerOnly || !state.schema.has(SYNC_TABLE)) return state;
+  if (state.ownerOnly || !ownsSync(state.schema)) return state;
   let current = state;
   if (await ensureSyncTable(current.schema, current.rows)) current = await loadState();
   if (await refreshMajLe(current.schema, current.rows)) current = await loadState();
@@ -118,10 +125,15 @@ function sourceView(state, access, open) {
   const out = el('div', { class: 'out' }, notice);
   notice = null;
   const toolbar = el('div', { class: 'toolbar' },
-    el('button', { class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly, onclick: () => exportWizard(null, renderSource) }, icon('plus'), t('send.new')));
+    el('button', {
+      class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || state.foreign, title: state.foreign ? t('send.foreign.blocked') : null,
+      onclick: () => exportWizard(null, renderSource),
+    }, icon('plus'), t('send.new')));
   // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
-  const cards = state.ownerOnly ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
+  const cards = state.ownerOnly || state.foreign ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
   if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
+  if (state.strays.length) cards.unshift(strayCard(state, out));
+  if (state.foreign) cards.unshift(foreignCard(state, out));
   return [toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
@@ -217,7 +229,7 @@ function exportCard(exp, state, open, out) {
   const n = exp.recipients.length;
   const [status, tone] = exportStatus(exp);
   const rows = [
-    ...exp.recipients.map(h => personRow(exp, h, ownerOnly, out)),
+    ...exp.recipients.map(h => personRow(exp, h, ownerOnly, out, state.syncCols)),
     ...exp.invitations.map(inv => inviteRow(exp, inv, ownerOnly, out)),
     exp.public ? publicRow(exp, open, ownerOnly, out) : null,
   ].filter(Boolean);
@@ -253,8 +265,18 @@ const eventsBlock = exp => (exp.events.length ? el('details', {
 }, el('summary', {}, el('span', { class: 'history-title' }, t('send.history.title', { n: exp.events.length }))),
   el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, exp.events.map(eventLine))) : null);
 
+// Ce que dit l'erreur d'un destinataire. Un journal qui refuse une colonne que Synchro porte sans
+// qu'elle soit au widget, ou qu'elle ne porte plus mais que la file garde, n'a rien à faire de son
+// côté : le texte le dit (voir columnFault).
+function errorText(h, syncCols) {
+  const fault = columnFault(h.usage, syncCols);
+  if (fault === 'stray') return t('send.error.stray', { col: refusedColumn(h.usage) });
+  if (fault === 'gone') return t('send.error.gone', { col: refusedColumn(h.usage) });
+  return t(hookErrorKey(h), { col: refusedColumn(h.usage) || '?' });
+}
+
 // Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul.
-function personRow(exp, h, ownerOnly, out) {
+function personRow(exp, h, ownerOnly, out, syncCols) {
   const [status, tone] = hookStatus(h);
   const u = h.usage || {};
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
@@ -266,7 +288,7 @@ function personRow(exp, h, ownerOnly, out) {
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
-    failing ? el('p', { class: 'small text-danger' }, t(hookErrorKey(h))) : null,
+    failing ? el('p', { class: 'small text-danger' }, errorText(h, syncCols)) : null,
     failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) })) : null,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
@@ -317,3 +339,41 @@ const unsafeCard = (hooks, ownerOnly, out) => cleanupCard({
   clean: t('send.unsafe.delete'), confirm: t('send.unsafe.confirm'), ownerOnly, out,
   fn: async () => { for (const h of hooks) await deleteWebhook(h.id); },
 });
+
+// ---------------------------------------------------------------------------------------------
+// Table Synchro à remettre en état (voir logic/strays.js) : colonnes en trop, ou table de ce nom qui
+// n'est pas celle du widget. Chaque cas a sa carte, avec le bouton qui ouvre la fenêtre ; la
+// fenêtre s'ouvre aussi d'elle-même, une fois par chargement de la page (« Plus tard » la ferme).
+
+const strayCard = (state, out) => {
+  const risky = state.strays.filter(hasContent);
+  return el('article', { class: 'card', 'data-stray': '' },
+    el('div', { class: 'card-head' }, el('strong', {}, t('send.stray.title')), statusPill('error', 'err')),
+    el('p', { class: 'small' }, t('send.stray.body', { n: state.strays.length, list: state.strays.map(s => s.id).join(', '), total: syncColumnIds().size })),
+    risky.length ? message('warn', t('send.stray.filled', { cols: risky.map(s => s.id).join(', ') })) : null,
+    el('div', { class: 'card-actions' }, actionButton(t('send.stray.open'), 'trash', () => removeStrays(state), false, out, { kind: 'btn-primary' })));
+};
+
+const foreignCard = (state, out) => el('article', { class: 'card', 'data-foreign': '' },
+  el('div', { class: 'card-head' }, el('strong', {}, t('send.foreign.title')), statusPill('error', 'err')),
+  el('p', { class: 'small' }, t('send.foreign.body')),
+  el('div', { class: 'card-actions' }, actionButton(t('send.foreign.open'), 'edit', renameForeign, false, out, { kind: 'btn-primary' })));
+
+// Un envoi bloqué par l'une des colonnes : la fenêtre vide ensuite la file de Grist (voir strayDialog).
+async function removeStrays(state) {
+  const stuck = state.exports.some(exp => exp.recipients.some(h => columnFault(h.usage, state.syncCols) === 'stray'));
+  if (await strayDialog(state.strays, { stuck })) notice = message('ok', t('send.stray.done', { n: state.strays.length }));
+}
+
+async function renameForeign() {
+  if (await foreignDialog()) notice = message('ok', t('send.foreign.done'));
+}
+
+const asked = new Set();
+function askAboutSync(state) {
+  if (state.ownerOnly || document.querySelector('.scrim')) return;
+  const [kind, open] = state.foreign ? ['foreign', renameForeign] : state.strays.length ? ['stray', () => removeStrays(state)] : [];
+  if (!kind || asked.has(kind)) return;
+  asked.add(kind);
+  open().then(() => renderSource()).catch((e) => { console.error(e); noteError(e); });
+}

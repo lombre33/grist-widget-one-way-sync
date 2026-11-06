@@ -8,6 +8,7 @@ import { VERSION } from '../config.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
 import { wireExchange } from '../exchange.js';
+import { foreignSync } from '../logic/strays.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { createJournal, prepareDest, storeKey, updateJournalNote } from './journals.js';
 import { missingColumns, optionsNote, receivedJournals } from '../logic/received.js';
@@ -62,6 +63,9 @@ async function readInvitation(text) {
   // d'un export d'ici, qu'il remplacerait en coupant ses destinataires, sauf le retour de ce même
   // Échange (nouvelle invitation pour une réception déjà là, voir showRelink).
   const schema = await readSchema();
+  // Le retour de l'Échange est un export d'ici : il a besoin de la table Synchro du widget, que le
+  // widget ne prend pas à quelqu'un d'autre (voir foreignSync).
+  if (foreignSync(schema)) throw new Error('syncTableForeign');
   const local = readSourceNote(schema).exports.some(e => e.id === invitation.export) || (await syncRows(schema)).some(r => r[EXPORT_COL] === invitation.export);
   const again = receivedJournals(schema).some(r => r.note.export === invitation.export && r.note.mode === 'echange' && !r.note.retour);
   if (local && !again) throw new Error('exportTaken');

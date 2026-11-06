@@ -92,6 +92,16 @@ function tidyActions(viewRef, sections, views, pages) {
   return actions;
 }
 
+// Une page du document montre cette table (sections d'une page de la liste, hors ses données brutes) :
+// le widget lui-même, posé sur la table Synchro qu'une personne avait faite à la main (voir
+// foreignSync). L'effacer ferait disparaître sa page, et le widget avec elle.
+export async function isOnPage(tableId) {
+  const [tables, sections, pages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Pages')]);
+  const table = tables.find(tb => tb.tableId === tableId);
+  const listed = new Set(pages.map(p => p.viewRef));
+  return Boolean(table) && sections.some(s => s.tableRef === table.id && listed.has(s.parentId));
+}
+
 // Efface des tables techniques et les pages qu'elles laissent vides (dont celles de leurs
 // formulaires), puis range les pages où il reste des sections.
 export async function removeTechnicalTables(tableIds) {

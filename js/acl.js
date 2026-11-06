@@ -3,7 +3,8 @@
 // document (donc le widget). Elles ne sont donc réécrites que si elles diffèrent, et jamais pendant
 // un assistant (un rechargement le fermerait). Rend vrai si elles ont changé : l'onglet attend
 // alors le rechargement (voir reloading).
-import { KEY_COL, SYNC_TABLE, isUserTable } from './logic/common.js';
+import { KEY_COL, isUserTable } from './logic/common.js';
+import { ownsSync } from './logic/strays.js';
 import { LOCK_MEMO, aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules, publicAclRules } from './logic/acl.js';
 import { apply, fetchRows, readSchema } from './grist.js';
 import { message } from './ui.js';
@@ -33,7 +34,7 @@ export async function syncRules({ publicIds = null, open = null, release = [] } 
     asked: destsOf(lockable.filter(r => r.note.verrou)), current: current.filter(r => r.memo === LOCK_MEMO).map(r => r.tableId),
     received: new Set(destsOf(lockable)), released: release,
   });
-  const wanted = [...publicPart, ...(schema.has(SYNC_TABLE) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals), ...lockAclRules(locked)];
+  const wanted = [...publicPart, ...(ownsSync(schema) ? ownerAclRules(exchanges) : []), ...journalAclRules(journals), ...lockAclRules(locked)];
   const actions = aclActions(resources, rules, wanted, id => !schema.has(id));
   if (!actions.length) {
     // Règles en place : chaque journal réservé le note, pour l'onglet d'un éditeur (qui ne lit pas

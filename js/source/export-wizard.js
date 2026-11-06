@@ -1,7 +1,8 @@
 // SOURCE : assistant d'export, en trois étapes (Tables, Colonnes, Nom). Crée l'export, ou le
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
-import { SYNC_TABLE, isUserTable, nowS, randomHex } from '../logic/common.js';
+import { isUserTable, nowS, randomHex } from '../logic/common.js';
+import { ownsSync } from '../logic/strays.js';
 import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../logic/exports.js';
 import { linkTables, linkable } from '../logic/links.js';
 import { hiddenTables } from '../logic/acl.js';
@@ -120,7 +121,7 @@ async function showColumns(ctx) {
   const report = el('div', { class: 'report' });
   const blocks = ctx.chosen.map(table => columnsBlock(ctx, schema, table, relays.includes(table)));
   const adds = ctx.chosen.flatMap(table => missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
-  if (!schema.has(SYNC_TABLE)) adds.push(t('send.check.sync'));
+  if (!ownsSync(schema)) adds.push(t('send.check.sync'));
   const removed = ctx.exp ? ctx.exp.tables.map(tb => tb.table).filter(table => !ctx.chosen.includes(table)) : [];
   const next = () => {
     if (ctx.chosen.some(table => !(ctx.selected.get(table) || []).length)) throw new Error('noColumn');

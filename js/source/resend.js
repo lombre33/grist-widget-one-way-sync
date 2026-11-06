@@ -3,6 +3,7 @@
 // les lignes voulues dans Synchro_Renvoi et Grist recalcule le lot.
 import { EXPORT_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, RESEND_ALL, RESEND_COL, STATE_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, chunk, nowS, randomHex, sleep } from '../logic/common.js';
 import { hookStatus, swapExports, tooLarge } from '../logic/exports.js';
+import { ownsSync } from '../logic/strays.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
   RESEND_CHUNK, addSpent, budgetWait, chargeBusy, chunkMark, dueRows, listRequest, parseCharge, resendValue, rowsSince, trackState,
@@ -241,7 +242,7 @@ async function lightRows() {
   if (Date.now() - noSyncAt < HIDDEN_MS) return null;
   const rows = await selectRows(SYNC_TABLE, [EXPORT_COL, TABLE_COL, TYPE_COL, RESEND_COL, STATE_COL]);
   if (rows) return rows.filter(r => !isCharge(r));
-  if ((await readSchema()).has(SYNC_TABLE)) return syncRows();
+  if (ownsSync(await readSchema())) return syncRows();
   noSyncAt = Date.now();
   return null;
 }

@@ -33,13 +33,14 @@ courriel.
 
 ## 0. Installer le widget (dans chaque document)
 
-**Ajouter**, **Ajouter une page**, vue **Personnalisée** (n'importe quelle table), **Ajouter une
+**Ajouter**, **Ajouter une page**, vue **Personnalisée** (une table qui existe déjà, par exemple Table1, jamais une table qu'on crée et qu'on nomme Synchro), **Ajouter une
 page** ; choisir Synchro Grist dans la galerie de l'instance s'il y est, sinon **URL
 personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
 ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
 **Ajouter un widget** (Grist peut demander de confirmer) ; dans le panneau de droite, accepter
 l'**accès complet**. Renommer la
-page, par exemple « Synchro ». Les tables techniques n'ont pas de page : elles sont dans « Données
+page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro : c'est le nom de la table
+technique que le widget crée seul. Les tables techniques n'ont pas de page : elles sont dans « Données
 source ».
 
 ![Ajouter une page](images/00a-installer-ajouter.png)
@@ -478,7 +479,12 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |
+| Un envoi est en erreur, « Invalid column « A » » | Une colonne qui n'est pas au widget (A, B, C d'une table faite à la main) est dans la table Synchro de la SOURCE : chaque envoi l'emporte, le journal la refuse | La carte **Colonnes en trop dans la table Synchro** les liste ; **Retirer** après sauvegarde de ce qu'elles contiennent, puis le widget débloque la file |
+| « Une table nommée Synchro existe déjà » | Une table de ce nom n'est pas celle du widget, qui ne la reprend pas | Accepter de la renommer (elle garde son contenu) ; le widget crée ensuite la sienne |
 | « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
+
+![Colonnes en trop dans Synchro](images/31-source-colonnes-en-trop.png)
+![Une table Synchro existe déjà](images/32-source-table-existante.png)

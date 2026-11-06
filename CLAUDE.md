@@ -27,9 +27,13 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 - Publication : l'Alpha est en ligne sur grist-factory (V0.5.8 transmise le 16 octobre). Seule la
   branche `alpha` y part : un bug de l'Alpha s'y corrige (puis `main` le reprend). Depuis le
   16 octobre (Antoine : « si les correctifs sont prêts pour l'alpha ils peuvent être publiés
-  directement sur le dépôt live »), un correctif prêt et testé sur `alpha` est transmis pour
+  directement sur le dépôt live »), un correctif prêt et testé sur `alpha` était transmis pour
   publication sans lui redemander (le commit au fil coordinateur du projet). **`main` (V0.6 et
   plus) n'y part pas sans demande explicite d'Antoine.**
+  **Depuis le 6 novembre, l'Alpha est gelée** (Antoine : « on ne touche pas au code de l'alpha et au
+  dépôt public. On corrige sur dev. On pushera une v beta bientôt ») : rien n'est commité sur `alpha`,
+  rien n'est transmis à grist-factory ; cela remplace la règle du 16 octobre. Tout correctif va sur
+  `main` et part avec la prochaine Bêta.
 - Avant de coder lourdement, se mettre d'accord avec Antoine sur le parcours et les
   fonctionnalités (proposition en cours : `docs/03-proposition-ux-et-droits.md`).
 
@@ -274,7 +278,51 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.1 (21 octobre 2026)
+## État : V0.12.2 (6 novembre 2026)
+
+V0.12.2 (Antoine, 6 novembre : un utilisateur de l'Alpha 0.5.9 avait des envois bloqués par
+`400 {"error":"Invalid column \"A\""}` ; Antoine : « on ne touche pas au code de l'alpha et au dépôt
+public, on corrige sur dev »). **Cause** : une table nommée `Synchro` faite à la main (pour y poser le
+widget, colonnes A, B, C de Grist) était reprise par le widget, qui n'y retirait rien : le webhook
+envoie la ligne entière de `Synchro` et le journal de la CIBLE refuse toute clé qui n'est pas une de ses
+colonnes (et ne nomme que la première). Rapport : `/mnt/project-files/notes/erreur-colonne-A/pistes.md`.
+Choix d'Antoine (carte de décision) : garder le nom `Synchro` et poser un garde-fou, pas de nom
+distinctif (le nom est en dur dans les formules, webhooks, règles d'accès, lien public et codes).
+- **Logique pure** `js/logic/strays.js` (testée, `tests/unit/strays.test.mjs`) : `ownsSync` (la table
+  `Synchro` est celle du widget quand elle a `Synchro_Export`), `foreignSync` (une table de ce nom sans
+  cette colonne : jamais reprise), `strayColumns` (colonnes de `Synchro` hors `syncColumns`, `manualSort`
+  et `gristHelper_*`, avec le nombre de cellules remplies, 0 ou faux ou liste vide ne comptent pas, et la
+  formule), `refusedColumn` / `columnFault` (colonne nommée par le refus : `stray` encore dans Synchro,
+  `gone` déjà retirée mais gardée par la file, `''` colonne du widget qui manque au journal),
+  `freeTableName` (`Table_Synchro`, pas `Synchro_…` que `isUserTable` écarterait).
+- **Colonnes en trop** (onglet Envoyer, propriétaires) : carte « Colonnes en trop dans la table
+  Synchro » (`data-stray`) et fenêtre qui s'ouvre seule une fois par chargement (`askAboutSync`,
+  « Plus tard » ne retire rien) : liste chaque colonne (vide, N cellules remplies, formule), demande de
+  sauvegarder avant et une case « J'ai sauvegardé » quand il y a quelque chose à perdre
+  (`js/source/strays.js`). `removeStrayColumns` ne retire que ce que `strayColumns` voit encore. Un envoi
+  bloqué par l'une d'elles : la file de Grist garde ses envois (qui portent la colonne), donc
+  `clearAndMark` après le retrait, puis le rattrapage renvoie. Le texte ne dit pas à la personne qu'elle a
+  fait une faute (Grist met A, B, C à toute table neuve).
+- **Erreur d'un destinataire** : `errorText` (`source/tab.js`) dit « colonne X de la table Synchro, rien à
+  faire de son côté » (`stray`) ou « la file garde d'anciens envois » (`gone`) ; le texte d'avant
+  (« ouvrez la page de son widget ») ne reste que pour une colonne du widget qui manque au journal, et il
+  nomme la colonne.
+- **Table `Synchro` qui n'est pas celle du widget** : `ensureSyncTable`, `syncRows`, `saveExport`, les
+  règles d'accès (`syncRules`), le diagnostic, le premier écran et l'assistant d'export testent
+  `ownsSync`. `saveExport` lève `syncTableForeign` ; la CIBLE d'un Échange le refuse dès la lecture de
+  l'invitation (`readInvitation`). L'onglet Envoyer montre la carte « Une table nommée Synchro existe
+  déjà » (`data-foreign`), grise « Nouvel export », et propose de la renommer (`RenameTable` : colonnes,
+  valeurs et formules restent, nom proposé `Table_Synchro`, modifiable) ; le widget crée ensuite la sienne.
+- Tutoriel (`i18n/tutorial.json`, `docs/04`) : « Renommer la page, par exemple « Synchro Grist » », ne pas
+  créer soi-même de table Synchro ; deux lignes de dépannage.
+- Testé de bout en bout (`ONLY_STRAYS=1`, `straySteps`, Grist 1.7.22) : envoi refusé, fenêtre, « Plus
+  tard », retrait, file débloquée et envois repris ; colonne vide sans case ; table d'une autre personne
+  (sa page est celle du widget) jamais reprise, renommée, le widget crée la sienne.
+- **Risque connu, non traité** : un widget posé sur la table `Synchro` elle-même (page sur cette table)
+  perd sa page quand le dernier export est supprimé (`removeTechnicalTables`). Les nouveaux documents ne
+  s'y mettent plus (la table d'une autre personne est renommée).
+
+V0.12.1 (état précédent, 21 octobre 2026) :
 
 V0.12.1 (Antoine, 21 octobre : « oui faire les corrections necessaire », après la liste des limites
 non corrigées de la 0.12) :

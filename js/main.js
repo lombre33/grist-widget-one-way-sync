@@ -3,7 +3,8 @@
 import { GRIST_ORIGINS, VERSION, widgetUrl } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
-import { SYNC_TABLE, sleep } from './logic/common.js';
+import { sleep } from './logic/common.js';
+import { ownsSync } from './logic/strays.js';
 import { readSchema } from './grist.js';
 import { readSourceNote } from './source/synchro.js';
 import { receivedJournals } from './logic/received.js';
@@ -182,7 +183,7 @@ async function openFirstScreen() {
   ready = true;
   if (picked) await select(picked);
   else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
-  else if (schema.has(SYNC_TABLE)) await select('send');
+  else if (ownsSync(schema)) await select('send');
   else showHome();
   if (journals.length) consolidateAll();
 }

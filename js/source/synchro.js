@@ -11,16 +11,17 @@ import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormul
 import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } from '../logic/exports.js';
 import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
+import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
 import { addEvent } from '../logic/notes.js';
 import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../grist.js';
-import { dropPages, removeTechnicalTables } from '../pages.js';
+import { dropPages, isOnPage, removeTechnicalTables } from '../pages.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
 
 // Lignes de Synchro des exports ([] sans la table), sans la ligne 'charge'. `schema` : instantané
 // déjà lu, s'il y en a un.
 export const isCharge = row => row[TYPE_COL] === KIND.load;
-export const syncRows = async (schema = null) => ((schema || await readSchema()).has(SYNC_TABLE) ? (await fetchRows(SYNC_TABLE)).filter(r => !isCharge(r)) : []);
+export const syncRows = async (schema = null) => (ownsSync(schema || await readSchema()) ? (await fetchRows(SYNC_TABLE)).filter(r => !isCharge(r)) : []);
 
 // Webhooks du document et leurs conditions (propriétaires seulement) ; `of(id)` : les
 // destinataires d'un export (voir hooksOf).
@@ -82,7 +83,7 @@ async function refreshFormulas(schema, rows) {
 // vrai si quelque chose a changé.
 export async function ensureSyncTable(schema = null, rows = null) {
   schema ||= await readSchema();
-  if (!schema.has(SYNC_TABLE)) return false;
+  if (!ownsSync(schema)) return false;
   const have = new Set(schema.columns(SYNC_TABLE).map(c => c.colId));
   const missing = syncColumns([]).filter(c => !have.has(c.id));
   const sorted = have.has(SORT_COL);
@@ -98,6 +99,25 @@ export async function ensureSyncTable(schema = null, rows = null) {
   if (depsChanged) await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
   const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
   return missing.length > 0 || sorted || depsChanged || formulasChanged;
+}
+
+// Retire de Synchro des colonnes qui ne sont pas au widget (voir strayColumns) ; `ids` : leurs
+// noms. Seules celles qui sont encore là et que le widget ne gère pas partent : un nom de colonne
+// du widget, ou déjà retiré par un autre onglet, est laissé.
+export async function removeStrayColumns(ids) {
+  const schema = await readSchema();
+  const stray = new Set(strayColumns(schema.columns(SYNC_TABLE) || []).map(c => c.id));
+  await apply(ids.filter(id => stray.has(id)).map(id => ['RemoveColumn', SYNC_TABLE, id]));
+}
+
+// Rend son nom à Synchro : la table de ce nom qui n'est pas celle du widget (voir foreignSync) est
+// renommée `name`. Grist garde ses colonnes, ses valeurs et ses formules (les formules et les règles
+// qui la nomment suivent), et le widget crée alors la sienne au premier export.
+export async function renameForeignSync(name) {
+  const schema = await readSchema();
+  if (!foreignSync(schema)) return;
+  if (schema.resolve(name)) throw new Error('tableNameTaken');
+  await apply([['RenameTable', SYNC_TABLE, name]]);
 }
 
 // Listes de choix et formats changés dans les tables des exports (voir optionsActions). Rend vrai
@@ -138,7 +158,10 @@ export async function refreshMajLe(schema = null, rows = null) {
 // Synchro au premier export. Rend les tables dont les lignes sont à envoyer (nouvelles ou aux
 // colonnes changées). `swap` : export en Échange (voir exportRowsActions).
 export async function saveExport(exportId, tables, { isPublic = false, swap = false } = {}) {
-  if (!(await readSchema()).has(SYNC_TABLE)) {
+  const schema = await readSchema();
+  // Une table nommée Synchro qui n'est pas la nôtre n'est pas reprise (voir foreignSync).
+  if (foreignSync(schema)) throw new Error('syncTableForeign');
+  if (!schema.has(SYNC_TABLE)) {
     await apply([['AddTable', SYNC_TABLE, syncColumns(tables.map(tb => tb.table))]]);
     await dropPages([SYNC_TABLE]);
   }
@@ -158,7 +181,8 @@ export async function saveExport(exportId, tables, { isPublic = false, swap = fa
 export async function removeExport(exportId) {
   const rows = await syncRows();
   const left = rows.filter(r => r[EXPORT_COL] !== exportId);
-  if (!left.length) {
+  // La table disparaît avec le dernier export, sauf si une page la montre (le widget posé sur elle).
+  if (!left.length && !(await isOnPage(SYNC_TABLE))) {
     await removeTechnicalTables([SYNC_TABLE]);
     return;
   }

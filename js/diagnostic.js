@@ -1,6 +1,7 @@
 // Diagnostic à copier (Réglages) : relit le document et l'état des onglets, puis le met en texte
 // (choix de ce qui en fait partie et forme : logic/diagnostic.js).
 import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RESEND_COL, nowS } from './logic/common.js';
+import { ownsSync } from './logic/strays.js';
 import { diagnosticText, exportFacts, journalFacts } from './logic/diagnostic.js';
 import { conditionExport, exportDrift, exportTables, hooksOf } from './logic/exports.js';
 import { receivedJournals, receivedKey } from './logic/received.js';
@@ -12,7 +13,7 @@ import { VERSION, servedFrom } from './config.js';
 import { recentErrors } from './ui.js';
 
 async function sourceFacts(schema) {
-  if (!schema.has(SYNC_TABLE)) return null;
+  if (!ownsSync(schema)) return null;
   const owner = await isOwner().catch(() => false);
   const [hooks, conditions] = owner ? await Promise.all([listWebhooks(), webhookConditions()]) : [[], new Map()];
   const all = await fetchRows(SYNC_TABLE);

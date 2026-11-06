@@ -834,8 +834,121 @@ try {
     assert.equal((await records(dst.doc, '_grist_Attachments')).length, 3, 'le premier destinataire ne reçoit rien de plus');
     step('Pièces jointes : un nouveau destinataire reçoit tous les fichiers');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // --- Table Synchro remise en état. Cas vu avec l'Alpha 0.5.9 : une table Synchro faite à la main (colonnes A, B et C
+  // de Grist) reprise par le widget ; chaque envoi emportait A, le journal du destinataire le refusait (« Invalid column »)
+  // et la file se bloquait. D'abord une table du widget qui porte des colonnes en trop (envoi bloqué, carte, fenêtre qui
+  // dit ce que les colonnes contiennent, file débloquée ensuite), puis une table Synchro qui n'est pas la sienne (jamais
+  // reprise, renommée avec l'accord de la personne).
+  async function straySteps() {
+    const src = await fichesDoc('Colonnes en trop SOURCE');
+    const dst = await newDocWithWidget('Colonnes en trop CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.'), { url: src.url });
+    await openWidget(dst.url);
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    const syncColumns = async (doc) => {
+      const parent = await tableRef(doc, 'Synchro');
+      return (await records(doc, '_grist_Tables_column')).filter(c => c.parentId === parent && c.colId !== 'manualSort').map(c => c.colId);
+    };
+    const WIDGET_COLUMNS = ['Sync_Etat', 'Sync_Par', 'Synchro_Colonnes', 'Synchro_Export', 'Synchro_Ids', 'Synchro_Lot', 'Synchro_Renvoi', 'Synchro_Table', 'Synchro_Type'];
+    assert.deepEqual((await syncColumns(src.doc)).sort(), WIDGET_COLUMNS, 'neuf colonnes à la création');
+    // Trois colonnes ajoutées à la main (A, B, C), B avec une valeur, puis un changement : l'envoi emporte A, refusé.
+    const lot = (await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
+    await applyActions(src.doc, [['AddColumn', 'Synchro', 'A', { type: 'Any' }], ['AddColumn', 'Synchro', 'B', { type: 'Text' }], ['AddColumn', 'Synchro', 'C', { type: 'Any' }]]);
+    await applyActions(src.doc, [['UpdateRecord', 'Synchro', lot.id, { B: 'à garder' }], ['UpdateRecord', 'Fiches', 1, { Nom: 'Anna2' }]]);
+    const hooks = async () => (await api('GET', `/docs/${src.doc}/webhooks`)).webhooks;
+    await waitFor(async () => (await hooks()).some(h => /Invalid column/.test((h.usage || {}).lastErrorMessage || '')), 'envoi refusé par le journal (Invalid column)', 60000);
+    // L'onglet Envoyer : la carte, et la fenêtre qui s'ouvre d'elle-même.
+    await openWidget(src.url);
+    await dialog().getByText('Retirer les colonnes en trop ?').waitFor({ timeout: 30000 });
+    await dialog().getByText(/Ces colonnes seront retirées de la table Synchro/).waitFor();
+    for (const line of [/^A \(Quelconque\)\s:\svide$/, /^B \(Texte\)\s:\s1 cellule remplie$/, /^C \(Quelconque\)\s:\svide$/]) await dialog().locator('.stray-list li').filter({ hasText: line }).waitFor();
+    await dialog().getByText(/Cette colonne contient des valeurs ou une formule \(B\).*sauvegardez-la/).waitFor();
+    await dialog().getByText(/Des envois sont bloqués à cause de ces colonnes/).waitFor();
+    assert.ok(await dialogButton('Retirer').isDisabled(), 'des valeurs à perdre : la case « sauvegardé » d\'abord');
+    await shot('31-source-colonnes-en-trop');
+    await dialogButton('Plus tard').click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.deepEqual((await syncColumns(src.doc)).sort(), [...WIDGET_COLUMNS, 'A', 'B', 'C'].sort(), '« Plus tard » ne retire rien');
+    const card = widget().locator('.card[data-stray]');
+    await card.getByText(/Le widget y trouve 3 colonnes de plus\s:\sA, B, C/).waitFor();
+    await card.getByText(/Contient des valeurs ou une formule\s:\sB/).waitFor();
+    await widget().getByText(/à cause de la colonne «\sA\s» de la table Synchro de ce document/).waitFor({ timeout: 30000 });
+    assert.equal(await widget().getByText(/ouvrir la page de son widget/).count(), 0, 'le texte ne renvoie plus vers la CIBLE');
+    // Retirer, après avoir dit qu'on a sauvegardé : les trois colonnes partent, la file est vidée, tout est renvoyé.
+    await card.getByRole('button', { name: 'Voir et retirer', exact: true }).click();
+    await dialog().getByRole('checkbox', { name: /J’ai sauvegardé/ }).check();
+    await dialogButton('Retirer').click();
+    await dialog().waitFor({ state: 'detached' });
+    await widget().getByText('Colonnes retirées de la table Synchro.').waitFor();
+    assert.deepEqual((await syncColumns(src.doc)).sort(), WIDGET_COLUMNS, 'seules les colonnes du widget restent');
+    assert.equal(await widget().locator('.card[data-stray]').count(), 0, 'la carte disparaît');
+    await openWidget(dst.url);
+    await waitFor(async () => (await fiches()).Anna2, 'envois repris après le retrait (Anna2 reçue)', 120000);
+    assert.equal((await records(src.doc, 'Fiches')).length, 3);
+    // Une colonne vide ajoutée plus tard : la fenêtre le dit, et n'exige rien.
+    await applyActions(src.doc, [['AddColumn', 'Synchro', 'D', { type: 'Any' }]]);
+    await openWidget(src.url);
+    await dialog().getByText(/Cette colonne sera retirée de la table Synchro/).waitFor({ timeout: 30000 });
+    await dialog().getByText('Elle est vide : rien ne sera perdu.').waitFor();
+    assert.equal(await dialog().getByRole('checkbox').count(), 0, 'rien à sauvegarder : pas de case');
+    assert.equal(await dialog().getByText(/Des envois sont bloqués/).count(), 0, 'aucun envoi bloqué : la file n\'est pas touchée');
+    await dialogButton('Retirer').click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.deepEqual((await syncColumns(src.doc)).sort(), WIDGET_COLUMNS);
+    step('Colonnes en trop dans Synchro : envoi refusé (« Invalid column »), carte et fenêtre (colonnes, valeurs, sauvegarde demandée), « Plus tard » ne retire rien, retrait puis file débloquée et envois repris ; colonne vide sans case');
+
+    // Une table Synchro qui n'est pas celle du widget : sa page est celle du widget (Table1 renommée Synchro, A, B, C).
+    const mine = await newDocWithWidget('Table Synchro d\'une autre personne', [
+      ['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }]], ['AddRecord', 'Fiches', null, { Nom: 'Anna' }],
+    ]);
+    await applyActions(mine.doc, [['RenameTable', 'Table1', 'Synchro']]);
+    await openWidget(mine.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await dialog().getByText('Une table nommée Synchro existe déjà').waitFor({ timeout: 30000 });
+    await dialog().getByText(/Votre table Synchro\s:\s3 colonnes \(A, B, C\), 0 ligne/).waitFor();
+    assert.equal(await dialog().getByLabel('Nouveau nom de votre table').inputValue(), 'Table_Synchro');
+    await shot('32-source-table-existante');
+    await dialogButton('Plus tard').click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.deepEqual((await syncColumns(mine.doc)).sort(), ['A', 'B', 'C'], 'la table d\'une autre personne n\'est pas reprise : aucune colonne ajoutée');
+    assert.ok(await button('Nouvel export').isDisabled(), 'pas d\'export tant que le nom n\'est pas libre');
+    await widget().locator('.card[data-foreign]').getByRole('button', { name: 'Renommer la table', exact: true }).click();
+    await dialog().getByLabel('Nouveau nom de votre table').fill('Ma table');
+    await dialogButton('Renommer ma table').click();
+    await dialog().getByText(/lettres sans accent/).waitFor();
+    await dialog().getByLabel('Nouveau nom de votre table').fill('Table_Synchro');
+    await dialogButton('Renommer ma table').click();
+    await dialog().waitFor({ state: 'detached' });
+    await widget().getByText(/Table renommée/).waitFor();
+    const names = (await records(mine.doc, '_grist_Tables')).map(tb => tb.tableId);
+    assert.deepEqual([names.includes('Synchro'), names.includes('Table_Synchro')], [false, true], 'la table est renommée');
+    assert.equal((await api('GET', `/docs/${mine.doc}/tables/Table_Synchro/columns`)).columns.map(c => c.id).join(), 'A,B,C', 'elle garde ses colonnes');
+    await newExport('Fiches', 'Annuaire');
+    await widget().getByText('Export « Annuaire » créé.').waitFor();
+    assert.deepEqual((await syncColumns(mine.doc)).sort(), WIDGET_COLUMNS, 'le widget crée sa propre table Synchro');
+    assert.equal((await api('GET', `/docs/${mine.doc}/tables/Table_Synchro/columns`)).columns.map(c => c.id).join(), 'A,B,C', 'celle de l\'autre personne n\'a pas bougé');
+    step('Table Synchro d\'une autre personne : jamais reprise, fenêtre qui propose de la renommer (nom invalide refusé), le widget crée ensuite la sienne');
+
+    // Installations d'avant : le widget est posé sur la table Synchro elle-même. Supprimer le dernier export ne doit
+    // pas effacer la table, donc la page du widget.
+    const section = (await records(mine.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
+    await applyActions(mine.doc, [['UpdateRecord', '_grist_Views_section', section.id, { tableRef: await tableRef(mine.doc, 'Synchro') }]]);
+    await openWidget(mine.url);
+    await widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await button('Supprimer').click();
+    await dialogButton('Supprimer').click();
+    await widget().getByText(/^Aucun export\./).waitFor({ timeout: 30000 });
+    assert.ok((await records(mine.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'la table sur laquelle est posé le widget reste');
+    assert.equal((await records(mine.doc, 'Synchro')).filter(r => r.Synchro_Type !== 'charge').length, 0, 'sans ligne d\'export');
+    await newExport('Fiches', 'Autre export');
+    await widget().getByText('Export « Autre export » créé.').waitFor();
+    step('Widget posé sur la table Synchro : supprimer le dernier export garde la table et la page, un nouvel export repart');
+  }
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -1696,6 +1809,7 @@ try {
   await optionsSteps();
   await choicesSteps();
   await linksSteps();
+  await straySteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');
