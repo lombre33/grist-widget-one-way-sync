@@ -143,8 +143,10 @@ Exchange). **No dependencies**: no library, no build step, no third-party servic
    instance's **gallery** if it is there; otherwise **Custom URL** and the official address,
    `https://grist-factory.github.io/grist-widget-syncPlus/`, never an address received by email.
    Then **Add Widget**.
-2. In the right panel, grant **full access**: the widget reads and writes the document (see
-   below).
+2. In Grist's right panel, under **Access level**, click **Accept** (or pick **Full document
+   access**): the widget reads and writes the document (see below). Without it, the widget stays
+   stuck on a message that shows where to set it
+   ([screenshots](docs/04-tutoriel.md#0-installer-le-widget-dans-chaque-document), in French).
 
 The widget works with `grist.numerique.gouv.fr` and `docs.getgrist.com`. For another instance,
 add its address to `js/config.js` and to the CSP in `index.html`. To host your own copy

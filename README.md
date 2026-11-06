@@ -148,8 +148,10 @@ en Échange). **Aucune dépendance** : ni bibliothèque, ni étape de build, ni 
    Synchro Grist dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
    l'adresse officielle, `https://grist-factory.github.io/grist-widget-syncPlus/`, jamais une
    adresse reçue par courriel. Puis **Ajouter un widget**.
-2. Dans le panneau de droite, accepter l'**accès complet** : le widget lit et écrit le document
-   (voir plus bas).
+2. Dans le panneau de droite de Grist, section **Niveau d'accès**, cliquer **Accepter** (ou choisir
+   **Accès complet au document**) : le widget lit et écrit le document (voir plus bas). Sans cet
+   accès, il reste bloqué sur un message qui montre où le régler
+   ([captures](docs/04-tutoriel.md#0-installer-le-widget-dans-chaque-document)).
 
 Le widget fonctionne avec `grist.numerique.gouv.fr` et `docs.getgrist.com`. Pour une autre
 instance, ajouter son adresse dans `js/config.js` et dans la CSP de `index.html`. Pour héberger sa

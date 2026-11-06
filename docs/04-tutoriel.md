@@ -37,16 +37,30 @@ courriel.
 page** ; choisir Synchro Grist dans la galerie de l'instance s'il y est, sinon **URL
 personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
 ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
-**Ajouter un widget** (Grist peut demander de confirmer) ; dans le panneau de droite, accepter
-l'**accès complet**. Renommer la
-page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro : c'est le nom de la table
-technique que le widget crée seul. Les tables techniques n'ont pas de page : elles sont dans « Données
-source ».
+**Ajouter un widget** (Grist peut demander de confirmer).
 
 ![Ajouter une page](images/00a-installer-ajouter.png)
 ![Vue Personnalisée](images/00b-installer-page.png)
 ![URL personnalisée](images/00c-installer-url.png)
+
+**Accepter l'accès complet.** Dans le **panneau de droite** de Grist (icône tout en haut à droite
+si le panneau est fermé), cliquer sur le widget, puis, dans la section **Niveau d'accès**,
+cliquer **Accepter**, ou choisir **Accès complet au document** dans la liste. Sans cet accès, le
+widget reste bloqué sur un message, avec ces mêmes images.
+
 ![Accès complet](images/00d-installer-acces.png)
+![Niveau d'accès : Accepter](images/00e-installer-acces-accepter.png)
+![Niveau d'accès : la liste](images/00f-installer-acces-liste.png)
+
+**Pourquoi l'accès complet ?** Le widget lit la structure du document (tables et colonnes, pour
+proposer exports et destinations), crée sa table technique et ses colonnes de suivi, écrit dans les
+tables de destination et, pour un propriétaire, gère les webhooks et les règles d'accès qu'il pose.
+Un accès en lecture ne le permet pas (voir [Accès au document](../README.md#accès-au-document)). Il
+ne parle qu'à l'instance Grist, jamais à un autre serveur.
+
+Renommer la page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro :
+c'est le nom de la table technique que le widget crée seul. Les tables techniques n'ont pas de
+page : elles sont dans « Données source ».
 
 ![Le widget à l'ouverture](images/01-accueil.png)
 
@@ -484,6 +498,7 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
+| Le widget affiche « besoin de l'accès complet » | Grist ne lui a pas accordé l'accès complet | Panneau de droite de Grist, clic sur le widget, **Niveau d'accès** : **Accepter** ou **Accès complet au document** |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 
 ![Colonnes en trop dans Synchro](images/31-source-colonnes-en-trop.png)

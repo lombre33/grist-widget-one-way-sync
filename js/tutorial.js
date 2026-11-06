@@ -54,3 +54,13 @@ export function stepHelp(ids) {
   const chosen = SECTIONS.filter(s => ids.includes(s.id));
   return el('details', { class: 'guide tuto-step' }, el('summary', {}, t('tuto.step')), chosen.map(s => section(s)));
 }
+
+// Les deux captures du réglage d'accès de Grist (panneau de droite, section « Niveau d'accès »).
+const ACCESS_SHOTS = [['start.access.accept', '00e-installer-acces-accepter'], ['start.access.list', '00f-installer-acces-liste']];
+
+// Ce que montre le widget tant qu'il n'a pas l'accès complet : où le régler dans Grist, avec les
+// deux captures (la même aide que l'installation du tutoriel).
+export function accessHelp() {
+  return el('div', { class: 'access-help' }, el('p', { class: 'small' }, t('start.access.where')),
+    el('div', { class: 'access-shots' }, ACCESS_SHOTS.map(([key, name]) => el('figure', { class: 'help-figure' }, el('figcaption', {}, t(key)), figure(name)))));
+}

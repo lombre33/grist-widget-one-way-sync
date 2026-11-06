@@ -2,7 +2,8 @@
 # Lance un Grist jetable (image officielle) pour le test d'intégration, crée un utilisateur de
 # test, sa clé d'API et un site d'équipe (seul un site d'équipe accepte l'écriture anonyme par
 # formulaire). Écrit l'adresse, la clé et l'équipe dans tests/e2e/.env.json.
-# Usage : tests/e2e/start-grist.sh   (Docker requis)
+# Usage : tests/e2e/start-grist.sh   (Docker requis ; GRIST_IMAGE=mirror.gcr.io/gristlabs/grist:latest
+# si Docker Hub limite les téléchargements)
 set -euo pipefail
 PORT=8484
 CONTAINER=grist-sync-e2e
@@ -15,7 +16,7 @@ docker run -d --name "$CONTAINER" -p "$PORT:8484" \
   -e GRIST_IN_SERVICE=true -e GRIST_DEFAULT_EMAIL="$EMAIL" -e GRIST_TEST_LOGIN=1 -e GRIST_ORG_IN_PATH=true \
   -e APP_HOME_URL="http://localhost:$PORT" \
   -e ALLOWED_WEBHOOK_DOMAINS="localhost:$PORT" \
-  gristlabs/grist:latest >/dev/null
+  ${GRIST_IMAGE:-gristlabs/grist:latest} >/dev/null
 
 JAR="$(mktemp)"
 KEY=""

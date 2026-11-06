@@ -78,7 +78,8 @@ async function pageColumns(doc, tableId) {
   return [...new Set((await records(doc, '_grist_Views_section_field')).filter(f => sections.has(f.parentId)).map(f => cols.get(f.colRef)))];
 }
 
-async function newDocWithWidget(name, setup) {
+// `access` : niveau déjà accordé au widget ('none' : Grist demande l'accès complet, que le widget réclame).
+async function newDocWithWidget(name, setup, access = 'full') {
   const workspace = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
   const doc = await api('POST', `/workspaces/${workspace}/docs`, { name });
   if (setup) await applyActions(doc, setup);
@@ -86,7 +87,7 @@ async function newDocWithWidget(name, setup) {
   await applyActions(doc, [
     ['UpdateRecord', '_grist_Views', view.viewRef, { name: 'Synchro' }],
     ['UpdateRecord', '_grist_Views_section', view.sectionRef, {
-      parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: WIDGET_URL, access: 'full', renderAfterReady: false }) }),
+      parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: WIDGET_URL, access, renderAfterReady: false }) }),
     }],
   ]);
   return { doc, url: `${TEAM}/doc/${doc}/p/${view.viewRef}` };
@@ -159,6 +160,60 @@ async function installShots() {
   await page.getByRole('button', { name: 'Accepter' }).click();
   await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
   await page.locator('.test-right-opener').click().catch(() => {});
+}
+// Captures du réglage d'accès (docs/images/00e et 00f), que montrent le message de démarrage et le
+// tutoriel : le panneau de droite de Grist (section « Niveau d'accès ») quand le widget demande
+// l'accès complet, puis la liste des niveaux. À l'échelle 2 : ce sont des détails à lire.
+async function accessShots(url) {
+  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1100, height: 700 }, deviceScaleFactor: 2 });
+  const p = await ctx.newPage();
+  await p.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
+  await p.goto(url);
+  await p.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
+  await p.locator('.test-right-opener').click();
+  const accept = p.locator('.test-config-widget-access-accept');
+  await accept.waitFor();
+  await p.waitForTimeout(600);
+  const select = await p.locator('.test-config-widget-access').boundingBox();
+  const prompt = await accept.boundingBox();
+  const top = select.y - 50; // l'intitulé « Niveau d'accès » au-dessus de la liste
+  await p.screenshot({ path: join(ROOT, 'docs/images/00e-installer-acces-accepter.png'),
+    clip: { x: 860, y: top, width: 240, height: prompt.y + prompt.height + 24 - top } });
+  await p.locator('.test-config-widget-access').click();
+  await p.getByText('Accès complet au document', { exact: true }).hover();
+  const menu = await p.locator('.test-select-menu').boundingBox();
+  await p.waitForTimeout(300);
+  await p.screenshot({ path: join(ROOT, 'docs/images/00f-installer-acces-liste.png'),
+    clip: { x: menu.x - 4, y: top, width: 1100 - menu.x + 4, height: menu.y + menu.height + 14 - top } });
+  await ctx.close();
+}
+// Widget sans accès complet : Grist demande l'accès dans son panneau de droite ; le widget dit quoi
+// faire, avec les deux captures. L'accès accordé, par « Accepter » comme par la liste, il démarre.
+async function accessSteps() {
+  const { doc, url } = await newDocWithWidget('Accès', null, 'none');
+  await page.goto(url);
+  const help = widget().locator('.access-help');
+  await help.waitFor({ timeout: 30000 });
+  if (process.env.CAPTURES) await accessShots(url);
+  await widget().getByText('Le widget a besoin de l’accès complet au document', { exact: false }).waitFor();
+  assert.equal(await help.locator('img').count(), 2, 'deux captures du réglage');
+  assert.ok(await help.locator('img').evaluateAll(imgs => Promise.all(imgs.map(i => i.decode().then(() => i.naturalWidth > 0)))).then(all => all.every(Boolean)), 'captures chargées');
+  assert.ok(await widget().locator('[data-tab]').evaluateAll(tabs => tabs.every(tab => tab.disabled)), 'onglets grisés tant que l’accès manque');
+  assert.equal(await widget().getByRole('button', { name: 'Recharger la page' }).count(), 1);
+  await page.locator('.test-right-opener').click();
+  await page.locator('.test-config-widget-access-accept').click();
+  await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
+  step('Accès complet : message et captures sans accès, le widget démarre après « Accepter »');
+  // Accès retiré, puis rendu par la liste « Niveau d'accès ».
+  await page.locator('.test-config-widget-access').click();
+  await page.getByText('Pas d’accès au document', { exact: true }).last().click();
+  await widget().locator('.access-help').waitFor({ timeout: 30000 });
+  await page.locator('.test-config-widget-access').click();
+  await page.getByText('Accès complet au document', { exact: true }).last().click();
+  await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
+  step('Accès complet : le widget démarre aussi après le choix dans la liste');
+  await page.locator('.test-right-opener').click().catch(() => {});
+  return doc;
 }
 // CAPTURES=1 : enregistre les captures du tutoriel (docs/images) au fil du parcours.
 // Captures sans le bandeau du serveur de test ni l'erreur de la galerie de widgets (hors ligne).
@@ -947,8 +1002,8 @@ try {
     await widget().getByText('Export « Autre export » créé.').waitFor();
     step('Widget posé sur la table Synchro : supprimer le dernier export garde la table et la page, un nouvel export repart');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1, ONLY_ACCESS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -957,6 +1012,7 @@ try {
 
   if (process.env.CAPTURES) await installShots();
   if (process.env.INSTALL_ONLY) process.exit(0);
+  await accessSteps();
   // --- Accueil et Tutoriel
   await openWidget(source.url);
   await widget().locator('.guide summary').first().waitFor();

@@ -11,7 +11,7 @@ import { receivedJournals } from './logic/received.js';
 import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
-import { tutorialView } from './tutorial.js';
+import { accessHelp, tutorialView } from './tutorial.js';
 import { refreshSource, renderSource } from './source/tab.js';
 import { startAutoCatchUp } from './source/resend.js';
 import { refreshTarget, renderTarget } from './target/tab.js';
@@ -41,11 +41,11 @@ function showScreen(...nodes) {
   $('main').replaceChildren(...nodes.filter(Boolean));
 }
 
-// Démarrage impossible : ce qu'il faut faire, l'adresse du widget (hors de Grist) ou un bouton
-// pour recharger. Les onglets restent visibles, grisés.
-function showStartProblem(text, { withAddress = false, reload = false } = {}) {
+// Démarrage impossible : ce qu'il faut faire, le réglage d'accès à montrer en images, l'adresse du
+// widget (hors de Grist) ou un bouton pour recharger. Les onglets restent visibles, grisés.
+function showStartProblem(text, { withAddress = false, reload = false, access = false } = {}) {
   for (const button of document.querySelectorAll('[data-tab]')) button.disabled = true;
-  showScreen(message('warn', text), withAddress ? copyField(widgetUrl()) : null,
+  showScreen(message('warn', text), access ? accessHelp() : null, withAddress ? copyField(widgetUrl()) : null,
     reload ? el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, t('start.reload')) : null);
 }
 
@@ -153,7 +153,7 @@ async function start() {
   try {
     await Promise.race([grist.docApi.fetchTable('_grist_Tables'), sleep(START_MS).then(() => { throw new Error('timeout'); })]);
   } catch (e) {
-    return e.message === 'timeout' ? showStartProblem(t('start.slow'), { reload: true }) : showStartProblem(t('start.access'));
+    return showStartProblem(t(e.message === 'timeout' ? 'start.slow' : 'start.access'), { reload: true, access: true });
   }
 
   startAutoConsolidation(refreshTarget);

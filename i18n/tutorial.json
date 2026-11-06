@@ -12,17 +12,19 @@
         "1. Ajouter, puis Ajouter une page.",
         "2. Choisir la vue Personnalisée, avec une table qui existe déjà (par exemple Table1, jamais une table qu’on crée et qu’on nomme Synchro), puis Ajouter une page.",
         "3. Choisir Synchro Grist dans la galerie de widgets de l’instance s’il y figure. Sinon : cliquer « URL personnalisée », coller l’adresse officielle du widget (en bas de cet onglet), jamais une adresse reçue par courriel, puis Ajouter un widget. Grist peut demander de confirmer que vous faites confiance au widget.",
-        "4. Dans le panneau de droite, accepter l’accès complet au document. Renommer la page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro : c’est le nom de la table technique que le widget crée seul. Les tables techniques n’ont pas de page : elles sont dans « Données source »."
+        "4. Accepter l’accès complet au document, dans le panneau de droite de Grist (icône tout en haut à droite si le panneau est fermé) : cliquer sur le widget, puis, dans la section « Niveau d’accès », cliquer « Accepter », ou choisir « Accès complet au document » dans la liste. Sans cet accès, le widget reste bloqué sur un message. Renommer ensuite la page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro : c’est le nom de la table technique que le widget crée seul. Les tables techniques n’ont pas de page : elles sont dans « Données source ».",
+        "Pourquoi l’accès complet ? Le widget lit la structure du document (tables et colonnes, pour proposer exports et destinations), crée sa table technique et ses colonnes de suivi, écrit dans les tables de destination et, pour un propriétaire, gère les webhooks et les règles d’accès qu’il pose. Un accès en lecture ne le permet pas. Il ne parle qu’à l’instance Grist, jamais à un autre serveur."
       ],
       "en": [
         "You need an owner of the SOURCE document and an editor of the TARGET document, on the same Grist instance. Each installs the widget in their document:",
         "1. Add, then Add page.",
         "2. Pick the Custom view, with a table that already exists (for example Table1, never a table you create and name Synchro), then Add page.",
         "3. Pick Synchro Grist in the instance’s widget gallery if it is there. Otherwise: click “Custom URL”, paste the official widget address (at the bottom of this tab), never an address received by email, then Add widget. Grist may ask you to confirm you trust the widget.",
-        "4. In the right panel, accept full access to the document. Rename the page, for example “Grist sync”. Do not create a table named Synchro yourself: that is the name of the technical table the widget creates on its own. Technical tables have no page: they are in “Raw data”."
+        "4. Accept full access to the document, in Grist’s right panel (icon at the very top right if the panel is closed): click the widget, then, in the “Access level” section, click “Accept”, or pick “Full document access” in the list. Without this access, the widget stays stuck on a message. Then rename the page, for example “Grist sync”. Do not create a table named Synchro yourself: that is the name of the technical table the widget creates on its own. Technical tables have no page: they are in “Raw data”.",
+        "Why full access? The widget reads the document’s structure (tables and columns, to offer exports and destinations), creates its technical table and tracking columns, writes to the destination tables and, for an owner, manages the webhooks and access rules it sets. Read access does not allow this. It only talks to the Grist instance, never to another server."
       ]
     },
-    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00d-installer-acces", "01-accueil"]
+    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00d-installer-acces", "00e-installer-acces-accepter", "00f-installer-acces-liste", "01-accueil"]
   },
   {
     "id": "s-tables",
@@ -408,7 +410,8 @@
         "Des lignes ne sont pas arrivées : ouvrir la page du widget dans la SOURCE (un gros changement y finit de partir seul), sinon Tout renvoyer.",
         "Au branchement, « Grist 1.7.11 ou plus récent » : l’instance ne sait pas filtrer un webhook par export.",
         "Envoi en erreur « Invalid column » : la table Synchro de la SOURCE a une colonne qui n’est pas au widget (A, B et C d’une table faite à la main, par exemple). La carte « Colonnes en trop dans la table Synchro » les liste et les retire après votre accord (sauvegardez d’abord ce qu’elles contiennent), puis le widget débloque la file.",
-        "« Une table nommée Synchro existe déjà » : le widget ne reprend pas la table de quelqu’un d’autre. Renommer cette table (le widget le propose, elle garde tout son contenu) : il crée ensuite la sienne."
+        "« Une table nommée Synchro existe déjà » : le widget ne reprend pas la table de quelqu’un d’autre. Renommer cette table (le widget le propose, elle garde tout son contenu) : il crée ensuite la sienne.",
+        "Le widget affiche « besoin de l’accès complet » : ouvrir le panneau de droite de Grist, cliquer sur le widget, puis « Accepter » (ou « Accès complet au document ») dans « Niveau d’accès »."
       ],
       "en": [
         "Nothing reaches the TARGET table: open the widget page in the TARGET, versions were waiting in the journal.",
@@ -417,7 +420,8 @@
         "Rows did not arrive: open the widget page in the SOURCE (a big change finishes leaving there on its own), otherwise Resend all.",
         "On connecting, “Grist 1.7.11 or later”: the instance cannot filter a webhook by export.",
         "Delivery fails with “Invalid column”: the SOURCE’s Synchro table has a column that does not belong to the widget (A, B and C of a hand-made table, for example). The card “Extra columns in the Synchro table” lists and removes them with your agreement (save what they hold first), then the widget unblocks the queue.",
-        "“A table named Synchro already exists”: the widget does not take over someone else’s table. Rename that table (the widget offers to; it keeps all its content): it then creates its own."
+        "“A table named Synchro already exists”: the widget does not take over someone else’s table. Rename that table (the widget offers to; it keeps all its content): it then creates its own.",
+        "The widget shows “needs full access”: open Grist’s right panel, click the widget, then “Accept” (or “Full document access”) under “Access level”."
       ]
     },
     "images": []

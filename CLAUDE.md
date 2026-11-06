@@ -88,6 +88,19 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   `"ids:" + " ".join(T.all.id_sync)`, surveillée par un second webhook : recalculée (et envoyée)
   à chaque ajout ou suppression, pas à une modification. Vérifié le 14 octobre.
 - Un widget **replié** dans Grist continue de tourner (vérifié le 14 octobre).
+- **Accès complet** (Antoine, 6 novembre : « bien rajouter que le widget a besoin d'avoir les accès
+  complets et un screen dédié du panneau », dans le tutoriel et dans l'interface) : le réglage est
+  dans le **panneau de droite** de Grist (pas celui de gauche, qui liste les pages), onglet du
+  widget (« Personnalisée »), section « Niveau d'accès » : liste « Pas d'accès au document » /
+  « Lire les données source sélectionnées » / « Accès complet au document », et, tant que rien n'est
+  décidé, une bulle « Le widget a besoin de full access à ce document » avec Accepter et Refuser
+  (vérifié dans Grist 1.7). Le panneau est **fermé** à l'ouverture d'un document déjà installé :
+  icône tout en haut à droite. Sans accès, `grist.docApi` refuse la lecture : le widget montre le
+  message `start.access` et `accessHelp()` (`js/tutorial.js`), les deux captures
+  `docs/images/00e` (Accepter) et `00f` (la liste), faites à l'échelle 2 par `accessShots`
+  (`CAPTURES=1 ONLY_ACCESS=1`). Une fois l'accès accordé, par « Accepter » comme par la liste,
+  Grist recharge le widget qui démarre seul (testé : `accessSteps`). Même écran pour SOURCE et CIBLE :
+  le contrôle se fait au démarrage, avant de connaître le rôle.
 - Plusieurs formulaires publiés sur la même page partagent une seule clé, et cette clé lit aussi
   les colonnes **et leurs descriptions** (donc les notes) des tables de tous les formulaires de la
   page (vérifié). Depuis la V0.5 : un formulaire par page, une clé par réception.
