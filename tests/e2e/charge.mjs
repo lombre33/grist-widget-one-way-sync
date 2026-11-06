@@ -7,6 +7,7 @@
 //         ONLY=volume,budget node tests/e2e/charge.mjs   (certains)
 //         ROWS=30000 COLS=20 pour le scénario « volume » (défaut : 30000 lignes, 20 colonnes)
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { createHarness, log, sleep } from './harness.mjs';
 import { startChaosProxy } from './chaos-proxy.mjs';
 
@@ -21,6 +22,14 @@ const patches = process.env.FAST_BUDGET
 const h = await createHarness({ port: Number(process.env.PORT || 8586), envFile: chaosMode ? '.env-chaos.json' : '.env.json', patches });
 const proxy = chaosMode ? await startChaosProxy({ port: Number(new URL(h.env.grist).port), target: Number(process.env.INTERNAL_PORT || 8493) }) : null;
 const { env, api, records, sql, count, waitFor, webhooks, applyActions } = h;
+// SHOTS=<dossier> : capture de la page (le widget dans Grist) à quelques moments clés.
+const shot = async (view, name) => {
+  if (!process.env.SHOTS) return;
+  await mkdir(process.env.SHOTS, { recursive: true });
+  await view.page.setViewportSize({ width: 1100, height: 900 });
+  await sleep(500);
+  await view.page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
+};
 
 import { columnsOf, makeRow } from './data.mjs';
 
@@ -206,6 +215,7 @@ const scenarios = {
     await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
     await sleep(4000);
     log(`carte SOURCE : ${(await a.sv.text()).slice(0, 1800)}`);
+    await shot(a.sv, 'mort-erreur');
     const rowA = a.sv.widget().locator('li.person').filter({ has: a.sv.widget().locator('.person-who', { hasText: 'Mort A' }) });
     const t1 = Date.now();
     if (fix === 'auto') log('rien n\'est fait à la main : le widget doit mettre le destinataire mort en pause tout seul (page SOURCE ouverte)');
@@ -227,6 +237,7 @@ const scenarios = {
       await sleep(4000);
       const card = await a.sv.text();
       log(`carte SOURCE après la pause automatique : ${card.slice(0, 1200)}`);
+      await shot(a.sv, 'mort-pause-auto');
       assert.match(card, /Mise en pause par le widget/, 'la carte dit que le widget a mis ce destinataire en pause');
     }
   },
@@ -364,14 +375,20 @@ const scenarios = {
   async celluleGeante() {
     const rows = 300;
     const p = await h.pair({
-      name: 'Cellule géante', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'skip',
-      beforeExport: async ({ src }) => { await applyActions(src.doc, [['AddRecord', 'Contacts', null, { ...makeRow(rows), Nom: 'Géante', Commentaire: 'x'.repeat(1500000) }]]); },
+      name: 'Cellule géante', table: 'Contacts', columns: columnsOf(10), rows, makeRow, send: 'skip',
+      // L'API de Grist refuse un corps de plus de 1 Mo : deux cellules de 900 ko, écrites en deux fois, font une
+      // ligne d'environ 1,8 Mo (ce qu'une formule ou plusieurs personnes peuvent faire).
+      beforeExport: async ({ src }) => {
+        const own = Object.fromEntries(columnsOf(10).map(c => [c.id, makeRow(rows)[c.id]]));
+        await applyActions(src.doc, [['AddRecord', 'Contacts', null, { ...own, Nom: 'Géante', Adresse: 'x'.repeat(900000) }]]);
+        const last = (await records(src.doc, 'Contacts')).find(r => r.Nom === 'Géante');
+        await applyActions(src.doc, [['UpdateRecord', 'Contacts', last.id, { Commentaire: 'y'.repeat(900000) }]]);
+      },
     });
     await p.sv.open(p.src.url);
     await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
     await p.sv.button('Tout renvoyer').click();
-    await p.sv.dialogButton('Envoyer').click();
-    await p.sv.dialog().getByText(/Renvoi terminé|Lignes existantes envoyées|renvoyées/).waitFor({ timeout: 300000 }).catch(() => {});
+    await p.sv.widget().getByText(/Renvoi terminé|Un autre renvoi est en cours/).waitFor({ timeout: 300000 }).catch(() => {});
     await sleep(20000);
     await p.dv.open(p.dst.url);
     await sleep(15000);
@@ -541,11 +558,19 @@ const scenarios = {
     await other.widget().getByRole('tab', { name: 'Envoyer' }).click();
     await p.sv.open(p.src.url);
     await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    // Depuis la 0.12.3, « Tout renvoyer » part sans fenêtre (sauf un envoi long, qui se confirme) et se suit sur la carte :
+    // « Renvoi terminé » quand cette page a envoyé, « Un autre renvoi est en cours » quand une autre page a la main
+    // (le lot est alors noté et partira seul). Les deux réponses sont bonnes, le test relève laquelle vient.
     const again = async (view) => {
       await view.button('Tout renvoyer').click();
-      await view.dialogButton('Envoyer').click();
-      await sleep(1500);
-      await view.dialogButton('Fermer').click({ timeout: 3000 }).catch(() => {});
+      const confirm = view.dialogButton('Envoyer');
+      const which = await Promise.race([
+        confirm.waitFor({ timeout: 180000 }).then(() => 'confirmation'),
+        view.widget().getByText('Renvoi terminé').waitFor({ timeout: 180000 }).then(() => 'terminé'),
+        view.widget().getByText('Un autre renvoi est en cours pour ce document').waitFor({ timeout: 180000 }).then(() => 'attente'),
+      ]).catch(() => 'rien');
+      log(`« Tout renvoyer » : ${which}`);
+      if (which === 'confirmation') await confirm.click();
     };
     const t0 = Date.now();
     await Promise.all([again(p.sv), again(other)]);

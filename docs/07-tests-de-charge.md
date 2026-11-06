@@ -53,6 +53,24 @@ ouvertes ensuite chargent.
 | `plusieursDestinataires`, `beaucoupDestinataires` | 3 destinataires, puis 256 sur une dizaine de lignes |
 | `modifMasse`, `renvoisRepetes` | modifications en masse pendant un envoi, renvois enchaînés |
 
+Mesures (Grist 1.7.22, une machine de test, un seul Grist) :
+
+- `volume` : 30 000 lignes × 20 colonnes arrivent en environ 4 minutes ; `cibleFermee` : 160 lots bruts dépliés et
+  recopiés en 30 s à l'ouverture de la page CIBLE ; `sourceFermee` : l'envoi reprend à la réouverture de la page.
+- `plusieursDestinataires` : 3 destinataires × 8 000 lignes × 20 colonnes. Les deux premiers ont tout en 3 minutes ;
+  le troisième s'arrête à 3 200 lignes, **attend le budget des renvois** (la carte dit l'heure de reprise), puis
+  termine à 8 minutes 16. Rien n'est perdu, rien n'est en erreur.
+- `modifMasse` : 6 000 lignes modifiées d'un coup, puis 3 000 ajoutées : tout arrive en 47 s et 32 s, sans doublon.
+- `renvoisRepetes` : trois « Tout renvoyer » de suite depuis deux pages SOURCE ouvertes en même temps : la CIBLE garde
+  exactement les 4 000 lignes, sans doublon, et plus rien n'est en file 1 min 46 après. Depuis la 0.12.3 le renvoi
+  part sans fenêtre (sauf un envoi long, qui se confirme) et se suit sur la carte.
+- `celluleGeante` : une ligne de 1,8 Mo (deux cellules de 900 ko) ne peut pas partir, plus grosse à elle seule que
+  l'envoi de Grist : les 300 autres lignes arrivent, la file n'est pas bloquée, la carte CIBLE dit « Incomplet »
+  et « 1 ligne ne peut pas arriver ».
+- `colonnesLarges` : 2 000 lignes × 120 colonnes arrivent entières en environ une minute et demie (toutes les
+  colonnes, vérifiées sur une ligne).
+- `beaucoupDestinataires` (256 destinataires, 10 lignes) : voir le tableau des trouvailles.
+
 ## « L'humain qui clique partout » (`tests/e2e/betises.mjs`)
 
 Une quarantaine de bêtises faites dans Grist sur un document SOURCE ou CIBLE d'une synchro qui marche : colonne ou
@@ -64,6 +82,18 @@ document CIBLE supprimé ; personne éditrice ou lectrice qui ouvre le widget ; 
 Pour chacune, le test fait une modification dans la SOURCE et relève : arrive-t-elle, que disent les deux cartes,
 la file de Grist est-elle bloquée, y a-t-il des erreurs en console. Ce n'est pas un test qui passe ou échoue : c'est
 un **relevé**, à lire ligne à ligne. Ce qui est corrigé l'est avec un test d'unité (`tests/unit/*.test.mjs`).
+
+Quatre relevés qui se lisent bien en quelques mots :
+
+- `pleinEnvoi` : 6 000 lignes en cours d'envoi, pendant lesquelles on modifie 301 lignes, en supprime 201 et en ajoute
+  150 : 20 s après la fin de l'envoi, la SOURCE (5 949 lignes) et la CIBLE sont identiques ligne à ligne.
+- `toutSupprimer` : toute la table exportée est supprimée dans la SOURCE : la CIBLE ne l'efface pas, la carte dit
+  « À valider » avec Appliquer ou Ignorer (vague de suppressions).
+- `lignesEnDouble` : dix lignes dupliquées avec leur clé : la carte SOURCE le dit et propose « Réparer les clés ».
+- `cleSupprimee` : colonne `id_sync` supprimée : la carte SOURCE le dit, « Réparer les clés » remet la colonne et
+  renvoie tout en 23 s. Les lignes ont des clés neuves, donc la CIBLE retient les 30 anciennes dans une vague de
+  suppressions « À valider » (choix de la personne), et elle signale une « arrivée suspecte » (le lot sans clé,
+  rejeté) dont le texte donne l'explication innocente.
 
 ## Ce que Grist fait vraiment (mesuré, Grist 1.7.22)
 

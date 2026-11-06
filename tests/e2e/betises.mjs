@@ -7,6 +7,7 @@
 // test d'unité ou d'intégration à part.
 // Usage : PORT=8700 node tests/e2e/betises.mjs                (tout)
 //         PORT=8701 ONLY=colonneSupprimee,tableRenommee node tests/e2e/betises.mjs
+import { mkdir } from 'node:fs/promises';
 import { createHarness, log, sleep } from './harness.mjs';
 import { columnsOf, makeRow } from './data.mjs';
 
@@ -17,11 +18,18 @@ const flat = text => String(text || '').replace(/\s+/g, ' ');
 const rowsOf = 30;
 
 // Page du widget d'un document : texte de l'onglet demandé, ou ce que la page montre si le widget ne démarre pas.
-async function read(view, url, tab) {
+// SHOTS=<dossier> : une capture de la page (le widget dans Grist) pour chaque carte relevée, nommée `<shot>.png`.
+async function read(view, url, tab, shot = '') {
   try {
     await view.open(url);
     if (tab) await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 });
     await sleep(tab ? 6000 : 12000);
+    if (process.env.SHOTS && shot) {
+      await mkdir(process.env.SHOTS, { recursive: true });
+      await view.page.setViewportSize({ width: 1100, height: 900 });
+      await sleep(500);
+      await view.page.screenshot({ path: `${process.env.SHOTS}/${shot}.png` });
+    }
     return flat(await view.text()).replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 1100);
   } catch (e) {
     const body = flat(await view.page.locator('body').innerText().catch(() => ''));
@@ -162,8 +170,8 @@ async function runCase(name, spec) {
     }
   }
   const q = await queue(p.src.doc);
-  const src = await read(p.sv, p.src.url, 'Envoyer');
-  const dst = await read(p.dv, p.dst.url, null);
+  const src = await read(p.sv, p.src.url, 'Envoyer', `${name}-source`);
+  const dst = await read(p.dv, p.dst.url, null, `${name}-cible`);
   log(`[${name}] ${spec.note}`);
   log(`[${name}] action : ${acted} ; modification arrivée : ${arrived ?? '(sans objet)'} ; file Grist : ${q}`);
   log(`[${name}] carte SOURCE : ${src}`);

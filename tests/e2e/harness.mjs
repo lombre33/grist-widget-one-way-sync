@@ -94,8 +94,10 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
   // Table de `rows` lignes remplie par paquets (le corps d'une requête reste petit).
   async function fillTable(doc, tableId, columns, rows, makeRow, { prefix = 0 } = {}) {
     await applyActions(doc, [['AddTable', tableId, columns]]);
-    for (let from = 0; from < rows; from += 2000) {
-      const n = Math.min(2000, rows - from);
+    // Paquets d'au plus 2 000 lignes et d'environ 30 000 cellules (le corps d'une requête de Grist est limité à 1 Mo).
+    const step = Math.max(50, Math.min(2000, Math.floor(30000 / columns.length)));
+    for (let from = 0; from < rows; from += step) {
+      const n = Math.min(step, rows - from);
       const cols = Object.fromEntries(columns.map(c => [c.id, []]));
       for (let i = 0; i < n; i++) {
         const row = makeRow(prefix + from + i);
