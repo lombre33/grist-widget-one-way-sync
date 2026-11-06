@@ -69,6 +69,8 @@ Mesures (Grist 1.7.22, une machine de test, un seul Grist) :
   et « 1 ligne ne peut pas arriver ».
 - `colonnesLarges` : 2 000 lignes × 120 colonnes arrivent entières en environ une minute et demie (toutes les
   colonnes, vérifiées sur une ligne).
+- `grandeTable` : 100 000 lignes × 5 colonnes arrivent entières en 11 min 35, sans erreur d'envoi, file jamais bloquée
+  (la liste des clés part en 256 seaux, le lot en tranches).
 - `beaucoupDestinataires` (256 destinataires, 10 lignes) : voir le tableau des trouvailles.
 
 ## « L'humain qui clique partout » (`tests/e2e/betises.mjs`)
@@ -147,6 +149,7 @@ Quatre relevés qui se lisent bien en quelques mots :
 - Les erreurs passagères (429, 5xx, réseau) ne mettent pas en pause toutes seules : Grist réessaie pendant
   15 minutes et les autres destinataires attendent. Choix à faire : étendre la pause automatique à ces erreurs
   (au risque de couper un destinataire qui allait reprendre).
-- Table de plus de 100 000 lignes, cellules de plusieurs Mo : voir les mesures de `grandeTable` et
-  `celluleGeante` ; la limite de Grist (1 Mo par envoi) reste celle du format du lot.
+- Une ligne de plus de 1 Mo à elle seule (quelques cellules géantes) ne peut pas partir : la CIBLE le dit (« 1 ligne
+  ne peut pas arriver »), les autres lignes arrivent. La limite de Grist (1 Mo par envoi) reste celle du format du
+  lot. Les tables de 100 000 lignes passent (voir `grandeTable`).
 - Onglet caché du navigateur : les minuteries sont ralenties (une fois par minute) ; non testable sans tête.
