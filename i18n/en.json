@@ -552,6 +552,7 @@
   "recv.action.report": "Copy the status for the SOURCE",
   "recv.report.copied": "Status copied. Paste it in a message to the person who sends: it holds no code, no link and no value from your tables.",
   "recv.report.failed": "Copy is not possible from here: select and copy the text below.",
+  "recv.tally": "{table}: the SOURCE announces {expected} {expected|row|rows}, but only {got} arrived here, and nothing has changed for {min} minutes. {gap} {gap|row is|rows are} missing. A delivery may have been lost (Grist restarted, delivery queue cleared), or some SOURCE rows share the same key. Ask an owner of the SOURCE to open its widget page and click “Resend all”; “Copy the status for the SOURCE” gives them what they need to check.",
   "recv.big": "{table}: {n} {n|row|rows} cannot arrive, each larger than the maximum size of a Grist send (1 MB). Shorten it in the SOURCE.",
   "recv.tooBig": "{tables}: too large for the public link (over 2 MB), nothing of it is read. Ask the SOURCE for an invitation, or a row filter.",
   "recv.files.waiting": "{n} {n|file|files} expected in {dest}: {n|it arrives|they arrive} when an owner of the SOURCE document opens the widget page.",

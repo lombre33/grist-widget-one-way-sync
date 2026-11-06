@@ -13,6 +13,7 @@ import { updateJournalNote } from './journals.js';
 import { receivedJournals, receivedKey } from '../logic/received.js';
 import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
 import { SHOWN } from '../logic/report.js';
+import { TALLY_GRACE_S } from '../logic/tally.js';
 import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
@@ -131,7 +132,7 @@ function cardStatus(group) {
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
   if (tables.some(r => r.pendingCount || r.held)) return ['review', 'pending'];
-  const incomplete = Object.keys({ ...note.missing, ...note.big }).length || tables.some(r => r.files && r.files.waiting);
+  const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && r.files.waiting);
   return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }
 
@@ -172,6 +173,7 @@ function cardNotes(group) {
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
     note.tables.some(entry => (state.results.get(tableKey(group.journal, entry.table)) || {}).locked) ? message('info', t('recv.lock.waiting')) : null,
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
+    Object.entries((state.results.get(group.journal) || {}).tally || {}).map(([table, g]) => message('warn', t('recv.tally', { table, ...g, min: TALLY_GRACE_S / 60 }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
     group.shared && !group.public ? alertBlock(t('recv.shared.title'), [t('recv.shared.body', { n: group.shared })], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text')]) : null,

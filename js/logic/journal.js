@@ -54,10 +54,12 @@ function listBuckets(list) {
   return seaux.length && typeof list.t === 'number' ? { t: list.t, keys: new Map(seaux.map(([b, keys]) => [Number(b), new Set(keyStrings(keys))])) } : null;
 }
 
-// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, rest?, tooBig? } ; null s'il est
+// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, rest?, tally?, tooBig? } ; null s'il est
 // illisible. `tooBig` : instantané public trop gros, laissé vide. `rest` : combien de lignes de la
 // table la SOURCE annonce encore à venir après ce lot de renvoi (`restant`), absent si elle ne
-// l'annonce pas (SOURCE d'avant la 0.12.4, lot ordinaire). Une ligne sans clé, sans bloc de colonnes, ou dont
+// l'annonce pas (SOURCE d'avant la 0.12.4, lot ordinaire). `tally` : { n, t } le nombre de clés que la
+// SOURCE annonce avoir pour la table, et l'heure de leur dernier changement (voir tally.js), absent si
+// l'annonce manque ou est illisible. Une ligne sans clé, sans bloc de colonnes, ou dont
 // l'heure n'est ni vide ni un nombre, est écartée.
 const validLine = l => Array.isArray(l) && isKey(l[0]) && (l[1] === null || l[1] === undefined || typeof l[1] === 'number')
   && l[3] !== null && typeof l[3] === 'object' && !Array.isArray(l[3]);
@@ -67,7 +69,9 @@ export function parseLot(text) {
   const lines = lot.lignes.filter(validLine).map(([key, order, deleted, data]) => ({ key: String(key), order: order ?? null, deleted: isTrue(deleted), data }));
   const big = keyStrings(lot.tropGros).slice(0, MAX_BIG);
   const rest = Number.isInteger(lot.restant) && lot.restant >= 0 ? Math.min(lot.restant, MAX_REST) : null;
-  return { lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(lot.trop === true ? { tooBig: true } : {}) };
+  const a = lot.bilan;
+  const tally = a && Number.isInteger(a.n) && a.n >= 0 && Number.isFinite(a.t) ? { n: a.n, t: a.t } : null;
+  return { lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(tally ? { tally } : {}), ...(lot.trop === true ? { tooBig: true } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -144,7 +148,7 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
   const all = journalRows.filter(r => isRaw(r) && !(exportId && r[TYPE_COL] === KIND.part && r[EXPORT_COL] === exportId)).sort((a, b) => a.id - b.id);
   const raw = all.slice(0, max);
   const added = [];
-  const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set() };
+  const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set(), tally: new Map() };
   let rejected = 0;
   let ended;
   const limit = now + FUTURE_S;
@@ -169,7 +173,7 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
   const plain = map => Object.fromEntries(map);
   return {
     added, removed, actions: unpackActions(journalTable, added, removed),
-    missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], rejected, left: all.length - raw.length,
+    missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], tally: plain(gaps.tally), rejected, left: all.length - raw.length,
     ...(ended === undefined ? {} : { ended }),
   };
 }
@@ -192,6 +196,8 @@ function noteGaps(gaps, table, lot, resent) {
   const add = (map, items) => map.set(table, [...(map.get(table) || []), ...items]);
   if (lot.big.length) add(gaps.big, lot.big);
   add(gaps.arrived, lot.lines.map(l => l.key));
+  const was = gaps.tally.get(table);
+  if (lot.tally && (!was || lot.tally.t >= was.t)) gaps.tally.set(table, lot.tally);
   if (resent) {
     gaps.resent.add(table);
     gaps.missing.set(table, lot.rest ?? 0);

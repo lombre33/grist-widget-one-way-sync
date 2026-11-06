@@ -285,6 +285,14 @@ function lotFormula(pick) {
     'if big: lot["tropGros"] = big',
     `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
     'if capped and rest is not None: lot["restant"] = rest',
+    // Bilan : combien de clés la table a pour cet export (lues dans la ligne 'suivi', déjà recalculée à
+    // chaque changement des clés), et depuis quand. La CIBLE compare avec ce qui lui est arrivé (voir
+    // tally.js). Le texte ne change que si les clés changent : pas d'envoi de plus. Pas en Échange.
+    'if capped and not swap.id:',
+    `  tr = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
+    `  head = str(tr.${LIST_COL} or "").split(":")[0]`,
+    `  st = json.loads(tr.${TRACK_COL}) if isinstance(tr.${TRACK_COL}, str) and tr.${TRACK_COL}.startswith("{") else {}`,
+    '  if tr.id and head.isdigit() and st.get("t"): lot["bilan"] = {"n": int(head), "t": int(st["t"])}',
     'return json.dumps(lot, ensure_ascii=False)',
   ], KIND.lot).join('\n');
 }

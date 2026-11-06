@@ -552,6 +552,7 @@
   "recv.action.report": "Copier l’état pour la SOURCE",
   "recv.report.copied": "État copié. Collez-le dans un message à la personne qui envoie : il ne contient ni code, ni lien, ni valeur de vos tables.",
   "recv.report.failed": "Copie impossible depuis ici : sélectionnez et copiez le texte ci-dessous.",
+  "recv.tally": "{table} : la SOURCE annonce {expected} {expected|ligne|lignes}, mais seules {got} sont arrivées ici, et rien n’a changé depuis {min} minutes. Il en manque {gap}. Un envoi a pu se perdre (Grist redémarré, file d’envoi vidée), ou des lignes de la SOURCE partagent la même clé. Demandez à un propriétaire de la SOURCE d’ouvrir la page de son widget et de cliquer sur « Tout renvoyer » ; « Copier l’état pour la SOURCE » lui donne de quoi vérifier.",
   "recv.big": "{table} : {n} {n|ligne ne peut pas arriver|lignes ne peuvent pas arriver}, plus {n|grosse|grosses} à elle seule que la taille maximale d’un envoi de Grist (1 Mo). Raccourcissez-la dans la SOURCE.",
   "recv.tooBig": "{tables} : trop gros pour le lien public (plus de 2 Mo), rien n’en est lu. Demandez à la SOURCE une invitation, ou un filtre de lignes.",
   "recv.files.waiting": "{n} {n|fichier attendu|fichiers attendus} dans {dest} : {n|il arrive|ils arrivent} quand un propriétaire du document SOURCE ouvre la page du widget.",

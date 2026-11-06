@@ -294,7 +294,41 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.5 (6 novembre 2026)
+## État : V0.13.0 (6 novembre 2026)
+
+V0.13.0 (Antoine, 6 novembre, sur ma réserve « comparaison finale pas faite » de la 0.12.4 : « si ce cas
+n'est pas étudié dans l'autre fil il faudrait le prévoir non ? ») : **bilan des lignes annoncées et reçues**.
+Cas visé : un envoi qui ne part jamais (Grist redémarré : la file vit en mémoire sans Redis ; file vidée ;
+webhook coupé un temps). Aucune tranche n'annonce de reste, et la CIBLE restait « À jour » avec une table
+incomplète.
+- **SOURCE** : la formule du lot (ligne `lot`, hors Échange) ajoute `"bilan": {"n", "t"}` : `n` = nombre
+  de clés lu dans la ligne `suivi` (`Synchro_Ids` = `N:crc`, clé présente et filtre appliqué, doublons
+  comptés), `t` = `Sync_Etat` du suivi (heure du dernier changement des clés). Le texte du lot ne change que
+  quand les clés changent : pas d'événement de plus pour une modification. Signé avec le lot. Pas de nouvelle
+  colonne ni table, `CODE_FORMAT` inchangé (une CIBLE d'avant ignore la clé, une SOURCE d'avant n'annonce rien).
+- **CIBLE** (`js/logic/tally.js`, `parseLot` rend `tally`, `planUnpack` rend `tally` par table, la plus récente
+  par `t` : un lot arrivé dans le désordre ne remplace pas une annonce plus récente) : `nextTally` garde
+  l'annonce par table dans la note du journal (`tally`, bornée à 200 tables, écrite seulement si elle change).
+  `liveKeys` compte les clés que la SOURCE a encore d'après les versions du journal (dernière version de
+  chaque clé, sauf celle marquée `suppression` ou `partie` sans case Supprime ; la case laisse la ligne dans la
+  SOURCE donc dans le compte annoncé). `tallyGap` ne signale que **reçues < annoncées** (un surplus, par exemple une
+  ligne cochée Supprime puis effacée, n'est pas un manque) ; `tallyDue` exige que le même manque dure
+  `TALLY_GRACE_S` (600 s) de page ouverte (suivi en mémoire, `tallySeen` de `target/loop.js`), ce qui couvre
+  l'envoi en route, une liste de suppressions pas encore passée et un lot arrivé dans le désordre.
+  Rien tant que des envois bruts attendent (`unpacked.left`), en Échange, par lien public, en archive, ni
+  pour une table dont l'écart a déjà son avis (`missing`, `big`).
+- Affichage : `recv.tally` sur la carte (attendues, reçues, manque, pistes : envoi perdu ou clés en double,
+  demander un « Tout renvoyer »), la carte passe à « incomplet », l'état à copier dit les annonces et le
+  manque. Un passage tous les 5 minutes au plus quand rien ne change : le manque sort entre 10 et 15 minutes.
+- **Limite dite** : le manque n'est vu qu'à l'arrivée d'un lot suivant (qui porte l'annonce à jour). Si plus
+  rien n'est modifié à la SOURCE après la perte, la CIBLE ne peut pas le deviner. Un moteur de relance (ping
+  périodique de la SOURCE) aurait coûté un événement par table et par destinataire (file Grist de 1 000).
+- Testé : unit (`tally`, `journal`, `formulas`) ; e2e : le délai est ramené à 20 s (`tally.js` réécrit par le
+  petit serveur du test) ; aucun avis après tout le parcours précédent (pas de fausse alerte), webhook coupé
+  (`PATCH enabled:false`), ligne ajoutée pendant la coupure puis une autre après la reprise : « la SOURCE
+  annonce … mais seules … » ; renvoi à la main de la ligne perdue, avis effacé ; lignes d'essai supprimées.
+
+V0.12.5 (état précédent, même jour) :
 
 V0.12.5 (Antoine, 6 novembre : « fiabiliser les envois à mort », tests réels qui essaient de les faire
 échouer, messages d'erreur « super clairs », puis « se mettre à la place d'un humain dans Grist qui clique

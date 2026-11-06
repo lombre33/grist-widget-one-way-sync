@@ -305,6 +305,14 @@ cours de route, la CIBLE ne reste donc pas « À jour » avec une table à moiti
 combien de lignes n'ont pas encore été envoyées, et l'avis disparaît à l'arrivée de la dernière
 tranche, dès que la page de la SOURCE se rouvre.
 
+Un envoi qui ne part jamais (Grist redémarré, file d'envoi vidée) n'a pas de tranche à annoncer. Chaque
+lot dit donc aussi combien de lignes la table de la SOURCE a au total. Quand la CIBLE en a reçu moins
+et que rien n'a changé depuis 10 minutes, sa carte le dit (« la SOURCE annonce 30 000 lignes, mais
+seules 29 400 sont arrivées ici ») : il suffit qu'un propriétaire de la SOURCE ouvre la page de son
+widget et clique sur **Tout renvoyer**. Pas d'alerte pendant un envoi en route, en Échange, ni par
+lien public ; un surplus n'en est pas une. Le manque n'est vu qu'à l'arrivée d'un lot suivant : si
+plus rien n'est modifié dans la SOURCE, la CIBLE ne peut pas le deviner.
+
 Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
 Référence, ou une formule) repart seule, sans toucher la ligne.
 
@@ -505,6 +513,7 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception, coupé ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau ; dans la CIBLE, la même réception reprend |
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
+| La CIBLE dit « la SOURCE annonce N lignes, mais seules M sont arrivées » | Un envoi s'est perdu (Grist redémarré, file vidée), ou des lignes de la SOURCE ont la même clé | **Tout renvoyer** depuis la SOURCE ; si l'écart reste, chercher les clés en double (carte de l'export) |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi, ou envoi par tranches interrompu (page du widget SOURCE fermée) | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | Des lignes manquent dans la CIBLE alors que la SOURCE dit avoir envoyé | Rien n'est arrivé, ou ce qui est arrivé attend d'être recopié (page fermée, cachée, ou un autre onglet du même navigateur qui avance seul) | Sur la carte de la réception : **Dernier envoi arrivé** et **envois arrivés pas encore recopiés** ; **Copier l'état pour la SOURCE** donne à la personne qui envoie de quoi comprendre (ni code, ni lien, ni valeur de vos tables) |
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |

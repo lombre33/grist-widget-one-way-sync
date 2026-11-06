@@ -37,6 +37,8 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /asked = \(\$Synchro_Renvoi or ""\)\.split\(":"\)\nagain = set\(int\(i\) for i in asked\[-1\]\.split\(","\)/, 'numéros à renvoyer : la dernière partie, comme avant');
   assert.match(lot, /rest = int\(asked\[1\]\) if len\(asked\) == 3 and asked\[1\]\.isdigit\(\) else None/, 'reste annoncé : marque:reste:numéros');
   assert.match(lot, /if capped and rest is not None: lot\["restant"\] = rest/, 'seul un lot ordinaire annonce le reste');
+  assert.match(lot, /if capped and not swap\.id:\n  tr = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="suivi"\)\n  head = str\(tr\.Synchro_Ids or ""\)\.split\(":"\)\[0\]/, 'bilan : nombre de clés lu dans la ligne suivi');
+  assert.match(lot, /lot\["bilan"\] = \{"n": int\(head\), "t": int\(st\["t"\]\)\}/, 'annonce : nombre de clés et heure de leur dernier changement, pas en Échange');
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);

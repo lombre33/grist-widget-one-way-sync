@@ -35,6 +35,11 @@ const server = createServer(async (req, res) => {
     let body = await readFile(join(ROOT, path));
     if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
     if (path === '/js/config.js') body = String(body).replace("GRIST_ORIGINS = [", `GRIST_ORIGINS = ['${env.grist}', `);
+    // Bilan des lignes (tally.js) : le délai de 10 minutes est ramené à 20 secondes pour le test.
+    if (path === '/js/logic/tally.js') {
+      body = String(body).replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
+      if (!String(body).includes('TALLY_GRACE_S = 20')) throw new Error('délai du bilan introuvable dans tally.js');
+    }
     res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream' });
     res.end(body);
   } catch (e) {
@@ -1590,6 +1595,42 @@ try {
   await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'dernière tranche : avis retiré', 60000);
   await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: '' }]]);
   step('CIBLE : un renvoi en tranches interrompu dit combien de lignes restent à venir, la dernière tranche efface l\'avis');
+
+  // --- Bilan : un envoi perdu (webhook coupé, comme une file vidée ou un Grist redémarré) ne laisse
+  // pas la CIBLE « À jour » avec une table incomplète. Chaque lot annonce le nombre de clés de la
+  // SOURCE ; la CIBLE dit le manque s'il dure (20 secondes ici, 10 minutes en vrai).
+  const syncNow = () => widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
+  const tallyText = /Contacts\s:\sla SOURCE annonce [\d\s]+ lignes, mais seules [\d\s]+ sont arrivées ici/;
+  const hookList = async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
+  const setHooks = async enabled => { for (const h of await hookList()) await api('PATCH', `/docs/${source.doc}/webhooks/${h.id}`, { enabled }); };
+  // Rien de perdu depuis le début du parcours : pas de fausse alerte, même après le délai.
+  await syncNow();
+  await new Promise(r => setTimeout(r, 22000));
+  await syncNow();
+  await new Promise(r => setTimeout(r, 2000));
+  assert.equal(await widget().getByText(tallyText).count(), 0, 'aucun manque signalé quand rien n\'est perdu');
+  await setHooks(false);
+  await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Perdue' }]]);
+  await new Promise(r => setTimeout(r, 7000)); // hors de la fenêtre d'un lot : 'Visible' part seul
+  await setHooks(true);
+  await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Visible' }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Visible'), 'ligne envoyée après la reprise reçue', 60000);
+  assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Perdue'), 'la ligne ajoutée pendant la coupure n\'est jamais partie');
+  await syncNow();
+  await new Promise(r => setTimeout(r, 22000));
+  await syncNow();
+  await widget().getByText(tallyText).waitFor({ timeout: 20000 });
+  // La SOURCE renvoie la ligne perdue : le manque disparaît.
+  const lostId = (await records(source.doc, 'Contacts')).find(r => r.Nom === 'Perdue').id;
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', (await lotRow()).id, { Synchro_Renvoi: `ab77:0:${lostId}` }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Perdue'), 'ligne perdue renvoyée et reçue', 60000);
+  await syncNow();
+  await waitFor(async () => !(await widget().getByText(tallyText).count()), 'manque effacé une fois la ligne reçue', 30000);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', (await lotRow()).id, { Synchro_Renvoi: '' }]]);
+  const extra = (await records(source.doc, 'Contacts')).filter(r => ['Perdue', 'Visible'].includes(r.Nom)).map(r => r.id);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', extra]]);
+  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => ['Perdue', 'Visible'].includes(r.Nom)), 'lignes de l\'essai effacées aussi chez le destinataire', 120000);
+  step('CIBLE : un envoi perdu est signalé comme un manque après le délai (aucune fausse alerte avant), puis effacé quand la ligne est renvoyée');
 
   // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
   // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le

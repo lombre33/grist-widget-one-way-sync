@@ -14,6 +14,7 @@ import {
   restoreActions, rowNumbers,
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
+import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
@@ -229,9 +230,13 @@ async function noteArrivals(journal, note, { plan, forged, flood }) {
   const gaps = nextGaps(note, plan);
   if (rejected || flood) gaps.suspect = nextSuspect(note.suspect, rejected, flood, nowS());
   const ended = endedAt(note, plan, nowS());
-  if (!gaps.suspect && ended === note.ended && JSON.stringify(gaps) === JSON.stringify({ missing: note.missing || {}, big: note.big || {} })) return note;
-  await updateJournalNote(journal, n => ({ ...n, ...gaps, ended }));
-  return { ...note, ...gaps, ended };
+  // Nombre de clés annoncé par la SOURCE pour chaque table (voir tally.js) ; pas de clé 'tally' sans annonce.
+  const announced = nextTally(note.tally, plan.tally, note.tables.map(tb => tb.table));
+  const tally = Object.keys(announced).length ? announced : undefined;
+  if (!gaps.suspect && ended === note.ended && JSON.stringify(gaps) === JSON.stringify({ missing: note.missing || {}, big: note.big || {} })
+    && JSON.stringify(tally) === JSON.stringify(note.tally)) return note;
+  await updateJournalNote(journal, n => ({ ...n, ...gaps, ended, tally }));
+  return { ...note, ...gaps, ended, tally };
 }
 
 // Colonnes d'une table reçue, avant sa recopie : celles qui arrivent (voir receivedColumns),
@@ -488,6 +493,22 @@ async function copyTables(ctx, note, owner) {
   return note.tables.map(noted => done.get(noted.table));
 }
 
+// Manques signalés par table (voir tally.js) : { table: { expected, got, gap } }. Les comptes se lisent
+// dans les versions du journal ; un manque n'est dit qu'après avoir duré (`tallySeen`, en mémoire de
+// la page). Rien quand des envois bruts attendent encore leur dépliage, en Échange, par lien public,
+// en archive, ni pour une table dont l'écart est déjà expliqué (lignes à venir, trop grosses).
+const tallySeen = new Map();
+function tallyReport(journal, note, groups, pending) {
+  const out = {};
+  const off = pending || note.mode === 'echange' || note.mode === 'public' || note.archive;
+  for (const tb of note.tables) {
+    const explained = (note.missing || {})[tb.table] > 0 || ((note.big || {})[tb.table] || []).length > 0;
+    const gap = off ? null : tallyGap((note.tally || {})[tb.table], groups.get(tb.table) || [], explained);
+    if (tallyDue(tallySeen, tableKey(journal, tb.table), gap, nowS())) out[tb.table] = gap;
+  }
+  return out;
+}
+
 // Un passage sur un journal : déplier, recopier chaque table rangée, noter les tables proposées,
 // nettoyer. Chaque étape est un seul lot d'écritures, donc tout ou rien. Tables reçues en lecture
 // seule (`verrou`, voir acl.js) : seul un propriétaire (`owner`) les recopie ; pour les autres,
@@ -524,7 +545,10 @@ async function consolidate(schema, { journal, note: noteBefore }, owner) {
   // Lignes reçues laissées pour le passage suivant : il vient sans attendre la minute.
   if (unpacked.left) lastArrival = Date.now();
   const afterGroups = rowsByTable(expandRows(after));
-  return { rows: after.length, note, tables: tables.map(tb => tableResult(tb, afterGroups, state.lastVisit)) };
+  return {
+    rows: after.length, note, tables: tables.map(tb => tableResult(tb, afterGroups, state.lastVisit)),
+    tally: tallyReport(journal, note, rowsByTable(after), unpacked.left > 0),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -535,8 +559,8 @@ const summary = s => (s.added || s.updated || s.removed ? t('recv.result', s) : 
 // Résultat d'un passage noté pour l'onglet ; rend vrai si la carte change.
 function notePass(journal, pass, before, offersBefore, at) {
   // Ce que la carte montre du journal : lignes manquantes, trop grosses, arrivées suspectes, fin.
-  const gaps = JSON.stringify([pass.note.missing, pass.note.big, pass.note.suspect, pass.note.ended]);
-  state.results.set(journal, { at, rows: pass.rows, gaps });
+  const gaps = JSON.stringify([pass.note.missing, pass.note.big, pass.note.suspect, pass.note.ended, pass.tally]);
+  state.results.set(journal, { at, rows: pass.rows, gaps, tally: pass.tally });
   const tablesChanged = pass.tables.map(tb => noteTable(journal, tb, at)).some(Boolean);
   return tablesChanged || !before || Boolean(before.error) || !before.rows !== !pass.rows || before.gaps !== gaps
     || offersBefore !== JSON.stringify(state.offers.get(journal) || []);

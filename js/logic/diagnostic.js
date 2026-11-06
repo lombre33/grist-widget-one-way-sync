@@ -85,6 +85,8 @@ export function journalFacts({ journal, note, signed, results = [], offers = 0, 
     reserve: note.reserve ? (note.reserved ? 'posée' : 'en attente') : 'non',
     ended: note.ended ? when(note.ended * 1000) : '',
     missing: Object.entries(note.missing || {}).map(([table, n]) => `${table}: ${n}`),
+    announced: Object.entries(note.tally || {}).map(([table, a]) => `${table}: ${a.n}`),
+    gap: results.flatMap(r => Object.entries((r && r.tally) || {}).map(([table, g]) => `${table}: ${g.got} reçues sur ${g.expected} annoncées`)),
     big: Object.entries(note.big || {}).map(([table, keys]) => `${table}: ${(keys || []).length}`),
     suspect: note.suspect ? `${note.suspect.n || 0} (dernière ${when((note.suspect.at || 0) * 1000)}${note.suspect.flood ? ', flot' : ''})` : '',
     errors: results.filter(r => r && r.error).map(r => `${r.table || journal}: ${clip(r.text || r.error)}`),
@@ -111,7 +113,7 @@ function journalLines(j) {
     `Réception ${j.journal} (export ${j.export}, ${j.mode})`,
     line('tables', j.tables), line('tables refusées', j.refused || ''), line('tables proposées', j.offers || ''),
     `  signée : ${j.signed ? 'oui' : 'non'}, sceau : ${j.sealed ? 'oui' : 'non'}, réservée aux éditeurs : ${j.reserve}`,
-    line('coupée par la SOURCE', j.ended), line('lignes manquantes', j.missing), line('clés trop grosses', j.big),
+    line('coupée par la SOURCE', j.ended), line('lignes manquantes', j.missing), line('lignes annoncées par la SOURCE', j.announced), line('manque signalé', j.gap), line('clés trop grosses', j.big),
     line('arrivées suspectes', j.suspect), line('journal', j.arrival), line('erreurs', j.errors),
   ];
 }
