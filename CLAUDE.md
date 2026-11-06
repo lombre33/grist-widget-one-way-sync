@@ -96,9 +96,12 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   décidé, une bulle « Le widget a besoin de full access à ce document » avec Accepter et Refuser
   (vérifié dans Grist 1.7). Le panneau est **fermé** à l'ouverture d'un document déjà installé :
   icône tout en haut à droite. Sans accès, `grist.docApi` refuse la lecture : le widget montre le
-  message `start.access` et `accessHelp()` (`js/tutorial.js`), les deux captures
-  `docs/images/00e` (Accepter) et `00f` (la liste), faites à l'échelle 2 par `accessShots`
-  (`CAPTURES=1 ONLY_ACCESS=1`). Une fois l'accès accordé, par « Accepter » comme par la liste,
+  message `start.access` et `accessHelp()` (`js/tutorial.js`), avec trois captures **pleine page**
+  (Antoine : un screen « qui montre où est le panel », widget ouvert assez large pour qu'on le voie)
+  à cadre rouge : `docs/images/00g` (panneau fermé, icône d'ouverture), `00e` (panneau ouvert,
+  « Niveau d'accès » et Accepter) et `00f` (la liste), faites à l'échelle 2 par `accessShots`
+  (`CAPTURES=1 ONLY_ACCESS=1` ; le widget y retire ses propres images pour ne pas se montrer
+  lui-même). Une fois l'accès accordé, par « Accepter » comme par la liste,
   Grist recharge le widget qui démarre seul (testé : `accessSteps`). Même écran pour SOURCE et CIBLE :
   le contrôle se fait au démarrage, avant de connaître le rôle.
 - Plusieurs formulaires publiés sur la même page partagent une seule clé, et cette clé lit aussi

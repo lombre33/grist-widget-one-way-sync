@@ -48,7 +48,7 @@ si le panneau est fermé), cliquer sur le widget, puis, dans la section **Niveau
 cliquer **Accepter**, ou choisir **Accès complet au document** dans la liste. Sans cet accès, le
 widget reste bloqué sur un message, avec ces mêmes images.
 
-![Accès complet](images/00d-installer-acces.png)
+![Panneau de droite fermé : l'icône qui l'ouvre](images/00g-installer-acces-ouvrir.png)
 ![Niveau d'accès : Accepter](images/00e-installer-acces-accepter.png)
 ![Niveau d'accès : la liste](images/00f-installer-acces-liste.png)
 

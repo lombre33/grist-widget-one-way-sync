@@ -24,7 +24,7 @@
         "Why full access? The widget reads the document’s structure (tables and columns, to offer exports and destinations), creates its technical table and tracking columns, writes to the destination tables and, for an owner, manages the webhooks and access rules it sets. Read access does not allow this. It only talks to the Grist instance, never to another server."
       ]
     },
-    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00d-installer-acces", "00e-installer-acces-accepter", "00f-installer-acces-liste", "01-accueil"]
+    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00g-installer-acces-ouvrir", "00e-installer-acces-accepter", "00f-installer-acces-liste", "01-accueil"]
   },
   {
     "id": "s-tables",

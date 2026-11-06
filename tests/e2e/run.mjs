@@ -156,35 +156,54 @@ async function installShots() {
   await page.locator('.test-right-opener').click();
   await page.locator('.test-right-tab-pagewidget').click();
   await page.getByRole('button', { name: 'Accepter' }).waitFor();
-  await save('00d-installer-acces');
   await page.getByRole('button', { name: 'Accepter' }).click();
   await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
   await page.locator('.test-right-opener').click().catch(() => {});
 }
-// Captures du réglage d'accès (docs/images/00e et 00f), que montrent le message de démarrage et le
-// tutoriel : le panneau de droite de Grist (section « Niveau d'accès ») quand le widget demande
-// l'accès complet, puis la liste des niveaux. À l'échelle 2 : ce sont des détails à lire.
+// Captures du réglage d'accès (docs/images/00g, 00e et 00f), que montrent le message de démarrage et
+// le tutoriel : la page entière, widget ouvert, pour qu'on voie où est le panneau de droite de Grist
+// et son bouton, avec un cadre rouge sur ce qu'il faut trouver. Panneau fermé (l'icône qui l'ouvre),
+// ouvert (section « Niveau d'accès » et « Accepter »), puis la liste des niveaux. À l'échelle 2.
 async function accessShots(url) {
-  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1100, height: 700 }, deviceScaleFactor: 2 });
+  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1200, height: 720 }, deviceScaleFactor: 2 });
   const p = await ctx.newPage();
   await p.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
   await p.goto(url);
   await p.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
-  await p.locator('.test-right-opener').click();
+  // Le widget montre lui-même ces captures : elles sont retirées ici, pour que la capture ne les contienne pas.
+  const inner = await waitFor(() => p.frames().find(f => f.url().startsWith(widgetCode)), 'iframe du widget');
+  await inner.locator('.access-help').waitFor();
+  await inner.evaluate(() => document.querySelector('.access-help').remove());
+  // Cadre rouge autour de `box`, ramené dans la fenêtre (l'icône du panneau touche le bord droit).
+  const frame = box => p.evaluate(({ x, y, width, height }) => {
+    const left = Math.max(3, x - 6), top = Math.max(3, y - 6);
+    const right = Math.min(window.innerWidth - 3, x + width + 6), bottom = Math.min(window.innerHeight - 3, y + height + 6);
+    const d = document.createElement('div');
+    d.className = 'capture-frame';
+    d.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${right - left}px;height:${bottom - top}px;border:3px solid #e5484d;`
+      + 'box-sizing:border-box;border-radius:10px;box-shadow:0 0 0 4px rgba(229,72,77,.25);pointer-events:none;z-index:2147483647';
+    document.body.append(d);
+  }, box);
+  const save = async (name, box) => {
+    await frame(box);
+    await p.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) });
+    await p.evaluate(() => document.querySelectorAll('.capture-frame').forEach(d => d.remove()));
+  };
+  const opener = p.locator('.test-right-opener');
+  await save('00g-installer-acces-ouvrir', await opener.boundingBox());
+  await opener.click();
   const accept = p.locator('.test-config-widget-access-accept');
   await accept.waitFor();
   await p.waitForTimeout(600);
   const select = await p.locator('.test-config-widget-access').boundingBox();
   const prompt = await accept.boundingBox();
-  const top = select.y - 50; // l'intitulé « Niveau d'accès » au-dessus de la liste
-  await p.screenshot({ path: join(ROOT, 'docs/images/00e-installer-acces-accepter.png'),
-    clip: { x: 860, y: top, width: 240, height: prompt.y + prompt.height + 24 - top } });
+  const top = select.y - 34; // l'intitulé « Niveau d'accès » au-dessus de la liste
+  await save('00e-installer-acces-accepter', { x: select.x - 8, y: top, width: select.width + 16, height: prompt.y + prompt.height + 14 - top });
   await p.locator('.test-config-widget-access').click();
   await p.getByText('Accès complet au document', { exact: true }).hover();
-  const menu = await p.locator('.test-select-menu').boundingBox();
   await p.waitForTimeout(300);
-  await p.screenshot({ path: join(ROOT, 'docs/images/00f-installer-acces-liste.png'),
-    clip: { x: menu.x - 4, y: top, width: 1100 - menu.x + 4, height: menu.y + menu.height + 14 - top } });
+  const menu = await p.locator('.test-select-menu').boundingBox();
+  await save('00f-installer-acces-liste', menu);
   await ctx.close();
 }
 // Widget sans accès complet : Grist demande l'accès dans son panneau de droite ; le widget dit quoi
@@ -196,7 +215,7 @@ async function accessSteps() {
   await help.waitFor({ timeout: 30000 });
   if (process.env.CAPTURES) await accessShots(url);
   await widget().getByText('Le widget a besoin de l’accès complet au document', { exact: false }).waitFor();
-  assert.equal(await help.locator('img').count(), 2, 'deux captures du réglage');
+  assert.equal(await help.locator('img').count(), 3, 'trois captures du réglage');
   assert.ok(await help.locator('img').evaluateAll(imgs => Promise.all(imgs.map(i => i.decode().then(() => i.naturalWidth > 0)))).then(all => all.every(Boolean)), 'captures chargées');
   assert.ok(await widget().locator('[data-tab]').evaluateAll(tabs => tabs.every(tab => tab.disabled)), 'onglets grisés tant que l’accès manque');
   assert.equal(await widget().getByRole('button', { name: 'Recharger la page' }).count(), 1);
@@ -1023,7 +1042,11 @@ try {
   await widget().getByRole('button', { name: 'Je suis la CIBLE' }).click();
   assert.ok(await widget().locator('#tuto-t-link').isVisible() && !(await widget().locator('#tuto-s-tables').isVisible()), 'filtre CIBLE');
   await widget().getByRole('button', { name: 'Tout', exact: true }).click();
-  assert.ok(await widget().locator('.tuto-shot img').first().evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
+  // Les captures se chargent à l'approche (loading=lazy) : un texte plus long en repousse une hors de portée,
+  // et decode() n'aboutit jamais sur une image qui n'est pas demandée. On l'amène donc à l'écran d'abord.
+  const firstShot = widget().locator('.tuto-shot img').first();
+  await firstShot.scrollIntoViewIfNeeded();
+  assert.ok(await firstShot.evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
   await shot('16-tutoriel');
 
   // --- SOURCE : un export (Tables, Colonnes, Nom), puis son premier destinataire
