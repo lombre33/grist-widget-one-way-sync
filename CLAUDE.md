@@ -294,7 +294,49 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.2 (6 novembre 2026)
+## État : V0.12.3 (6 novembre 2026)
+
+V0.12.3 (Antoine, 6 novembre : un utilisateur de l'Alpha 0.5.9 voyait ~400 lignes sur ~30 000 dans la
+CIBLE ; « anticiper et fiabiliser les envois », « donner plus de contexte aux users sur les blocages »,
+« pendant que des envois sont en cours ou prévus par lot, l'user ait un feedback » ; carte de décision :
+« Tout, par étapes »). **Étape 1 = cette version, étape 2 (V0.13.0) = bilan attendues/reçues.** Les
+essais de charge et d'échec (deux Grists, 30 000 × 20) sont dans l'autre fil « Fiabiliser les envois par
+des tests de charge » (`js/source/keys.js`, `js/logic/keys.js`, `queueBlocker`, `deleteWebhook`, `personRow`).
+- **Mesuré (Grist 1.7.22)** : 30 000 lignes × 20 colonnes = 715 o/ligne, ~21 Mo par destinataire, 160 lots
+  en 2 min 40 ; 40 colonnes = 1 388 o/ligne, ~42 Mo. Le budget `RESEND_BUDGET` (20 Mo / 600 s) est une
+  fenêtre glissante, pas une pause entre envois : après les 20 premiers Mo, environ 2 Mo/min (42 Mo pour
+  un destinataire ≈ 11 min, trois destinataires ≈ 55 min). Le budget n'a pas bougé (protection de DINUM,
+  à ne pas relever sans décision d'Antoine). Une page CIBLE fermée pendant tout l'envoi n'empêche rien.
+- **Estimation avant l'envoi** (`js/logic/estimate.js`, `js/source/flow.js` `exportEstimate`,
+  `confirmSend`) : lignes qui partiront (suivi `N:crc` de `Synchro`, `eligibleRows`), poids d'après 50
+  lignes, lots, destinataires, durée = max(lots × `LOT_SECONDS`, budget). Dite dans l'assistant de
+  destinataire (`showLoad`) ; au-delà de `LONG_SECONDS` (180 s) un envoi manuel demande confirmation.
+- **Avancement** (`js/logic/health.js` `exportFlow`, `flowView`) : la ligne `charge` porte `prog`
+  (`{exp, table, done, total, lots, lotsTotal, bytes, at, last}`, gardé après la fermeture de la page,
+  `startProg`/`addProg`/`etaSeconds`). La carte de l'export dit : en cours (barre, lot n sur N, temps
+  restant = max du rythme observé et du rythme du budget), autre page (`runningOther`), attente du budget
+  (`budget`, `budgetWait`), file (`queued`), tout en pause, bloqué par un destinataire en erreur,
+  interrompu (page fermée, `done` sur `total`), en attente du rattrapage. Redessin toutes les 10 s
+  (`tickFlows`, lectures légères). Le rattrapage garde la raison de son dernier passage
+  (`lastPass`, `catchState`).
+- **Lots plus économes** (`nextChunkSize`) : un lot coupé (`lotCut`, `total > lines + big`) est quand même
+  envoyé et mangeait le budget ; la tranche suivante se règle sur ce qui tient (0,9 × lignes qui tiennent).
+  30 000 × 40 colonnes : ~38 Mo au lieu de ~75 Mo.
+- **Erreurs d'envoi** (`hookErrorKey`) : 429, 5xx et erreur réseau ont leur texte. `errorText` reçoit le
+  statut.
+- **CIBLE** (`journalStats`, une agrégation SQL ; `arrivalNotes`, `reportButton`) : « Dernier envoi
+  arrivé » (`Sync_Recu`), lignes brutes pas encore recopiées, page visible ou non, « Copier l'état pour la
+  SOURCE » (= diagnostic F1 étendu : avancement, rattrapage, journaux).
+- **Pièges** : `wizard.show(index, body, buttons)` n'aplatit qu'un niveau du tableau du corps : y étaler
+  (`...`) les listes de nœuds ; les clés i18n composées (`common.size.*`) vont dans `DYNAMIC` de
+  `tests/unit/i18n.test.mjs`. Lancer l'e2e depuis une session cloud : `gristlabs/grist:latest` de Docker
+  Hub (l'image de mirror.gcr.io échoue), voir `access-full-help-and-cloud-e2e` en mémoire.
+- **Étape 2 (à faire)** : la CIBLE ne sait pas combien de lignes il reste quand la page SOURCE est fermée
+  en plein envoi (elle reste « À jour » avec une table partielle). Prévu : annonce du reste (`restant`)
+  portée par les lots de renvoi, `noteGaps` règle `missing` dessus ; la vérification des clés (`N:crc`
+  annoncé, comparé sur la CIBLE) est dans l'autre fil.
+
+V0.12.2 (état précédent) :
 
 V0.12.2 (Antoine, 6 novembre : un utilisateur de l'Alpha 0.5.9 avait des envois bloqués par
 `400 {"error":"Invalid column \"A\""}` ; Antoine : « on ne touche pas au code de l'alpha et au dépôt
