@@ -528,7 +528,7 @@
   "recv.result": "{added} {added|ajoutée|ajoutées}, {updated} {updated|mise à jour|mises à jour}, {removed} {removed|supprimée|supprimées}",
   "recv.result.none": "Rien à faire",
   "recv.auto": "Mise à jour automatique tant que cette page est ouverte : toutes les 10 secondes, toutes les minutes quand rien n’arrive.",
-  "recv.missing": "{table} : {n} {n|ligne n’est pas encore arrivée|lignes ne sont pas encore arrivées} (changement trop gros pour un seul envoi). {n|Elle partira d’elle-même|Elles partiront d’elles-mêmes} dès qu’un propriétaire de la SOURCE ouvrira la page de son widget.",
+  "recv.missing": "{table} : {n} {n|ligne n’est pas encore arrivée|lignes ne sont pas encore arrivées} (envoi en plusieurs morceaux). {n|Elle part d’elle-même|Elles partent d’elles-mêmes} tant qu’un propriétaire de la SOURCE a la page de son widget ouverte : si ce nombre ne baisse pas, demandez-lui de l’ouvrir.",
   "recv.arrival": "Dernier envoi arrivé : {at} · {n} {n|ligne|lignes} dans le journal.",
   "recv.arrival.raw": "{n} {n|envoi arrivé n’est pas encore recopié|envois arrivés ne sont pas encore recopiés} dans les tables : le widget le fait tant que cette page reste ouverte et visible.",
   "recv.action.report": "Copier l’état pour la SOURCE",

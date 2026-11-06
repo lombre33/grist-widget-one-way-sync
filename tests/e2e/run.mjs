@@ -1565,6 +1565,8 @@ try {
   await widget().locator('[data-export-flow] [data-flow]').first().waitFor();
   // Le widget envoie le reste seul : la carte dit où il en est (lignes, lots), puis l'avis disparaît.
   await widget().locator('[data-flow="running"] progress').waitFor({ timeout: 120000 });
+  // Chaque tranche annonce ce qui reste à venir (marque:reste:numéros), pour la CIBLE.
+  await waitFor(async () => /^[0-9a-f]+:\d+:[\d,]*$/.test((await lotRow()).Synchro_Renvoi || ''), 'chaque tranche du renvoi annonce ce qui reste à venir', 30000);
   await widget().getByText(/Envoi en cours\s:\s[\d\s]+ sur [\d\s]+ lignes \([\d\s]+%\), lot [\d\s]+ sur environ [\d\s]+/).first().waitFor();
   await widget().locator('[data-export-flow] [data-flow]').first().waitFor({ state: 'detached', timeout: 240000 });
   assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
@@ -1575,6 +1577,19 @@ try {
   await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
   step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
+
+  // --- Renvoi en tranches interrompu (page SOURCE fermée en route) : la CIBLE dit combien de lignes
+  // restent à venir au lieu de rester « À jour » avec une table à moitié reçue. On écrit à la main ce
+  // que le widget écrit à chaque tranche, puis la dernière tranche (reste zéro).
+  const sliceLot = await lotRow();
+  const slice = (await records(source.doc, 'Contacts')).slice(0, 2).map(r => r.id);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: `ab12:123:${slice.join(',')}` }]]);
+  assert.equal(JSON.parse((await lotRow()).Synchro_Lot).restant, 123, 'le lot annonce ce qui reste');
+  await widget().getByText(/Contacts\s:\s123\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: `ab13:0:${slice[0]}` }]]);
+  await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'dernière tranche : avis retiré', 60000);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: '' }]]);
+  step('CIBLE : un renvoi en tranches interrompu dit combien de lignes restent à venir, la dernière tranche efface l\'avis');
 
   // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
   // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le

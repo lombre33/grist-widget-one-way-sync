@@ -13,6 +13,7 @@ import { exportSchema, validColumns } from './codes.js';
 
 const MAX_LINES = 100000; // lignes par lot, au plus (un envoi fait au plus 1 Mo, un instantané public 2 Mo)
 const MAX_BIG = 1000; // clés de lignes trop grosses retenues par table
+const MAX_REST = 1e9; // lignes annoncées à venir, au plus (un nombre absurde n'est pas montré tel quel)
 const MAX_TABLES = 200; // tables suivies dans la note d'un journal
 
 // Ligne telle que déposée par le webhook (ou le lien public) : une liste des clés ou un lot.
@@ -53,9 +54,11 @@ function listBuckets(list) {
   return seaux.length && typeof list.t === 'number' ? { t: list.t, keys: new Map(seaux.map(([b, keys]) => [Number(b), new Set(keyStrings(keys))])) } : null;
 }
 
-// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, tooBig } ; null s'il est
-// illisible. `tooBig` : instantané public trop gros, laissé vide. Une ligne sans clé, sans bloc de
-// colonnes, ou dont l'heure n'est ni vide ni un nombre, est écartée.
+// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, rest?, tooBig? } ; null s'il est
+// illisible. `tooBig` : instantané public trop gros, laissé vide. `rest` : combien de lignes de la
+// table la SOURCE annonce encore à venir après ce lot de renvoi (`restant`), absent si elle ne
+// l'annonce pas (SOURCE d'avant la 0.12.4, lot ordinaire). Une ligne sans clé, sans bloc de colonnes, ou dont
+// l'heure n'est ni vide ni un nombre, est écartée.
 const validLine = l => Array.isArray(l) && isKey(l[0]) && (l[1] === null || l[1] === undefined || typeof l[1] === 'number')
   && l[3] !== null && typeof l[3] === 'object' && !Array.isArray(l[3]);
 export function parseLot(text) {
@@ -63,7 +66,8 @@ export function parseLot(text) {
   if (!lot || !Array.isArray(lot.lignes) || lot.lignes.length > MAX_LINES) return null;
   const lines = lot.lignes.filter(validLine).map(([key, order, deleted, data]) => ({ key: String(key), order: order ?? null, deleted: isTrue(deleted), data }));
   const big = keyStrings(lot.tropGros).slice(0, MAX_BIG);
-  return { lines, total: Number(lot.total) || lines.length, big, ...(lot.trop === true ? { tooBig: true } : {}) };
+  const rest = Number.isInteger(lot.restant) && lot.restant >= 0 ? Math.min(lot.restant, MAX_REST) : null;
+  return { lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(lot.trop === true ? { tooBig: true } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -181,15 +185,16 @@ export function unpackActions(journalTable, added, removed) {
   return actions;
 }
 
-// Un renvoi remet le compte de sa table à zéro (la SOURCE recoupe elle-même un lot de renvoi trop
-// gros) ; un lot coupé ajoute ce qui manque.
+// Un renvoi remet le compte de sa table à ce que la SOURCE annonce encore à venir (`rest`, 0 quand
+// elle ne dit rien : elle recoupe elle-même un lot de renvoi trop gros) ; un lot coupé ajoute ce qui
+// manque. Une page SOURCE fermée en plein renvoi laisse ainsi le compte des lignes à venir.
 function noteGaps(gaps, table, lot, resent) {
   const add = (map, items) => map.set(table, [...(map.get(table) || []), ...items]);
   if (lot.big.length) add(gaps.big, lot.big);
   add(gaps.arrived, lot.lines.map(l => l.key));
   if (resent) {
     gaps.resent.add(table);
-    gaps.missing.set(table, 0);
+    gaps.missing.set(table, lot.rest ?? 0);
   } else if (lot.total > lot.lines.length) gaps.missing.set(table, (gaps.missing.get(table) || 0) + lot.total - lot.lines.length);
 }
 

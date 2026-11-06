@@ -210,7 +210,10 @@ function lotFormula(pick) {
   return signed([
     `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...READ,
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
-    `again = set(int(i) for i in ($${RESEND_COL} or "").split(":")[-1].split(",") if i.strip().isdigit())`,
+    `asked = ($${RESEND_COL} or "").split(":")`,
+    'again = set(int(i) for i in asked[-1].split(",") if i.strip().isdigit())',
+    // Un renvoi en tranches annonce combien de lignes partiront encore après celle-ci (`marque:reste:numéros`).
+    'rest = int(asked[1]) if len(asked) == 3 and asked[1].isdigit() else None',
     `if $${TYPE_COL} != "${KIND.lot}": rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
     `if $${TYPE_COL} == "${KIND.files}":`,
     '  files = {}',
@@ -278,6 +281,7 @@ function lotFormula(pick) {
     'lot = {"lignes": out, "total": len(rows)}',
     'if big: lot["tropGros"] = big',
     `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
+    'if capped and rest is not None: lot["restant"] = rest',
     'return json.dumps(lot, ensure_ascii=False)',
   ], KIND.lot).join('\n');
 }

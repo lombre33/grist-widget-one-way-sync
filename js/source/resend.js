@@ -6,7 +6,7 @@ import { hookStatus, swapExports, tooLarge } from '../logic/exports.js';
 import { ownsSync } from '../logic/strays.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
-  RESEND_CHUNK, addProg, addSpent, budgetWait, chargeBusy, chunkCount, chunkMark, dueRows, eligibleRows, listRequest, lotCut, nextChunkSize, parseCharge,
+  RESEND_CHUNK, addProg, addSpent, announceRest, budgetWait, chargeBusy, chunkCount, chunkMark, dueRows, eligibleRows, listRequest, lotCut, nextChunkSize, parseCharge,
   resendValue, rowsSince, startProg, trackState,
 } from '../logic/resend.js';
 import { exportFlow } from '../logic/health.js';
@@ -118,10 +118,14 @@ async function markLots(exportId, tables, since) {
     if (!schema.has(lot[TABLE_COL])) continue;
     const start = startOf(lot, since);
     await writeSync([lot.id], { [MISSING_COL]: start });
-    const rows = rowsSince(await fetchRows(lot[TABLE_COL]), start);
+    const data = await fetchRows(lot[TABLE_COL]);
+    const rows = rowsSince(data, start);
     // Lignes qui peuvent partir : celles du suivi (clé présente, filtre appliqué) pour toute la table.
-    const eligible = start <= RESEND_ALL ? eligibleRows(await syncRows(), exportId, lot[TABLE_COL]) : null;
-    plans.push({ table: lot[TABLE_COL], lot: lot.id, start, rows, total: eligible ?? rows.length });
+    const allEligible = eligibleRows(await syncRows(), exportId, lot[TABLE_COL]);
+    const eligible = start <= RESEND_ALL ? allEligible : null;
+    // Part des lignes de la table qui partent vraiment (voir announceRest) ; 1 si le suivi ne le dit pas.
+    const ratio = allEligible !== null && data.length ? allEligible / data.length : 1;
+    plans.push({ table: lot[TABLE_COL], lot: lot.id, start, rows, total: eligible ?? rows.length, ratio });
   }
   return plans;
 }
@@ -129,14 +133,17 @@ async function markLots(exportId, tables, since) {
 // Lignes d'une table, tranche par tranche. Une table sans ligne à renvoyer part quand même en lot
 // de renvoi (vide) : la CIBLE remet à zéro son compte de lignes non arrivées. La marque est
 // effacée à part à la fin : écrite avec le lot ordinaire, elle cacherait un nouvel envoi coupé.
-async function sendRows({ lot, start, rows }, hookIds, onSent) {
+async function sendRows({ lot, start, rows, ratio = 1 }, hookIds, onSent) {
   let size = RESEND_CHUNK;
   let sentRows = 0;
   const queue = rows.length ? chunk(rows, size) : [[]];
   while (queue.length) {
     const part = queue.shift();
     await waitForQueue(hookIds);
-    await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id)), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
+    // Chaque tranche annonce à la CIBLE ce qui reste à venir : une page fermée en cours de route ne
+    // la laisse plus « À jour » avec une table à moitié reçue.
+    const rest = announceRest(queue.reduce((n, p) => n + p.length, 0), ratio);
+    await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id), rest), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
     const cell = String(((await fetchRows(SYNC_TABLE)).find(r => r.id === lot) || {})[LOT_COL] || '');
     const bytes = cell.length * hookIds.length;
     await spend(bytes);

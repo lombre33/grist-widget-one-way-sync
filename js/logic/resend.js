@@ -6,8 +6,18 @@ import { swapExports } from './exports.js';
 export const RESEND_CHUNK = 200; // lignes par tranche de renvoi
 
 // Renvoi de lignes (numéros de ligne de la table SOURCE) : une marque nouvelle à chaque fois, pour
-// que la valeur change même si les lignes sont les mêmes.
-export const resendValue = (mark, ids) => `${mark}:${ids.join(',')}`;
+// que la valeur change même si les lignes sont les mêmes. `rest` : combien de lignes de la table
+// partiront encore après cette tranche (voir announceRest) ; la formule du lot l'annonce à la CIBLE
+// (`restant`). Une formule d'avant ne lit que la dernière partie, les numéros : le reste lui est
+// inconnu et sans effet.
+export const resendValue = (mark, ids, rest = null) => (rest === null ? `${mark}:${ids.join(',')}` : `${mark}:${rest}:${ids.join(',')}`);
+
+// Ce que la CIBLE doit savoir d'un renvoi en tranches : les lignes qui n'ont pas encore été envoyées
+// (`left` : celles des tranches à venir). Le widget compte toutes les lignes de la table, la formule
+// n'en envoie que celles qui ont une clé et passent le filtre : `ratio` (part des lignes de la table
+// qui peuvent partir, 1 sans filtre) ramène le compte à ce qui arrivera, arrondi vers le haut tant qu'il
+// reste des tranches. La dernière tranche annonce 0 : c'est ce qui efface l'avis de la CIBLE.
+export const announceRest = (left, ratio = 1) => (left > 0 ? Math.max(1, Math.ceil(left * Math.min(1, Math.max(0, ratio)))) : 0);
 
 // Renvoi reprenable : lignes d'une table à renvoyer depuis `since` (RESEND_ALL : toutes), dans
 // l'ordre de MajLe. Chaque tranche part avec la marque `chunkMark` : ses lignes et les suivantes

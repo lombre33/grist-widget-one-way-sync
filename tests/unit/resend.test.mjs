@@ -1,7 +1,7 @@
 // Renvois (SOURCE) : marques reprenables, listes des clés, budget par document.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addProg, addSpent, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
+import { addProg, addSpent, announceRest, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
 import { RESEND_ALL } from '../../js/logic/common.js';
 import { parseList } from '../../js/logic/journal.js';
 
@@ -9,6 +9,8 @@ test('renvoi reprenable : lignes depuis la marque, dans l\'ordre de MajLe ; la m
   const rows = [{ id: 1, MajLe: 30 }, { id: 2, MajLe: null }, { id: 3, MajLe: 10 }, { id: 4, MajLe: 20 }, { id: 5, MajLe: 10 }];
   assert.deepEqual(rowsSince(rows, RESEND_ALL).map(r => r.id), [2, 3, 5, 4, 1], 'toute la table, lignes sans MajLe d\'abord');
   assert.equal(resendValue('ab12', [3, 4]), 'ab12:3,4', 'demande de renvoi : marque et numéros');
+  assert.equal(resendValue('ab12', [3, 4], 250), 'ab12:250:3,4', 'avec ce qui reste à venir : marque, reste, numéros');
+  assert.equal(resendValue('ab12', [], 0), 'ab12:0:', 'dernière tranche vide : le reste est zéro');
   assert.deepEqual(rowsSince(rows, 20).map(r => r.id), [4, 1]);
   assert.deepEqual(rowsSince(rows, 31), []);
   const all = rowsSince(rows, RESEND_ALL);
@@ -128,4 +130,13 @@ test('lignes qui peuvent partir : le nombre du suivi de la table, null sans suiv
   assert.equal(eligibleRows(rows, 'e', 'C'), null);
   assert.equal(eligibleRows(rows, 'e', 'D'), null, 'la ligne des clés n\'est pas le suivi');
   assert.equal(eligibleRows(rows, 'autre', 'A'), null);
+});
+
+test('renvoi en tranches : ce qui reste à venir est annoncé à la CIBLE, ramené aux lignes qui partent', () => {
+  assert.equal(announceRest(0), 0, 'plus de tranche : rien ne reste');
+  assert.equal(announceRest(800), 800, 'sans filtre : toutes les lignes des tranches à venir');
+  assert.equal(announceRest(800, 0.25), 200, 'filtre : seule la part qui part est annoncée');
+  assert.equal(announceRest(3, 0.01), 1, 'tant qu\'il reste des tranches, au moins une ligne');
+  assert.equal(announceRest(10, 7), 10, 'une part plus grande que 1 est ramenée à 1');
+  assert.equal(announceRest(10, -1), 1, 'une part négative est ramenée à 0 : au moins une ligne tant qu\'il reste des tranches');
 });
