@@ -294,7 +294,48 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.4 (6 novembre 2026)
+## État : V0.12.5 (6 novembre 2026)
+
+V0.12.5 (Antoine, 6 novembre : « fiabiliser les envois à mort », tests réels qui essaient de les faire
+échouer, messages d'erreur « super clairs », puis « se mettre à la place d'un humain dans Grist qui clique
+partout ») : banc `tests/e2e/charge.mjs` et `tests/e2e/betises.mjs`, mode d'emploi, mesures de Grist et tableau
+« trouvé / corrigé » dans `docs/07-tests-de-charge.md`. Deux Grist réels (le second derrière
+`chaos-proxy.mjs`, qui fait échouer les envois à la demande), jusqu'à 30 000 × 20, 100 000 lignes, 256
+destinataires sur dix lignes, une quarantaine de bêtises. À retenir :
+- **Grist (mesuré, 1.7.22)** : une file d'envoi par document, 1 000 événements (au-delà, chaque écriture du
+  document attend, par pas de 5 s ; N destinataires = N événements par modification). Un envoi qui échoue est
+  retenté ~15 min et retient tous les autres destinataires du document. Un serveur qui ne répond jamais laisse
+  l'envoi « en cours » **sans fin** (20 min sans reprise). Désactiver un webhook libère les autres ;
+  `DELETE /webhooks/<id>` n'arrête pas un envoi en cours, `DELETE /webhooks/queue/<id>` oui (`deleteWebhook`
+  le fait d'abord). `lastHttpStatus` reste celui du dernier envoi réussi après une connexion coupée : c'est
+  `lastEventBatch` qui dit l'échec en cours (`failureStatus`).
+- **Pause d'office** (`js/source/pausing.js`, `autoPauseKind` de `logic/exports.js`) : un destinataire dont le
+  lien est mort (404, 401, 403), dont le journal est supprimé (`Table not found`) ou dont un envoi attend plus de
+  3 min (`SLOW_MS`) est mis en pause par le widget après 60 s vu ainsi, page d'un propriétaire ouverte
+  (`pauseDeadLinks`, dans `catchUpLocked`), note `auto` + `why` (`link` ou `slow`), événement `autopause`, la carte
+  le dit. Les erreurs qui passent seules (429, 5xx, connexion coupée) ne sont **jamais** mises en pause d'office :
+  l'étendre est un choix à poser à Antoine. « Débloquer la file » n'est plus proposé pour ces erreurs (`NO_UNBLOCK`).
+- **Textes d'erreur** (`hookErrorKey`) : un par cause (`size`, `column`, `link`, `journal`, `rate`, `server`,
+  `network`, `slow`, `other`), qui disent aussi que les autres destinataires attendent et quoi faire ; un seul avis
+  « N destinataires attendent derrière… » par export (`behindNotice`) ; la carte se relit toute seule tant qu'un
+  envoi est en cours (`hookBusy`, `tickFlows`).
+- **Clés `id_sync` / colonnes du widget** (`js/logic/keys.js`, `js/source/keys.js`) : lignes sans clé ou de même
+  clé, colonne `id_sync`, `MajLe` ou `RecalculLe` supprimée : carte « Des lignes n'arriveront pas » et bouton
+  « Réparer les clés » (colonnes remises, clés neuves, toutes les lignes repartent). Le compte des clés lit le
+  schéma d'abord : SQLite lit un identifiant inconnu entre guillemets comme un texte.
+- **Bêtises vues et corrigées** : valeurs `NaN` ou infinies (`v()` de `formulas.js` envoie `None`) ; webhook
+  supprimé à la main (avis `vanishedRecipients` : ajoutés moins présents) ; lignes de `Synchro` supprimées (avis
+  « les lignes de cet export ont disparu » ; **les clés de signature des destinataires étaient dans ces lignes** :
+  `unkeyedRecipients`, avis par personne, révoquer puis réinviter) ; CIBLE : **renommer la seule table reçue
+  perdait la clé de signature et arrêtait la réception** (`receivedKey` suit `refs.table`), clé perdue ou table
+  effacée dite par la carte (un premier passage en erreur ne passe plus pour « En attente du lien »), formulaire
+  dépublié ou page supprimée (`formGone`), refus d'une règle d'accès (`error.blockedRules`), 512 contrôles de lien
+  simultanés à 256 destinataires (`pool`, six à la fois).
+- **Pas traité** : table `Synchro` supprimée ou cachée à tous (la SOURCE revient au premier écran) ; hang d'un
+  envoi vers un document CIBLE supprimé (Grist met l'envoi « en cours » avant de répondre 404) ; minuteries d'un
+  onglet caché (non testable sans tête) ; lecteur de la SOURCE qui voit l'écran d'accueil.
+
+V0.12.4 (état précédent, même jour) :
 
 V0.12.4 (étape 2 de la même demande d'Antoine, 6 novembre) : **un renvoi en tranches annonce ce qui
 reste à venir**. Cas visé : la page du widget SOURCE se ferme en plein renvoi (premier envoi, « Tout

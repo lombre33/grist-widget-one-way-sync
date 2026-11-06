@@ -231,6 +231,47 @@ const scenarios = {
     }
   },
 
+  // CHAOS=1. Un destinataire dont le serveur ne répond jamais (connexion ouverte, pas de réponse) : Grist n'a pas de
+  // délai d'attente, l'envoi reste « en cours » et la file de tout le document attend (vu : plus de 20 minutes sans
+  // reprise). Le widget doit le dire au bout de trois minutes, puis, page SOURCE ouverte, mettre ce destinataire en
+  // pause d'office : l'autre reçoit alors sans rien faire à la main.
+  async destinataireMuet() {
+    assert.ok(proxy, 'scénario réservé à CHAOS=1');
+    const rows = 100;
+    const a = await h.pair({ name: 'Muet A', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
+    await follow(a, 'A reçoit', n => n === rows, { timeout: 120000, every: 3000 });
+    const b = await h.addRecipient(a, { name: 'Muet B', send: 'wait' });
+    await waitFor(async () => (await count(b.dst.doc, 'Contacts')) === rows, 'B reçoit', 120000, 2000);
+    const [hookA] = await webhooks(a.src.doc);
+    const keyA = /\/api\/s\/([^/]+)\//.exec(hookA.fields.url)[1];
+    proxy.set('hang', { only: keyA });
+    log('le serveur de A ne répond plus (la connexion reste ouverte)');
+    await a.sv.open(a.src.url);
+    await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    const ids = (await records(a.src.doc, 'Contacts')).slice(0, 5).map(r => r.id);
+    await applyActions(a.src.doc, [['BulkUpdateRecord', 'Contacts', ids, { Ville: ids.map(() => 'Muet1') }]]);
+    const t0 = Date.now();
+    const bGot = async () => (await count(b.dst.doc, 'Contacts', `where "Ville" = 'Muet1'`)) === 5;
+    let said = 0;
+    let got = 0;
+    for (let i = 0; i < 90 && !got; i++) {
+      await sleep(5000);
+      if (!said && /ne répond pas/.test(await a.sv.text())) { said = Math.round((Date.now() - t0) / 1000); log(`la carte dit « ne répond pas » après ${said} s`); }
+      if (await bGot()) got = Math.round((Date.now() - t0) / 1000);
+      else if (i % 6 === 5) log(`B n'a pas encore la modification (${Math.round((Date.now() - t0) / 1000)} s) ; files : ${JSON.stringify((await webhooks(a.src.doc)).map(w => [w.usage.status, w.usage.numWaiting]))}`);
+    }
+    log(got ? `B reçoit la modification ${got} s après la panne de A` : 'B ne reçoit pas la modification en 7 minutes');
+    proxy.set('pass');
+    await a.sv.open(a.src.url);
+    await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await sleep(4000);
+    const card = await a.sv.text();
+    log(`carte SOURCE : ${card.slice(0, 1200)}`);
+    assert.ok(said, 'la carte dit que le destinataire ne répond pas');
+    assert.ok(got, 'B reçoit sans rien faire à la main');
+    assert.match(card, /Mise en pause par le widget : un envoi vers cette personne attendait/, 'la carte dit pourquoi le destinataire est en pause');
+  },
+
   // CHAOS=1. Envois de webhooks qui échouent : quota (429), erreurs du serveur (500, 503), connexion coupée,
   // réponse qui ne vient jamais, réponse lente. Pour chacun : ce que Grist note de l'échec (texte réel), ce que
   // la SOURCE en dit, et la reprise seule quand le mal est passé.

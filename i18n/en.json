@@ -131,6 +131,7 @@
   "send.history.pause": "{who}: sending paused.",
   "send.history.autopause": "{who}: paused by the widget, its receiving link no longer worked.",
   "send.paused.auto": "Paused by the widget: its receiving link no longer worked (reception stopped, link cut or form unpublished), and it was holding back deliveries to the other people of this document. Revoke them and invite them again; if the link is restored, resume their deliveries.",
+  "send.paused.slow": "Paused by the widget: a send to this person was waiting for a reply that never came (Grist never gives up by itself), and it was holding back the sends to the other people of this document. If their document answers again, resume their sends; otherwise revoke them and invite them again.",
   "send.history.resume": "{who}: sending resumed.",
   "send.history.revoke": "{who}: revoked.",
   "send.history.edit": "Export edited.",

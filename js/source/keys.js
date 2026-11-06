@@ -1,7 +1,7 @@
 // SOURCE : les clés `id_sync` des tables envoyées. Une ligne sans clé ne part pas, deux lignes de même clé
 // n'en font qu'une chez les destinataires (voir logic/keys.js) : l'onglet Envoyer le compte (une requête,
 // rien n'est lu en dehors des nombres) et propose de donner une clé neuve à ces lignes, puis les renvoie.
-import { KEY_COL, ORDER_COL, nowS } from '../logic/common.js';
+import { KEY_COL, ORDER_COL, chunk, nowS } from '../logic/common.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
 import { keyCountSql, keyCounts, keyProblems, repairActions } from '../logic/keys.js';
 import { apply, fetchRows, querySql, readSchema, selectRows } from '../grist.js';
@@ -39,15 +39,22 @@ export async function checkKeys(tables) {
 const keyRows = async table => (await selectRows(table, [KEY_COL])) || fetchRows(table);
 
 // Répare : remet les colonnes du widget supprimées (toutes les lignes reçoivent alors une clé neuve si id_sync
-// manquait), puis donne une clé neuve aux lignes sans clé et aux doubles (la plus ancienne garde la sienne), et les
+// manquait, et repartent), puis donne une clé neuve aux lignes sans clé et aux doubles (la plus ancienne garde la sienne), et les
 // lignes touchées repartent comme après une modification. Rend le nombre de lignes renvoyées.
 export async function repairKeys(table) {
   const missing = missingSyncColumns((await readSchema()).columns(table));
   if (missing.length) {
     await apply(prepareSourceActions(table, missing));
-    if (missing.includes(KEY_COL)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
     checked.delete(table);
-    if (missing.includes(KEY_COL)) return 0;
+    if (missing.includes(KEY_COL)) {
+      // Clés neuves pour toutes les lignes : elles repartent toutes comme après une modification (par tranches si la
+      // table est grande, voir le rattrapage), sinon chez les destinataires rien ne porterait les nouvelles clés.
+      const rows = await fetchRows(table);
+      await apply(fillKeyActions(table, rows, () => crypto.randomUUID()));
+      const now = nowS();
+      await apply(chunk(rows.map(r => r.id)).map(ids => ['BulkUpdateRecord', table, ids, { [ORDER_COL]: ids.map(() => now) }]));
+      return rows.length;
+    }
   }
   const problems = keyProblems(await keyRows(table));
   if (!problems.touch.length) return 0;

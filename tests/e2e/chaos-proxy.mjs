@@ -9,8 +9,9 @@ const HOOK = /^\/(o\/[^/]+\/)?api\/s\//;
 
 export function startChaosProxy({ port, target }) {
   // mode : 'pass' | 'status' (réponse `code`) | 'reset' | 'hang' | 'slow' (`delay` ms avant de relayer)
-  // `every` : seul un envoi sur `every` est touché (1 : tous). `stats` : envois vus par mode.
-  const chaos = { mode: 'pass', code: 500, delay: 0, every: 1, seen: 0, stats: {}, bodies: [] };
+  // `every` : seul un envoi sur `every` est touché (1 : tous). `only` : seuls les envois dont l'adresse contient ce
+  // texte (la clé d'un destinataire) sont touchés. `stats` : envois vus par mode.
+  const chaos = { mode: 'pass', code: 500, delay: 0, every: 1, only: '', seen: 0, stats: {}, bodies: [] };
   const note = (key) => { chaos.stats[key] = (chaos.stats[key] || 0) + 1; };
 
   const forward = (req, res, body) => {
@@ -23,7 +24,7 @@ export function startChaosProxy({ port, target }) {
   };
 
   const server = createServer((req, res) => {
-    const hit = req.method === 'POST' && HOOK.test(req.url);
+    const hit = req.method === 'POST' && HOOK.test(req.url) && (!chaos.only || req.url.includes(chaos.only));
     if (!hit || chaos.mode === 'pass') {
       if (hit) note('pass');
       return forward(req, res);
@@ -60,7 +61,7 @@ export function startChaosProxy({ port, target }) {
 
   return new Promise(resolve => server.listen(port, () => resolve({
     chaos,
-    set(mode, options = {}) { Object.assign(chaos, { mode, code: 500, delay: 0, every: 1, seen: 0 }, options); },
+    set(mode, options = {}) { Object.assign(chaos, { mode, code: 500, delay: 0, every: 1, only: '', seen: 0 }, options); },
     close: () => new Promise(done => { server.closeAllConnections?.(); server.close(done); }),
   })));
 }

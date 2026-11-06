@@ -131,6 +131,7 @@
   "send.history.pause": "{who} : envois mis en pause.",
   "send.history.autopause": "{who} : mis en pause par le widget, son lien de réception ne marchait plus.",
   "send.paused.auto": "Mise en pause par le widget : son lien de réception ne marchait plus (réception arrêtée, lien coupé ou formulaire dépublié), et il retenait les envois vers les autres personnes de ce document. Révoquez-la et invitez-la de nouveau ; si le lien est rétabli, reprenez ses envois.",
+  "send.paused.slow": "Mise en pause par le widget : un envoi vers cette personne attendait une réponse qui ne venait pas (Grist n’abandonne jamais de lui-même), et il retenait les envois vers les autres personnes de ce document. Si son document répond de nouveau, reprenez ses envois ; sinon révoquez-la et invitez-la de nouveau.",
   "send.history.resume": "{who} : envois repris.",
   "send.history.revoke": "{who} : révoqué.",
   "send.history.edit": "Export modifié.",

@@ -3,7 +3,7 @@
 // destinataire, filtré par Grist sur les lignes de son export.
 import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, pool } from '../logic/common.js';
 import { maskKey, parseWebhookUrl } from '../logic/codes.js';
-import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../logic/exports.js';
+import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
 import { STATES, parseLot } from '../logic/journal.js';
 import { eventsOf, vanishedRecipients } from '../logic/notes.js';
@@ -111,7 +111,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
     return;
   }
   container.replaceChildren(...sourceView(state, access, open));
-  if ([...flowSlots.values()].some(slot => slot.moving)) watchFlows();
+  if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
   if (state.ownerOnly) return;
   resumeExchange(state);
   if (!periodic) askAboutSync(state);
@@ -336,7 +336,7 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   const [status] = hookStatus(h);
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const failing = status === 'error';
-  const autoPaused = status === 'paused' && note.pauses.some(p => p.hook === h.id && p.auto);
+  const autoPaused = status === 'paused' ? note.pauses.find(p => p.hook === h.id && p.auto) : null;
   // Vider la file ne règle ni un lien mort, ni un serveur qui n'en peut plus (l'envoi suivant échoue de la même
   // façon) : la pause libère les autres destinataires, ou l'on attend (Grist retente seul).
   const waits = failing && !columnFault(h.usage, syncCols) && NO_UNBLOCK.includes(hookErrorKey(h));
@@ -349,7 +349,7 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     exp.unkeyed.has(h.id) ? message('err', t('send.person.noKey')) : null,
-    autoPaused ? message('info', t('send.paused.auto')) : null,
+    autoPaused ? message('info', t(autoPaused.why === 'slow' ? 'send.paused.slow' : 'send.paused.auto')) : null,
     slot.lines,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
@@ -425,6 +425,7 @@ async function tickFlows() {
     const slot = personSlots.get(h.id);
     if (!slot || !slot.pill.isConnected) continue;
     changed ||= hookStatus(h)[0] !== slot.status;
+    moving ||= hookBusy(h);
     fillPerson(slot, h);
   }
   if (changed && !document.querySelector('.scrim')) await refreshSource();

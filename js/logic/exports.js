@@ -206,6 +206,10 @@ function failureMessage(h) {
   return String((batch && batch.status !== 'success' && batch.errorMessage) || u.lastErrorMessage || '');
 }
 
+// Envoi en cours chez ce destinataire (des envois attendent, ou un envoi part ou est retenté) : l'état de la
+// carte peut changer sans que personne ne touche à rien (échec, envoi qui n'obtient pas de réponse), elle se relit.
+export const hookBusy = h => Boolean(h.fields.enabled) && (((h.usage || {}).numWaiting || 0) > 0 || ['sending', 'retrying', 'postponed'].includes((h.usage || {}).status));
+
 // Destinataire dont l'envoi échoue : Grist n'a qu'une file d'envoi par document et la rejoue dans l'ordre, un
 // envoi qui échoue est retenté jusqu'à un quart d'heure avant de passer son tour, donc les autres destinataires
 // du document (de tous ses exports) attendent derrière lui. Null si aucun n'échoue.
@@ -237,6 +241,16 @@ export function hookErrorKey(h, now = Date.now()) {
 // Lien de réception mort (clé de formulaire inconnue, réception arrêtée) : l'envoi échoue et échouera toujours.
 export const DEAD_KEYS = ['send.error.link', 'send.error.journal'];
 export const deadLink = h => h.fields.enabled && hookStatus(h)[0] === 'error' && DEAD_KEYS.includes(hookErrorKey(h));
+
+// Pourquoi le widget met ce destinataire en pause d'office : 'link' (lien ou journal mort), 'slow' (un envoi attend
+// une réponse qui ne vient pas : Grist n'a pas de délai, vu au test de charge, 20 minutes sans reprise et la file
+// du document bloquée), '' sinon. Les erreurs qui passent d'elles-mêmes (quota, panne passagère) n'en sont pas.
+export function autoPauseKind(h, now = Date.now()) {
+  if (!h.fields.enabled || hookStatus(h, now)[0] !== 'error') return '';
+  const key = hookErrorKey(h, now);
+  if (DEAD_KEYS.includes(key)) return 'link';
+  return key === 'send.error.slow' ? 'slow' : '';
+}
 
 // Erreurs que vider la file ne règle pas (l'envoi suivant échouerait de la même façon) : ce qui aide, c'est la
 // pause, qui libère les autres destinataires, ou d'attendre.

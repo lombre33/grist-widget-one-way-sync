@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
+  autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
   hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
@@ -294,4 +294,29 @@ test('choix et formats : envoyés avec les colonnes, réécrits quand ils change
   assert.deepEqual(again.changed, [], 'une liste de choix changée ne renvoie pas la table');
   assert.equal(again.actions.length, 1);
   assert.deepEqual(optionsActions([...rows, { id: 9, Synchro_Export: E, Synchro_Table: 'Perdue', Synchro_Type: 'cles', Synchro_Colonnes: '[]' }], { has: t => t === 'Contacts', columns: t => cols[t] }).length, 1, 'table introuvable laissée');
+});
+
+test('pause d\'office : seulement ce qui ne revient pas tout seul (lien ou journal mort, réponse qui ne vient jamais)', () => {
+  const now = 1e12;
+  const hook = (usage, enabled = true) => ({ id: 'h', fields: { enabled }, usage });
+  const link = hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Share not known"}', lastEventBatch: { status: 'failure', httpStatus: 404 } });
+  const gone = hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: 'Table not found "J"', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: 'Table not found "J"' } });
+  const silent = hook({ status: 'sending', updatedTime: now - SLOW_MS - 1000, lastHttpStatus: 200, lastEventBatch: { status: 'success', httpStatus: 200 } });
+  assert.equal(autoPauseKind(link, now), 'link');
+  assert.equal(autoPauseKind(gone, now), 'link');
+  assert.equal(autoPauseKind(silent, now), 'slow');
+  assert.equal(autoPauseKind(hook({ status: 'sending', updatedTime: now - 5000, lastHttpStatus: 200 }), now), '', 'un envoi en cours depuis peu');
+  for (const code of [429, 500, 503]) assert.equal(autoPauseKind(hook({ status: 'retrying', lastHttpStatus: code, lastEventBatch: { status: 'failure', httpStatus: code } }), now), '', `${code} passe tout seul`);
+  assert.equal(autoPauseKind(hook({ status: 'retrying', lastHttpStatus: 200, lastErrorMessage: 'socket hang up', lastEventBatch: { status: 'failure', httpStatus: null } }), now), '', 'connexion coupée');
+  assert.equal(autoPauseKind(link === null ? link : hook(link.usage, false), now), '', 'déjà en pause');
+});
+
+test('envoi en cours chez un destinataire : la carte se relit tant qu\'il dure', () => {
+  const hook = (usage, enabled = true) => ({ id: 'h', fields: { enabled }, usage });
+  assert.equal(hookBusy(hook({ status: 'idle', numWaiting: 0 })), false);
+  assert.equal(hookBusy(hook({ status: 'idle', numWaiting: 2 })), true);
+  assert.equal(hookBusy(hook({ status: 'sending', numWaiting: 0 })), true);
+  assert.equal(hookBusy(hook({ status: 'retrying' })), true);
+  assert.equal(hookBusy(hook({ status: 'sending', numWaiting: 3 }, false)), false, 'en pause : rien ne part');
+  assert.equal(hookBusy(hook(undefined)), false);
 });
