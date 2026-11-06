@@ -18,7 +18,7 @@ import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
-import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, run, smallButton } from '../ui.js';
+import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, redraw, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 
@@ -96,7 +96,7 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
     el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
   const cards = groups.map(safeCard);
-  container.replaceChildren(...[toolbar,
+  redraw(container, [toolbar,
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),

@@ -25,7 +25,7 @@ import { foreignDialog, strayDialog } from './strays.js';
 import { checkKeys, keysBlock } from './keys.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { confirmDialog, el, icon, message, noteError, pill, run, smallButton } from '../ui.js';
+import { confirmDialog, el, icon, message, noteError, pill, redraw, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 
@@ -112,7 +112,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
     reloading(container, renderSource);
     return;
   }
-  container.replaceChildren(...sourceView(state, access, open));
+  redraw(container, sourceView(state, access, open));
   if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
   if (state.ownerOnly) return;
   resumeExchange(state);

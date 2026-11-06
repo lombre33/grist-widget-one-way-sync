@@ -294,7 +294,24 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.13.1 (6 novembre 2026)
+## État : V0.13.2 (6 novembre 2026)
+
+V0.13.2 (Antoine, 6 novembre : « refaire un audit UI/UX pour vérifier que tout est cohérent, fluide »). Rapport
+classé (15 constats, captures) : Claude Doc « Audit UI/UX de la Bêta V0.13.1 », captures dans
+`/mnt/project-files/notes/audit-ux-0.13/`. Corrigé ici, vérifié dans un Grist réel :
+- **Fausse alerte de retouches** : une Référence qui affiche le numéro de ligne arrive du journal en nombre, la
+  destination la garde en texte ; `sameValue` (`logic/consolidation.js`) tient un nombre et le même nombre en texte
+  pour égaux (43 retouches annoncées sur le document d'essai, 3 vraies).
+- **Assistants coupés à 700 px** : `.scrim` est une grille à piste automatique, `max-width: 100%` ne contraignait pas
+  sous 744 px ; `grid-template-columns: minmax(0, 1fr)`.
+- **Focus perdu à chaque redessin** : `redraw`, `focusSpot`, `restoreFocus` (`js/ui.js`) retrouvent l'élément actif
+  par son rôle et son nom ; une fenêtre rend le focus à son bouton d'origine à la fermeture.
+- Textes : apostrophes, « courriel », libellé de réponse « Date ».
+Constats restants (avertissements hétérogènes, pause sans explication, identifiants bruts, « lignes dans le
+journal » qui compte des versions, tutoriel étape 1 dense, assistants centrés verticalement, options de la
+CIBLE à replier) : attendent le choix d'Antoine, voir le rapport.
+
+V0.13.1 (état précédent, même jour) :
 
 V0.13.1 (Antoine, 6 novembre, après le récap des tests de charge : « je veux un max de message d'erreur ciblés
 et précis donc oui tous à faire », sur les cas que la 0.12.5 laissait sans message sur mesure) :

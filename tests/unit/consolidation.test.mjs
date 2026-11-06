@@ -172,6 +172,14 @@ test('écarts : valeurs retouchées ici, par numéro de ligne ; rien en Échange
   assert.deepEqual(manualEdits({ journalRows, destRows, copyCols, exchange: true }), []);
 });
 
+test('écarts : un nombre reçu et le même nombre en texte ne sont pas une retouche (Référence qui montre le numéro de ligne)', () => {
+  const copyCols = [['Service', 'Service']];
+  const journalRows = [j(1, 'a', 10, { Service: 1, ...done }), j(2, 'b', 10, { Service: 2, ...done })];
+  const destRows = [{ id: 1, id_sync: 'a', manualSort: 1, Service: '1' }, { id: 2, id_sync: 'b', manualSort: 2, Service: '3' }];
+  assert.deepEqual(manualEdits({ journalRows, destRows, copyCols }).map(e => [e.key, e.cells]), [['b', [['Service', 'Service', '3', 2]]]],
+    'a : 1 et « 1 » sont la même valeur ; b : 2 et « 3 » restent une retouche');
+});
+
 test('lignes effacées ici : signalées tant que la SOURCE les a ; une clé partie de la SOURCE est notée, plus signalée', () => {
   const copyCols = [['Nom', 'Nom']];
   const journalRows = [j(1, 'a', 10, done), j(2, 'b', 10, { ...done, Sync_Etat: 'suppression' }), j(3, 'c', 10, { ...done, Sync_Etat: 'partie' }),

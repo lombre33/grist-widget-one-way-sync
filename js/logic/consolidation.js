@@ -100,9 +100,14 @@ export function addedColumns({ columns = [], map = {}, addedCols = [] }, next, a
 
 // Valeur reçue et valeur de la destination égales ? Vide vaut vide ; une liste de choix lue dans
 // Grist commence par la marque 'L'.
+// Un nombre reçu et le même nombre écrit en texte sont égaux : une Référence qui n'affiche que le
+// numéro de ligne (ou une colonne numérique) part en nombre, et la colonne Texte d'ici le garde en texte.
 function sameValue(sent, have) {
   const norm = x => (isBlank(x) ? null : Array.isArray(x) && x[0] === 'L' ? x.slice(1) : x);
-  return JSON.stringify(norm(sent)) === JSON.stringify(norm(have));
+  const [a, b] = [norm(sent), norm(have)];
+  if (typeof a === 'number' && typeof b === 'string') return String(a) === b;
+  if (typeof a === 'string' && typeof b === 'number') return a === String(b);
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 // Numéro de ligne de chaque clé de la destination, tel que Grist l'affiche dans une vue sans tri

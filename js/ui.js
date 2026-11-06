@@ -44,8 +44,36 @@ export function message(kind, text) {
 
 const stack = [];
 
+// Où est le focus clavier dans `root` : bouton, résumé ou lien, avec son nom et son rang parmi ses semblables, pour le
+// retrouver quand l'onglet est redessiné (les éléments sont alors tous neufs).
+const FOCUS_KINDS = 'button, summary, a[href]';
+const focusName = node => node.getAttribute('aria-label') || node.textContent.trim();
+const sameKind = (root, tag, name) => [...root.querySelectorAll(tag)].filter(node => focusName(node) === name);
+export function focusSpot(root, node = document.activeElement) {
+  if (!node || node === root || !root.contains(node) || !node.matches(FOCUS_KINDS)) return null;
+  const name = focusName(node);
+  return { tag: node.tagName, name, index: sameKind(root, node.tagName, name).indexOf(node) };
+}
+export function restoreFocus(root, spot) {
+  if (!spot) return false;
+  const found = sameKind(root, spot.tag, spot.name);
+  const target = found[spot.index] || found[0];
+  if (!target || target.disabled) return false;
+  target.focus({ preventScroll: true });
+  return true;
+}
+// Redessin automatique d'un onglet (donnée arrivée, passage du rattrapage) : le focus reste sur le même bouton, au lieu de
+// tomber en haut de la page pour une personne qui navigue au clavier ou au lecteur d'écran.
+export function redraw(root, nodes) {
+  const spot = focusSpot(root);
+  root.replaceChildren(...nodes);
+  restoreFocus(root, spot);
+}
+
 export function openModal({ title, body, buttons = [], width = 480, onClose }) {
   const opener = document.activeElement;
+  const main = document.getElementById('main');
+  const spot = main ? focusSpot(main, opener) : null;
   const titleId = `modal-title-${stack.length}`;
   const footer = el('div', { class: 'modal-footer' });
   const frame = el('div', { class: `modal modal-${width}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
@@ -60,6 +88,8 @@ export function openModal({ title, body, buttons = [], width = 480, onClose }) {
       stack.splice(stack.indexOf(modal), 1);
       if (opener && opener.focus) opener.focus();
       if (onClose) onClose(result);
+      // L'onglet se redessine à la fermeture : le bouton d'origine n'existe plus, le focus revient au même bouton du nouveau dessin.
+      if (spot) for (const ms of [150, 600, 1500]) setTimeout(() => { if (!stack.length && (!document.activeElement || document.activeElement === document.body)) restoreFocus(main, spot); }, ms);
     },
     // Un clic à la fois : les boutons restent grisés tant que l'action tourne (un double clic
     // brancherait deux fois le même destinataire).

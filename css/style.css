@@ -181,7 +181,7 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .filter-field > .btn { justify-self: start; }
 
 /* Fenêtres : titre et boutons fixes, contenu qui défile ; tiennent dans un panneau de 700×400 */
-.scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 2000; padding: 12px; }
+.scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 2000; padding: 12px; }
 .modal { background: var(--surface); border-radius: var(--radius-frame); box-shadow: var(--shadow-float); width: 100%;
   max-height: calc(100vh - 24px); display: flex; flex-direction: column; }
 .modal-400 { max-width: 400px; }

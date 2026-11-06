@@ -177,7 +177,7 @@ réception a le sien, sur sa page.
 ![Réponse](images/10-cible-reponse.png)
 
 Copier le code de réponse et le renvoyer à la SOURCE. Il contient l'adresse d'écriture et votre
-fiche (e-mail, document, équipe). Le **code de contrôle** affiché dessous (six caractères) est
+fiche (courriel, document, équipe). Le **code de contrôle** affiché dessous (six caractères) est
 celui que la SOURCE verra : comparez-le avec elle par téléphone.
 
 ## Côté SOURCE : approuver
