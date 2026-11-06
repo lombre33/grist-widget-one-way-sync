@@ -34,6 +34,9 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   }
   assert.match(lot, /rows = \[r for r in src\.all if r\.id_sync and keep\(r\)\]/, 'seules les lignes du filtre partent');
   assert.match(lot, /tables = \{"Contacts": Contacts, "Villes": Villes\}/);
+  assert.match(lot, /asked = \(\$Synchro_Renvoi or ""\)\.split\(":"\)\nagain = set\(int\(i\) for i in asked\[-1\]\.split\(","\)/, 'numéros à renvoyer : la dernière partie, comme avant');
+  assert.match(lot, /rest = int\(asked\[1\]\) if len\(asked\) == 3 and asked\[1\]\.isdigit\(\) else None/, 'reste annoncé : marque:reste:numéros');
+  assert.match(lot, /if capped and rest is not None: lot\["restant"\] = rest/, 'seul un lot ordinaire annonce le reste');
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);

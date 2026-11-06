@@ -24,7 +24,7 @@
         "Why full access? The widget reads the document’s structure (tables and columns, to offer exports and destinations), creates its technical table and tracking columns, writes to the destination tables and, for an owner, manages the webhooks and access rules it sets. Read access does not allow this. It only talks to the Grist instance, never to another server."
       ]
     },
-    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00d-installer-acces", "00e-installer-acces-accepter", "00f-installer-acces-liste", "01-accueil"]
+    "images": ["00a-installer-ajouter", "00b-installer-page", "00c-installer-url", "00g-installer-acces-ouvrir", "00e-installer-acces-accepter", "00f-installer-acces-liste", "01-accueil"]
   },
   {
     "id": "s-tables",
@@ -215,12 +215,14 @@
       "fr": [
         "La carte de l’export liste ses tables et ses destinataires. Pour l’export : Ajouter un destinataire (sans refaire l’export) ; Modifier (tables, colonnes, nom, pour tous) ; Tout renvoyer ; Supprimer.",
         "Pour une personne : Mettre en pause, puis Reprendre, qui propose de rattraper les changements de la pause (recommandé) ; Débloquer la file si un envoi échoue ; Révoquer, sans toucher aux autres.",
-        "Un renvoi part vers tous les destinataires de l’export ; chez ceux qui avaient déjà ces lignes, il est sans effet."
+        "Un renvoi part vers tous les destinataires de l’export ; chez ceux qui avaient déjà ces lignes, il est sans effet.",
+        "Un envoi long se prévoit et se suit : avant « Tout renvoyer » (ou « Envoyer » à l’ajout d’un destinataire), le widget dit ce qu’il va coûter (lignes, taille, lots, durée). Pendant l’envoi, la carte de l’export affiche où il en est (lignes et lots, temps restant), la pause qui ménage le serveur de Grist (20 Mo par tranche de 10 minutes, tous destinataires confondus) avec l’heure de reprise, et, si un destinataire est en erreur, pourquoi rien ne part. Gardez une page du widget ouverte jusqu’à la fin."
       ],
       "en": [
         "The export card lists its tables and recipients. For the export: Add a recipient (without redoing the export); Edit (tables, columns, name, for everyone); Resend all; Delete.",
         "For one person: Pause, then Resume, which offers to catch up on changes made during the pause (recommended); Unblock the queue when a delivery fails; Revoke, without affecting the others.",
-        "A resend goes to all recipients of the export; for those who already had these rows, it has no effect."
+        "A resend goes to all recipients of the export; for those who already had these rows, it has no effect.",
+        "A long send is announced and followed: before “Resend all” (or “Send” when adding a recipient), the widget says what it will cost (rows, size, batches, time). While it runs, the export card shows where it stands (rows and batches, time left), the pause that spares Grist’s server (20 MB per 10 minutes, all recipients combined) with the time it resumes, and, if a recipient is failing, why nothing leaves. Keep a widget page open until it is done."
       ]
     },
     "images": ["13-source-actif", "18-source-modifier", "13b-source-reprendre"]
@@ -408,6 +410,7 @@
         "Ligne d’un destinataire en rouge : la CIBLE a arrêté la réception, coupé ou dépublié son formulaire. Révoquer cette personne, puis l’inviter de nouveau ; dans la CIBLE, la même réception reprend.",
         "Tous les envois du document SOURCE sont en retard : un envoi en échec bloque la file. Débloquer la file.",
         "Des lignes ne sont pas arrivées : ouvrir la page du widget dans la SOURCE (un gros changement y finit de partir seul), sinon Tout renvoyer.",
+        "Des lignes manquent dans la CIBLE alors que la SOURCE dit avoir envoyé : sur la carte de la réception, « Dernier envoi arrivé » dit si quelque chose est arrivé, et « envois arrivés pas encore recopiés » si la recopie attend (page fermée, cachée, ou un autre onglet du même navigateur qui avance seul). « Copier l’état pour la SOURCE » donne à la personne qui envoie de quoi comprendre, sans code, lien ni valeur de vos tables.",
         "Au branchement, « Grist 1.7.11 ou plus récent » : l’instance ne sait pas filtrer un webhook par export.",
         "Envoi en erreur « Invalid column » : la table Synchro de la SOURCE a une colonne qui n’est pas au widget (A, B et C d’une table faite à la main, par exemple). La carte « Colonnes en trop dans la table Synchro » les liste et les retire après votre accord (sauvegardez d’abord ce qu’elles contiennent), puis le widget débloque la file.",
         "« Une table nommée Synchro existe déjà » : le widget ne reprend pas la table de quelqu’un d’autre. Renommer cette table (le widget le propose, elle garde tout son contenu) : il crée ensuite la sienne.",
@@ -418,6 +421,7 @@
         "Red recipient line: the TARGET stopped receiving, cut or unpublished its form. Revoke this person, then invite them again; in the TARGET, the same reception resumes.",
         "All deliveries of the SOURCE document are late: a failed delivery blocks the queue. Unblock the queue.",
         "Rows did not arrive: open the widget page in the SOURCE (a big change finishes leaving there on its own), otherwise Resend all.",
+        "Rows are missing in the TARGET although the SOURCE says it sent them: on the reception card, “Last delivery arrived” says whether anything arrived, and “deliveries that arrived are not copied into the tables yet” says the copy is waiting (page closed, hidden, or another tab of the same browser moving on its own). “Copy the status for the SOURCE” gives the sender what they need, with no code, link or value from your tables.",
         "On connecting, “Grist 1.7.11 or later”: the instance cannot filter a webhook by export.",
         "Delivery fails with “Invalid column”: the SOURCE’s Synchro table has a column that does not belong to the widget (A, B and C of a hand-made table, for example). The card “Extra columns in the Synchro table” lists and removes them with your agreement (save what they hold first), then the widget unblocks the queue.",
         "“A table named Synchro already exists”: the widget does not take over someone else’s table. Rename that table (the widget offers to; it keeps all its content): it then creates its own.",

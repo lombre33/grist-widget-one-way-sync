@@ -6,14 +6,16 @@ import { hookStatus, swapExports, tooLarge } from '../logic/exports.js';
 import { ownsSync } from '../logic/strays.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
-  RESEND_CHUNK, addSpent, budgetWait, chargeBusy, chunkMark, dueRows, listRequest, parseCharge, resendValue, rowsSince, trackState,
+  RESEND_CHUNK, addProg, addSpent, announceRest, budgetWait, chargeBusy, chunkCount, chunkMark, dueRows, eligibleRows, listRequest, lotCut, nextChunkSize, parseCharge,
+  resendValue, rowsSince, startProg, trackState,
 } from '../logic/resend.js';
+import { exportFlow } from '../logic/health.js';
 import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../grist.js';
 import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
 import { pauseDeadLinks } from './pausing.js';
-import { message, noteError } from '../ui.js';
-import { t, timeText } from '../i18n.js';
+import { noteError } from '../ui.js';
+import { flowView } from './flow.js';
 import { readPref, writePref } from '../prefs.js';
 
 // Rythmes : file d'envoi relue (60 fois au plus, rapprochées au début : un envoi met en général
@@ -82,21 +84,30 @@ async function resendLocked(exportId, tables, out, since, kind = 'resend') {
   const hookIds = (await readHooks()).of(exportId).filter(h => h.fields.enabled).map(h => h.id);
   if (!hookIds.length) return 0;
   const plans = await markLots(exportId, tables, since);
-  const total = plans.reduce((n, p) => n + p.rows.length, 0);
-  let done = 0;
+  const total = plans.reduce((n, p) => n + p.total, 0);
+  charge.state = { ...charge.state, prog: startProg(exportId, total, plans.reduce((n, p) => n + chunkCount(p.rows.length), 0), nowS()) };
+  let sentRows = 0;
   for (const plan of plans) {
-    await sendRows(plan, hookIds, (n) => {
-      done += n;
-      if (!out) return;
-      out.replaceChildren(message('info', t('send.load.progress', { done, total })));
-      out.scrollIntoView({ block: 'nearest' });
+    charge.state.prog.table = plan.table;
+    sentRows += await sendRows(plan, hookIds, ({ rows, bytes }) => {
+      charge.state = { ...charge.state, prog: addProg(charge.state.prog, { rows, bytes, now: nowS() }) };
+      showProgress(out);
     });
     // Un Échange n'efface rien d'après les listes des clés : inutile de l'envoyer.
     if (!swapExports(await syncRows()).has(exportId)) await sendList(exportId, plan.table, hookIds);
   }
+  charge.state = { ...charge.state, prog: null };
   if (out) out.replaceChildren();
-  if (total) await recordEvent(exportId, kind, { n: total });
-  return total;
+  if (sentRows) await recordEvent(exportId, kind, { n: sentRows });
+  return sentRows;
+}
+
+// L'avancement dans `out` (fenêtre d'un assistant), dit comme sur la carte de l'export.
+function showProgress(out) {
+  if (!out || !charge || !charge.state.prog) return;
+  const prog = charge.state.prog;
+  out.replaceChildren(flowView(exportFlow({ exportId: prog.exp, owed: 1, recipients: ['active'], charge: { ...charge.state, le: nowS() }, page: PAGE, now: nowS() })));
+  out.scrollIntoView({ block: 'nearest' });
 }
 
 // Marque de chaque lot posée avant tout envoi, et lignes à renvoyer. Une table retirée ou
@@ -108,7 +119,14 @@ async function markLots(exportId, tables, since) {
     if (!schema.has(lot[TABLE_COL])) continue;
     const start = startOf(lot, since);
     await writeSync([lot.id], { [MISSING_COL]: start });
-    plans.push({ table: lot[TABLE_COL], lot: lot.id, start, rows: rowsSince(await fetchRows(lot[TABLE_COL]), start) });
+    const data = await fetchRows(lot[TABLE_COL]);
+    const rows = rowsSince(data, start);
+    // Lignes qui peuvent partir : celles du suivi (clé présente, filtre appliqué) pour toute la table.
+    const allEligible = eligibleRows(await syncRows(), exportId, lot[TABLE_COL]);
+    const eligible = start <= RESEND_ALL ? allEligible : null;
+    // Part des lignes de la table qui partent vraiment (voir announceRest) ; 1 si le suivi ne le dit pas.
+    const ratio = allEligible !== null && data.length ? allEligible / data.length : 1;
+    plans.push({ table: lot[TABLE_COL], lot: lot.id, start, rows, total: eligible ?? rows.length, ratio });
   }
   return plans;
 }
@@ -116,21 +134,36 @@ async function markLots(exportId, tables, since) {
 // Lignes d'une table, tranche par tranche. Une table sans ligne à renvoyer part quand même en lot
 // de renvoi (vide) : la CIBLE remet à zéro son compte de lignes non arrivées. La marque est
 // effacée à part à la fin : écrite avec le lot ordinaire, elle cacherait un nouvel envoi coupé.
-async function sendRows({ lot, start, rows }, hookIds, onSent) {
-  const queue = rows.length ? chunk(rows, RESEND_CHUNK) : [[]];
+async function sendRows({ lot, start, rows, ratio = 1 }, hookIds, onSent) {
+  let size = RESEND_CHUNK;
+  let sentRows = 0;
+  const queue = rows.length ? chunk(rows, size) : [[]];
   while (queue.length) {
     const part = queue.shift();
     await waitForQueue(hookIds);
-    await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id)), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
+    // Chaque tranche annonce à la CIBLE ce qui reste à venir : une page fermée en cours de route ne
+    // la laisse plus « À jour » avec une table à moitié reçue.
+    const rest = announceRest(queue.reduce((n, p) => n + p.length, 0), ratio);
+    await writeSync([lot], { [RESEND_COL]: resendValue(randomHex(4), part.map(r => r.id), rest), [MISSING_COL]: part.length ? chunkMark(part, start) : start });
     const cell = String(((await fetchRows(SYNC_TABLE)).find(r => r.id === lot) || {})[LOT_COL] || '');
-    await spend(cell.length * hookIds.length);
+    const bytes = cell.length * hookIds.length;
+    await spend(bytes);
     const sent = parseLot(cell);
-    if (sent && sent.total > sent.lines.length && part.length > 1) queue.unshift(part.slice(0, part.length / 2), part.slice(part.length / 2));
-    else onSent(part.length);
+    // Lot coupé : il est parti pour rien ; les tranches qui suivent sont plus petites (au lieu de
+    // couper chacune en deux), et celle-ci est refaite en tranches de cette taille.
+    const cut = lotCut(sent) && part.length > 1;
+    if (cut) {
+      size = nextChunkSize(size, part.length, sent.lines.length);
+      queue.unshift(...chunk(part, size));
+    }
+    const counted = cut || !sent ? 0 : sent.lines.length;
+    sentRows += counted;
+    onSent({ rows: counted, bytes });
   }
   await waitForQueue(hookIds);
   await writeSync([lot], { [MISSING_COL]: 0 });
   await writeSync([lot], { [RESEND_COL]: '' });
+  return sentRows;
 }
 
 // Liste complète des clés d'une table, en morceaux, chacun quand le précédent est parti : la CIBLE
@@ -177,16 +210,23 @@ let catching = false;
 let notOwner = false;
 let repairedAt = 0;
 let caughtAt = 0;
+// Dernier passage du rattrapage de cette page et ce qu'il a trouvé (`why` : 'idle' rien à renvoyer,
+// 'sent' il a renvoyé, 'blocked' un destinataire est en erreur, 'busy' une autre page renvoie,
+// 'nosync' pas de table Synchro) : la carte d'un export dit pourquoi rien ne part.
+const lastPass = { at: 0, why: '' };
+export const catchState = () => ({ at: lastPass.at, why: lastPass.why, running: catching });
 
 export async function catchUp(onDone = () => {}) {
   if (catching || notOwner) return;
   catching = true;
   caughtAt = Date.now();
+  lastPass.at = caughtAt;
   try {
     if (await withLock('gristsync-resend', catchUpLocked)) await onDone();
   } catch (e) {
     if (e.message === 'ownerOnly') notOwner = true;
-    else if (e.message !== 'resendBusy') {
+    else if (e.message === 'resendBusy') lastPass.why = 'busy';
+    else {
       console.warn(e);
       noteError(e);
     }
@@ -209,7 +249,10 @@ export function startAutoCatchUp(onDone) {
 
 async function catchUpLocked() {
   let rows = await lightRows();
-  if (!rows) return 0;
+  if (!rows) {
+    lastPass.why = 'nosync';
+    return 0;
+  }
   let { hooks, conditions, of: recipients } = await readHooks();
   // Un lien de réception mort bloque la file de tout le document : le widget met ce destinataire en pause.
   if (await pauseDeadLinks(hooks, conditions)) ({ hooks, conditions, of: recipients } = await readHooks());
@@ -218,9 +261,13 @@ async function catchUpLocked() {
     await clearAndMark();
     rows = await lightRows();
   }
-  if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) return 0;
+  if (hooks.some(h => h.fields.enabled && !tooLarge(h) && hookStatus(h)[0] === 'error')) {
+    lastPass.why = 'blocked';
+    return 0;
+  }
   const { late, lists } = dueRows(rows);
   const files = rows.some(r => r[TYPE_COL] === KIND.files) ? await planFiles(hooks, conditions, h => h.fields.enabled && hookStatus(h)[0] !== 'error') : [];
+  lastPass.why = 'idle';
   if (!late.length && !lists.length && !files.length) return 0;
   const active = row => recipients(row[EXPORT_COL]).filter(h => h.fields.enabled).map(h => h.id);
   let sent = 0;
@@ -235,6 +282,7 @@ async function catchUpLocked() {
     }
     sent = await sendFiles(files, spend);
   });
+  lastPass.why = 'sent';
   return late.length + lists.length + sent + files.length;
 }
 
@@ -267,10 +315,12 @@ async function withCharge(fn, out = null) {
   const row = await readCharge();
   const state = parseCharge(row[RESEND_COL]);
   if (chargeBusy(state, PAGE, nowS())) throw new Error('resendBusy');
-  charge = { id: row.id, state: { ...state, par: PAGE, reprise: 0 }, saved: 0, out };
+  charge = { id: row.id, state: { ...state, par: PAGE, reprise: 0, prog: null }, saved: 0, out };
   await saveCharge();
   try {
-    return await fn();
+    const result = await fn();
+    charge.state = { ...charge.state, prog: null };
+    return result;
   } finally {
     charge.state = { ...charge.state, par: '', reprise: 0 };
     await saveCharge().catch(() => {});
@@ -302,7 +352,7 @@ async function spend(bytes) {
   if (wait > 0) {
     charge.state.reprise = nowS() + wait;
     await saveCharge();
-    if (charge.out) charge.out.replaceChildren(message('info', t('send.charge.wait', { at: timeText(charge.state.reprise) })));
+    showProgress(charge.out);
     while (nowS() < charge.state.reprise) {
       await sleep(Math.min(WAIT_STEP_S, charge.state.reprise - nowS()) * 1000);
       await saveCharge();
@@ -312,7 +362,16 @@ async function spend(bytes) {
   await beat();
 }
 
-export function chargeNotice(state) {
-  if (state.reprise > nowS()) return message('info', t('send.charge.wait', { at: timeText(state.reprise) }));
-  return chargeBusy(state, PAGE, nowS()) ? message('info', t('send.charge.busy')) : null;
+// État des renvois du document, le plus récent : celui de cette page quand elle renvoie, sinon la
+// ligne 'charge' de Synchro.
+export async function currentCharge() {
+  if (charge) return { ...charge.state, le: nowS() };
+  return parseCharge((await readCharge())[RESEND_COL]);
+}
+
+// Où en est un export (voir exportFlow) vu de cette page. `exp` : { id, owed, recipients }.
+export function flowOf(exp, state) {
+  return exportFlow({
+    exportId: exp.id, owed: exp.owed, recipients: exp.recipients.map(h => hookStatus(h)[0]), charge: state, page: PAGE, now: nowS(), lastPass,
+  });
 }

@@ -47,14 +47,32 @@ async function deny(doc, { tableId, colIds = '*' }, formula = 'True', permission
 
 const tableIdOf = async (doc, prefix) => (await records(doc, '_grist_Tables')).map(t => t.tableId).find(id => id.startsWith(prefix));
 
+// La personne suit le conseil de la carte : « Réparer les clés », puis elle modifie une ligne.
+async function repairKeys(p) {
+  await p.sv.open(p.src.url);
+  await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+  await p.sv.button('Réparer les clés').click();
+  await p.sv.dialogButton('Réparer les clés').click();
+  await p.sv.dialog().waitFor({ state: 'detached', timeout: 120000 }).catch(() => {});
+  await sleep(5000);
+  const columns = (await records(p.src.doc, '_grist_Tables_column')).map(c => c.colId);
+  const [first] = await records(p.src.doc, 'Contacts');
+  await applyActions(p.src.doc, [['UpdateRecord', 'Contacts', first.id, { Email: 'reparee@x.fr' }]]);
+  const t0 = Date.now();
+  const ok = await waitFor(async () => (await count(p.dst.doc, p.dest, `where "Email" = 'reparee@x.fr'`)) >= 1, 'arrivée après réparation', 90000, 3000).then(() => true, () => false);
+  await sleep(20000);
+  const card = flat(await p.dv.text().catch(() => '')).slice(0, 500);
+  return `après « Réparer les clés » : colonnes id_sync/MajLe présentes ${columns.includes('id_sync')}/${columns.includes('MajLe')} ; modification ${ok ? `arrivée en ${Math.round((Date.now() - t0) / 1000)} s` : 'NON arrivée (90 s)'} ; CIBLE ${await count(p.dst.doc, p.dest)} lignes ; carte CIBLE : ${card}`;
+}
+
 // Chaque cas : `act(p)` fait la bêtise ; `side` dit où l'on regarde en premier (les deux cartes sont lues de toute façon).
 const cases = {
   colonneSupprimee: { note: 'colonne exportée supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'Prenom']]) },
   colonneRenommee: { note: 'colonne exportée renommée dans la SOURCE', act: p => applyActions(p.src.doc, [['RenameColumn', 'Contacts', 'Ville', 'Commune']]) },
   tableRenommee: { note: 'table exportée renommée dans la SOURCE', act: p => applyActions(p.src.doc, [['RenameTable', 'Contacts', 'Personnes']]), probeTable: 'Personnes' },
   tableSupprimee: { note: 'table exportée supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveTable', 'Contacts']]), probe: false },
-  cleSupprimee: { note: 'colonne id_sync supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'id_sync']]) },
-  majleSupprimee: { note: 'colonne MajLe supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'MajLe']]) },
+  cleSupprimee: { note: 'colonne id_sync supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'id_sync']]), after: repairKeys },
+  majleSupprimee: { note: 'colonne MajLe supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'MajLe']]), after: repairKeys },
   typeChange: { note: 'type d\'une colonne exportée changé (Texte vers Entier) dans la SOURCE', act: p => applyActions(p.src.doc, [['ModifyColumn', 'Contacts', 'Quantite', { type: 'Text' }], ['ModifyColumn', 'Contacts', 'Nom', { type: 'Int' }]]) },
   toutSupprimer: { note: 'toutes les lignes de la table exportée supprimées dans la SOURCE (vague de suppressions)', act: async p => { await applyActions(p.src.doc, [['BulkRemoveRecord', 'Contacts', (await records(p.src.doc, 'Contacts')).map(r => r.id)]]); }, probe: false },
   lignesEnDouble: { note: 'dix lignes dupliquées avec leur clé dans la SOURCE', act: async p => { const rows = (await records(p.src.doc, 'Contacts')).slice(0, 10); await applyActions(p.src.doc, [['BulkAddRecord', 'Contacts', rows.map(() => null), Object.fromEntries(columnsOf(8).map(c => [c.id, rows.map(r => r[c.id])]).concat([['id_sync', rows.map(r => r.id_sync)]]))]]); }, probe: false },

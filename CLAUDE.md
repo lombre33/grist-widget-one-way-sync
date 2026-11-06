@@ -96,9 +96,12 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
   décidé, une bulle « Le widget a besoin de full access à ce document » avec Accepter et Refuser
   (vérifié dans Grist 1.7). Le panneau est **fermé** à l'ouverture d'un document déjà installé :
   icône tout en haut à droite. Sans accès, `grist.docApi` refuse la lecture : le widget montre le
-  message `start.access` et `accessHelp()` (`js/tutorial.js`), les deux captures
-  `docs/images/00e` (Accepter) et `00f` (la liste), faites à l'échelle 2 par `accessShots`
-  (`CAPTURES=1 ONLY_ACCESS=1`). Une fois l'accès accordé, par « Accepter » comme par la liste,
+  message `start.access` et `accessHelp()` (`js/tutorial.js`), avec trois captures **pleine page**
+  (Antoine : un screen « qui montre où est le panel », widget ouvert assez large pour qu'on le voie)
+  à cadre rouge : `docs/images/00g` (panneau fermé, icône d'ouverture), `00e` (panneau ouvert,
+  « Niveau d'accès » et Accepter) et `00f` (la liste), faites à l'échelle 2 par `accessShots`
+  (`CAPTURES=1 ONLY_ACCESS=1` ; le widget y retire ses propres images pour ne pas se montrer
+  lui-même). Une fois l'accès accordé, par « Accepter » comme par la liste,
   Grist recharge le widget qui démarre seul (testé : `accessSteps`). Même écran pour SOURCE et CIBLE :
   le contrôle se fait au démarrage, avant de connaître le rôle.
 - Plusieurs formulaires publiés sur la même page partagent une seule clé, et cette clé lit aussi
@@ -291,7 +294,73 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.12.2 (6 novembre 2026)
+## État : V0.12.4 (6 novembre 2026)
+
+V0.12.4 (étape 2 de la même demande d'Antoine, 6 novembre) : **un renvoi en tranches annonce ce qui
+reste à venir**. Cas visé : la page du widget SOURCE se ferme en plein renvoi (premier envoi, « Tout
+renvoyer », rattrapage) ; la CIBLE restait « À jour » avec une table à moitié reçue, rien ne lui disait
+qu'il en manquait (mesuré par le fil des essais de charge).
+- Format : `Synchro_Renvoi` vaut `marque:reste:numéros` (`resendValue(mark, ids, rest)`, `announceRest`
+  de `logic/resend.js`) ; la formule du lot lit la dernière partie pour les numéros (comme avant : une
+  formule d'avant lit aussi la nouvelle valeur) et pose `"restant": reste` dans le lot (ligne `lot`
+  seulement, signé avec le reste du texte). `refus<heure>:<numéros>` (renvoi d'un refus corrigé, CIBLE)
+  n'a pas de reste. Pas de nouvelle colonne ni table, `CODE_FORMAT` inchangé (une CIBLE d'avant ignore la clé).
+- Le reste est le nombre de lignes des tranches à venir ramené à celles qui partent vraiment
+  (`ratio` = lignes du suivi `N:crc` / lignes de la table, le filtre et les clés vides pèsent) ; la
+  dernière tranche annonce 0. Une tranche coupée refaite en tranches plus petites annonce le reste de la
+  tranche refaite à l'envoi suivant.
+- CIBLE : `parseLot` lit `rest` (entier ≥ 0, borné à 1e9, absent sinon) ; `noteGaps` met le compte de
+  la table à `rest` (0 sans annonce : SOURCE d'avant, comme avant) ; `nextGaps` remplace le compte (il ne
+  s'additionne pas d'une tranche à l'autre). Texte `recv.missing` : « envoi en plusieurs morceaux ... tant
+  qu'un propriétaire de la SOURCE a la page de son widget ouverte : si ce nombre ne baisse pas, demandez-lui
+  de l'ouvrir ». L'état de la carte passe à « incomplet » (`cardStatus`).
+- Testé : unit (`resend`, `journal`, `formulas`) ; e2e (`Synchro_Renvoi` de chaque tranche du rattrapage
+  de 4 000 lignes au bon format ; renvoi interrompu écrit à la main : lot `restant` = 123, avis « 123 lignes »
+  sur la CIBLE, puis tranche à reste 0 et avis retiré).
+- **Pas fait, volontairement** : comparaison finale « lignes attendues / lignes reçues » (nombre annoncé par
+  `N:crc` contre les lignes vivantes du journal). Faux positifs en usage normal (ajouts et suppressions entre
+  l'annonce et l'arrivée, filtre qui change) ; la vérification des clés (doublons, clés vides) est dans le fil
+  des essais de charge. À reprendre si un cas réel échappe au reste annoncé.
+
+V0.12.3 (état précédent, même jour) :
+
+V0.12.3 (Antoine, 6 novembre : un utilisateur de l'Alpha 0.5.9 voyait ~400 lignes sur ~30 000 dans la
+CIBLE ; « anticiper et fiabiliser les envois », « donner plus de contexte aux users sur les blocages »,
+« pendant que des envois sont en cours ou prévus par lot, l'user ait un feedback » ; carte de décision :
+« Tout, par étapes »). **Étape 1 = cette version, étape 2 (V0.13.0) = bilan attendues/reçues.** Les
+essais de charge et d'échec (deux Grists, 30 000 × 20) sont dans l'autre fil « Fiabiliser les envois par
+des tests de charge » (`js/source/keys.js`, `js/logic/keys.js`, `queueBlocker`, `deleteWebhook`, `personRow`).
+- **Mesuré (Grist 1.7.22)** : 30 000 lignes × 20 colonnes = 715 o/ligne, ~21 Mo par destinataire, 160 lots
+  en 2 min 40 ; 40 colonnes = 1 388 o/ligne, ~42 Mo. Le budget `RESEND_BUDGET` (20 Mo / 600 s) est une
+  fenêtre glissante, pas une pause entre envois : après les 20 premiers Mo, environ 2 Mo/min (42 Mo pour
+  un destinataire ≈ 11 min, trois destinataires ≈ 55 min). Le budget n'a pas bougé (protection de DINUM,
+  à ne pas relever sans décision d'Antoine). Une page CIBLE fermée pendant tout l'envoi n'empêche rien.
+- **Estimation avant l'envoi** (`js/logic/estimate.js`, `js/source/flow.js` `exportEstimate`,
+  `confirmSend`) : lignes qui partiront (suivi `N:crc` de `Synchro`, `eligibleRows`), poids d'après 50
+  lignes, lots, destinataires, durée = max(lots × `LOT_SECONDS`, budget). Dite dans l'assistant de
+  destinataire (`showLoad`) ; au-delà de `LONG_SECONDS` (180 s) un envoi manuel demande confirmation.
+- **Avancement** (`js/logic/health.js` `exportFlow`, `flowView`) : la ligne `charge` porte `prog`
+  (`{exp, table, done, total, lots, lotsTotal, bytes, at, last}`, gardé après la fermeture de la page,
+  `startProg`/`addProg`/`etaSeconds`). La carte de l'export dit : en cours (barre, lot n sur N, temps
+  restant = max du rythme observé et du rythme du budget), autre page (`runningOther`), attente du budget
+  (`budget`, `budgetWait`), file (`queued`), tout en pause, bloqué par un destinataire en erreur,
+  interrompu (page fermée, `done` sur `total`), en attente du rattrapage. Redessin toutes les 10 s
+  (`tickFlows`, lectures légères). Le rattrapage garde la raison de son dernier passage
+  (`lastPass`, `catchState`).
+- **Lots plus économes** (`nextChunkSize`) : un lot coupé (`lotCut`, `total > lines + big`) est quand même
+  envoyé et mangeait le budget ; la tranche suivante se règle sur ce qui tient (0,9 × lignes qui tiennent).
+  30 000 × 40 colonnes : ~38 Mo au lieu de ~75 Mo.
+- **Erreurs d'envoi** (`hookErrorKey`) : 429, 5xx et erreur réseau ont leur texte. `errorText` reçoit le
+  statut.
+- **CIBLE** (`journalStats`, une agrégation SQL ; `arrivalNotes`, `reportButton`) : « Dernier envoi
+  arrivé » (`Sync_Recu`), lignes brutes pas encore recopiées, page visible ou non, « Copier l'état pour la
+  SOURCE » (= diagnostic F1 étendu : avancement, rattrapage, journaux).
+- **Pièges** : `wizard.show(index, body, buttons)` n'aplatit qu'un niveau du tableau du corps : y étaler
+  (`...`) les listes de nœuds ; les clés i18n composées (`common.size.*`) vont dans `DYNAMIC` de
+  `tests/unit/i18n.test.mjs`. Lancer l'e2e depuis une session cloud : `gristlabs/grist:latest` de Docker
+  Hub (l'image de mirror.gcr.io échoue), voir `access-full-help-and-cloud-e2e` en mémoire.
+
+V0.12.2 (état précédent) :
 
 V0.12.2 (Antoine, 6 novembre : un utilisateur de l'Alpha 0.5.9 avait des envois bloqués par
 `400 {"error":"Invalid column \"A\""}` ; Antoine : « on ne touche pas au code de l'alpha et au dépôt

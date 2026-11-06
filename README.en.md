@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.12.2 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.12.4 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -111,6 +111,10 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   ticked “Deleted at the source”) and *read-only* (only owners write in the received tables).
 - **Large tables**: no row limit (tested with 21,000), big imports sent in batches, a stuck
   delivery queue is cleared and resent.
+- **Long sends announced and followed**: before a full send, what it will cost (rows, size,
+  batches, time); while it runs, progress on the card (rows, batches, time left, budget pause and
+  resume time); on the TARGET side, the last delivery that arrived, those waiting to be copied, and
+  a status to copy for the person who sends.
 - **Clear tracking**: one card per export and per reception, last delivery, errors explained,
   collapsed history of changes since the last visit, with row numbers, values before and after,
   and columns added to the export.

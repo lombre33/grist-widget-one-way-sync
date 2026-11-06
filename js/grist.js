@@ -116,6 +116,22 @@ export async function querySql(query) {
   }
 }
 
+// Résumé d'un journal en une seule requête : { n, last, raw } = lignes, dernière arrivée (secondes)
+// et lignes brutes pas encore dépliées. Null si Grist refuse (droits) ou si le journal n'a pas ces
+// colonnes (journal d'avant la 0.5).
+export async function journalStats(tableId, receivedCol, typeCol) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableId)) return null;
+  try {
+    const sql = `select count(*) as n, max("${receivedCol}") as last, sum(case when "${typeCol}" is not null and "${typeCol}" != '' then 1 else 0 end) as raw from "${tableId}"`;
+    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(sql)}`, { full: true }));
+    if (!response.ok) return null;
+    const [row] = (await response.json()).records.map(r => r.fields);
+    return row ? { n: Number(row.n) || 0, last: Number(row.last) || 0, raw: Number(row.raw) || 0 } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Contenu d'une pièce jointe du document (numéro dans _grist_Attachments).
 export async function downloadAttachment(id) {
   const response = await gristFetch(await authUrl(`/attachments/${Number(id)}/download`));

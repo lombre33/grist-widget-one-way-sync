@@ -70,6 +70,36 @@ test('lot : lignes reçues, lignes illisibles écartées', () => {
   assert.equal(parseLot('{"x": 1}'), null);
 });
 
+test('lot : le reste annoncé par un renvoi en tranches est lu, borné, et absent sans annonce', () => {
+  const rest = value => parseLot(JSON.stringify({ lignes: [], total: 0, restant: value })).rest;
+  assert.equal(rest(250), 250);
+  assert.equal(rest(0), 0, 'zéro est une annonce : la dernière tranche');
+  assert.equal(rest(1e12), 1e9, 'un nombre absurde est borné');
+  for (const bad of [-1, 1.5, '12', null, true, {}]) assert.equal(rest(bad), undefined, `restant illisible ignoré : ${JSON.stringify(bad)}`);
+  assert.ok(!('rest' in parseLot('{"lignes": [], "total": 3}')), 'lot ordinaire : pas d\'annonce');
+});
+
+test('CIBLE : un renvoi en tranches laisse le compte des lignes à venir, la dernière tranche l\'efface', () => {
+  const schema = '[{"id":"Nom","type":"Text","label":"Nom"}]';
+  const raw = (id, type, extra) => ({ id, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: type, Synchro_Colonnes: schema, Synchro_Renvoi: '', Sync_Recu: 100 + id, ...extra });
+  const tranche = (id, restant, ids) => raw(id, 'lot', {
+    Synchro_Renvoi: `m${id}:${restant}:${ids}`,
+    Synchro_Lot: JSON.stringify({ lignes: [['a', 10, false, { Nom: 'A' }]], total: 1, renvoi: true, restant }),
+  });
+  assert.deepEqual(planUnpack([tranche(2, 800, '1,2')], 'J').missing, { Contacts: 800 }, 'une tranche : ce qui reste à venir');
+  assert.deepEqual(planUnpack([tranche(2, 800, '1,2'), tranche(3, 600, '3,4')], 'J').missing, { Contacts: 600 }, 'la plus récente décide');
+  assert.deepEqual(planUnpack([tranche(2, 200, '1,2'), tranche(3, 0, '3,4')], 'J').missing, { Contacts: 0 }, 'dernière tranche : plus rien à venir');
+  assert.deepEqual(planUnpack([tranche(2, 800, '1,2')], 'J').resent, ['Contacts']);
+  const old = raw(4, 'lot', { Synchro_Renvoi: 'm:1,2', Synchro_Lot: JSON.stringify({ lignes: [], total: 1 }) });
+  assert.deepEqual(planUnpack([old], 'J').missing, { Contacts: 0 }, 'SOURCE d\'avant : un renvoi remet le compte à zéro');
+  let gaps = nextGaps({}, planUnpack([tranche(2, 800, '1,2')], 'J'));
+  assert.deepEqual(gaps, { missing: { Contacts: 800 }, big: {} });
+  gaps = nextGaps(gaps, planUnpack([tranche(3, 400, '3,4')], 'J'));
+  assert.deepEqual(gaps.missing, { Contacts: 400 }, 'le compte baisse d\'une tranche à l\'autre, il ne s\'additionne pas');
+  gaps = nextGaps(gaps, planUnpack([tranche(4, 0, '5')], 'J'));
+  assert.deepEqual(gaps.missing, {}, 'la dernière tranche efface l\'avis');
+});
+
 test('CIBLE : dépliage des listes et des lots dans l\'ordre d\'arrivée, lignes manquantes comptées', () => {
   const schema = '[{"id":"Nom","type":"Text","label":"Nom"}]';
   const raw = (id, type, extra) => ({ id, Synchro_Export: 'e', Synchro_Table: 'Contacts', Synchro_Type: type, Synchro_Colonnes: schema, Synchro_Renvoi: '', Sync_Recu: 100 + id, ...extra });

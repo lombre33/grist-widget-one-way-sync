@@ -156,35 +156,54 @@ async function installShots() {
   await page.locator('.test-right-opener').click();
   await page.locator('.test-right-tab-pagewidget').click();
   await page.getByRole('button', { name: 'Accepter' }).waitFor();
-  await save('00d-installer-acces');
   await page.getByRole('button', { name: 'Accepter' }).click();
   await widget().locator('.guide summary').first().waitFor({ timeout: 30000 });
   await page.locator('.test-right-opener').click().catch(() => {});
 }
-// Captures du réglage d'accès (docs/images/00e et 00f), que montrent le message de démarrage et le
-// tutoriel : le panneau de droite de Grist (section « Niveau d'accès ») quand le widget demande
-// l'accès complet, puis la liste des niveaux. À l'échelle 2 : ce sont des détails à lire.
+// Captures du réglage d'accès (docs/images/00g, 00e et 00f), que montrent le message de démarrage et
+// le tutoriel : la page entière, widget ouvert, pour qu'on voie où est le panneau de droite de Grist
+// et son bouton, avec un cadre rouge sur ce qu'il faut trouver. Panneau fermé (l'icône qui l'ouvre),
+// ouvert (section « Niveau d'accès » et « Accepter »), puis la liste des niveaux. À l'échelle 2.
 async function accessShots(url) {
-  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1100, height: 700 }, deviceScaleFactor: 2 });
+  const ctx = await browser.newContext({ locale: 'fr-FR', viewport: { width: 1200, height: 720 }, deviceScaleFactor: 2 });
   const p = await ctx.newPage();
   await p.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
   await p.goto(url);
   await p.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
-  await p.locator('.test-right-opener').click();
+  // Le widget montre lui-même ces captures : elles sont retirées ici, pour que la capture ne les contienne pas.
+  const inner = await waitFor(() => p.frames().find(f => f.url().startsWith(widgetCode)), 'iframe du widget');
+  await inner.locator('.access-help').waitFor();
+  await inner.evaluate(() => document.querySelector('.access-help').remove());
+  // Cadre rouge autour de `box`, ramené dans la fenêtre (l'icône du panneau touche le bord droit).
+  const frame = box => p.evaluate(({ x, y, width, height }) => {
+    const left = Math.max(3, x - 6), top = Math.max(3, y - 6);
+    const right = Math.min(window.innerWidth - 3, x + width + 6), bottom = Math.min(window.innerHeight - 3, y + height + 6);
+    const d = document.createElement('div');
+    d.className = 'capture-frame';
+    d.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${right - left}px;height:${bottom - top}px;border:3px solid #e5484d;`
+      + 'box-sizing:border-box;border-radius:10px;box-shadow:0 0 0 4px rgba(229,72,77,.25);pointer-events:none;z-index:2147483647';
+    document.body.append(d);
+  }, box);
+  const save = async (name, box) => {
+    await frame(box);
+    await p.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) });
+    await p.evaluate(() => document.querySelectorAll('.capture-frame').forEach(d => d.remove()));
+  };
+  const opener = p.locator('.test-right-opener');
+  await save('00g-installer-acces-ouvrir', await opener.boundingBox());
+  await opener.click();
   const accept = p.locator('.test-config-widget-access-accept');
   await accept.waitFor();
   await p.waitForTimeout(600);
   const select = await p.locator('.test-config-widget-access').boundingBox();
   const prompt = await accept.boundingBox();
-  const top = select.y - 50; // l'intitulé « Niveau d'accès » au-dessus de la liste
-  await p.screenshot({ path: join(ROOT, 'docs/images/00e-installer-acces-accepter.png'),
-    clip: { x: 860, y: top, width: 240, height: prompt.y + prompt.height + 24 - top } });
+  const top = select.y - 34; // l'intitulé « Niveau d'accès » au-dessus de la liste
+  await save('00e-installer-acces-accepter', { x: select.x - 8, y: top, width: select.width + 16, height: prompt.y + prompt.height + 14 - top });
   await p.locator('.test-config-widget-access').click();
   await p.getByText('Accès complet au document', { exact: true }).hover();
-  const menu = await p.locator('.test-select-menu').boundingBox();
   await p.waitForTimeout(300);
-  await p.screenshot({ path: join(ROOT, 'docs/images/00f-installer-acces-liste.png'),
-    clip: { x: menu.x - 4, y: top, width: 1100 - menu.x + 4, height: menu.y + menu.height + 14 - top } });
+  const menu = await p.locator('.test-select-menu').boundingBox();
+  await save('00f-installer-acces-liste', menu);
   await ctx.close();
 }
 // Widget sans accès complet : Grist demande l'accès dans son panneau de droite ; le widget dit quoi
@@ -196,7 +215,7 @@ async function accessSteps() {
   await help.waitFor({ timeout: 30000 });
   if (process.env.CAPTURES) await accessShots(url);
   await widget().getByText('Le widget a besoin de l’accès complet au document', { exact: false }).waitFor();
-  assert.equal(await help.locator('img').count(), 2, 'deux captures du réglage');
+  assert.equal(await help.locator('img').count(), 3, 'trois captures du réglage');
   assert.ok(await help.locator('img').evaluateAll(imgs => Promise.all(imgs.map(i => i.decode().then(() => i.naturalWidth > 0)))).then(all => all.every(Boolean)), 'captures chargées');
   assert.ok(await widget().locator('[data-tab]').evaluateAll(tabs => tabs.every(tab => tab.disabled)), 'onglets grisés tant que l’accès manque');
   assert.equal(await widget().getByRole('button', { name: 'Recharger la page' }).count(), 1);
@@ -415,8 +434,9 @@ try {
     await dialogButton('Approuver et brancher').click();
     await dialog().getByText('Branché').waitFor();
     if (shots) await shot('12-source-envoi');
+    await dialog().getByText(/lignes? à envoyer, environ [\d\s]+ Ko, en [\d\s]+ lots?/).waitFor();
     await dialogButton('Envoyer').click();
-    await dialog().getByText('Lignes existantes envoyées').waitFor();
+    await dialog().getByText(/Lignes existantes envoyées\s:\s[\d\s]+\./).waitFor();
     await dialogButton('Fermer').click();
     await dialog().waitFor({ state: 'detached' });
   }
@@ -1023,7 +1043,11 @@ try {
   await widget().getByRole('button', { name: 'Je suis la CIBLE' }).click();
   assert.ok(await widget().locator('#tuto-t-link').isVisible() && !(await widget().locator('#tuto-s-tables').isVisible()), 'filtre CIBLE');
   await widget().getByRole('button', { name: 'Tout', exact: true }).click();
-  assert.ok(await widget().locator('.tuto-shot img').first().evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
+  // Les captures se chargent à l'approche (loading=lazy) : un texte plus long en repousse une hors de portée,
+  // et decode() n'aboutit jamais sur une image qui n'est pas demandée. On l'amène donc à l'écran d'abord.
+  const firstShot = widget().locator('.tuto-shot img').first();
+  await firstShot.scrollIntoViewIfNeeded();
+  assert.ok(await firstShot.evaluate(img => img.decode().then(() => img.naturalWidth > 0)), 'captures chargées');
   await shot('16-tutoriel');
 
   // --- SOURCE : un export (Tables, Colonnes, Nom), puis son premier destinataire
@@ -1150,10 +1174,13 @@ try {
   // --- Une autre page renvoie déjà (signe de vie récent) : « Tout renvoyer » ne lance rien et
   // note le lot ; la main rendue, le rattrapage l'envoie seul
   const chargeRow = (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'charge');
-  const holdCharge = par => applyActions(source.doc, [['UpdateRecord', 'Synchro', chargeRow.id, { Synchro_Renvoi: JSON.stringify({ ...charge, par, le: Date.now() / 1000 }) }]]);
+  const nowSec = () => Date.now() / 1000;
+  const prog = { exp: synchro[0].Synchro_Export, table: 'Contacts', done: 2, total: 4, lots: 1, lotsTotal: 2, bytes: 1000, at: nowSec() - 60, last: nowSec() };
+  const holdCharge = par => applyActions(source.doc, [['UpdateRecord', 'Synchro', chargeRow.id, { Synchro_Renvoi: JSON.stringify({ ...charge, par, le: nowSec(), prog: par ? prog : null }) }]]);
   await holdCharge('autre');
   await openWidget(source.url);
-  await widget().getByText('Un renvoi est en cours depuis une autre page').waitFor();
+  await widget().getByText(/Un envoi est en cours depuis une autre page ou une autre personne\s:\s2 sur 4 lignes \(50\s%\), lot 2 sur environ 2\./).waitFor();
+  assert.equal(await widget().locator('[data-flow="runningOther"] progress').getAttribute('value'), '2', 'barre d\'avancement');
   await button('Tout renvoyer').click();
   await widget().getByText('Un autre renvoi est en cours pour ce document').waitFor();
   const lotOf = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
@@ -1535,8 +1562,13 @@ try {
   await widget().getByText(/Contacts\s:\s[\d\s]+\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
   await shot('19-cible-envoi-coupe');
   await openWidget(source.url);
-  await widget().getByText('Un envoi n’est pas terminé').waitFor();
-  await widget().getByText('Un envoi n’est pas terminé').waitFor({ state: 'detached', timeout: 240000 });
+  await widget().locator('[data-export-flow] [data-flow]').first().waitFor();
+  // Le widget envoie le reste seul : la carte dit où il en est (lignes, lots), puis l'avis disparaît.
+  await widget().locator('[data-flow="running"] progress').waitFor({ timeout: 120000 });
+  // Chaque tranche annonce ce qui reste à venir (marque:reste:numéros), pour la CIBLE.
+  await waitFor(async () => /^[0-9a-f]+:\d+:[\d,]*$/.test((await lotRow()).Synchro_Renvoi || ''), 'chaque tranche du renvoi annonce ce qui reste à venir', 30000);
+  await widget().getByText(/Envoi en cours\s:\s[\d\s]+ sur [\d\s]+ lignes \([\d\s]+%\), lot [\d\s]+ sur environ [\d\s]+/).first().waitFor();
+  await widget().locator('[data-export-flow] [data-flow]').first().waitFor({ state: 'detached', timeout: 240000 });
   assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
   await openWidget(target.url);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + imported.length, 'gros import reçu en entier', 120000);
@@ -1545,6 +1577,19 @@ try {
   await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
   step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
+
+  // --- Renvoi en tranches interrompu (page SOURCE fermée en route) : la CIBLE dit combien de lignes
+  // restent à venir au lieu de rester « À jour » avec une table à moitié reçue. On écrit à la main ce
+  // que le widget écrit à chaque tranche, puis la dernière tranche (reste zéro).
+  const sliceLot = await lotRow();
+  const slice = (await records(source.doc, 'Contacts')).slice(0, 2).map(r => r.id);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: `ab12:123:${slice.join(',')}` }]]);
+  assert.equal(JSON.parse((await lotRow()).Synchro_Lot).restant, 123, 'le lot annonce ce qui reste');
+  await widget().getByText(/Contacts\s:\s123\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: `ab13:0:${slice[0]}` }]]);
+  await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'dernière tranche : avis retiré', 60000);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', sliceLot.id, { Synchro_Renvoi: '' }]]);
+  step('CIBLE : un renvoi en tranches interrompu dit combien de lignes restent à venir, la dernière tranche efface l\'avis');
 
   // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
   // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le

@@ -48,7 +48,7 @@ si le panneau est fermé), cliquer sur le widget, puis, dans la section **Niveau
 cliquer **Accepter**, ou choisir **Accès complet au document** dans la liste. Sans cet accès, le
 widget reste bloqué sur un message, avec ces mêmes images.
 
-![Accès complet](images/00d-installer-acces.png)
+![Panneau de droite fermé : l'icône qui l'ouvre](images/00g-installer-acces-ouvrir.png)
 ![Niveau d'accès : Accepter](images/00e-installer-acces-accepter.png)
 ![Niveau d'accès : la liste](images/00f-installer-acces-liste.png)
 
@@ -235,6 +235,14 @@ Un renvoi (après l'ajout d'un destinataire, une reprise, **Tout renvoyer**) par
 destinataires de l'export. Chez ceux qui avaient déjà ces lignes, il est sans effet : une ligne que
 la SOURCE n'a pas changée garde ses retouches.
 
+Un envoi long se prévoit et se suit. Avant **Tout renvoyer** (ou **Envoyer** à l'ajout d'un
+destinataire), le widget dit ce qu'il va coûter : lignes, taille, lots, durée (et demande
+confirmation au-delà de trois minutes). Pendant l'envoi, la carte de l'export affiche où il en est
+(lignes et lots, temps restant), la pause qui ménage le serveur de Grist (20 Mo par tranche de
+10 minutes, tous destinataires confondus) avec l'heure de reprise, et, si un destinataire est en
+erreur, pourquoi rien ne part. Gardez une page du widget ouverte jusqu'à la fin ; si elle se ferme,
+l'envoi reprend là où il s'est arrêté à la prochaine ouverture par un propriétaire.
+
 ## Au quotidien, côté CIBLE
 
 Chaque ajout, modification ou suppression dans la SOURCE arrive dans le journal en une seconde
@@ -290,6 +298,12 @@ qu'un propriétaire ouvre sa page (même repliée). En attendant, la carte de la
 lignes ne sont pas encore arrivées :
 
 ![Envoi coupé, signalé par la CIBLE](images/19-cible-envoi-coupe.png)
+
+Un envoi long (premier envoi, **Tout renvoyer**, ajout d'un destinataire) part aussi par tranches, et
+chaque tranche annonce combien de lignes restent à venir. Si la page du widget SOURCE se ferme en
+cours de route, la CIBLE ne reste donc pas « À jour » avec une table à moitié reçue : sa carte dit
+combien de lignes n'ont pas encore été envoyées, et l'avis disparaît à l'arrivée de la dernière
+tranche, dès que la page de la SOURCE se rouvre.
 
 Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
 Référence, ou une formule) repart seule, sans toucher la ligne.
@@ -491,7 +505,8 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | La ligne d'un destinataire est rouge | La CIBLE a arrêté la réception, coupé ou dépublié son formulaire | Révoquer cette personne, puis l'inviter de nouveau ; dans la CIBLE, la même réception reprend |
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
-| La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
+| La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi, ou envoi par tranches interrompu (page du widget SOURCE fermée) | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
+| Des lignes manquent dans la CIBLE alors que la SOURCE dit avoir envoyé | Rien n'est arrivé, ou ce qui est arrivé attend d'être recopié (page fermée, cachée, ou un autre onglet du même navigateur qui avance seul) | Sur la carte de la réception : **Dernier envoi arrivé** et **envois arrivés pas encore recopiés** ; **Copier l'état pour la SOURCE** donne à la personne qui envoie de quoi comprendre (ni code, ni lien, ni valeur de vos tables) |
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |
 | Un envoi est en erreur, « Invalid column « A » » | Une colonne qui n'est pas au widget (A, B, C d'une table faite à la main) est dans la table Synchro de la SOURCE : chaque envoi l'emporte, le journal la refuse | La carte **Colonnes en trop dans la table Synchro** les liste ; **Retirer** après sauvegarde de ce qu'elles contiennent, puis le widget débloque la file |
 | « Une table nommée Synchro existe déjà » | Une table de ce nom n'est pas celle du widget, qui ne la reprend pas | Accepter de la renommer (elle garde son contenu) ; le widget crée ensuite la sienne |

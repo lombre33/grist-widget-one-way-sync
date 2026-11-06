@@ -156,7 +156,7 @@ test('erreurs d\'envoi vues sur un vrai Grist : quota, serveur, connexion coupé
   const now = 1e12;
   // Mesures du test de charge (Grist 1.7.22) : le texte et les états que Grist note vraiment.
   const quota = hook({ status: 'retrying', lastHttpStatus: 429, lastErrorMessage: '{"error":"Too Many Requests"}', lastEventBatch: { status: 'failure', httpStatus: 429 } });
-  assert.equal(hookErrorKey(quota, now), 'send.error.quota');
+  assert.equal(hookErrorKey(quota, now), 'send.error.rate');
   assert.equal(hookErrorKey(hook({ status: 'retrying', lastHttpStatus: 503, lastEventBatch: { status: 'failure', httpStatus: 503 } }), now), 'send.error.server');
   // Connexion coupée : pas de statut HTTP pour ce lot, `lastHttpStatus` garde le 200 de l'envoi réussi d'avant.
   const reset = hook({ status: 'retrying', lastHttpStatus: 200, lastErrorMessage: 'request to http://x/api/s/k/tables/J/records failed, reason: socket hang up', lastEventBatch: { status: 'failure', httpStatus: null } });
@@ -178,7 +178,7 @@ test('erreurs d\'envoi vues sur un vrai Grist : quota, serveur, connexion coupé
   assert.equal(deadLink(gone), true);
   assert.ok(NO_UNBLOCK.includes('send.error.journal'));
   // Ce que vider la file ne règle pas : la carte ne propose pas « Débloquer la file ».
-  for (const key of ['send.error.link', 'send.error.quota', 'send.error.server', 'send.error.network', 'send.error.slow']) assert.ok(NO_UNBLOCK.includes(key));
+  for (const key of ['send.error.link', 'send.error.rate', 'send.error.server', 'send.error.network', 'send.error.slow']) assert.ok(NO_UNBLOCK.includes(key));
   for (const key of ['send.error.size', 'send.error.column', 'send.error.other']) assert.ok(!NO_UNBLOCK.includes(key));
 });
 
@@ -193,8 +193,15 @@ test('état d\'un destinataire et d\'un export : pastille, erreur dite simplemen
   assert.equal(hookErrorKey(hook(true, { lastEventBatch: { httpStatus: 413 } })), 'send.error.size');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Invalid column "X"' })), 'send.error.column');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 404 })), 'send.error.link');
-  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.server');
-  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400 })), 'send.error.other');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.server', 'l\'instance en panne : réessai seul');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 503, lastErrorMessage: 'Service Unavailable' })), 'send.error.server');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 429 })), 'send.error.rate', 'l\'instance demande de ralentir');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'Too Many Requests' })), 'send.error.rate');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'request to https://x failed, reason: connect ECONNREFUSED' })), 'send.error.network');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'network timeout at: https://x' })), 'send.error.network');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 502, lastErrorMessage: 'timeout' })), 'send.error.server', 'un code HTTP l\'emporte sur le message');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Bad Request' })), 'send.error.other');
+  assert.equal(hookErrorKey(hook(true, {})), 'send.error.other');
   const exp = fields => ({ recipients: [], invitations: [], ...fields });
   assert.deepEqual(exportStatus(exp({})), ['alone', 'off']);
   assert.deepEqual(exportStatus(exp({ invitations: [{}] })), ['invited', 'pending']);

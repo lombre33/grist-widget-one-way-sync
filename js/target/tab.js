@@ -1,10 +1,11 @@
 // Onglet « Recevoir » (document CIBLE) : une carte par export reçu, avec ses tables, ce qui manque,
 // les arrivées suspectes, les valeurs retouchées à la main et l'historique des changements. Un
 // journal encore vide attend son lien.
-import { isBlank } from '../logic/common.js';
+import { RECEIVED_COL, TYPE_COL, isBlank } from '../logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
 import { FILE_MAX, fileList } from '../logic/files.js';
-import { fetchRows, isOwner, isReadOnly, readSchema } from '../grist.js';
+import { fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
+import { diagnostic } from '../diagnostic.js';
 import { reloading, syncRules } from '../acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
 import { closeExport } from '../exchange.js';
@@ -16,7 +17,7 @@ import { uploadErrors } from './files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
-import { cancelButton, confirmDialog, el, errorText, icon, message, noteError, openModal, pickField, pill, run, smallButton } from '../ui.js';
+import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 
@@ -59,7 +60,8 @@ async function receivedGroups(schema, owner) {
     const unreserved = Boolean(note.reserve) && !note.reserved && !owner;
     // Réception déjà branchée dont le formulaire n'est plus publié (dépublié, page supprimée) : la SOURCE ne peut plus écrire.
     const formGone = note.mode !== 'public' && !note.retour && !waiting && !forms.has(journal);
-    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, formGone, owner, shared: (forms.get(journal) || {}).shared || 0 });
+    const stats = waiting ? null : await journalStats(journal, RECEIVED_COL, TYPE_COL);
+    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, formGone, owner, stats, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
 }
@@ -163,6 +165,7 @@ function tableLine(group, entry) {
 function cardNotes(group) {
   const { note } = group;
   return [
+    arrivalNotes(group),
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
     group.formGone ? message('err', t('recv.formGone')) : null,
     group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
@@ -179,6 +182,33 @@ function cardNotes(group) {
   ];
 }
 
+// Ce qui est arrivé dans le journal : dernier envoi, nombre de lignes, et les envois arrivés qui ne
+// sont pas encore recopiés (la recopie ne tourne que page ouverte et visible).
+function arrivalNotes({ stats, waiting }) {
+  if (waiting || !stats || !stats.n) return null;
+  return [
+    stats.last ? el('p', { class: 'muted small' }, t('recv.arrival', { at: dateText(stats.last * 1000), n: stats.n })) : null,
+    stats.raw ? message('info', t('recv.arrival.raw', { n: stats.raw })) : null,
+  ];
+}
+
+const reportButton = () => smallButton(t('recv.action.report'), 'copy', (e) => {
+  const out = e.currentTarget.closest('.card').querySelector('.report-out');
+  return run(e.currentTarget, out, () => copyReport(out));
+});
+
+// Copie l'état de ce document (diagnostic : sans code, lien ni valeur des tables) pour le coller dans
+// un message à la personne qui envoie. Si le presse-papiers refuse, le texte est montré à copier.
+async function copyReport(out) {
+  const text = await diagnostic();
+  try {
+    await navigator.clipboard.writeText(text);
+    out.replaceChildren(message('ok', t('recv.report.copied')));
+  } catch (e) {
+    out.replaceChildren(message('warn', t('recv.report.failed')), copyField(text, t('recv.action.report')));
+  }
+}
+
 function syncCard(group) {
   const { note } = group;
   const [status, tone] = cardStatus(group);
@@ -191,9 +221,11 @@ function syncCard(group) {
     uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
     note.tables.map(entry => [waveBlock(group, entry), reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
+    el('div', { class: 'report-out' }),
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : linkButton(group),
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
+      group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
 

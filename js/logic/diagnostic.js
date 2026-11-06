@@ -55,10 +55,25 @@ export function exportFacts(exp) {
   };
 }
 
+// Renvoi en cours ou interrompu (`prog` de la ligne 'charge'), en une phrase ; '' sans renvoi.
+export function progressFact(prog, now) {
+  if (!prog) return '';
+  const ago = prog.last ? `, dernier lot il y a ${Math.max(0, Math.round(now - prog.last))} s` : '';
+  return `export ${short(prog.exp)}, ${prog.done} sur ${prog.total} lignes, ${prog.lots} lots sur environ ${prog.lotsTotal}${ago}`;
+}
+
+// Dernier passage du rattrapage de cette page et ce qu'il a trouvé.
+const PASS = { idle: 'rien à renvoyer', sent: 'a renvoyé', blocked: 'bloqué : un destinataire est en erreur', busy: 'une autre page renvoie', nosync: 'pas de table Synchro' };
+export function catchFact({ at, why, running }) {
+  if (!at) return running ? 'en cours, premier passage' : 'pas encore passé';
+  return `dernier passage ${when(at)}${why ? ` (${PASS[why] || why})` : ''}${running ? ', en cours' : ''}`;
+}
+
 // Réception (CIBLE) : note du journal sans son secret, ses clés ni l'adresse de la SOURCE ; état
 // du dernier passage (erreurs) et tables proposées.
-export function journalFacts({ journal, note, signed, results = [], offers = 0 }) {
+export function journalFacts({ journal, note, signed, results = [], offers = 0, stats = null }) {
   return {
+    arrival: stats ? `${stats.n} lignes, ${stats.last ? `dernière arrivée ${when(stats.last * 1000)}` : 'aucune date d\'arrivée'}, ${stats.raw} envois bruts pas encore recopiés` : '',
     journal,
     export: short(note.export),
     mode: `${note.mode || 'reponse'}${note.retour ? ', retour' : ''}${note.renforce ? ', renforcé' : ''}`,
@@ -97,7 +112,7 @@ function journalLines(j) {
     line('tables', j.tables), line('tables refusées', j.refused || ''), line('tables proposées', j.offers || ''),
     `  signée : ${j.signed ? 'oui' : 'non'}, sceau : ${j.sealed ? 'oui' : 'non'}, réservée aux éditeurs : ${j.reserve}`,
     line('coupée par la SOURCE', j.ended), line('lignes manquantes', j.missing), line('clés trop grosses', j.big),
-    line('arrivées suspectes', j.suspect), line('erreurs', j.errors),
+    line('arrivées suspectes', j.suspect), line('journal', j.arrival), line('erreurs', j.errors),
   ];
 }
 
@@ -117,6 +132,8 @@ export function diagnosticText({ version, served, origin, access, at, agent, sou
       source.ownerOnly ? 'Destinataires : lecture réservée aux propriétaires.' : null,
       source.unsafe ? `Webhooks sur Synchro sans filtre reconnu : ${source.unsafe}` : null,
       source.charge ? `Renvoi en cours : ${source.charge}` : null,
+      source.progress ? `Avancement : ${source.progress}` : null,
+      source.catchUp ? `Rattrapage : ${source.catchUp}` : null,
       `Lignes de Synchro : ${Object.entries(source.kinds || {}).map(([kind, n]) => `${kind} ${n}`).join(', ') || 'aucune'}`,
       ...(source.exports.length ? source.exports.flatMap(exportLines) : ['Aucun export.']),
     ]),
@@ -124,6 +141,7 @@ export function diagnosticText({ version, served, origin, access, at, agent, sou
     '== Recevoir',
     ...(!target || !target.journals.length ? ['Aucune réception.'] : [
       target.compare === false ? 'Grist refuse la comparaison d\'états : relecture au rythme lent.' : null,
+      target.visible === undefined ? null : `Page visible : ${target.visible ? 'oui' : 'non (la recopie attend)'}`,
       ...target.journals.flatMap(journalLines),
     ]),
     '',

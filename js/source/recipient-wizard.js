@@ -23,6 +23,7 @@ import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSo
 import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
 import { receivedDests } from '../logic/received.js';
 import { resendTables } from './resend.js';
+import { estimateLines, exportEstimate } from './flow.js';
 import { publicCode } from './actions.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, failure, laterButton, message, openWizard, run,
@@ -320,13 +321,18 @@ async function showLoad({ exp, wizard, onClose }) {
     wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.empty'))], closeButtons());
     return;
   }
+  // Ce que l'envoi va coûter : lignes qui peuvent partir (clé présente, filtre appliqué), lots, durée.
+  const est = await exportEstimate(exp).catch(() => null);
+  const count = est ? est.rows : total;
   const send = async () => {
     wizard.show(STEP.load, [message('ok', t('send.connected')), report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
-    report.replaceChildren(message('info', t('send.load.progress', { done: 0, total })));
+    report.replaceChildren(message('info', t('send.load.start')));
     const n = await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
     if (!report.isConnected) return onClose && onClose();
-    return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done')), closeButtons());
+    return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done', { n })), closeButtons());
   };
-  wizard.show(STEP.load, [message('ok', t('send.connected')), el('p', {}, t('send.load.body', { n: total })), report],
+  const intro = count ? [el('p', {}, t('send.load.body', { n: count })), ...(est ? estimateLines(est) : [])]
+    : [message('warn', t('send.load.nothing', { n: total }))];
+  wizard.show(STEP.load, [message('ok', t('send.connected')), ...intro, report],
     [later, { label: t('send.load.ok'), kind: 'btn-primary', onClick: () => run(null, report, send) }]);
 }

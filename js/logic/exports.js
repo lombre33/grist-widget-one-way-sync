@@ -228,7 +228,7 @@ export function hookErrorKey(h, now = Date.now()) {
   if (/Invalid column/i.test(u.lastErrorMessage || '')) return 'send.error.column';
   if (status === 404 && /Table not found/i.test(failureMessage(h))) return 'send.error.journal';
   if ([401, 403, 404].includes(status)) return 'send.error.link';
-  if (status === 429) return 'send.error.quota';
+  if (status === 429 || /too many requests|rate.?limit/i.test(u.lastErrorMessage || '')) return 'send.error.rate';
   if (status >= 500) return 'send.error.server';
   if (waitingTooLong(u, now)) return 'send.error.slow';
   return !status && u.lastErrorMessage ? 'send.error.network' : 'send.error.other';
@@ -240,7 +240,7 @@ export const deadLink = h => h.fields.enabled && hookStatus(h)[0] === 'error' &&
 
 // Erreurs que vider la file ne règle pas (l'envoi suivant échouerait de la même façon) : ce qui aide, c'est la
 // pause, qui libère les autres destinataires, ou d'attendre.
-export const NO_UNBLOCK = ['send.error.link', 'send.error.journal', 'send.error.quota', 'send.error.server', 'send.error.network', 'send.error.slow'];
+export const NO_UNBLOCK = ['send.error.link', 'send.error.journal', 'send.error.rate', 'send.error.server', 'send.error.network', 'send.error.slow'];
 
 // État d'un export pour sa carte : [clé de la pastille, ton]. `exp` : { recipients, invitations,
 // public, echange, retour }.
