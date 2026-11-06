@@ -12,7 +12,7 @@ import { copyField, el, errorText, icon, message, noteError, openModal } from '.
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
 import { accessHelp, tutorialView } from './tutorial.js';
-import { refreshSource, renderSource } from './source/tab.js';
+import { isOwnerHere, lostSynchro, refreshSource, renderSource } from './source/tab.js';
 import { startAutoCatchUp } from './source/resend.js';
 import { refreshTarget, renderTarget } from './target/tab.js';
 import { consolidateAll, startAutoConsolidation } from './target/loop.js';
@@ -74,11 +74,12 @@ async function select(tab, retry = true) {
   return undefined;
 }
 
-function showHome() {
+function showHome(notOwner = false) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', 'false');
   const tile = (tab, title, desc) => el('button', { class: 'tile', type: 'button', onclick: () => select(tab) },
     el('span', { class: 'tile-title' }, title), el('span', { class: 'tile-desc' }, desc));
   showScreen(el('h2', { class: 'home-title' }, t('home.title')),
+    notOwner ? message('info', t('home.notOwner')) : null,
     el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc'))),
     roleGuide({}));
 }
@@ -183,8 +184,8 @@ async function openFirstScreen() {
   ready = true;
   if (picked) await select(picked);
   else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
-  else if (ownsSync(schema)) await select('send');
-  else showHome();
+  else if (ownsSync(schema) || await lostSynchro(schema)) await select('send');
+  else showHome(await isOwnerHere() === false);
   if (journals.length) consolidateAll();
 }
 

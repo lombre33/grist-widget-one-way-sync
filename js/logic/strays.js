@@ -7,6 +7,7 @@
 // vu avec la 0.5.9 : une table nommée Synchro faite à la main pour y poser le widget (colonnes A, B,
 // C de Grist), reprise par le widget, qui n'y retirait rien.
 import { EXPORT_COL, SYNC_TABLE, isBlank } from './common.js';
+import { conditionExport } from './exports.js';
 import { syncColumns } from './formulas.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre de toute table Grist (voir ensureSyncTable)
@@ -17,6 +18,25 @@ const HELPER = /^gristHelper_/; // colonnes cachées de Grist (texte affiché d'
 // reprend pas. `schema` : voir readSchema.
 export const ownsSync = schema => schema.has(SYNC_TABLE) && schema.columns(SYNC_TABLE).some(c => c.colId === EXPORT_COL);
 export const foreignSync = schema => schema.has(SYNC_TABLE) && !ownsSync(schema);
+
+// Table Synchro disparue : la mémoire du widget (liste des exports, clés de signature des destinataires) n'est
+// plus lisible, mais les webhooks des destinataires restent chez Grist, avec leur condition d'export (vérifié :
+// une table effacée laisse ses webhooks sans table, une table renommée les garde et ils la suivent). C'est ce qui
+// prouve que le widget était là. `hooks` et `conditions` : voir readHooks (propriétaires seulement).
+//  - `hidden` : la table porte toujours le nom Synchro, mais le widget n'y retrouve plus Synchro_Export (colonne
+//    effacée, ou illisible pour tout le monde par une règle d'accès) ;
+//  - `renamed` : elle a un autre nom (`name`) ;
+//  - `deleted` : elle n'existe plus.
+// Rend null quand Synchro est bien celle du widget, ou qu'aucun webhook du widget ne reste.
+export function lostSync(schema, hooks, conditions) {
+  if (ownsSync(schema)) return null;
+  const own = hooks.filter(h => conditionExport(conditions.get(h.id)));
+  if (!own.length) return null;
+  const names = own.map(h => h.fields.tableId || '');
+  const renamed = names.find(name => name && name !== SYNC_TABLE);
+  const kind = names.includes(SYNC_TABLE) ? 'hidden' : renamed ? 'renamed' : 'deleted';
+  return { kind, name: kind === 'renamed' ? renamed : '', hooks: own.map(h => h.id) };
+}
 
 // Noms des colonnes que le widget donne à Synchro.
 export const syncColumnIds = () => new Set(syncColumns([]).map(c => c.id));

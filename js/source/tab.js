@@ -13,7 +13,7 @@ import { flowMoves } from '../logic/health.js';
 import { LONG_SECONDS } from '../logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
 import { expiresAt, isExpired, memoMatches, unkeyedRecipients } from '../logic/trust.js';
-import { columnFault, foreignSync, hasContent, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
+import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
 import { reloading, syncRules } from '../acl.js';
 import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from './resend.js';
@@ -60,7 +60,9 @@ async function loadState() {
   // Lignes sans clé ou de même clé dans les tables envoyées : elles n'arrivent pas chez les destinataires.
   const keys = ownerOnly ? new Map() : await checkKeys(exports.flatMap(exp => exp.tables.map(tb => tb.table)));
   const blocker = queueBlocker(exports.flatMap(exp => exp.recipients));
-  return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, keys, blocker, foreign: !ownerOnly && foreignSync(schema) };
+  // Synchro perdue (effacée, renommée, illisible) alors que des webhooks du widget restent : voir lostSync.
+  const lost = ownerOnly ? null : lostSync(schema, hooks, conditions);
+  return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, keys, blocker, lost, foreign: !ownerOnly && !lost && foreignSync(schema) };
 }
 
 function exportState(id, { note, rows, schema, acl, recipients }) {
@@ -139,7 +141,8 @@ function sourceView(state, access, open) {
   notice = null;
   const toolbar = el('div', { class: 'toolbar' },
     el('button', {
-      class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || state.foreign, title: state.foreign ? t('send.foreign.blocked') : null,
+      class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || state.foreign || blocksNew(state.lost),
+      title: state.foreign ? t('send.foreign.blocked') : blocksNew(state.lost) ? t('send.lost.blocked') : null,
       onclick: () => exportWizard(null, renderSource),
     }, icon('plus'), t('send.new')));
   // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
@@ -147,11 +150,12 @@ function sourceView(state, access, open) {
   if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
   if (state.strays.length) cards.unshift(strayCard(state, out));
   if (state.foreign) cards.unshift(foreignCard(state, out));
+  if (state.lost) cards.unshift(lostCard(state.lost, out));
   return [toolbar,
-    state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
+    state.ownerOnly ? message('warn', t('send.ownersOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
     out,
-    cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t(state.ownerOnly && state.exports.length ? 'send.ownersOnly' : 'send.empty')),
+    cards.length ? el('div', { class: 'cards' }, cards) : state.ownerOnly ? null : el('p', { class: 'muted' }, t('send.empty')),
     roleGuide({ you: 'source' })].filter(Boolean);
 }
 
@@ -489,6 +493,42 @@ const strayCard = (state, out) => {
     risky.length ? message('warn', t('send.stray.filled', { cols: risky.map(s => s.id).join(', ') })) : null,
     el('div', { class: 'card-actions' }, actionButton(t('send.stray.open'), 'trash', () => removeStrays(state), false, out, { kind: 'btn-primary' })));
 };
+
+// Synchro perdue : ce qui s'est passé, ce qu'on peut faire. Effacée : un nouvel export recrée la table (les anciens
+// webhooks, qui ne servent plus, se retirent d'un bouton). Renommée ou illisible : un nouvel export se heurterait à
+// la table qui reste, il est refusé tant que ce n'est pas réglé.
+// Synchro perdue ? Dit au premier écran (propriétaires seulement : eux seuls lisent les webhooks).
+export async function lostSynchro(schema) {
+  try {
+    return lostSync(schema, await listWebhooks(), await webhookConditions());
+  } catch (e) {
+    return null;
+  }
+}
+// Personne propriétaire du document ? (Eux seuls lisent les webhooks.) Null : Grist n'a pas répondu, on ne sait pas.
+export async function isOwnerHere() {
+  try {
+    await listWebhooks();
+    return true;
+  } catch (e) {
+    return e.message === 'ownerOnly' ? false : null;
+  }
+}
+const blocksNew = lost => Boolean(lost) && lost.kind !== 'deleted';
+function lostCard(lost, out) {
+  const vars = { name: lost.name, n: lost.hooks.length };
+  const title = t(`send.lost.${lost.kind}.title`, vars);
+  const clean = lost.kind !== 'deleted' ? null : actionButton(t('send.lost.deleted.clean'), 'trash', async () => {
+    if (!(await confirmDialog({ title, body: t('send.lost.deleted.confirm', vars), confirmLabel: t('send.lost.deleted.clean') }))) return;
+    for (const id of lost.hooks) await deleteWebhook(id);
+    notice = message('ok', t('send.lost.deleted.done', vars));
+  }, false, out, { kind: 'btn-danger-text' });
+  return el('article', { class: 'card', 'data-lost': lost.kind },
+    el('div', { class: 'card-head' }, el('strong', {}, title), statusPill('error', 'err')),
+    el('p', { class: 'small' }, t(`send.lost.${lost.kind}.body`, vars)),
+    el('p', { class: 'small' }, t(`send.lost.${lost.kind}.how`, vars)),
+    clean ? el('div', { class: 'card-actions' }, clean) : null);
+}
 
 const foreignCard = (state, out) => el('article', { class: 'card', 'data-foreign': '' },
   el('div', { class: 'card-head' }, el('strong', {}, t('send.foreign.title')), statusPill('error', 'err')),

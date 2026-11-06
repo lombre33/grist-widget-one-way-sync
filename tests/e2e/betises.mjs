@@ -105,7 +105,14 @@ const cases = {
       return `après « Modifier » : modification ${ok ? `arrivée en ${Math.round((Date.now() - t0) / 1000)} s` : 'NON arrivée (90 s)'} ; CIBLE ${await count(p.dst.doc, p.dest)} lignes`;
     },
   },
-  synchroSupprimee: { note: 'table Synchro supprimée', act: p => applyActions(p.src.doc, [['RemoveTable', 'Synchro']]) },
+  synchroSupprimee: {
+    note: 'table Synchro supprimée', act: p => applyActions(p.src.doc, [['RemoveTable', 'Synchro']]), probe: false,
+    expect: /La table Synchro a été supprimée/, after: removeOldHooks,
+  },
+  synchroRenommee: {
+    note: 'table Synchro renommée', act: p => applyActions(p.src.doc, [['RenameTable', 'Synchro', 'Ma_table']]), probe: false,
+    expect: /La table Synchro a été renommée.*« Ma_table »/s,
+  },
   synchroColonneSupprimee: { note: 'colonne Synchro_Lot supprimée', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Synchro', 'Synchro_Lot']]) },
   synchroFormuleRetouchee: { note: 'formule de Synchro_Lot remplacée par du texte', act: p => applyActions(p.src.doc, [['ModifyColumn', 'Synchro', 'Synchro_Lot', { formula: '"oups"', isFormula: true }]]) },
   synchroValeurEcrite: { note: 'Synchro_Export modifié à la main sur une ligne', act: async p => { const [r] = (await records(p.src.doc, 'Synchro')).filter(x => x.Synchro_Type === 'lot'); await applyActions(p.src.doc, [['UpdateRecord', 'Synchro', r.id, { Synchro_Export: 'bidule' }]]); } },
@@ -115,7 +122,7 @@ const cases = {
   webhookAutreTable: { note: 'table du webhook changée à la main', act: async p => { const [w] = await webhooks(p.src.doc); await api('PATCH', `/docs/${p.src.doc}/webhooks/${w.id}`, { tableId: 'Contacts' }); } },
   regleColonne: { note: 'règle d\'accès : colonne Prenom illisible pour tous', act: p => deny(p.src.doc, { tableId: 'Contacts', colIds: 'Prenom' }) },
   regleLignes: { note: 'règle d\'accès : lignes de Lyon illisibles pour tous', act: p => deny(p.src.doc, { tableId: 'Contacts' }, 'rec.Ville == "Lyon"') },
-  regleSynchro: { note: 'règle d\'accès : table Synchro illisible pour tous', act: p => deny(p.src.doc, { tableId: 'Synchro' }) },
+  regleSynchro: { note: 'règle d\'accès : table Synchro illisible pour tous', act: p => deny(p.src.doc, { tableId: 'Synchro' }), probe: false, expect: /La table Synchro n’est plus lisible par le widget/ },
   regleSourceEcriture: { note: 'règle d\'accès : table Contacts en lecture seule pour tous (le widget n\'écrit plus dedans)', act: p => deny(p.src.doc, { tableId: 'Contacts' }, 'True', '-U-C-D') },
   regleSynchroEcriture: { note: 'règle d\'accès : table Synchro en écriture interdite pour tous', act: p => deny(p.src.doc, { tableId: 'Synchro' }, 'True', '-U-C-D') },
   journalColonneSupprimee: { note: 'CIBLE : colonne Sync_Recu supprimée du journal', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['RemoveColumn', p.journal, 'Sync_Recu']]); } },
@@ -137,11 +144,23 @@ const cases = {
 
 // Les cas qui font intervenir une autre personne.
 const people = {
-  editeurSource: { note: 'SOURCE : une personne éditrice (non propriétaire) ouvre le widget', doc: 'src', access: 'editors' },
-  lecteurSource: { note: 'SOURCE : une personne lectrice ouvre le widget', doc: 'src', access: 'viewers' },
+  editeurSource: { note: 'SOURCE : une personne éditrice (non propriétaire) ouvre le widget', doc: 'src', access: 'editors', first: /Vous n’êtes pas propriétaire de ce document/ },
+  lecteurSource: { note: 'SOURCE : une personne lectrice ouvre le widget', doc: 'src', access: 'viewers', first: /Vous n’êtes pas propriétaire de ce document/ },
   editeurCible: { note: 'CIBLE : une personne éditrice (non propriétaire) ouvre le widget', doc: 'dst', access: 'editors' },
   lecteurCible: { note: 'CIBLE : une personne lectrice ouvre le widget', doc: 'dst', access: 'viewers' },
 };
+
+// « Retirer les anciens webhooks » (Synchro supprimée) : la carte propose le bouton, la confirmation, et plus rien ne reste.
+async function removeOldHooks(p) {
+  await p.sv.open(p.src.url);
+  await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+  await p.sv.button('Retirer les anciens webhooks').click();
+  await p.sv.dialogButton('Retirer les anciens webhooks').click();
+  await p.sv.widget().getByText(/ancien webhook retiré/).waitFor({ timeout: 30000 });
+  const left = (await webhooks(p.src.doc)).length;
+  const card = flat(await p.sv.text());
+  return `après « Retirer les anciens webhooks » : ${left} webhook restant ; carte : ${card.slice(0, 500)}`;
+}
 
 async function fresh(name) {
   const p = await h.pair({ name: `Bétise ${name}`, table: 'Contacts', columns: columnsOf(8), rows: rowsOf, makeRow, send: 'wait' });
@@ -175,6 +194,7 @@ async function runCase(name, spec) {
   log(`[${name}] ${spec.note}`);
   log(`[${name}] action : ${acted} ; modification arrivée : ${arrived ?? '(sans objet)'} ; file Grist : ${q}`);
   log(`[${name}] carte SOURCE : ${src}`);
+  if (spec.expect) log(`[${name}] ATTENDU dans la carte SOURCE (${spec.expect}) : ${spec.expect.test(src) ? 'OUI' : 'NON'}`);
   log(`[${name}] carte CIBLE : ${dst}`);
   if (spec.after) log(`[${name}] ${await spec.after(p).catch(e => `la suite échoue : ${e.message.split('\n')[0]}`)}`);
   const errs = h.problems.slice(problems0);
@@ -193,10 +213,21 @@ async function runPerson(name, spec) {
   log(`[${name}] ${spec.note}`);
   try {
     await view.open(url);
+    if (spec.first) {
+      await sleep(6000);
+      const first = flat(await view.text());
+      log(`[${name}] premier écran : ${first.replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 700)}`);
+      log(`[${name}] ATTENDU au premier écran (${spec.first}) : ${spec.first.test(first) ? 'OUI' : 'NON'}`);
+    }
     for (const tab of spec.doc === 'src' ? ['Envoyer', 'Recevoir'] : ['Recevoir', 'Envoyer']) {
       await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 }).catch(() => {});
       await sleep(7000);
       log(`[${name}] onglet ${tab} : ${flat(await view.text()).replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 900)}`);
+      if (process.env.SHOTS) {
+        await mkdir(process.env.SHOTS, { recursive: true });
+        await view.page.setViewportSize({ width: 1100, height: 900 });
+        await view.page.screenshot({ path: `${process.env.SHOTS}/${name}-${tab}.png` });
+      }
     }
   } catch (e) {
     log(`[${name}] le widget ne s'affiche pas : ${e.message.split('\n')[0]} ; page : ${flat(await view.page.locator('body').innerText().catch(() => '')).slice(0, 300)}`);

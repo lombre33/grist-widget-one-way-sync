@@ -138,6 +138,9 @@ Quatre relevés qui se lisent bien en quelques mots :
 | CIBLE : formulaire dépublié ou page supprimée : la carte disait « À jour » | avis « Le formulaire de réception n'est plus publié » |
 | Règle d'accès qui interdit l'écriture : « Erreur : Blocked by table update access rules » | texte qui dit où regarder (`error.blockedRules`) |
 | Colonne masquée par une règle d'accès : « renommées, supprimées ou d'un autre type » | le texte cite aussi les règles d'accès |
+| Table `Synchro` supprimée, renommée ou cachée à tous : la SOURCE revenait à l'accueil sans rien dire | trois cartes dédiées (`send.lost.*`), reconnues aux webhooks qui restent : démarche pour retrouver la table, bouton pour retirer les anciens webhooks (V0.13.1) |
+| Document CIBLE supprimé : « Actif », rien d'autre, ou « le lien ne marche plus » sans citer le document | Grist répond 404 puis abandonne l'envoi ; pause d'office après 60 s, texte qui cite le document supprimé parmi les quatre causes (V0.13.1) |
+| Personne éditrice ou lectrice de la SOURCE : « Aucun export » (faux) | « Vous n'êtes pas propriétaire de ce document… » à l'accueil et dans Envoyer (V0.13.1) |
 
 ## Ce qui reste (limites connues)
 
@@ -145,7 +148,8 @@ Quatre relevés qui se lisent bien en quelques mots :
 - Un lien mort ne se voit que par la SOURCE : le destinataire dont le formulaire est dépublié l'est dans sa carte,
   mais la SOURCE reste la seule à pouvoir réinviter.
 - La table `Synchro` est la mémoire du widget (liste des exports, colonnes, clés). La supprimer ou la rendre
-  illisible à tous, propriétaires compris, est irréparable : la SOURCE revient au premier écran, sans rien dire.
+  illisible à tous, propriétaires compris, reste irréparable par le widget (depuis la 0.13.1 il le dit et dit
+  quoi faire : annuler, ou repartir à zéro) ; sans aucun webhook restant, rien ne prouve qu'il était là.
 - Les erreurs passagères (429, 5xx, réseau) ne mettent pas en pause toutes seules : Grist réessaie pendant
   15 minutes et les autres destinataires attendent. Choix d'Antoine (6 novembre, carte de décision) : on laisse comme
   ça, car une pause fait perdre les changements faits pendant qu'elle dure, sauf renvoi, et peut couper un

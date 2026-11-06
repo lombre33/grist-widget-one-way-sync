@@ -294,7 +294,35 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
-## État : V0.13.0 (6 novembre 2026)
+## État : V0.13.1 (6 novembre 2026)
+
+V0.13.1 (Antoine, 6 novembre, après le récap des tests de charge : « je veux un max de message d'erreur ciblés
+et précis donc oui tous à faire », sur les cas que la 0.12.5 laissait sans message sur mesure) :
+- **Table `Synchro` perdue** (`lostSync` de `logic/strays.js`, `lostCard` et `lostSynchro` de `source/tab.js`,
+  textes `send.lost.*`) : **vérifié sur Grist 1.7.22** (`tests/e2e/tools/probe-synchro-gone.mjs`) : une table
+  effacée laisse ses webhooks (sans table, `tableId` nul) et ses règles d'accès ; renommée, les webhooks la
+  suivent (`tableId` = le nouveau nom) ; ces webhooks, avec leur condition `rec.Synchro_Export == "<export>"`,
+  prouvent que le widget était là. Trois cartes (propriétaires seulement, ils sont seuls à lire les webhooks) :
+  `deleted` (dit ce qui est perdu, Ctrl+Z ou « Historique du document », et un bouton « Retirer les anciens
+  webhooks » après confirmation ; un nouvel export reste possible), `renamed` (le nouveau nom, « redonnez-lui le
+  nom Synchro : tout reprend »), `hidden` (la table porte son nom mais le widget n'y retrouve pas
+  `Synchro_Export` : colonne effacée ou règle d'accès qui cache la table à tous, propriétaires compris ;
+  « Permissions avancées »). Dans les deux derniers cas « Nouvel export » est grisé. Au premier écran, un
+  propriétaire dont la table est perdue arrive directement dans Envoyer (`openFirstScreen`), pas à l'accueil.
+  La carte « une table nommée Synchro existe déjà » (`foreign`) cède la place quand `lost` s'applique.
+- **Document CIBLE supprimé** (sonde `tools/probe-dead-target.mjs`) : Grist répond `404 Share not known`,
+  retente environ une minute puis **abandonne l'envoi** (file à 0, plus d'erreur visible) ; le widget met le
+  destinataire en pause d'office après 60 s de lien mort, et les textes (`send.error.link`, `send.paused.auto`)
+  citent maintenant le document supprimé parmi les quatre causes, que Grist ne distingue pas (même 404).
+- **Personne non propriétaire** : l'onglet Envoyer dit « Vous n'êtes pas propriétaire de ce document : la
+  liste des exports et de leurs destinataires est réservée à ses propriétaires… » (avant : « Aucun export »,
+  faux) ; l'accueil le dit aussi (`home.notOwner`, via `isOwnerHere`). Éditeur et lecteur de la SOURCE ont le
+  même écran (Grist ne laisse lire les webhooks qu'aux propriétaires).
+- Testé : unit (`lostSync`) ; e2e `betises.mjs` : `synchroSupprimee` (bouton compris), `synchroRenommee`,
+  `regleSynchro`, `lecteurSource`, `editeurSource` (ligne « ATTENDU … OUI » dans le relevé, `SHOTS=<dossier>` fait
+  des captures).
+
+## V0.13.0 (6 novembre 2026)
 
 V0.13.0 (Antoine, 6 novembre, sur ma réserve « comparaison finale pas faite » de la 0.12.4 : « si ce cas
 n'est pas étudié dans l'autre fil il faudrait le prévoir non ? ») : **bilan des lignes annoncées et reçues**.
@@ -366,9 +394,8 @@ destinataires sur dix lignes, une quarantaine de bêtises. À retenir :
   effacée dite par la carte (un premier passage en erreur ne passe plus pour « En attente du lien »), formulaire
   dépublié ou page supprimée (`formGone`), refus d'une règle d'accès (`error.blockedRules`), 512 contrôles de lien
   simultanés à 256 destinataires (`pool`, six à la fois).
-- **Pas traité** : table `Synchro` supprimée ou cachée à tous (la SOURCE revient au premier écran) ; hang d'un
-  envoi vers un document CIBLE supprimé (Grist met l'envoi « en cours » avant de répondre 404) ; minuteries d'un
-  onglet caché (non testable sans tête) ; lecteur de la SOURCE qui voit l'écran d'accueil.
+- **Pas traité** (traité en 0.13.1 : table `Synchro` supprimée ou cachée, document CIBLE supprimé, lecteur de la
+  SOURCE) : minuteries d'un onglet caché (non testable sans tête).
 
 V0.12.4 (état précédent, même jour) :
 

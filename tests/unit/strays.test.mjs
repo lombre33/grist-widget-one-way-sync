@@ -3,8 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { syncColumns } from '../../js/logic/formulas.js';
+import { exportCondition } from '../../js/logic/exports.js';
 import {
-  columnFault, foreignSync, freeTableName, hasContent, ownsSync, refusedColumn, strayColumns, syncColumnIds, tableNameProblem,
+  columnFault, foreignSync, freeTableName, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds, tableNameProblem,
 } from '../../js/logic/strays.js';
 
 // Colonnes telles que readSchema les rend.
@@ -76,4 +77,34 @@ test('nom libre pour la table d\'une autre personne, et noms que Grist accepte',
   assert.equal(tableNameProblem('table_synchro', ['Table_Synchro']), 'taken');
   assert.equal(tableNameProblem(' Table_Synchro ', ['Contacts']), '', 'les espaces autour sont ignorés');
   assert.equal(tableNameProblem('Table_Synchro', ['Contacts']), '');
+});
+
+// Webhooks tels que listWebhooks les rend, et leurs conditions (webhookConditions).
+const hook = (id, tableId) => ({ id, fields: { tableId } });
+const conditions = ids => new Map(ids.map(([id, exportId]) => [id, exportCondition(exportId)]));
+
+test('Synchro perdue : effacée, renommée ou illisible, reconnue aux webhooks du widget qui restent', () => {
+  const exportId = '0123456789abcdef';
+  const mine = conditions([['w1', exportId], ['w2', exportId]]);
+  const noTable = schemaOf({ Contacts: grist() });
+  // Effacée : Grist garde les webhooks, sans table.
+  assert.deepEqual(lostSync(noTable, [hook('w1', null), hook('w2', null)], mine), { kind: 'deleted', name: '', hooks: ['w1', 'w2'] });
+  // Renommée : les webhooks suivent la table.
+  assert.deepEqual(lostSync(noTable, [hook('w1', 'Ma_table'), hook('w2', 'Ma_table')], mine), { kind: 'renamed', name: 'Ma_table', hooks: ['w1', 'w2'] });
+  // Au nom de Synchro, mais sans sa colonne Synchro_Export pour le widget : effacée ou cachée par une règle d'accès.
+  const hidden = schemaOf({ Synchro: [col('manualSort')] });
+  assert.equal(lostSync(hidden, [hook('w1', 'Synchro')], mine).kind, 'hidden');
+  assert.equal(lostSync(noTable, [hook('w1', 'Synchro')], mine).kind, 'hidden', 'table cachée à tous : elle n\'est même plus dans le schéma');
+});
+
+test('Synchro perdue : rien à dire quand la table est celle du widget, ou qu\'aucun de ses webhooks ne reste', () => {
+  const exportId = '0123456789abcdef';
+  const mine = conditions([['w1', exportId]]);
+  const own = schemaOf({ Synchro: widget() });
+  assert.equal(lostSync(own, [hook('w1', 'Synchro')], mine), null, 'table en place');
+  const noTable = schemaOf({ Contacts: grist() });
+  assert.equal(lostSync(noTable, [], new Map()), null, 'jamais servi : rien n\'est perdu');
+  // Un webhook qui n'est pas celui d'un export (autre usage de Grist, condition d'un autre genre) ne prouve rien.
+  assert.equal(lostSync(noTable, [hook('w9', null)], new Map([['w9', 'rec.Montant > 3']])), null);
+  assert.equal(lostSync(noTable, [hook('w9', null)], new Map()), null);
 });
