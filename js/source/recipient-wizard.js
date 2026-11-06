@@ -331,8 +331,8 @@ async function showLoad({ exp, wizard, onClose }) {
     if (!report.isConnected) return onClose && onClose();
     return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done', { n })), closeButtons());
   };
-  const intro = count ? [el('p', {}, t('send.load.body', { n: count })), est ? estimateLines(est) : null]
+  const intro = count ? [el('p', {}, t('send.load.body', { n: count })), ...(est ? estimateLines(est) : [])]
     : [message('warn', t('send.load.nothing', { n: total }))];
-  wizard.show(STEP.load, [message('ok', t('send.connected')), intro, report],
+  wizard.show(STEP.load, [message('ok', t('send.connected')), ...intro, report],
     [later, { label: t('send.load.ok'), kind: 'btn-primary', onClick: () => run(null, report, send) }]);
 }
