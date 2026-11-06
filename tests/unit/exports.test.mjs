@@ -141,7 +141,15 @@ test('état d\'un destinataire et d\'un export : pastille, erreur dite simplemen
   assert.equal(hookErrorKey(hook(true, { lastEventBatch: { httpStatus: 413 } })), 'send.error.size');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Invalid column "X"' })), 'send.error.column');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 404 })), 'send.error.link');
-  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.other');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.server', 'l\'instance en panne : réessai seul');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 503, lastErrorMessage: 'Service Unavailable' })), 'send.error.server');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 429 })), 'send.error.rate', 'l\'instance demande de ralentir');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'Too Many Requests' })), 'send.error.rate');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'request to https://x failed, reason: connect ECONNREFUSED' })), 'send.error.network');
+  assert.equal(hookErrorKey(hook(true, { lastErrorMessage: 'network timeout at: https://x' })), 'send.error.network');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 502, lastErrorMessage: 'timeout' })), 'send.error.server', 'un code HTTP l\'emporte sur le message');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Bad Request' })), 'send.error.other');
+  assert.equal(hookErrorKey(hook(true, {})), 'send.error.other');
   const exp = fields => ({ recipients: [], invitations: [], ...fields });
   assert.deepEqual(exportStatus(exp({})), ['alone', 'off']);
   assert.deepEqual(exportStatus(exp({ invitations: [{}] })), ['invited', 'pending']);

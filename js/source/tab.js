@@ -9,12 +9,15 @@ import { STATES, parseLot } from '../logic/journal.js';
 import { eventsOf } from '../logic/notes.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, lotLate, parseCharge } from '../logic/resend.js';
+import { flowMoves } from '../logic/health.js';
+import { LONG_SECONDS } from '../logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
 import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
 import { columnFault, foreignSync, hasContent, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
 import { reloading, syncRules } from '../acl.js';
 import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
-import { catchUp, chargeNotice, resendTables } from './resend.js';
+import { catchUp, currentCharge, flowOf, resendTables } from './resend.js';
+import { confirmSend, exportEstimate, flowView } from './flow.js';
 import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
@@ -68,7 +71,8 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
     events: eventsOf(note, id),
-    partial: recipients.some(h => h.fields.enabled) && mine.some(r => lotLate(r) || listDue(r)),
+    // Tables dont des lignes ou la liste des clés restent à envoyer (voir exportFlow).
+    owed: recipients.length ? new Set(mine.filter(r => lotLate(r) || listDue(r)).map(r => r[TABLE_COL])).size : 0,
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
     tooBig: mine.filter(r => r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
     ...exportDrift(schema, tables),
@@ -101,6 +105,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
     return;
   }
   container.replaceChildren(...sourceView(state, access, open));
+  if ([...flowSlots.values()].some(slot => slot.moving)) watchFlows();
   if (state.ownerOnly) return;
   resumeExchange(state);
   if (!periodic) askAboutSync(state);
@@ -122,6 +127,8 @@ async function upgradeSource(state) {
 
 // Contenu de l'onglet : « Nouvel export », avertissements, avis de la dernière action, cartes.
 function sourceView(state, access, open) {
+  flowSlots.clear();
+  personSlots.clear();
   const out = el('div', { class: 'out' }, notice);
   notice = null;
   const toolbar = el('div', { class: 'toolbar' },
@@ -137,7 +144,6 @@ function sourceView(state, access, open) {
   return [toolbar,
     state.ownerOnly ? message('warn', t('common.ownerOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
-    chargeNotice(state.charge),
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : el('p', { class: 'muted' }, t(state.ownerOnly && state.exports.length ? 'send.ownersOnly' : 'send.empty')),
     roleGuide({ you: 'source' })].filter(Boolean);
@@ -214,7 +220,6 @@ const exportNotes = exp => [
   exp.structure ? message('warn', t('send.renforce.structure')) : null,
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
   exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
-  exp.partial ? message('info', t('send.export.partial')) : null,
   filesPending(exp.id) ? message('info', t('send.files.pending', { n: filesPending(exp.id) })) : null,
   exp.retour ? message('info', t('send.exchange.managed')) : null,
   exp.echange && !exp.retour ? el('p', { class: 'muted small' }, exp.recipients.length > 1 ? t('send.exchange.hub', { n: exp.recipients.length }) : t('send.exchange.with')) : null,
@@ -233,10 +238,20 @@ function exportCard(exp, state, open, out) {
     ...exp.invitations.map(inv => inviteRow(exp, inv, ownerOnly, out)),
     exp.public ? publicRow(exp, open, ownerOnly, out) : null,
   ].filter(Boolean);
+  // Un envoi long se confirme avec son coût (lignes, lots, durée) ; il se suit sur la carte (voir
+  // flowSlot), pendant que ce bouton attend la fin.
   const load = async () => {
+    const est = await exportEstimate(exp).catch(() => null);
+    if (est && est.seconds >= LONG_SECONDS && !(await confirmSend(est))) return;
     await resendFiles(exp.id);
-    const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), out);
-    notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
+    loading++;
+    watchFlows();
+    try {
+      const total = await resendTables(exp.id, exp.tables.map(tb => tb.table), null);
+      notice = total === null ? message('info', t('send.load.queued')) : message('ok', t('send.load.done', { n: total }));
+    } finally {
+      loading--;
+    }
   };
   // L'export de retour d'un Échange (reçu d'un autre document) se règle depuis l'onglet Recevoir.
   // Un seul bouton principal par carte, l'étape suivante : ajouter un premier destinataire, ou
@@ -245,6 +260,7 @@ function exportCard(exp, state, open, out) {
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), statusPill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
     exportNotes(exp),
+    flowSlot(exp, state.charge),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     eventsBlock(exp),
     el('div', { class: 'card-actions' },
@@ -272,28 +288,103 @@ function errorText(h, syncCols) {
   const fault = columnFault(h.usage, syncCols);
   if (fault === 'stray') return t('send.error.stray', { col: refusedColumn(h.usage) });
   if (fault === 'gone') return t('send.error.gone', { col: refusedColumn(h.usage) });
-  return t(hookErrorKey(h), { col: refusedColumn(h.usage) || '?' });
+  return t(hookErrorKey(h), { col: refusedColumn(h.usage) || '?', status: (h.usage || {}).lastHttpStatus || '' });
 }
 
-// Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul.
+// Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul. Son
+// état d'envoi (pastille, dernier envoi, envois en attente, erreur) est redessiné sur place tant
+// qu'un envoi bouge (voir tickFlows).
 function personRow(exp, h, ownerOnly, out, syncCols) {
-  const [status, tone] = hookStatus(h);
-  const u = h.usage || {};
+  const [status] = hookStatus(h);
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const failing = status === 'error';
   const { other, bad } = checked.get(h.id) || {};
+  const slot = { pill: el('span', {}), lines: el('div', {}), syncCols, status };
+  personSlots.set(h.id, slot);
+  fillPerson(slot, h);
   return el('li', { class: 'person' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, personLabel(h)), statusPill(status, tone)),
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, personLabel(h)), slot.pill),
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
-    u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
-    u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
-    failing ? el('p', { class: 'small text-danger' }, errorText(h, syncCols)) : null,
-    failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) })) : null,
+    slot.lines,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
       failing ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
       action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
+}
+
+function fillPerson(slot, h) {
+  const [status, tone] = hookStatus(h);
+  const u = h.usage || {};
+  const failing = status === 'error';
+  slot.status = status;
+  slot.pill.replaceChildren(statusPill(status, tone));
+  slot.lines.replaceChildren(...[
+    u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
+    u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
+    failing ? el('p', { class: 'small text-danger' }, errorText(h, slot.syncCols)) : null,
+    failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) })) : null,
+  ].filter(Boolean));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Où en est l'envoi de chaque export : sa phrase (voir exportFlow) est redessinée sur place, avec l'état
+// de ses destinataires, tant qu'un envoi bouge ; une page qui change d'état se redessine en entier.
+// Une lecture légère toutes les 10 s (ligne 'charge', webhooks), jamais la table Synchro.
+const FLOW_MS = 10000;
+const flowSlots = new Map(); // export -> { node, exp, moving }
+const personSlots = new Map(); // webhook -> { pill, lines, syncCols, status }
+let flowTimer = 0;
+let loading = 0; // envois lancés depuis cette page par « Tout renvoyer »
+
+function flowSlot(exp, charge) {
+  const node = el('div', { class: 'flow-slot', 'data-export-flow': exp.id });
+  const flow = flowOf(exp, charge);
+  const view = flowView(flow);
+  if (view) node.append(view);
+  flowSlots.set(exp.id, { node, exp, moving: flowMoves(flow) });
+  return node;
+}
+
+function watchFlows() {
+  if (!flowTimer) flowTimer = setTimeout(tickFlows, FLOW_MS);
+}
+
+async function tickFlows() {
+  flowTimer = 0;
+  if (!container || !container.isConnected) return;
+  let charge;
+  let hooks;
+  let conditions;
+  try {
+    [charge, hooks, conditions] = await Promise.all([currentCharge(), listWebhooks(), webhookConditions()]);
+  } catch (e) {
+    if (loading) watchFlows();
+    return;
+  }
+  let moving = loading > 0;
+  let changed = false;
+  for (const [id, slot] of flowSlots) {
+    if (!slot.node.isConnected) {
+      flowSlots.delete(id);
+      continue;
+    }
+    slot.exp = { ...slot.exp, recipients: hooksOf(hooks, conditions, id) };
+    const flow = flowOf(slot.exp, charge);
+    const view = flowView(flow);
+    slot.node.replaceChildren(...(view ? [view] : []));
+    changed ||= slot.moving && !flowMoves(flow);
+    slot.moving = flowMoves(flow);
+    moving ||= slot.moving;
+  }
+  for (const h of hooks) {
+    const slot = personSlots.get(h.id);
+    if (!slot || !slot.pill.isConnected) continue;
+    changed ||= hookStatus(h)[0] !== slot.status;
+    fillPerson(slot, h);
+  }
+  if (changed && !document.querySelector('.scrim')) await refreshSource();
+  else if (moving || changed) watchFlows();
 }
 
 // Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et

@@ -434,8 +434,9 @@ try {
     await dialogButton('Approuver et brancher').click();
     await dialog().getByText('Branché').waitFor();
     if (shots) await shot('12-source-envoi');
+    await dialog().getByText(/lignes? à envoyer, environ [\d\s]+ Ko, en [\d\s]+ lots?/).waitFor();
     await dialogButton('Envoyer').click();
-    await dialog().getByText('Lignes existantes envoyées').waitFor();
+    await dialog().getByText(/Lignes existantes envoyées\s:\s[\d\s]+\./).waitFor();
     await dialogButton('Fermer').click();
     await dialog().waitFor({ state: 'detached' });
   }
@@ -1173,10 +1174,13 @@ try {
   // --- Une autre page renvoie déjà (signe de vie récent) : « Tout renvoyer » ne lance rien et
   // note le lot ; la main rendue, le rattrapage l'envoie seul
   const chargeRow = (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'charge');
-  const holdCharge = par => applyActions(source.doc, [['UpdateRecord', 'Synchro', chargeRow.id, { Synchro_Renvoi: JSON.stringify({ ...charge, par, le: Date.now() / 1000 }) }]]);
+  const nowSec = () => Date.now() / 1000;
+  const prog = { exp: synchro[0].Synchro_Export, table: 'Contacts', done: 2, total: 4, lots: 1, lotsTotal: 2, bytes: 1000, at: nowSec() - 60, last: nowSec() };
+  const holdCharge = par => applyActions(source.doc, [['UpdateRecord', 'Synchro', chargeRow.id, { Synchro_Renvoi: JSON.stringify({ ...charge, par, le: nowSec(), prog: par ? prog : null }) }]]);
   await holdCharge('autre');
   await openWidget(source.url);
-  await widget().getByText('Un renvoi est en cours depuis une autre page').waitFor();
+  await widget().getByText(/Un envoi est en cours depuis une autre page ou une autre personne\s:\s2 sur 4 lignes \(50\s%\), lot 2 sur environ 2\./).waitFor();
+  assert.equal(await widget().locator('[data-flow="runningOther"] progress').getAttribute('value'), '2', 'barre d\'avancement');
   await button('Tout renvoyer').click();
   await widget().getByText('Un autre renvoi est en cours pour ce document').waitFor();
   const lotOf = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
@@ -1558,8 +1562,11 @@ try {
   await widget().getByText(/Contacts\s:\s[\d\s]+\slignes ne sont pas encore arrivées/).waitFor({ timeout: 60000 });
   await shot('19-cible-envoi-coupe');
   await openWidget(source.url);
-  await widget().getByText('Un envoi n’est pas terminé').waitFor();
-  await widget().getByText('Un envoi n’est pas terminé').waitFor({ state: 'detached', timeout: 240000 });
+  await widget().locator('[data-export-flow] [data-flow]').first().waitFor();
+  // Le widget envoie le reste seul : la carte dit où il en est (lignes, lots), puis l'avis disparaît.
+  await widget().locator('[data-flow="running"] progress').waitFor({ timeout: 120000 });
+  await widget().getByText(/Envoi en cours\s:\s[\d\s]+ sur [\d\s]+ lignes \([\d\s]+%\), lot [\d\s]+ sur environ [\d\s]+/).first().waitFor();
+  await widget().locator('[data-export-flow] [data-flow]').first().waitFor({ state: 'detached', timeout: 240000 });
   assert.equal((await lotRow()).Sync_Etat, 0, 'marque effacée');
   await openWidget(target.url);
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + imported.length, 'gros import reçu en entier', 120000);

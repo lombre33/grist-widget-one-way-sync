@@ -120,6 +120,8 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .msg-ok { background: var(--good-soft); border-color: var(--good); color: var(--good); }
 .msg-warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .msg-err { background: var(--danger-soft); border-color: var(--danger); color: var(--danger-ink); }
+/* Avancement d'un envoi sur la carte d'un export (js/source/flow.js). */
+.flow progress { display: block; width: 100%; height: 8px; margin: -4px 0 8px; accent-color: var(--accent); }
 .suspect p { margin: 4px 0 0; }
 .suspect .card-actions { margin-top: 8px; }
 

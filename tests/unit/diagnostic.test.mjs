@@ -1,7 +1,7 @@
 // Diagnostic à copier : ce qu'il dit, et surtout ce qu'il ne dit jamais (adresses, clés, courriels).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diagnosticText, exportFacts, hookFacts, journalFacts } from '../../js/logic/diagnostic.js';
+import { catchFact, diagnosticText, exportFacts, hookFacts, journalFacts, progressFact } from '../../js/logic/diagnostic.js';
 
 const KEY = 'AbCdEfGhIjKlMnOpQrStUv';
 const hook = {
@@ -67,4 +67,25 @@ test('texte : document sans export ni réception', () => {
   assert.ok(owner.includes('lecture réservée aux propriétaires') && owner.includes('Aucun export.') && owner.includes('Renvoi en cours : budget atteint'));
   assert.equal(journalFacts({ journal: 'J', note: { export: 'e' } }).reserve, 'non');
   assert.equal(journalFacts({ journal: 'J', note: { export: 'e', reserve: true, reserved: true, ended: 10 } }).reserve, 'posée');
+});
+
+test('avancement, rattrapage et arrivées : en une phrase, sans adresse ni identifiant entier', () => {
+  assert.equal(progressFact(null, 100), '');
+  const prog = { exp: '0123456789abcdef', table: 'Contacts', done: 12400, total: 30000, lots: 62, lotsTotal: 150, last: 1000 };
+  assert.equal(progressFact(prog, 1042.4), 'export 01234567, 12400 sur 30000 lignes, 62 lots sur environ 150, dernier lot il y a 42 s');
+  assert.equal(catchFact({ at: 0, why: '', running: false }), 'pas encore passé');
+  assert.equal(catchFact({ at: 1760000000000, why: 'blocked', running: false }), 'dernier passage 2025-10-09T08:53:20Z (bloqué : un destinataire est en erreur)');
+  assert.equal(catchFact({ at: 1760000000000, why: 'sent', running: true }), 'dernier passage 2025-10-09T08:53:20Z (a renvoyé), en cours');
+  const facts = journalFacts({ journal: 'Journal_x', note, stats: { n: 412, last: 1760000000, raw: 3 } });
+  assert.equal(facts.arrival, '412 lignes, dernière arrivée 2025-10-09T08:53:20Z, 3 envois bruts pas encore recopiés');
+  assert.equal(journalFacts({ journal: 'Journal_x', note }).arrival, '', 'journal illisible : rien');
+  const text = diagnosticText({
+    version: '0.12.3', served: 'x', origin: 'https://g.fr', access: 'propriétaire', at: 1760000000000, agent: 'test',
+    source: { ownerOnly: false, exports: [], unsafe: 0, charge: '', progress: progressFact(prog, 1042), catchUp: 'pas encore passé', kinds: {} },
+    target: { journals: [facts], compare: true, visible: false },
+  });
+  assert.match(text, /Avancement : export 01234567, 12400 sur 30000 lignes/);
+  assert.match(text, /Rattrapage : pas encore passé/);
+  assert.match(text, /journal : 412 lignes, dernière arrivée/);
+  assert.match(text, /Page visible : non \(la recopie attend\)/);
 });

@@ -1,6 +1,6 @@
 // SOURCE : renvois de lignes et de listes des clés, ménagés pour l'instance (un renvoi à la fois par
 // document, un budget d'octets par fenêtre de temps).
-import { EXPORT_COL, KIND, MISSING_COL, ORDER_COL, RESEND_ALL, RESEND_COL, TABLE_COL, TRACK_COL, TYPE_COL, parseJson } from './common.js';
+import { EXPORT_COL, KIND, LIST_COL, MISSING_COL, ORDER_COL, RESEND_ALL, RESEND_COL, TABLE_COL, TRACK_COL, TYPE_COL, parseJson } from './common.js';
 import { swapExports } from './exports.js';
 
 export const RESEND_CHUNK = 200; // lignes par tranche de renvoi
@@ -63,8 +63,66 @@ export function parseCharge(text) {
   const pairs = Array.isArray(charge.envoye) ? charge.envoye.filter(e => Array.isArray(e) && e.length === 2) : [];
   return {
     par: typeof charge.par === 'string' ? charge.par : '', le: Number(charge.le) || 0, reprise: Number(charge.reprise) || 0,
-    envoye: pairs.map(([at, n]) => [Number(at) || 0, Number(n) || 0]),
+    envoye: pairs.map(([at, n]) => [Number(at) || 0, Number(n) || 0]), prog: parseProg(charge.prog),
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Avancement d'un renvoi (`prog` de la ligne 'charge') : { exp, table, done, total, lots, lotsTotal,
+// bytes, at, last } = lignes parties sur lignes à envoyer, lots partis sur lots prévus (environ : un
+// lot coupé en refait), octets écrits dans les lots (une copie par destinataire), début et dernier
+// signe, en secondes. Gardé après une page fermée en route : la carte dit où le renvoi s'est arrêté.
+export function parseProg(p) {
+  if (!p || typeof p !== 'object' || typeof p.exp !== 'string' || !p.exp) return null;
+  const num = x => (Number.isFinite(Number(x)) && Number(x) > 0 ? Math.floor(Number(x)) : 0);
+  return {
+    exp: p.exp, table: typeof p.table === 'string' ? p.table : '', done: num(p.done), total: num(p.total), lots: num(p.lots),
+    lotsTotal: num(p.lotsTotal), bytes: num(p.bytes), at: num(p.at), last: num(p.last),
+  };
+}
+
+export const startProg = (exp, total, lotsTotal, now) => ({ exp, table: '', done: 0, total, lots: 0, lotsTotal, bytes: 0, at: Math.floor(now), last: Math.floor(now) });
+export const addProg = (prog, { rows, bytes, now }) => ({ ...prog, done: prog.done + rows, lots: prog.lots + 1, bytes: prog.bytes + bytes, last: Math.floor(now) });
+export const percent = prog => (prog.total > 0 ? Math.min(100, Math.floor((prog.done * 100) / prog.total)) : 0);
+
+// Octets déjà écrits dans la fenêtre du budget.
+export const windowSpent = (charge, now) => charge.envoye.filter(([at]) => at > now - BUDGET_WINDOW).reduce((sum, [, n]) => sum + n, 0);
+
+// Secondes qu'il reste à un renvoi : le plus grand de deux calculs, celui du rythme tenu jusqu'ici
+// (pauses comprises) et celui du budget (ce qui reste à écrire, moins ce que la fenêtre peut encore
+// prendre). Null tant qu'il est trop tôt pour le dire.
+export function etaSeconds(prog, charge, now) {
+  if (!prog || prog.done < 1 || prog.total <= prog.done) return null;
+  const elapsed = now - prog.at;
+  if (elapsed < 15) return null;
+  const left = prog.total - prog.done;
+  const byRate = left / (prog.done / elapsed);
+  const room = Math.max(0, RESEND_BUDGET - windowSpent(charge, now));
+  const byBudget = Math.max(0, ((left * (prog.bytes / prog.done) - room) / RESEND_BUDGET) * BUDGET_WINDOW);
+  return Math.round(Math.max(byRate, byBudget));
+}
+
+// Un lot est coupé quand il ne porte pas toutes les lignes demandées (hors lignes trop grosses pour
+// un envoi, qui ne partiront jamais : `big`).
+export const lotCut = sent => Boolean(sent) && sent.total > sent.lines.length + sent.big.length;
+
+// Taille des tranches suivantes après un lot coupé : un peu moins que ce qui a tenu (`fit` lignes
+// sur `asked`), au lieu de couper chaque tranche en deux (un lot coupé est parti pour rien et pèse
+// sur le budget). Jamais plus grande qu'avant.
+export function nextChunkSize(size, asked, fit) {
+  if (fit >= asked) return size;
+  return Math.max(1, Math.min(size, Math.floor(fit * 0.9) || 1));
+}
+
+// Nombre de lots que demandera un renvoi de `rows` lignes en tranches de `size`.
+export const chunkCount = (rows, size = RESEND_CHUNK) => (rows > 0 ? Math.ceil(rows / size) : 1);
+
+// Lignes que la table d'un export peut envoyer : le nombre lu dans la ligne 'suivi' (clés présentes
+// et filtre appliqué), ou null. `Synchro_Ids` d'une ligne 'suivi' vaut « nombre:somme ».
+export function eligibleRows(syncRows, exportId, table) {
+  const row = syncRows.find(r => r[EXPORT_COL] === exportId && r[TABLE_COL] === table && r[TYPE_COL] === KIND.track);
+  const m = row ? /^(\d+):[0-9a-f]+$/.exec(String(row[LIST_COL] || '')) : null;
+  return m ? Number(m[1]) : null;
 }
 
 // Une autre page renvoie, et a donné signe de vie depuis moins de LEASE_S secondes. Une page se

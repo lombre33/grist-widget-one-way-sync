@@ -190,12 +190,21 @@ export function tooLarge(h) {
 }
 
 // Erreur d'envoi d'un destinataire : clé du texte qui la dit simplement, avec ce qu'il faut faire.
+// Grist ne donne que le code HTTP et un message : taille (413), colonne refusée, lien mort (401, 403,
+// 404), instance qui ralentit (429), instance en panne (5xx), réseau (aucun code, message de
+// connexion).
+const NETWORK = /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|socket hang up|network|fetch failed|getaddrinfo/i;
 export function hookErrorKey(h) {
   const u = h.usage || {};
   const status = u.lastHttpStatus || (u.lastEventBatch || {}).httpStatus;
+  const text = u.lastErrorMessage || '';
   if (status === 413) return 'send.error.size';
-  if (/Invalid column/i.test(u.lastErrorMessage || '')) return 'send.error.column';
-  return [401, 403, 404].includes(status) ? 'send.error.link' : 'send.error.other';
+  if (/Invalid column/i.test(text)) return 'send.error.column';
+  if ([401, 403, 404].includes(status)) return 'send.error.link';
+  if (status === 429 || /too many requests|rate.?limit/i.test(text)) return 'send.error.rate';
+  if (status >= 500) return 'send.error.server';
+  if (!status && NETWORK.test(text)) return 'send.error.network';
+  return 'send.error.other';
 }
 
 // État d'un export pour sa carte : [clé de la pastille, ton]. `exp` : { recipients, invitations,

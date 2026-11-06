@@ -12,7 +12,7 @@ const SMALL_TABLE = 20;
 // Octets d'un lot. Grist refuse un envoi de plus de 1 Mo, et un même envoi regroupe les listes des
 // clés et les lots des tables d'un export qui changent ensemble : chaque lot prend sa part de ce
 // que les listes laissent.
-const LOT_MAX = 250000;
+export const LOT_MAX = 250000;
 const POST_MAX = 950000;
 const LOT_MIN = 20000;
 // Instantané d'un export public, relu par chaque page CIBLE ouverte quand il change : au-delà, il

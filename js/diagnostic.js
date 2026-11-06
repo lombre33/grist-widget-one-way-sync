@@ -1,12 +1,13 @@
 // Diagnostic à copier (Réglages) : relit le document et l'état des onglets, puis le met en texte
 // (choix de ce qui en fait partie et forme : logic/diagnostic.js).
-import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RESEND_COL, nowS } from './logic/common.js';
+import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RECEIVED_COL, RESEND_COL, nowS } from './logic/common.js';
 import { ownsSync } from './logic/strays.js';
-import { diagnosticText, exportFacts, journalFacts } from './logic/diagnostic.js';
+import { catchFact, diagnosticText, exportFacts, journalFacts, progressFact } from './logic/diagnostic.js';
 import { conditionExport, exportDrift, exportTables, hooksOf } from './logic/exports.js';
 import { receivedJournals, receivedKey } from './logic/received.js';
 import { LEASE_S, budgetWait, dueRows, parseCharge } from './logic/resend.js';
-import { docIdentity, fetchRows, isOwner, isReadOnly, listWebhooks, readSchema, webhookConditions } from './grist.js';
+import { docIdentity, fetchRows, isOwner, isReadOnly, journalStats, listWebhooks, readSchema, webhookConditions } from './grist.js';
+import { catchState } from './source/resend.js';
 import { isCharge, readSourceNote } from './source/synchro.js';
 import { comparing, state, tableKey } from './target/loop.js';
 import { VERSION, servedFrom } from './config.js';
@@ -37,18 +38,21 @@ async function sourceFacts(schema) {
     ownerOnly: !owner,
     unsafe: hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id))).length,
     charge: [busy, wait ? `budget atteint, reprise dans ${Math.round(wait)} s` : ''].filter(Boolean).join(', '),
+    progress: progressFact(charge.prog, now),
+    catchUp: catchFact(catchState()),
     exports,
     kinds: rows.reduce((n, r) => ({ ...n, [r[TYPE_COL]]: (n[r[TYPE_COL]] || 0) + 1 }), {}),
   };
 }
 
-function targetFacts(schema) {
-  const journals = receivedJournals(schema).map(({ journal, note }) => journalFacts({
+async function targetFacts(schema) {
+  const journals = await Promise.all(receivedJournals(schema).map(async ({ journal, note }) => journalFacts({
     journal, note, signed: receivedKey(schema, journal, note),
     results: [state.results.get(journal), ...note.tables.map(tb => state.results.get(tableKey(journal, tb.table)))],
     offers: (state.offers.get(journal) || []).length,
-  }));
-  return { journals, compare: comparing() };
+    stats: await journalStats(journal, RECEIVED_COL, TYPE_COL),
+  })));
+  return { journals, compare: comparing(), visible: document.visibilityState === 'visible' };
 }
 
 export async function diagnostic() {
@@ -62,7 +66,7 @@ export async function diagnostic() {
     at: Date.now(),
     agent: navigator.userAgent,
     source: await sourceFacts(schema),
-    target: targetFacts(schema),
+    target: await targetFacts(schema),
     errors: recentErrors,
   });
 }

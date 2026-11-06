@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.12.2 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.12.3 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -116,6 +116,10 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   les tables reçues).
 - **Grandes tables** : pas de limite de lignes (testé avec 21 000), gros imports envoyés par
   tranches, file d'envoi bloquée vidée puis renvoyée.
+- **Envois longs prévus et suivis** : avant un envoi complet, ce qu'il va coûter (lignes, taille,
+  lots, durée) ; pendant l'envoi, l'avancement sur la carte (lignes, lots, temps restant, pause du
+  budget et heure de reprise) ; côté CIBLE, le dernier envoi arrivé, ceux qui attendent d'être
+  recopiés, et un état à copier pour la personne qui envoie.
 - **Suivi clair** : une carte par export et par réception, dernier envoi, erreurs expliquées,
   historique replié des changements depuis la dernière visite, avec numéro de ligne, valeurs
   avant et après, et colonnes ajoutées à l'export.
