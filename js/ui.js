@@ -292,7 +292,13 @@ export function pickField({ items, value, label, onChange = () => {} }) {
 // Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`, avec ses valeurs
 // `vars`), sinon une phrase générique avec le détail technique.
 const known = e => t(`error.${e.message}`) !== `error.${e.message}`;
-export const errorText = e => (known(e) ? t(`error.${e.message}`, e.vars || {}) : t('error.generic', { detail: e.message || String(e) }));
+// Refus d'une règle d'accès de Grist (« Blocked by table update access rules ») : dit où regarder.
+const RULES_REFUSAL = /Blocked by [a-z ]*access rules/i;
+export const errorText = (e) => {
+  if (known(e)) return t(`error.${e.message}`, e.vars || {});
+  const refusal = RULES_REFUSAL.exec(e.message || '');
+  return refusal ? t('error.blockedRules', { detail: refusal[0] }) : t('error.generic', { detail: e.message || String(e) });
+};
 export const failure = (code, vars) => Object.assign(new Error(code), { vars });
 
 // Erreurs récentes, pour le diagnostic (Réglages) : les ERRORS_KEPT dernières, avec leur heure.

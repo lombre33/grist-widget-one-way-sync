@@ -11,7 +11,7 @@ const K2 = '2'.repeat(32);
 const schemaOf = (tables) => {
   let n = 0;
   const cols = Object.fromEntries(Object.entries(tables).map(([t, cs]) => [t, cs.map(([colId, note]) => ({ id: ++n, colId, description: note ? JSON.stringify(note) : '' }))]));
-  return { tableIds: Object.keys(cols), has: t => t in cols, columns: t => cols[t] };
+  return { tableIds: Object.keys(cols), has: t => t in cols, columns: t => cols[t], tableIdOf: ref => Object.keys(cols)[ref - 1] || null };
 };
 
 test('journaux reçus : ceux dont la note dit l\'export et les tables, complétée ; destinations et document d\'origine', () => {
@@ -49,6 +49,10 @@ test('clé de signature : à la place de l\'export, ou du journal pour un retour
   assert.equal(keySlot('Journal_r', { ...note, retour: true }), 'Journal_r');
   assert.equal(receivedKey(schema, 'Journal_a', note), K1);
   assert.equal(receivedKey(schema, 'Journal_r', { ...note, retour: true }), '', 'valeur illisible ignorée');
+  // Seule table de l'export renommée ici : la clé se retrouve par le numéro de la table, pas par son ancien nom.
+  const renamed = schemaOf({ Personnes: [['id_sync', { signature: { e1: K1 } }]] });
+  assert.equal(receivedKey(renamed, 'Journal_a', { export: 'e1', tables: [{ dest: 'Annuaire', refs: { table: 1 } }] }), K1);
+  assert.equal(receivedKey(renamed, 'Journal_a', { export: 'e1', tables: [{ dest: 'Annuaire' }] }), '', 'sans numéro noté, l\'ancien nom ne mène nulle part');
   assert.deepEqual(storeKeyActions(schema, ['Annuaire', 'Villes', 'Pays', 'Absente'], 'e1', K2), [
     ['UpdateRecord', '_grist_Tables_column', 1, { description: JSON.stringify({ signature: { e1: K2, Journal_r: 'pas une clé' } }) }],
     ['UpdateRecord', '_grist_Tables_column', 2, { description: JSON.stringify({ signature: { e1: K2 } }) }],

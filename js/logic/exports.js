@@ -174,13 +174,42 @@ export function conditionExport(text) {
 // Nom du webhook d'un destinataire : lisible dans les réglages de Grist, avec l'export en fin.
 export const hookName = (name, exportId) => `Synchro ${name} #${exportId}`;
 
+// Un envoi qui attend la réponse du destinataire depuis plus de ce délai (ms) : Grist n'a pas de délai à lui
+// (il abandonne au bout de cinq minutes, puis retente), et la file du document attend pendant ce temps.
+export const SLOW_MS = 180000;
+const waitingTooLong = (u, now) => u.status === 'sending' && u.updatedTime > 0 && now - u.updatedTime > SLOW_MS;
+
 // État d'un destinataire, lu dans l'état d'envoi que Grist donne à son webhook (`usage`) :
-// [état, ton de la pastille].
-export function hookStatus(h) {
+// [état, ton de la pastille]. `postponed` : un envoi échoué vingt fois est repoussé en fin de file, il échoue
+// toujours ; `sending` depuis trop longtemps : le destinataire ne répond pas.
+export function hookStatus(h, now = Date.now()) {
   if (!h.fields.enabled) return ['paused', 'off'];
   const u = h.usage || {};
-  return ['retrying', 'error'].includes(u.status) || u.lastHttpStatus >= 400 ? ['error', 'err'] : ['active', 'ok'];
+  const failing = ['retrying', 'error', 'postponed', 'invalid'].includes(u.status) || u.lastHttpStatus >= 400 || waitingTooLong(u, now);
+  return failing ? ['error', 'err'] : ['active', 'ok'];
 }
+
+// Statut HTTP de l'échec en cours, 0 si le serveur n'a pas répondu (connexion refusée, coupée). `lastHttpStatus`
+// garde le dernier statut vu, celui d'un envoi réussi avant la panne comprise (200 après une connexion coupée) :
+// c'est le dernier lot qui dit ce qui vient d'arriver.
+export function failureStatus(h) {
+  const u = h.usage || {};
+  const batch = u.lastEventBatch;
+  if (batch && batch.status !== 'success') return batch.httpStatus || 0;
+  return u.lastHttpStatus || 0;
+}
+
+// Message d'erreur de l'échec en cours (celui du dernier lot, sinon le dernier message du webhook).
+function failureMessage(h) {
+  const u = h.usage || {};
+  const batch = u.lastEventBatch;
+  return String((batch && batch.status !== 'success' && batch.errorMessage) || u.lastErrorMessage || '');
+}
+
+// Destinataire dont l'envoi échoue : Grist n'a qu'une file d'envoi par document et la rejoue dans l'ordre, un
+// envoi qui échoue est retenté jusqu'à un quart d'heure avant de passer son tour, donc les autres destinataires
+// du document (de tous ses exports) attendent derrière lui. Null si aucun n'échoue.
+export const queueBlocker = hooks => hooks.find(h => hookStatus(h)[0] === 'error') || null;
 
 // Lot refusé pour sa taille. L'état d'un webhook est remis à zéro quand la file est vidée, mais un
 // envoi en vol peut encore y écrire son échec : seul compte l'envoi que Grist retente.
@@ -189,14 +218,29 @@ export function tooLarge(h) {
   return ['retrying', 'postponed'].includes(u.status) && (u.lastEventBatch || {}).httpStatus === 413;
 }
 
-// Erreur d'envoi d'un destinataire : clé du texte qui la dit simplement, avec ce qu'il faut faire.
-export function hookErrorKey(h) {
+// Erreur d'envoi d'un destinataire : clé du texte qui la dit simplement, avec ce qu'il faut faire. Quota (429),
+// erreur du serveur (5xx), serveur injoignable ou muet : Grist retente seul, le texte le dit et dit ce que
+// coûte l'attente aux autres destinataires du document.
+export function hookErrorKey(h, now = Date.now()) {
   const u = h.usage || {};
-  const status = u.lastHttpStatus || (u.lastEventBatch || {}).httpStatus;
+  const status = failureStatus(h);
   if (status === 413) return 'send.error.size';
   if (/Invalid column/i.test(u.lastErrorMessage || '')) return 'send.error.column';
-  return [401, 403, 404].includes(status) ? 'send.error.link' : 'send.error.other';
+  if (status === 404 && /Table not found/i.test(failureMessage(h))) return 'send.error.journal';
+  if ([401, 403, 404].includes(status)) return 'send.error.link';
+  if (status === 429) return 'send.error.quota';
+  if (status >= 500) return 'send.error.server';
+  if (waitingTooLong(u, now)) return 'send.error.slow';
+  return !status && u.lastErrorMessage ? 'send.error.network' : 'send.error.other';
 }
+
+// Lien de réception mort (clé de formulaire inconnue, réception arrêtée) : l'envoi échoue et échouera toujours.
+export const DEAD_KEYS = ['send.error.link', 'send.error.journal'];
+export const deadLink = h => h.fields.enabled && hookStatus(h)[0] === 'error' && DEAD_KEYS.includes(hookErrorKey(h));
+
+// Erreurs que vider la file ne règle pas (l'envoi suivant échouerait de la même façon) : ce qui aide, c'est la
+// pause, qui libère les autres destinataires, ou d'attendre.
+export const NO_UNBLOCK = ['send.error.link', 'send.error.journal', 'send.error.quota', 'send.error.server', 'send.error.network', 'send.error.slow'];
 
 // État d'un export pour sa carte : [clé de la pastille, ton]. `exp` : { recipients, invitations,
 // public, echange, retour }.

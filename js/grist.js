@@ -101,10 +101,15 @@ export async function isOwner() {
 // répétée. `where` : { colonne: valeur } (des noms du widget, pas des valeurs lues ailleurs). Null
 // si Grist refuse (droits, table absente) : lire alors la table entière.
 export async function selectRows(tableId, colIds, where = {}) {
+  const test = Object.entries(where).map(([c, v]) => `"${c}" = '${String(v).replace(/'/g, "''")}'`).join(' and ');
+  return querySql(`select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"${test ? ` where ${test}` : ''}`);
+}
+
+// Une requête SQL de lecture sur le document (voir authUrl) ; rend les lignes, ou null si Grist refuse
+// (droits, table absente, requête invalide).
+export async function querySql(query) {
   try {
-    const test = Object.entries(where).map(([c, v]) => `"${c}" = '${String(v).replace(/'/g, "''")}'`).join(' and ');
-    const sql = `select ${['id', ...colIds].map(c => `"${c}"`).join(', ')} from "${tableId}"${test ? ` where ${test}` : ''}`;
-    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(sql)}`, { full: true }));
+    const response = await gristFetch(await authUrl(`/sql?q=${encodeURIComponent(query)}`, { full: true }));
     return response.ok ? (await response.json()).records.map(r => r.fields) : null;
   } catch (e) {
     return null;
@@ -210,7 +215,15 @@ export async function webhookConditions() {
 
 export const setWebhookEnabled = (id, enabled) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { enabled });
 export const renameWebhook = (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name });
-export const deleteWebhook = id => rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
+// Effacer un webhook ne coupe pas l'envoi que Grist retente pour lui (20 essais espacés jusqu'à 64 s, un quart
+// d'heure) : cet envoi garde la file de tout le document et les autres destinataires attendent derrière (vu au
+// test de charge : plus de deux minutes après la révocation). Vider d'abord la file de ce webhook seul abandonne
+// l'envoi en cours. Les Grist qui n'ont pas cette route l'ignorent.
+export const clearHookQueue = id => rest('DELETE', `/webhooks/queue/${encodeURIComponent(id)}`);
+export async function deleteWebhook(id) {
+  await clearHookQueue(id).catch(() => {});
+  return rest('DELETE', `/webhooks/${encodeURIComponent(id)}`);
+}
 
 // Envoi direct de lignes à une adresse d'écriture (clé d'un formulaire publié : elle n'accepte
 // qu'un ajout de lignes, sans identifiant), comme le webhook les enverrait. Écriture anonyme en

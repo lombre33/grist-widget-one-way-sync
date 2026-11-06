@@ -25,10 +25,10 @@ export function dropExport(note, id) {
 // rattrapages, pauses, destinataires), du plus récent au plus ancien, les EVENTS_KEPT derniers.
 // Les envois ordinaires partent de Grist sans le widget : l'état de chaque destinataire (dernier
 // succès, erreur) les dit. `event` : { at (secondes), kind ('join', 'resend', 'catchup', 'unblock',
-// 'pause', 'resume', 'revoke', 'edit', 'editSent'), who (destinataire, texte), n (lignes ou tables) }.
+// 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent'), who (destinataire, texte), n (lignes ou tables) }.
 export const EVENTS_KEPT = 30;
 const WHO_MAX = 80;
-const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'resume', 'revoke', 'edit', 'editSent'];
+const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent'];
 export function addEvent(note, exportId, { at, kind, who = '', n = 0 }) {
   const event = { at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(n ? { n } : {}) };
   return { ...note, historique: { ...(note.historique || {}), [exportId]: [event, ...((note.historique || {})[exportId] || [])].slice(0, EVENTS_KEPT) } };
@@ -41,6 +41,15 @@ export function eventsOf(note, exportId) {
   return (Array.isArray(list) ? list : []).filter(readable).map(({ at, kind, who, n }) => ({
     at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(Number.isFinite(n) && n ? { n } : {}),
   }));
+}
+
+// Destinataires ajoutés par le widget (événement `join`) et ni révoqués par lui (`revoke`) ni présents parmi les
+// webhooks : leur webhook a été supprimé dans les réglages de Grist. Le nombre, 0 si rien ne manque ; seul
+// l'historique gardé (EVENTS_KEPT) compte, donc au pire un destinataire manquant passe inaperçu, jamais l'inverse.
+export function vanishedRecipients(events, present) {
+  const joined = events.filter(e => e.kind === 'join').length;
+  const revoked = events.filter(e => e.kind === 'revoke').length;
+  return Math.max(0, joined - revoked - present);
 }
 
 export const putInvitation = (note, entry) => ({ ...note, invitations: put(note.invitations, entry) });

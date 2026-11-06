@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, exportStatus, exportableColumns, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, readTables, tooLarge,
+  conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
+  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/logic/exports.js';
 import { sentColumns } from '../../js/logic/journal.js';
 import { memoMatches } from '../../js/logic/trust.js';
@@ -130,6 +130,58 @@ test('Échange : colonnes renvoyées sous leur nom d\'origine, correspondance d�
   assert.deepEqual(forged, { sent: [{ id: 'Commune', as: 'Ville' }], map: { Commune: 'Ville' } });
 });
 
+test('lien mort : seul un lien définitivement mort est mis en pause par le widget', () => {
+  const hook = (enabled, usage) => ({ id: 'h', fields: { enabled }, usage });
+  const dead = { status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '{"error":"Share not known"}', lastEventBatch: { status: 'failure', httpStatus: 404 } };
+  assert.equal(deadLink(hook(true, dead)), true);
+  assert.equal(deadLink(hook(true, { ...dead, lastHttpStatus: 403, lastEventBatch: { status: 'failure', httpStatus: 403 } })), true);
+  assert.equal(deadLink(hook(false, dead)), false, 'déjà en pause');
+  for (const status of [429, 500, 503]) assert.equal(deadLink(hook(true, { status: 'retrying', lastHttpStatus: status, lastEventBatch: { status: 'failure', httpStatus: status } })), false, `${status} passe tout seul`);
+  assert.equal(deadLink(hook(true, { status: 'retrying', lastHttpStatus: 404, lastErrorMessage: 'socket hang up', lastEventBatch: { status: 'failure', httpStatus: null } })), false, 'un 404 d\'avant n\'est pas l\'échec en cours');
+  assert.equal(deadLink(hook(true, { status: 'idle', lastHttpStatus: 200, lastEventBatch: { status: 'success', httpStatus: 200 } })), false);
+});
+
+test('file d\'envoi commune : le destinataire en échec retient les autres', () => {
+  const hook = (id, enabled, usage) => ({ id, fields: { enabled }, usage });
+  const ok = hook('a', true, { status: 'idle', lastHttpStatus: 200 });
+  const dead = hook('b', true, { status: 'retrying', lastHttpStatus: 404 });
+  assert.equal(queueBlocker([ok, dead, hook('c', true, { lastHttpStatus: 500 })]).id, 'b');
+  assert.equal(queueBlocker([ok, hook('d', false, { status: 'retrying', lastHttpStatus: 404 })]), null, 'un destinataire en pause ne retient plus rien');
+  assert.equal(queueBlocker([ok]), null);
+  assert.equal(queueBlocker([]), null);
+});
+
+test('erreurs d\'envoi vues sur un vrai Grist : quota, serveur, connexion coupée, serveur muet, envoi repoussé', () => {
+  const hook = usage => ({ id: 'h', fields: { enabled: true }, usage });
+  const now = 1e12;
+  // Mesures du test de charge (Grist 1.7.22) : le texte et les états que Grist note vraiment.
+  const quota = hook({ status: 'retrying', lastHttpStatus: 429, lastErrorMessage: '{"error":"Too Many Requests"}', lastEventBatch: { status: 'failure', httpStatus: 429 } });
+  assert.equal(hookErrorKey(quota, now), 'send.error.quota');
+  assert.equal(hookErrorKey(hook({ status: 'retrying', lastHttpStatus: 503, lastEventBatch: { status: 'failure', httpStatus: 503 } }), now), 'send.error.server');
+  // Connexion coupée : pas de statut HTTP pour ce lot, `lastHttpStatus` garde le 200 de l'envoi réussi d'avant.
+  const reset = hook({ status: 'retrying', lastHttpStatus: 200, lastErrorMessage: 'request to http://x/api/s/k/tables/J/records failed, reason: socket hang up', lastEventBatch: { status: 'failure', httpStatus: null } });
+  assert.equal(failureStatus(reset), 0);
+  assert.equal(hookErrorKey(reset, now), 'send.error.network');
+  // Un statut périmé d'avant la panne ne se fait pas passer pour l'échec en cours.
+  assert.equal(hookErrorKey(hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: 'socket hang up', lastEventBatch: { status: 'failure', httpStatus: null } }), now), 'send.error.network');
+  // Envoi repoussé en fin de file après vingt échecs : toujours en erreur, même sans statut HTTP.
+  assert.deepEqual(hookStatus(hook({ status: 'postponed', lastHttpStatus: 200, lastEventBatch: { status: 'failure', httpStatus: null } }), now), ['error', 'err']);
+  // Serveur muet : « sending » depuis plus de SLOW_MS.
+  const silent = hook({ status: 'sending', updatedTime: now - SLOW_MS - 1000, lastHttpStatus: 200, lastEventBatch: { status: 'success', httpStatus: 200 } });
+  assert.deepEqual(hookStatus(silent, now), ['error', 'err']);
+  assert.equal(hookErrorKey(silent, now), 'send.error.slow');
+  assert.deepEqual(hookStatus(hook({ status: 'sending', updatedTime: now - 5000, lastHttpStatus: 200 }), now), ['active', 'ok'], 'un envoi en cours depuis peu n\'est pas une erreur');
+  // Journal supprimé chez le destinataire (vu sur Grist 1.7.22) : le lien existe, la table non ; mort comme un lien coupé.
+  const gone = hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Table not found \\"Journal_Annuaire\\""}', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: '404 {"error":"Table not found \\"Journal_Annuaire\\""}' } });
+  assert.equal(hookErrorKey(gone, now), 'send.error.journal');
+  assert.equal(hookErrorKey(hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Share not known"}', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: '404 {"error":"Share not known"}' } }), now), 'send.error.link');
+  assert.equal(deadLink(gone), true);
+  assert.ok(NO_UNBLOCK.includes('send.error.journal'));
+  // Ce que vider la file ne règle pas : la carte ne propose pas « Débloquer la file ».
+  for (const key of ['send.error.link', 'send.error.quota', 'send.error.server', 'send.error.network', 'send.error.slow']) assert.ok(NO_UNBLOCK.includes(key));
+  for (const key of ['send.error.size', 'send.error.column', 'send.error.other']) assert.ok(!NO_UNBLOCK.includes(key));
+});
+
 test('état d\'un destinataire et d\'un export : pastille, erreur dite simplement', () => {
   const hook = (enabled, usage) => ({ id: 'h', fields: { enabled, memo: 'a@b.fr · docA12345678 · equipe' }, usage });
   assert.deepEqual(hookStatus(hook(false, {})), ['paused', 'off']);
@@ -141,7 +193,8 @@ test('état d\'un destinataire et d\'un export : pastille, erreur dite simplemen
   assert.equal(hookErrorKey(hook(true, { lastEventBatch: { httpStatus: 413 } })), 'send.error.size');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400, lastErrorMessage: 'Invalid column "X"' })), 'send.error.column');
   assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 404 })), 'send.error.link');
-  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.other');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 500 })), 'send.error.server');
+  assert.equal(hookErrorKey(hook(true, { lastHttpStatus: 400 })), 'send.error.other');
   const exp = fields => ({ recipients: [], invitations: [], ...fields });
   assert.deepEqual(exportStatus(exp({})), ['alone', 'off']);
   assert.deepEqual(exportStatus(exp({ invitations: [{}] })), ['invited', 'pending']);

@@ -1,16 +1,16 @@
 // Onglet « Envoyer » (document SOURCE) : une carte par export (un nom, des tables et leurs
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
-import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../logic/common.js';
+import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, pool } from '../logic/common.js';
 import { maskKey, parseWebhookUrl } from '../logic/codes.js';
-import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, hookErrorKey, hookLabel, hookStatus, hooksOf, readTables } from '../logic/exports.js';
+import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
 import { STATES, parseLot } from '../logic/journal.js';
-import { eventsOf } from '../logic/notes.js';
+import { eventsOf, vanishedRecipients } from '../logic/notes.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { listDue, lotLate, parseCharge } from '../logic/resend.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
-import { expiresAt, isExpired, memoMatches } from '../logic/trust.js';
+import { expiresAt, isExpired, memoMatches, unkeyedRecipients } from '../logic/trust.js';
 import { columnFault, foreignSync, hasContent, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
 import { reloading, syncRules } from '../acl.js';
 import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
@@ -19,6 +19,7 @@ import { filesPending, resendFiles } from './files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { foreignDialog, strayDialog } from './strays.js';
+import { checkKeys, keysBlock } from './keys.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { confirmDialog, el, icon, message, noteError, pill, run, smallButton } from '../ui.js';
@@ -53,7 +54,10 @@ async function loadState() {
   // Colonnes de Synchro qui ne sont pas au widget : un envoi les emporte, un journal les refuse.
   const syncCols = ownsSync(schema) ? schema.columns(SYNC_TABLE).map(c => c.colId) : [];
   const strays = ownerOnly || !syncCols.length ? [] : strayColumns(schema.columns(SYNC_TABLE), all);
-  return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, foreign: !ownerOnly && foreignSync(schema) };
+  // Lignes sans clé ou de même clé dans les tables envoyées : elles n'arrivent pas chez les destinataires.
+  const keys = ownerOnly ? new Map() : await checkKeys(exports.flatMap(exp => exp.tables.map(tb => tb.table)));
+  const blocker = queueBlocker(exports.flatMap(exp => exp.recipients));
+  return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, keys, blocker, foreign: !ownerOnly && foreignSync(schema) };
 }
 
 function exportState(id, { note, rows, schema, acl, recipients }) {
@@ -68,6 +72,8 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
     events: eventsOf(note, id),
+    // Destinataires sans clé de signature (ligne 'signature' de Synchro perdue) : leur CIBLE rejette les envois.
+    unkeyed: new Set(unkeyedRecipients((mine.find(r => r[TYPE_COL] === KIND.sign) || {})[SCHEMA_COL], recipients.map(h => h.id), eventsOf(note, id).some(e => e.kind === 'join'))),
     partial: recipients.some(h => h.fields.enabled) && mine.some(r => lotLate(r) || listDue(r)),
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
     tooBig: mine.filter(r => r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
@@ -158,14 +164,17 @@ function resumeExchange(state) {
 // résultat ou une fiche a changé.
 const CHECK_MS = 3600000;
 const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' ; bad ; docName }
+const checking = new Set(); // webhooks dont le contrôle est en cours (deux affichages de suite ne le font pas deux fois)
+const CHECK_AT_ONCE = 6; // contrôles de lien simultanés au plus
 const personLabel = h => hookLabel(h.fields.memo, (checked.get(h.id) || {}).docName) || '—';
 async function checkHooks(hooks) {
+  const { origin } = await docIdentity();
   const due = hooks.filter((h) => {
     const was = checked.get(h.id);
-    return !was || was.url !== h.fields.url || Date.now() - was.at > CHECK_MS;
+    return !checking.has(h.id) && (!was || was.url !== h.fields.url || Date.now() - was.at > CHECK_MS);
   });
   if (!due.length) return false;
-  const { origin } = await docIdentity();
+  for (const h of due) checking.add(h.id);
   let changed = false;
   const note = (h, result) => {
     const was = checked.get(h.id) || { other: '', bad: false };
@@ -173,14 +182,18 @@ async function checkHooks(hooks) {
     checked.set(h.id, { at: Date.now(), url: h.fields.url, ...result });
     changed ||= was.other !== result.other || was.bad !== result.bad || label !== personLabel(h);
   };
-  await Promise.all(due.map(async (h) => {
-    const target = parseWebhookUrl(h.fields.url);
-    if (!target || !target.flat || target.origin !== origin) return note(h, { other: '', bad: true });
-    const info = await shareInfo(h.fields.url).catch(() => undefined);
-    if (info === undefined) return; // Grist ne répond pas : au prochain affichage
-    const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
-    note(h, { other, bad: false, docName: info && !other ? info.name : '' });
-  }));
+  await pool(due, CHECK_AT_ONCE, async (h) => {
+    try {
+      const target = parseWebhookUrl(h.fields.url);
+      if (!target || !target.flat || target.origin !== origin) return note(h, { other: '', bad: true });
+      const info = await shareInfo(h.fields.url).catch(() => undefined);
+      if (info === undefined) return undefined; // Grist ne répond pas : au prochain affichage
+      const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
+      return note(h, { other, bad: false, docName: info && !other ? info.name : '' });
+    } finally {
+      checking.delete(h.id);
+    }
+  });
   return changed;
 }
 
@@ -210,6 +223,7 @@ function rulesLine(exp) {
 
 // Avis d'un export : tables perdues, colonnes changées, envoi incomplet, fichiers à envoyer, Échange.
 const exportNotes = exp => [
+  !exp.tables.length && !exp.retour ? message('err', t('send.export.rowsGone')) : null,
   exp.hidden.length ? message('err', t('send.public.hiddenNow', { tables: exp.hidden.join(', ') })) : null,
   exp.structure ? message('warn', t('send.renforce.structure')) : null,
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
@@ -229,7 +243,7 @@ function exportCard(exp, state, open, out) {
   const n = exp.recipients.length;
   const [status, tone] = exportStatus(exp);
   const rows = [
-    ...exp.recipients.map(h => personRow(exp, h, ownerOnly, out, state.syncCols)),
+    ...exp.recipients.map(h => personRow(exp, h, ownerOnly, out, state)),
     ...exp.invitations.map(inv => inviteRow(exp, inv, ownerOnly, out)),
     exp.public ? publicRow(exp, open, ownerOnly, out) : null,
   ].filter(Boolean);
@@ -244,6 +258,9 @@ function exportCard(exp, state, open, out) {
   return el('article', { class: 'card', 'data-export': exp.id },
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), statusPill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
+    keyNotice(exp, state),
+    behindNotice(exp, state),
+    vanishedNotice(exp),
     exportNotes(exp),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     eventsBlock(exp),
@@ -252,6 +269,27 @@ function exportCard(exp, state, open, out) {
       exp.retour ? null : wizardButton(t('send.action.edit'), 'edit', () => exportWizard(exp, renderSource), { ownerOnly }),
       actionButton(t('send.action.load'), 'send', load, ownerOnly, out, { reason: n ? '' : t('send.load.nobody') }),
       actionButton(t('send.action.delete'), 'trash', () => deleteExport(exp), ownerOnly, out, { kind: 'btn-danger-text' })));
+}
+
+// Destinataires de cet export dont les envois attendent derrière l'envoi en échec d'une autre personne (la file de
+// Grist est commune à tout le document) : un seul avis, quel que soit leur nombre.
+function behindNotice(exp, { blocker }) {
+  if (!blocker) return null;
+  const n = exp.recipients.filter(h => h.id !== blocker.id && hookStatus(h)[0] !== 'error' && (h.usage || {}).numWaiting > 0).length;
+  return n ? message('warn', t('send.behind', { n, who: personLabel(blocker) })) : null;
+}
+
+// Destinataires dont le webhook a disparu des réglages de Grist (supprimé à la main) : rien ne leur est plus envoyé,
+// et la carte n'en montre aucun.
+function vanishedNotice(exp) {
+  const n = exp.retour || exp.public ? 0 : vanishedRecipients(exp.events, exp.recipients.length);
+  return n ? message('warn', t('send.vanished', { n })) : null;
+}
+
+// Clés manquantes ou en double dans les tables de l'export (voir keysBlock).
+function keyNotice(exp, state) {
+  const problems = new Map([...state.keys].filter(([table]) => exp.tables.some(tb => tb.table === table)));
+  return problems.size ? keysBlock(problems, () => renderSource(), { ownerOnly: state.ownerOnly }) : null;
 }
 
 // Historique des envois (voir addEvent), replié par défaut ; ce qu'on ouvre le reste d'un dessin à
@@ -276,11 +314,15 @@ function errorText(h, syncCols) {
 }
 
 // Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul.
-function personRow(exp, h, ownerOnly, out, syncCols) {
+function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   const [status, tone] = hookStatus(h);
   const u = h.usage || {};
   const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
   const failing = status === 'error';
+  const autoPaused = status === 'paused' && note.pauses.some(p => p.hook === h.id && p.auto);
+  // Vider la file ne règle ni un lien mort, ni un serveur qui n'en peut plus (l'envoi suivant échoue de la même
+  // façon) : la pause libère les autres destinataires, ou l'on attend (Grist retente seul).
+  const waits = failing && !columnFault(h.usage, syncCols) && NO_UNBLOCK.includes(hookErrorKey(h));
   const { other, bad } = checked.get(h.id) || {};
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, personLabel(h)), statusPill(status, tone)),
@@ -288,11 +330,13 @@ function personRow(exp, h, ownerOnly, out, syncCols) {
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     u.lastSuccessTime ? el('p', { class: 'muted small' }, t('send.lastOk', { at: dateText(u.lastSuccessTime) })) : null,
     u.numWaiting ? el('p', { class: 'small' }, t('send.waiting', { n: u.numWaiting })) : null,
+    exp.unkeyed.has(h.id) ? message('err', t('send.person.noKey')) : null,
+    status === 'paused' && autoPaused ? message('info', t('send.paused.auto')) : null,
     failing ? el('p', { class: 'small text-danger' }, errorText(h, syncCols)) : null,
-    failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${u.lastHttpStatus || ''} ${u.lastErrorMessage}`) })) : null,
+    failing && u.lastErrorMessage ? el('p', { class: 'muted small' }, t('send.error.detail', { detail: maskKey(`${failureStatus(h) || ''} ${u.lastErrorMessage}`.trim()) })) : null,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
-      failing ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
+      failing && !waits ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
       action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
 }
 

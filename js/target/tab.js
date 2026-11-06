@@ -50,13 +50,16 @@ async function receivedGroups(schema, owner) {
   const groups = [];
   for (const { journal, note } of receivedJournals(schema).filter(r => !awaitingPartner(r.note))) {
     const known = state.results.get(journal);
-    const rows = known ? known.rows : (await fetchRows(journal)).length;
+    // Un premier passage en erreur (clé perdue, table effacée) n'a pas compté les lignes : le journal en a peut-être.
+    const rows = known && Number.isFinite(known.rows) ? known.rows : (await fetchRows(journal)).length;
     const waiting = note.mode !== 'public' && !note.retour && !rows;
     // Sans clé de signature jamais vue : réception d'avant la 0.8 (une clé perdue arrête la
     // recopie, voir sealing dans loop.js).
     const unsigned = note.mode !== 'public' && !note.sceau && !receivedKey(schema, journal, note);
     const unreserved = Boolean(note.reserve) && !note.reserved && !owner;
-    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, owner, shared: (forms.get(journal) || {}).shared || 0 });
+    // Réception déjà branchée dont le formulaire n'est plus publié (dépublié, page supprimée) : la SOURCE ne peut plus écrire.
+    const formGone = note.mode !== 'public' && !note.retour && !waiting && !forms.has(journal);
+    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, formGone, owner, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
 }
@@ -161,6 +164,7 @@ function cardNotes(group) {
   const { note } = group;
   return [
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
+    group.formGone ? message('err', t('recv.formGone')) : null,
     group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
     note.tables.some(entry => (state.results.get(tableKey(group.journal, entry.table)) || {}).locked) ? message('info', t('recv.lock.waiting')) : null,

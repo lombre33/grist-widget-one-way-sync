@@ -11,6 +11,7 @@ import {
 import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../grist.js';
 import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
+import { pauseDeadLinks } from './pausing.js';
 import { message, noteError } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 import { readPref, writePref } from '../prefs.js';
@@ -209,7 +210,9 @@ export function startAutoCatchUp(onDone) {
 async function catchUpLocked() {
   let rows = await lightRows();
   if (!rows) return 0;
-  const { hooks, conditions, of: recipients } = await readHooks();
+  let { hooks, conditions, of: recipients } = await readHooks();
+  // Un lien de réception mort bloque la file de tout le document : le widget met ce destinataire en pause.
+  if (await pauseDeadLinks(hooks, conditions)) ({ hooks, conditions, of: recipients } = await readHooks());
   if (hooks.some(tooLarge) && Date.now() - repairedAt > REPAIR_MS) {
     repairedAt = Date.now();
     await clearAndMark();

@@ -97,9 +97,15 @@ function keysOf(column) {
   const { signature } = columnNote(column) || {};
   return signature && typeof signature === 'object' ? signature : {};
 }
+// Nom actuel de la destination d'une table reçue : renommée ici, elle se retrouve par son numéro dans Grist (`refs`,
+// voir followRenames). Sans cela, renommer la seule table d'un export faisait perdre la clé (donc la réception).
+const destNow = (schema, tb) => {
+  const ref = (tb.refs || {}).table;
+  return (ref && schema.tableIdOf && schema.tableIdOf(ref)) || tb.dest;
+};
 export function receivedKey(schema, journal, note) {
   const slot = keySlot(journal, note);
-  return (note.tables || []).map(tb => keysOf(keyColumn(schema, tb.dest))[slot]).find(k => SIG_KEY.test(k || '')) || '';
+  return (note.tables || []).map(tb => keysOf(keyColumn(schema, destNow(schema, tb)))[slot]).find(k => SIG_KEY.test(k || '')) || '';
 }
 // Clé notée à sa place dans les destinations `tables` qui ne l'ont pas déjà.
 export function storeKeyActions(schema, tables, slot, key) {

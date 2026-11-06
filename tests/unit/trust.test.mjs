@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   INVITE_DAYS, checkSeals, checkSigned, codeFacts, controlCode, expiresAt, hmac, isExpired, isPrivateKey, isUnpacked, keptKeys, linkKeys,
-  memoMatches, newKeyPair, readKeys, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText, signature,
+  memoMatches, newKeyPair, readKeys, unkeyedRecipients, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText, signature,
 } from '../../js/logic/trust.js';
 import { planUnpack, unpackActions } from '../../js/logic/journal.js';
 import { PUBLIC_KEY } from '../../js/logic/common.js';
@@ -179,4 +179,14 @@ test('sceau des lignes dépliées : une ligne d\'une table sans sceau valide est
   const again = await checkSeals([stored[1]], E, seal, seen);
   assert.deepEqual([again.forged, [...seen.keys()]], [[], [11]], 'une ligne disparue sort du cache');
   assert.deepEqual((await checkSeals(stored, E, await sealer('j'.repeat(32)), new Map())).forged, [10, 11], 'autre clé');
+});
+
+test('destinataires sans clé : la ligne signature de Synchro a été perdue', () => {
+  const K = 'a'.repeat(32);
+  assert.deepEqual(unkeyedRecipients('', ['h1', 'h2'], true), ['h1', 'h2'], 'ligne vidée, des destinataires ajoutés avec clé : toutes les clés manquent');
+  assert.deepEqual(unkeyedRecipients(JSON.stringify({ h1: K }), ['h1', 'h2'], true), ['h2'], 'une clé manque');
+  assert.deepEqual(unkeyedRecipients(JSON.stringify({ h1: K, h2: K }), ['h1', 'h2'], true), []);
+  assert.deepEqual(unkeyedRecipients(K, ['h1', 'h2'], true), [], 'clé commune d\'avant la 0.10');
+  assert.deepEqual(unkeyedRecipients('', ['h1'], false), [], 'export d\'avant les clés : rien à dire');
+  assert.deepEqual(unkeyedRecipients('', [], true), []);
 });

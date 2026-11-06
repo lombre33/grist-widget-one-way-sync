@@ -1,7 +1,7 @@
 // Note SOURCE : chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/logic/notes.js';
+import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/logic/notes.js';
 
 const note = () => ({
   exports: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
@@ -56,4 +56,15 @@ test('historique des envois : plus récent d\'abord, borné, par export, effacé
   for (const bad of [{ x: 1 }, 'texte', 7, null]) assert.deepEqual(eventsOf({ historique: { a: bad } }, 'a'), [], 'ce n\'est pas une liste');
   assert.deepEqual(eventsOf({ historique: { a: [{ kind: 'resend', at: 1e20 }, { kind: 'resend', at: -3 }, { kind: 'inconnu', at: 5 }, { kind: 'edit', at: 7, who: 42, n: 'x' }] } }, 'a'),
     [{ kind: 'edit', at: 7, who: '42' }], 'date impossible, genre inconnu et nombre faux écartés');
+});
+
+test('destinataires disparus : webhook supprimé à la main dans Grist', () => {
+  const ev = (kind, at) => ({ kind, at });
+  assert.equal(vanishedRecipients([], 0), 0);
+  assert.equal(vanishedRecipients([ev('join', 3), ev('edit', 2)], 1), 0, 'un destinataire ajouté et toujours là');
+  assert.equal(vanishedRecipients([ev('join', 3), ev('edit', 2)], 0), 1, 'ajouté, plus de webhook');
+  assert.equal(vanishedRecipients([ev('revoke', 4), ev('join', 3)], 0), 0, 'révoqué par le widget : rien ne manque');
+  assert.equal(vanishedRecipients([ev('join', 5), ev('join', 4), ev('revoke', 3)], 1), 0);
+  assert.equal(vanishedRecipients([ev('join', 5), ev('join', 4), ev('join', 3)], 1), 2);
+  assert.equal(vanishedRecipients([ev('revoke', 4)], 0), 0, 'jamais négatif (ajout sorti de l\'historique)');
 });

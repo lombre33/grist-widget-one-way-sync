@@ -1,5 +1,5 @@
 // SOURCE : actions sur un export et ses destinataires, depuis sa carte.
-import { ORDER_COL, RESEND_ALL } from '../logic/common.js';
+import { RESEND_ALL } from '../logic/common.js';
 import { buildInvitation } from '../logic/codes.js';
 import { rowsSince } from '../logic/resend.js';
 import { docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
@@ -10,6 +10,7 @@ import { closeExport, removeRecipient } from '../exchange.js';
 import { hookLabel } from '../logic/exports.js';
 import { readSourceNote, recordEvent, saveExport, updateSourceNote } from './synchro.js';
 import { clearAndMark, resendTables } from './resend.js';
+import { pauseHook } from './pausing.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
 import { handoffButton } from '../guide.js';
 import { t } from '../i18n.js';
@@ -17,16 +18,8 @@ import { t } from '../i18n.js';
 const AFTER_S = 0.0001; // juste après l'heure de la pause (MajLe en secondes)
 const who = h => hookLabel(h.fields.memo);
 
-// Mise en pause : un webhook désactivé perd son historique d'envoi (Grist remet son état à zéro),
-// il ne peut donc pas dire depuis quand il ne livre plus. On note la plus récente MajLe des tables
-// de l'export (heure du serveur, sans écart d'horloge avec le navigateur) et leurs colonnes.
-export async function pause(exp, h) {
-  let at = 0;
-  for (const { table } of exp.tables) for (const r of await fetchRows(table)) at = Math.max(at, r[ORDER_COL] || 0);
-  await updateSourceNote(note => setPause(note, h.id, { hook: h.id, export: exp.id, at, columns: JSON.stringify(exp.tables) }));
-  await setWebhookEnabled(h.id, false);
-  await recordEvent(exp.id, 'pause', { who: who(h) });
-}
+// Mise en pause du destinataire `h` de l'export `exp` (voir pausing.js).
+export const pause = (exp, h) => pauseHook(exp.id, exp.tables, h);
 
 // Choix de reprise : rattraper (par défaut) ou reprendre tel quel. Rend 'catchup', 'as-is' ou null.
 function resumeChoice(title, help) {

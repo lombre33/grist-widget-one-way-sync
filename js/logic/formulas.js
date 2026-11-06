@@ -86,8 +86,11 @@ const FILTER = [
 // Grist), Référence par son texte affiché, Pièces jointes par la liste de leurs fichiers
 // ([empreinte, nom, taille] : le contenu part à part, voir files.js).
 const READ = [
-  'import json, datetime',
+  'import json, datetime, math',
   'def v(x):',
+  // NaN et ±Infinity (une formule qui les rend) s'écrivent « NaN » et « Infinity » en JSON, ce que JSON ne
+  // connaît pas : le lot entier serait illisible côté CIBLE. Ils partent vides.
+  '  if isinstance(x, float) and not math.isfinite(x): return None',
   '  if isinstance(x, datetime.datetime): return x.timestamp()',
   '  if isinstance(x, datetime.date): return (x - datetime.date(1970, 1, 1)).days * 86400',
   '  if isinstance(x, (list, tuple)): return [v(y) for y in x]',

@@ -123,6 +123,16 @@ export function readKeys(value) {
   return Object.fromEntries(Object.entries(keys && typeof keys === 'object' ? keys : {}).filter(([, k]) => SIG_KEY.test(k)));
 }
 
+// Destinataires sans clé de signature : la ligne 'signature' de Synchro (`value`) a été supprimée ou vidée, ou n'a
+// jamais eu leur clé. Leurs lots partent sans signature pour eux et leur CIBLE les rejette comme suspects. La
+// clé ne se refait pas : elle vient de l'invitation. Un export plus ancien que les clés (aucun destinataire
+// ajouté depuis `join` dans l'historique, `hasJoin`) n'en avait pas : rien n'est dit.
+export function unkeyedRecipients(value, hookIds, hasJoin) {
+  const keys = readKeys(value);
+  if (!hasJoin || keys['*']) return [];
+  return hookIds.filter(id => !keys[id]);
+}
+
 // Clés à garder : celles des webhooks de l'export (`hookIds`) et des invitations en cours
 // d'approbation (`pendingIds`) ; la clé commune d'avant la 0.10 tant qu'un webhook n'a pas la sienne.
 export function keptKeys(keys, hookIds, pendingIds) {

@@ -1,7 +1,7 @@
 // Outils communs : noms de tables, lignes, seaux de clés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bucketOf, chunk, columnNote, crc32, freeTableId, isSafeId, journalId, noteAction, toRows, toTableId } from '../../js/logic/common.js';
+import { bucketOf, chunk, columnNote, crc32, freeTableId, isSafeId, journalId, noteAction, pool, toRows, toTableId } from '../../js/logic/common.js';
 
 test('toRows et chunk', () => {
   assert.deepEqual(toRows({ id: [1, 2], A: ['x', 'y'] }), [{ id: 1, A: 'x' }, { id: 2, A: 'y' }]);
@@ -59,4 +59,20 @@ test('CRC-32 : texte accentué lu en UTF-8, comme zlib.crc32(texte.encode()) en 
 test('identifiants sûrs : nom Grist, jamais une propriété des objets', () => {
   for (const ok of ['Contacts', 'id_sync', '_x', 'A1']) assert.ok(isSafeId(ok), ok);
   for (const bad of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', '1A', 'a b', 'Été', '', null, 5]) assert.ok(!isSafeId(bad), String(bad));
+});
+
+test('pool : au plus `limit` à la fois, résultats dans l\'ordre, une erreur remonte', async () => {
+  let running = 0;
+  let peak = 0;
+  const out = await pool(Array.from({ length: 20 }, (_, i) => i), 6, async (i) => {
+    running++;
+    peak = Math.max(peak, running);
+    await new Promise(resolve => setTimeout(resolve, 2));
+    running--;
+    return i * 2;
+  });
+  assert.deepEqual(out, Array.from({ length: 20 }, (_, i) => i * 2));
+  assert.equal(peak, 6);
+  assert.deepEqual(await pool([], 6, async () => 1), []);
+  await assert.rejects(pool([1, 2, 3], 2, async (i) => { if (i === 2) throw new Error('boum'); return i; }), /boum/);
 });

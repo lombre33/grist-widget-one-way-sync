@@ -89,6 +89,21 @@ export function chunk(items, size = CHUNK) {
   return parts;
 }
 
+// Applique `fn` à chaque élément, `limit` à la fois (sans jamais lancer tout d'un coup : 256 destinataires, 256
+// requêtes en même temps vers l'instance). Rend les résultats dans l'ordre.
+export async function pool(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // Éléments rangés par clé, dans leur ordre : Map(clé -> [éléments]).
 export function groupBy(items, keyOf) {
   const groups = new Map();
