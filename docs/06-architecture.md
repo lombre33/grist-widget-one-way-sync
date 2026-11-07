@@ -41,7 +41,7 @@ Villes  ──┤ formules ─▶ Synchro ── un webhook par ─────�
   vérifie taille et SHA-1, dépose le fichier (sauf s'il a déjà ce contenu) et écrit dans les
   cellules les fichiers présents ; un fichier arrivé ensuite complète la cellule si elle est
   restée telle que la recopie l'a laissée (`fillActions`, fichiers attendus notés par table).
-  Code : `js/logic/files.js`, `js/source/files.js`, `js/target/files.js`.
+  Code : `js/engine/logic/files.js`, `js/engine/source/files.js`, `js/engine/target/files.js`.
 
 L'étude de départ, avec les preuves dans le code de Grist, est dans
 [`01-etude-faisabilite.md`](01-etude-faisabilite.md).
@@ -98,29 +98,36 @@ sont plus reconnus : leurs tables techniques s'effacent à la main.
 
 ## Carte du code
 
-Par où commencer : `js/main.js` (démarrage et onglets), puis `js/logic/`, qui porte toutes les
+Par où commencer : `js/main.js` (démarrage et onglets), puis `js/engine/logic/`, qui porte toutes les
 règles et se lit sans navigateur.
+
+Le code est coupé en deux : le **moteur** (`js/engine/`), qui crée, lit, écrit et décide sans rien dessiner, et les
+**écrans** (le reste de `js/`), qui appellent le moteur, jamais l'inverse. Le moteur n'utilise ni `document`, ni
+`window`, ni `location`, ni `navigator`, ni le global `grist` (`tests/unit/engine.test.mjs` le vérifie). Il ne parle
+au monde que par un objet `port`, rempli au démarrage par `startEngine({ port, prefix })` : `js/sync-port.js`
+est le port de Sync+ seul. Contrat du port, préfixe et version : `js/engine/README.md`.
 
 | Fichier | Rôle |
 |---|---|
 | `index.html`, `css/style.css` | Page du widget, politique de sécurité du contenu, charte graphique |
 | `js/main.js`, `js/config.js` | Démarrage, onglets, Réglages ; instances Grist autorisées, version |
-| `js/grist.js` | Accès au document (API des widgets), webhooks et lectures SQL (API REST de la même instance) ; `gristFetch`, seule porte vers le réseau |
-| `js/pages.js` | Formulaires de réception, un par page, et ménage des pages |
-| `js/form-link.js` | Lien du formulaire : où le trouver, images d'aide, test sur son journal |
-| `js/exchange.js` | Échange : export de retour, webhook vers l'autre document, arrêt |
-| `js/acl.js` | Règles d'accès du widget, remises d'accord par un propriétaire, et attente du rechargement |
+| `js/grist.js`, `js/sync-port.js` | Accès au document (API des widgets), webhooks et lectures SQL (API REST de la même instance) ; `gristFetch`, seule porte vers le réseau. `sync-port.js` en fait le `port` du moteur (avec les textes `i18n`, la visibilité de la page, `localStorage`) |
+| `js/form-link.js` | Lien du formulaire : où le trouver, images d'aide (le test du lien est dans le moteur) |
 | `js/diagnostic.js` | Diagnostic à copier (Réglages) : lit l'état de la SOURCE et de la CIBLE, `logic/diagnostic.js` l'écrit |
-| `js/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks), `filters.js` (filtre des lignes, mêmes comparaisons que la formule), `acl.js` (règles d'accès du widget), `trust.js` (document vérifié par Grist, code de contrôle, expiration, clés par destinataire, signatures, sceau des lignes dépliées), `resend.js` (renvois, budget, avancement, temps restant, taille des tranches), `estimate.js` (poids, lots et durée d'un envoi, avant de le lancer), `health.js` (où en est l'envoi d'un export, et pourquoi rien ne part), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie), `received.js` (exports reçus lus dans le schéma : journaux, destinations, clés de signature), `report.js` (ce qu'un passage de recopie montre : carte d'une table, arrivées suspectes, tables proposées), `options.js` (listes de choix et formats d'une colonne, envoyés et repris), `links.js` (Références conservées entre tables d'un export), `diagnostic.js` (ce que le diagnostic à copier contient, et rien d'autre), `notes.js` (note SOURCE : exports, invitations, pauses, historique des envois), `files.js` (pièces jointes : suivi des envois, morceaux, réception, cellules) |
-| `js/source/` | Onglet Envoyer : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `flow.js` (avancement d'un envoi, estimation à confirmer), `files.js` (envoi des pièces jointes), `actions.js` (pause, reprise, révocation, file), `tab.js` (cartes), `export-wizard.js`, `filter-editor.js` (conditions du filtre, valeurs à cocher, aperçu), `recipient-wizard.js` |
-| `js/target/` | Onglet Recevoir : `journals.js` (journaux et leur note, écritures), `loop.js` (recopie automatique), `files.js` (réception des pièces jointes), `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `options.js` (archive et tables en lecture seule d'une réception), `wizard.js` (assistant de réception) |
+| `js/engine/index.js`, `port.js`, `errors.js`, `version.js` | Démarrage du moteur (`startEngine`), le `port` (mêmes noms que les anciennes fonctions de `grist.js`), erreurs prévues (`failure`, `errorText`), numéro de version du moteur |
+| `js/engine/pages.js`, `exchange.js`, `acl.js`, `form-link.js` | Formulaires de réception (un par page) et ménage des pages ; Échange (export de retour, webhook vers l'autre document, arrêt) ; règles d'accès du widget et attente du rechargement ; test du lien d'un formulaire sur son journal |
+| `js/engine/logic/` | Logique pure, testée sans navigateur : `common.js` (constantes, noms, outils), `formulas.js` (formules de `Synchro`), `exports.js` (exports, webhooks), `filters.js` (filtre des lignes, mêmes comparaisons que la formule), `acl.js` (règles d'accès du widget), `trust.js` (document vérifié par Grist, code de contrôle, expiration, clés par destinataire, signatures, sceau des lignes dépliées), `resend.js` (renvois, budget, avancement, temps restant, taille des tranches), `estimate.js` (poids, lots et durée d'un envoi, avant de le lancer), `health.js` (où en est l'envoi d'un export, et pourquoi rien ne part), `codes.js` (codes, adresses), `journal.js` (lecture et dépliage du journal, purge, historique), `consolidation.js` (recopie), `received.js` (exports reçus lus dans le schéma : journaux, destinations, clés de signature), `report.js` (ce qu'un passage de recopie montre : carte d'une table, arrivées suspectes, tables proposées), `options.js` (listes de choix et formats d'une colonne, envoyés et repris), `links.js` (Références conservées entre tables d'un export), `diagnostic.js` (ce que le diagnostic à copier contient, et rien d'autre), `notes.js` (note SOURCE : exports, invitations, pauses, historique des envois), `files.js` (pièces jointes : suivi des envois, morceaux, réception, cellules) |
+| `js/engine/source/` | Ce que la SOURCE fait sans rien dessiner : `synchro.js` (table `Synchro` et sa note), `resend.js` (renvois, rattrapage, charge du document), `files.js` (envoi des pièces jointes), `pausing.js` (pause d'office), `actions.js` (pause, reprise, révocation, file), `keys.js` (clés `id_sync`), `estimate.js` (estimation d'un envoi) |
+| `js/engine/target/` | Ce que la CIBLE fait sans rien dessiner : `journals.js` (journaux et leur note, écritures), `loop.js` (recopie automatique), `files.js` (réception des pièces jointes), `dest.js` (vérification des destinations) |
+| `js/source/` | Onglet Envoyer (écrans) : `flow.js` (avancement d'un envoi, estimation à confirmer), `actions.js`, `keys.js`, `strays.js` (fenêtres et boutons qui appellent le moteur), `tab.js` (cartes), `export-wizard.js`, `filter-editor.js` (conditions du filtre, valeurs à cocher, aperçu), `recipient-wizard.js` |
+| `js/target/` | Onglet Recevoir (écrans) : `tab.js` (cartes, historique), `dest.js` (destinations, table proposée), `options.js` (archive et tables en lecture seule d'une réception), `wizard.js` (assistant de réception) |
 | `js/guide.js`, `js/tutorial.js`, `i18n/tutorial.json` | « Qui fait quoi ? », consignes à copier, onglet Tutoriel et aide en images (texte du tutoriel dans le JSON) |
 | `js/ui.js`, `js/i18n.js`, `i18n/*.json`, `js/prefs.js` | Éléments d'interface, textes fr/en, préférences d'affichage |
 
 ## Tests
 
 ```bash
-npm test                      # tests unitaires de js/logic, des textes et des images du tutoriel (Node 20+, sans dépendance)
+npm test                      # tests unitaires du moteur (`js/engine`, dont un essai sur un faux Grist en mémoire), des textes et des images du tutoriel (Node 20+, sans dépendance)
 npm install                   # Playwright, pour le test d'intégration seulement
 tests/e2e/start-grist.sh      # Grist jetable dans Docker
 npm run test:e2e              # parcours complet dans un vrai Grist et un vrai navigateur

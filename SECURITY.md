@@ -196,7 +196,7 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   publique ni retiré la sécurité renforcée en route (vérifié par les tests) : à comparer par
   téléphone, ce qui ferme le cas d'un attaquant dans la même équipe ou placé entre les deux. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
   d'approuver (et, en Échange, côté CIBLE avant de répondre).
-- Contrôles à la lecture (`js/logic/codes.js`) : préfixe et version, identifiants, secret,
+- Contrôles à la lecture (`js/engine/logic/codes.js`) : préfixe et version, identifiants, secret,
   colonnes (noms Grist, types connus, 400 au plus), textes coupés à 200 caractères, adresses de la
   forme exacte `/api/s/<clé>/tables/<table>/records?flat=1` sur la **même instance**, sans
   identifiant dans l'adresse, réécrites avant usage. La réponse doit porter le secret d'une

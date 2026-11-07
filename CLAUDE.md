@@ -294,6 +294,39 @@ Autre rôle utile du widget côté SOURCE : créer le webhook lui-même. Vérifi
 complet ouvert par un propriétaire obtient un jeton par `grist.docApi.getAccessToken()` et peut
 appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
+## Moteur 1.0.0 (7 novembre 2026, rien de visible : l'écran reste à la V0.13.2)
+
+Consignes de GFS (suite d'apps Grist Factory) : son explorateur lira **le moteur** de Sync+ pour partager un dossier ou un
+fichier entre deux documents qui ont GFS (décision du porteur du 6 novembre, dépôt `lombre33/grist-widget-GFS`, `consignes/sync/`,
+001 et 002 ; la réponse est `GFS-ETAT.md` à la racine, **fichier de développement, jamais publié** ; ne rien pousser chez GFS).
+Antoine, 7 novembre : « tu peux travailler sur main [...] attention à ne pas créer des risques de sécurité ou modifier des
+comportements du standalone pour GFS ». Donc : aucun lien avec GFS dans le code de Sync+ (pas de `gfs.json`, pas d'entrée au
+catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode d'emploi : `js/engine/README.md`) :
+- **`js/engine/`** : logique pure, pages, règles d'accès, Échange, et la part sans écran de la SOURCE et de la CIBLE (renvois,
+  rattrapage, journaux, recopie, pièces jointes). Rien n'y lit `document`, `window`, `location`, `navigator`, `localStorage` ni
+  `grist` ; les écrans appellent le moteur, jamais l'inverse (`tests/unit/engine.test.mjs`, avec le contrôle des imports).
+- **Un seul `port`** (`engine/port.js`, `PORT_SHAPE`) : `startEngine({ port, prefix })` dans `js/main.js`, avec `js/sync-port.js`
+  (les fonctions de `js/grist.js`, les textes `i18n`, la visibilité de la page, `localStorage`). Les modules du moteur importent de
+  `port.js` les noms de l'ancien `grist.js`, résolus **à l'appel**, jamais à l'import.
+- **Préfixe de tables** (`prefix`, défaut `''` : les noms d'avant) : `SYNC_TABLE`, `JOURNAL_PREFIX` (liaisons vivantes de
+  `logic/common.js`, fixées par `setTablePrefix`) et `destTableId` ; les colonnes (`Synchro_*`, `id_sync`, `MajLe`) et les mémos
+  de règles d'accès ne changent pas. Une valeur évaluée à l'import ne verrait pas le préfixe (d'où `filterLines()` et `readLines()`
+  dans `formulas.js`). Lien public : les deux documents doivent avoir le même préfixe.
+- **`ENGINE_VERSION`** (`engine/version.js`) : 1.0.0, elle ne suit pas la version de Sync+ ; mineure pour un ajout, majeure pour
+  un port, un nom de table ou un format qui ne se lisent plus pareil. À dire dans `GFS-ETAT.md` avec le commit.
+- Fichiers scindés en deux parties (écran / moteur) : `form-link.js` (le test du lien), `source/{actions,estimate,keys}.js`,
+  `target/dest.js` (`checkDests`) ; `schemaFrom` (`logic/schema.js`) bâtit le schéma pour n'importe quel port ; `resendTables`
+  rend son avancement par un rappel (`progress`), l'écran le montre (`progressTo`).
+- **Reste côté écran, dit à GFS** : l'orchestration des assistants (`checkReply`, `approve`, `openBack` de
+  `source/recipient-wizard.js` ; `readInvitation`, `create`, `showReply`, `myEmail` de `target/wizard.js` ; `checkHooks` de
+  `source/tab.js`) et `js/diagnostic.js`. Les textes du moteur passent par `port.text(clé)` (qui rend la clé quand elle est
+  inconnue) ; restent en français fixe : les mémos des règles d'accès et le texte du diagnostic.
+- **Anciens chemins** : ceux que cite ce fichier plus bas (`js/logic/…`, `js/pages.js`, `js/acl.js`, `js/exchange.js`,
+  `js/source/{synchro,files,pausing,resend}.js`, `js/target/{journals,files,loop}.js`) sont maintenant sous `js/engine/`.
+- Essais : `tests/unit/engine.test.mjs` (garde-fous, préfixe), `engine-port.test.mjs` (SOURCE et CIBLE sur un Grist en mémoire,
+  `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
+  `js/engine/logic`), l'e2e que les chemins des fichiers servis.
+
 ## État : V0.13.2 (6 novembre 2026)
 
 V0.13.2 (Antoine, 6 novembre : « refaire un audit UI/UX pour vérifier que tout est cohérent, fluide »). Rapport

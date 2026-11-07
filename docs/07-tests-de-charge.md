@@ -120,7 +120,7 @@ Quatre relevés qui se lisent bien en quelques mots :
 | Échec trouvé | Correction |
 | --- | --- |
 | Valeur `NaN` ou infinie dans une cellule : le JSON du lot est invalide, l'export s'arrête sans bruit | `v()` de `formulas.js` envoie `None` |
-| Lignes sans clé ou de même clé : elles n'arrivent pas, sans message | carte « Des lignes n'arriveront pas » et bouton « Réparer les clés » (`js/source/keys.js`, `js/logic/keys.js`) |
+| Lignes sans clé ou de même clé : elles n'arrivent pas, sans message | carte « Des lignes n'arriveront pas » et bouton « Réparer les clés » (`js/source/keys.js`, `js/engine/source/keys.js`, `js/engine/logic/keys.js`) |
 | Colonne `id_sync`, `MajLe` ou `RecalculLe` supprimée : plus rien ne part, et le décompte des clés mentait | même carte, qui nomme la colonne perdue et la remet |
 | Un destinataire mort bloque tous ceux du document pendant 15 minutes ou plus | texte clair, « Mettre en pause » en tête, mise en pause **automatique** au bout de 60 s de lien mort (page SOURCE ouverte), vérifiée de bout en bout |
 | Révoquer un destinataire mort ne libérait pas la file (plus de 4 minutes) | `deleteWebhook` vide d'abord la file de ce webhook |

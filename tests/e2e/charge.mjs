@@ -17,7 +17,7 @@ const chaosMode = Boolean(process.env.CHAOS);
 // FAST_BUDGET=1 : le budget des renvois (20 Mo par 10 minutes) est réduit à 3 Mo par 2 minutes (le rang d'une minute est la plus petite tranche suivie) pour que la pause
 // se voie en quelques minutes ; seul ce chiffre change, pas la logique.
 const patches = process.env.FAST_BUDGET
-  ? { '/js/logic/resend.js': text => text.replace('RESEND_BUDGET = 20000000', 'RESEND_BUDGET = 3000000').replace('BUDGET_WINDOW = 600', 'BUDGET_WINDOW = 120') }
+  ? { '/js/engine/logic/resend.js': text => text.replace('RESEND_BUDGET = 20000000', 'RESEND_BUDGET = 3000000').replace('BUDGET_WINDOW = 600', 'BUDGET_WINDOW = 120') }
   : {};
 const h = await createHarness({ port: Number(process.env.PORT || 8586), envFile: chaosMode ? '.env-chaos.json' : '.env.json', patches });
 const proxy = chaosMode ? await startChaosProxy({ port: Number(new URL(h.env.grist).port), target: Number(process.env.INTERNAL_PORT || 8493) }) : null;

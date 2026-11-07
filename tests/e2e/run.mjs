@@ -36,7 +36,7 @@ const server = createServer(async (req, res) => {
     if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
     if (path === '/js/config.js') body = String(body).replace("GRIST_ORIGINS = [", `GRIST_ORIGINS = ['${env.grist}', `);
     // Bilan des lignes (tally.js) : le délai de 10 minutes est ramené à 20 secondes pour le test.
-    if (path === '/js/logic/tally.js') {
+    if (path === '/js/engine/logic/tally.js') {
       body = String(body).replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
       if (!String(body).includes('TALLY_GRACE_S = 20')) throw new Error('délai du bilan introuvable dans tally.js');
     }
