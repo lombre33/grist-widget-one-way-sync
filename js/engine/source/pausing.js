@@ -7,7 +7,7 @@
 import { ORDER_COL } from '../logic/common.js';
 import { autoPauseKind, conditionExport, exportTables, hookLabel } from '../logic/exports.js';
 import { setPause } from '../logic/notes.js';
-import { fetchRows, setWebhookEnabled } from '../../grist.js';
+import { fetchRows, setWebhookEnabled } from '../port.js';
 import { recordEvent, syncRows, updateSourceNote } from './synchro.js';
 
 // Mise en pause : un webhook désactivé perd son historique d'envoi (Grist remet son état à zéro),

@@ -6,7 +6,7 @@ import { REFUSED, STATES, awaitingPartner } from '../engine/logic/journal.js';
 import { FILE_MAX, fileList } from '../engine/logic/files.js';
 import { fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
 import { diagnostic } from '../diagnostic.js';
-import { reloading, syncRules } from '../engine/acl.js';
+import { syncRules } from '../engine/acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../engine/pages.js';
 import { closeExport } from '../engine/exchange.js';
 import { updateJournalNote } from '../engine/target/journals.js';
@@ -18,7 +18,7 @@ import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
-import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, redraw, run, smallButton } from '../ui.js';
+import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 

@@ -8,7 +8,7 @@ import { EXPORT_COL, HUB, KIND, SCHEMA_COL, SYNC_TABLE, TYPE_COL, nowS } from '.
 import { deleteColumnAction, keyTriggerAction, missingSyncColumns, prepareSourceActions } from './logic/formulas.js';
 import { exportCondition, exportTables, hookMemo, hookName, ownJournal, returnExportTables } from './logic/exports.js';
 import { clearExport, dropExport, putExport, setExport, setPause } from './logic/notes.js';
-import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from '../grist.js';
+import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from './port.js';
 import { removeTechnicalTables } from './pages.js';
 import {
   endRows, exportHooks, pruneKeys, putRecipientKey, readSourceNote, removeExport, saveExport, setOnlyKey, syncRows, updateSourceNote,

@@ -30,7 +30,9 @@ const PART_KEYS = 5000;
 // une ; mêmes comparaisons que filterTester (filters.js, qui dit quelles valeurs, sous quelle forme).
 // `items` : valeurs d'une cellule ; une condition qui échoue sur une ligne ne la garde pas. Un filtre
 // d'avant la 0.11 ({ value }, sans conditions) compare le texte affiché.
-const FILTER = [
+// Fonction, non constante : le texte nomme la table Synchro, dont le nom suit le préfixe donné au
+// démarrage du moteur (SYNC_TABLE), après l'import.
+const filterLines = () => [
   'def kind(s):',
   '  if s == "Bool": return "bool"',
   '  if s in ("Numeric", "Int"): return "number"',
@@ -85,7 +87,7 @@ const FILTER = [
 // part : une cellule en erreur part vide sans bloquer les autres. Dates en secondes (format de
 // Grist), Référence par son texte affiché, Pièces jointes par la liste de leurs fichiers
 // ([empreinte, nom, taille] : le contenu part à part, voir files.js).
-const READ = [
+const readLines = () => [
   'import json, datetime, math',
   'def v(x):',
   // NaN et ±Infinity (une formule qui les rend) s'écrivent « NaN » et « Infinity » en JSON, ce que JSON ne
@@ -119,7 +121,7 @@ const READ = [
   '  if isinstance(x, float) and x.is_integer(): x = int(x)',
   '  if isinstance(x, list): return ", ".join(txt(y) for y in x)',
   '  return "" if x is None else str(x).strip().lower()',
-  ...FILTER,
+  ...filterLines(),
 ];
 
 // Signature d'un lot ou d'une liste des clés (`kind`) par chacune des clés des destinataires de
@@ -171,7 +173,7 @@ function keysFormula(pick) {
     `if $${TYPE_COL} not in ("${KIND.keys}", "${KIND.track}"): return ""`,
     // Échange : l'autre document n'efface rien d'après la liste des clés, elle ne part pas.
     `if $${TYPE_COL} == "${KIND.keys}" and ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}").id: return ""`,
-    pick, 'if src is None: return ""', ...READ,
+    pick, 'if src is None: return ""', ...readLines(),
     `if $${TYPE_COL} == "${KIND.track}":`,
     '  import zlib',
     `  sums = [zlib.crc32(str(r.${KEY_COL}).encode()) for r in src.all if r.${KEY_COL} and keep(r)]`,
@@ -211,7 +213,7 @@ function keysFormula(pick) {
 // `Supprime` part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
 function lotFormula(pick) {
   return signed([
-    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...READ,
+    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...readLines(),
     `cols = json.loads($${SCHEMA_COL} or "[]")`,
     `asked = ($${RESEND_COL} or "").split(":")`,
     'again = set(int(i) for i in asked[-1].split(",") if i.strip().isdigit())',
@@ -315,7 +317,7 @@ function stateFormula(pick) {
     '  if lot.get("depuis") and not lot.get("renvoi"):',
     '    return min(value, lot["depuis"]) if value else lot["depuis"]',
     '  return value',
-    `if $${TYPE_COL} != "${KIND.track}": return value`, pick, 'if src is None: return value', ...READ,
+    `if $${TYPE_COL} != "${KIND.track}": return value`, pick, 'if src is None: return value', ...readLines(),
     'import zlib',
     'old = json.loads(value) if isinstance(value, str) and value.startswith("{") else {}',
     'top = old.get("top", 0)',

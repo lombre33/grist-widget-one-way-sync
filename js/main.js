@@ -16,6 +16,8 @@ import { isOwnerHere, lostSynchro, refreshSource, renderSource } from './source/
 import { startAutoCatchUp } from './engine/source/resend.js';
 import { refreshTarget, renderTarget } from './target/tab.js';
 import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
+import { startEngine } from './engine/index.js';
+import { syncPort } from './sync-port.js';
 
 const $ = id => document.getElementById(id);
 const RETRY_MS = 3000; // Grist injoignable un instant : nouvel essai de l'onglet
@@ -136,6 +138,7 @@ function diagnosticBlock() {
 }
 
 async function start() {
+  startEngine({ port: syncPort }); // le moteur parle à Grist par ce port (js/sync-port.js), noms de tables d'avant
   applyTheme();
   translatePage();
   $('settings').addEventListener('click', openSettings);

@@ -10,13 +10,11 @@ import {
   resendValue, rowsSince, startProg, trackState,
 } from '../logic/resend.js';
 import { exportFlow } from '../logic/health.js';
-import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../../grist.js';
+import { apply, clearWebhookQueue, fetchRows, listWebhooks, page, prefs, readSchema, selectRows, withLock } from '../port.js';
 import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
 import { pauseDeadLinks } from './pausing.js';
-import { noteError } from '../../ui.js';
-import { flowView } from '../../source/flow.js';
-import { readPref, writePref } from '../../prefs.js';
+import { noteError } from '../errors.js';
 
 // Rythmes : file d'envoi relue (60 fois au plus, rapprochées au début : un envoi met en général
 // moins d'une seconde) ; rattrapage toutes les 10 s, la minute quand l'onglet est caché ; file
@@ -62,16 +60,17 @@ export async function clearAndMark() {
 // page fermée en cours de route, le rattrapage reprend à la prochaine ouverture. Une marque déjà
 // plus ancienne l'emporte. Rend le nombre de lignes renvoyées. Un renvoi à la fois, tous onglets
 // confondus, et un seul par document (voir withCharge) : si une autre page renvoie déjà, les lots
-// sont seulement marqués, et le rattrapage les enverra ensuite (rend alors null). `out` reçoit
-// l'avancement. Un renvoi est noté dans l'historique de l'export (`kind` : 'resend', ou 'catchup'
+// sont seulement marqués, et le rattrapage les enverra ensuite (rend alors null). `progress`, s'il est
+// donné, reçoit l'avancement à chaque tranche (l'état d'envoi, voir exportFlow ; null pour l'effacer) : le
+// moteur ne dessine rien. Un renvoi est noté dans l'historique de l'export (`kind` : 'resend', ou 'catchup'
 // pour le rattrapage automatique).
 const startOf = (lot, since) => (lot[MISSING_COL] > 0 ? Math.min(lot[MISSING_COL], since) : since);
 const lotsOf = async (exportId, tables) => (await syncRows()).filter(r => r[EXPORT_COL] === exportId && tables.includes(r[TABLE_COL]) && r[TYPE_COL] === KIND.lot);
 
-export function resendTables(exportId, tables, out, since = RESEND_ALL) {
+export function resendTables(exportId, tables, progress, since = RESEND_ALL) {
   return withLock('gristsync-resend', async () => {
     try {
-      return await withCharge(() => resendLocked(exportId, tables, out, since), out);
+      return await withCharge(() => resendLocked(exportId, tables, progress, since), progress);
     } catch (e) {
       if (e.message !== 'resendBusy') throw e;
       for (const lot of await lotsOf(exportId, tables)) await writeSync([lot.id], { [MISSING_COL]: startOf(lot, since) });
@@ -80,7 +79,7 @@ export function resendTables(exportId, tables, out, since = RESEND_ALL) {
   });
 }
 
-async function resendLocked(exportId, tables, out, since, kind = 'resend') {
+async function resendLocked(exportId, tables, progress, since, kind = 'resend') {
   const hookIds = (await readHooks()).of(exportId).filter(h => h.fields.enabled).map(h => h.id);
   if (!hookIds.length) return 0;
   const plans = await markLots(exportId, tables, since);
@@ -91,23 +90,23 @@ async function resendLocked(exportId, tables, out, since, kind = 'resend') {
     charge.state.prog.table = plan.table;
     sentRows += await sendRows(plan, hookIds, ({ rows, bytes }) => {
       charge.state = { ...charge.state, prog: addProg(charge.state.prog, { rows, bytes, now: nowS() }) };
-      showProgress(out);
+      showProgress(progress);
     });
     // Un Échange n'efface rien d'après les listes des clés : inutile de l'envoyer.
     if (!swapExports(await syncRows()).has(exportId)) await sendList(exportId, plan.table, hookIds);
   }
   charge.state = { ...charge.state, prog: null };
-  if (out) out.replaceChildren();
+  if (progress) progress(null);
   if (sentRows) await recordEvent(exportId, kind, { n: sentRows });
   return sentRows;
 }
 
-// L'avancement dans `out` (fenêtre d'un assistant), dit comme sur la carte de l'export.
-function showProgress(out) {
-  if (!out || !charge || !charge.state.prog) return;
+// L'avancement donné à `progress` (la fenêtre d'un assistant le dessine), dit comme sur la carte de
+// l'export.
+function showProgress(progress) {
+  if (!progress || !charge || !charge.state.prog) return;
   const prog = charge.state.prog;
-  out.replaceChildren(flowView(exportFlow({ exportId: prog.exp, owed: 1, recipients: ['active'], charge: { ...charge.state, le: nowS() }, page: PAGE, now: nowS() })));
-  out.scrollIntoView({ block: 'nearest' });
+  progress(exportFlow({ exportId: prog.exp, owed: 1, recipients: ['active'], charge: { ...charge.state, le: nowS() }, page: pageName(), now: nowS() }));
 }
 
 // Marque de chaque lot posée avant tout envoi, et lignes à renvoyer. Une table retirée ou
@@ -236,14 +235,14 @@ export async function catchUp(onDone = () => {}) {
 }
 
 export function startAutoCatchUp(onDone) {
-  writePref('browser', BROWSER);
+  prefs.write('browser', browser());
   // Page fermée en plein renvoi : elle rend la main si Grist reçoit encore son écriture (sinon une
   // autre page de ce navigateur la reprend aussitôt, une autre personne après LEASE_S secondes).
-  window.addEventListener('pagehide', () => {
+  page.onLeave(() => {
     if (charge) apply([['UpdateRecord', SYNC_TABLE, charge.id, { [RESEND_COL]: JSON.stringify({ ...charge.state, par: '', reprise: 0 }) }]]).catch(() => {});
   });
   setInterval(() => {
-    if (!document.hidden || Date.now() - caughtAt > HIDDEN_MS) catchUp(onDone);
+    if (page.visible() || Date.now() - caughtAt > HIDDEN_MS) catchUp(onDone);
   }, CATCHUP_MS);
 }
 
@@ -302,20 +301,23 @@ async function lightRows() {
 // Renvois ménagés (voir parseCharge) : la ligne 'charge' de Synchro dit quelle page renvoie et ce
 // qui est parti ces dix dernières minutes. Une page qui dépasse le budget attend, en donnant signe
 // de vie ; une autre page (autre personne, autre navigateur) ne lance rien pendant ce temps.
-const BROWSER = readPref('browser') || randomHex(4);
-const PAGE = `${BROWSER}.${randomHex(4)}`;
-let charge = null; // { id, state, saved, out } pendant un renvoi de cette page
+// Lus au premier usage, pas à l'import : le port n'est branché qu'après.
+let browserId = null;
+let pageId = null;
+const browser = () => (browserId ||= prefs.read('browser') || randomHex(4));
+const pageName = () => (pageId ||= `${browser()}.${randomHex(4)}`);
+let charge = null; // { id, state, saved, progress } pendant un renvoi de cette page
 
 async function readCharge() {
   const rows = await selectRows(SYNC_TABLE, [TYPE_COL, RESEND_COL]);
   return (rows && rows.find(isCharge)) || chargeRow();
 }
 
-async function withCharge(fn, out = null) {
+async function withCharge(fn, progress = null) {
   const row = await readCharge();
   const state = parseCharge(row[RESEND_COL]);
-  if (chargeBusy(state, PAGE, nowS())) throw new Error('resendBusy');
-  charge = { id: row.id, state: { ...state, par: PAGE, reprise: 0, prog: null }, saved: 0, out };
+  if (chargeBusy(state, pageName(), nowS())) throw new Error('resendBusy');
+  charge = { id: row.id, state: { ...state, par: pageName(), reprise: 0, prog: null }, saved: 0, progress };
   await saveCharge();
   try {
     const result = await fn();
@@ -333,8 +335,8 @@ async function withCharge(fn, out = null) {
 // rattrapage.
 async function saveCharge() {
   const current = parseCharge((await readCharge())[RESEND_COL]);
-  if (charge.state.par && chargeBusy(current, PAGE, nowS())) throw new Error('resendBusy');
-  if (!charge.state.par && current.par && current.par !== PAGE) return;
+  if (charge.state.par && chargeBusy(current, pageName(), nowS())) throw new Error('resendBusy');
+  if (!charge.state.par && current.par && current.par !== pageName()) return;
   charge.state.le = nowS();
   charge.saved = nowS();
   await writeSync([charge.id], { [RESEND_COL]: JSON.stringify(charge.state) });
@@ -352,7 +354,7 @@ async function spend(bytes) {
   if (wait > 0) {
     charge.state.reprise = nowS() + wait;
     await saveCharge();
-    showProgress(charge.out);
+    showProgress(charge.progress);
     while (nowS() < charge.state.reprise) {
       await sleep(Math.min(WAIT_STEP_S, charge.state.reprise - nowS()) * 1000);
       await saveCharge();
@@ -372,6 +374,6 @@ export async function currentCharge() {
 // Où en est un export (voir exportFlow) vu de cette page. `exp` : { id, owed, recipients }.
 export function flowOf(exp, state) {
   return exportFlow({
-    exportId: exp.id, owed: exp.owed, recipients: exp.recipients.map(h => hookStatus(h)[0]), charge: state, page: PAGE, now: nowS(), lastPass,
+    exportId: exp.id, owed: exp.owed, recipients: exp.recipients.map(h => hookStatus(h)[0]), charge: state, page: pageName(), now: nowS(), lastPass,
   });
 }

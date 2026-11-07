@@ -1,11 +1,8 @@
 // SOURCE : ce que l'onglet Envoyer dit d'un envoi. Où il en est (lignes, lots, temps restant), ce
 // qu'il attend (budget, autre page, rattrapage), pourquoi il ne bouge pas (destinataire en erreur,
 // tout en pause), et ce qu'un envoi va coûter avant de le lancer.
-import { EXPORT_COL, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../engine/logic/common.js';
-import { LONG_SECONDS, durationParts, estimateSend, lineBytes, sizeParts } from '../engine/logic/estimate.js';
-import { BUDGET_WINDOW, RESEND_BUDGET, eligibleRows } from '../engine/logic/resend.js';
-import { fetchRows, selectRows } from '../grist.js';
-import { readHooks } from '../engine/source/synchro.js';
+import { LONG_SECONDS, durationParts, sizeParts } from '../engine/logic/estimate.js';
+import { BUDGET_WINDOW, RESEND_BUDGET } from '../engine/logic/resend.js';
 import { el, openModal } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 
@@ -41,24 +38,19 @@ export function flowView(flow) {
   return box;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Estimation avant un envoi complet
-
-// { rows, bytes, lots, seconds, recipients } pour l'envoi de toutes les lignes des tables de l'export
-// (`exp.tables`) : lignes qui peuvent partir lues dans le suivi de Synchro (clé présente, filtre
-// appliqué), poids d'après les 50 premières lignes de chaque table.
-export async function exportEstimate(exp) {
-  const sync = (await selectRows(SYNC_TABLE, [EXPORT_COL, TABLE_COL, TYPE_COL, LIST_COL])) || [];
-  const recipients = (await readHooks()).of(exp.id).filter(h => h.fields.enabled).length;
-  const tables = [];
-  for (const tb of exp.tables) {
-    const data = await fetchRows(tb.table);
-    const ids = tb.columns.map(c => c.id);
-    const sample = data.slice(0, 50).map(r => Object.fromEntries(ids.map(id => [id, r[id]])));
-    tables.push({ rows: eligibleRows(sync, exp.id, tb.table) ?? data.length, bytesPerLine: lineBytes(sample), all: data.length });
+// Dessine dans `out` l'avancement que le moteur donne à chaque tranche d'un renvoi (resendTables), et
+// l'efface quand il rend `null`. Sans `out`, rien n'est dessiné.
+export const progressTo = out => out && ((flow) => {
+  if (flow === null) {
+    out.replaceChildren();
+    return;
   }
-  return { ...estimateSend({ tables, recipients: Math.max(1, recipients) }), all: tables.reduce((n, tb) => n + tb.all, 0) };
-}
+  out.replaceChildren(flowView(flow));
+  out.scrollIntoView({ block: 'nearest' });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Estimation avant un envoi complet (le calcul est dans le moteur : engine/source/estimate.js)
 
 // Lignes de texte qui disent ce que l'envoi va coûter et pourquoi il ne part pas d'un coup.
 export function estimateLines(est) {

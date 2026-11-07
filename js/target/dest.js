@@ -1,17 +1,17 @@
 // CIBLE : destination d'une table reçue, nouvelle (nom libre) ou existante (liste filtrable). Une
 // table existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
 // Aussi : la fenêtre d'une table que la SOURCE ajoute à un export déjà reçu.
-import { EXPORT_COL, KEY_COL, TABLE_COL, isUserTable, toTableId } from '../engine/logic/common.js';
-import { docIdentity, isOwner, readSchema } from '../grist.js';
+import { KEY_COL, destTableId, isUserTable } from '../engine/logic/common.js';
+import { isOwner, readSchema } from '../grist.js';
 import { exportSchema } from '../engine/logic/codes.js';
 import { exportableColumns } from '../engine/logic/exports.js';
-import { syncRows } from '../engine/source/synchro.js';
 import { wireExchange } from '../engine/exchange.js';
-import { destColumns, destProblem } from '../engine/logic/journal.js';
+import { destColumns } from '../engine/logic/journal.js';
+import { checkDests } from '../engine/target/dest.js';
 import { prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
 import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { consolidateAll } from '../engine/target/loop.js';
-import { backButton, confirmDialog, el, failure, laterButton, message, openModal, pickField, run } from '../ui.js';
+import { backButton, confirmDialog, el, laterButton, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';
 
@@ -22,14 +22,14 @@ export function destField(schema, table) {
   const tables = schema.tableIds.filter(isUserTable);
   const feeds = new Map(receivedDests(schema).map(r => [r.dest, r.table]));
   const label = id => (feeds.has(id) ? t('recv.dest.taken', { dest: id, table: feeds.get(id) }) : id);
-  const name = el('input', { type: 'text', class: 'input', value: toTableId(table), 'aria-label': t('recv.dest.name', { table }) });
+  const name = el('input', { type: 'text', class: 'input', value: destTableId(table), 'aria-label': t('recv.dest.name', { table }) });
   const nameBox = el('div', { class: 'dest-pick' }, el('span', { class: 'muted small' }, t('recv.dest.nameLabel')), name);
   const field = pickField({
     label: table, value: '',
     items: [{ value: '', label: t('recv.dest.new') }, ...tables.map(id => ({ value: id, label: label(id) }))],
     onChange: (v) => { nameBox.classList.toggle('hidden', v !== ''); },
   });
-  const typed = () => toTableId(name.value, table);
+  const typed = () => destTableId(name.value, table);
   return { node: el('div', { class: 'dest-pick' }, field, nameBox), dest: () => field.value() || schema.resolve(typed()) || typed() };
 }
 
@@ -71,20 +71,6 @@ export async function confirmOutgoing(schema, dests, where) {
   if (!existing.length) return true;
   const list = existing.map(d => `${d} (${exportableColumns(schema.columns(d) || []).map(c => c.id).join(', ')})`).join(' ; ');
   return confirmDialog({ title: t('recv.outgoing.title'), body: t('recv.outgoing.body', { list, where }), confirmLabel: t('recv.outgoing.ok') });
-}
-
-// Une destination ne reçoit qu'une table, d'un seul export, et n'est ni une table du widget, ni
-// une table que ce document envoie lui-même (ses lignes, absentes des listes de la SOURCE, y
-// seraient effacées ; le relais, lui, reçoit d'abord puis envoie). Copie dans le même document :
-// une table ne peut pas se recevoir elle-même (`plans` : [{ table, dest }]). Échange (`exportId`) :
-// une table que ce document envoie dans le même Échange peut recevoir.
-export async function checkDests(schema, plans, fromDocId, exportId = null) {
-  const problem = destProblem(plans, receivedDests(schema));
-  if (problem) throw failure(problem.code, problem.vars);
-  const dests = plans.map(p => p.dest);
-  const sent = new Set((await syncRows(schema)).filter(r => !exportId || r[EXPORT_COL] !== exportId).map(r => r[TABLE_COL]));
-  if (dests.some(d => sent.has(d))) throw new Error('destExported');
-  if (fromDocId && fromDocId === (await docIdentity()).docId && plans.some(p => p.dest === p.table)) throw new Error('loop');
 }
 
 // ---------------------------------------------------------------------------------------------

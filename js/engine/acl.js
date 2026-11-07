@@ -2,13 +2,11 @@
 // propriétaire : seul un propriétaire peut les changer, et chaque changement fait recharger le
 // document (donc le widget). Elles ne sont donc réécrites que si elles diffèrent, et jamais pendant
 // un assistant (un rechargement le fermerait). Rend vrai si elles ont changé : l'onglet attend
-// alors le rechargement (voir reloading).
+// alors le rechargement (voir reloading dans ui.js).
 import { KEY_COL, isUserTable } from './logic/common.js';
 import { ownsSync } from './logic/strays.js';
 import { LOCK_MEMO, aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules, publicAclRules } from './logic/acl.js';
-import { apply, fetchRows, readSchema } from '../grist.js';
-import { message } from '../ui.js';
-import { t } from '../i18n.js';
+import { apply, fetchRows, page, readSchema } from './port.js';
 import { updateJournalNote } from './target/journals.js';
 import { receivedJournals } from './logic/received.js';
 import { readSourceNote } from './source/synchro.js';
@@ -19,7 +17,7 @@ import { readSourceNote } from './source/synchro.js';
 // tables reçues d'une réception verrouillée (`verrou`, jamais en Échange) en lecture seule pour
 // tous sauf les propriétaires.
 export async function syncRules({ publicIds = null, open = null, release = [] } = {}) {
-  if (document.querySelector('.scrim')) return false;
+  if (page.busy()) return false;
   const [schema, resources, rules] = await Promise.all([readSchema(), fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
   const current = currentRules(resources, rules);
   const publicPart = publicIds === null || open === null
@@ -55,13 +53,4 @@ export async function syncRules({ publicIds = null, open = null, release = [] } 
     return false;
   }
   return true;
-}
-
-// Après un changement de règles, Grist recharge le document, et le widget avec lui : l'onglet le
-// dit au lieu de se dessiner pour rien (un assistant ouvert serait fermé par le rechargement), et se
-// redessine lui-même si le rechargement tarde (RELOAD_MS).
-const RELOAD_MS = 8000;
-export function reloading(root, render) {
-  root.replaceChildren(message('info', t('common.reloading')));
-  setTimeout(() => { if (root.isConnected) render(); }, RELOAD_MS);
 }

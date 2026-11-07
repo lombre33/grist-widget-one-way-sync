@@ -81,8 +81,9 @@ export function columnFault(usage, inSync) {
 
 // Nom libre pour la table d'une personne que le widget ne reprend pas : « Table_Synchro », puis
 // « Table_Synchro2 »... (Grist ne distingue pas les majuscules ; un nom en « Synchro_ » serait
-// écarté des tables d'utilisateur, voir isUserTable.) `taken` : noms de tables du document.
-export function freeTableName(taken, base = 'Table_Synchro') {
+// écarté des tables d'utilisateur, voir isUserTable ; avec un préfixe de tables, « Table_ » suivi
+// du nom de la table technique.) `taken` : noms de tables du document.
+export function freeTableName(taken, base = `Table_${SYNC_TABLE}`) {
   const used = new Set([...taken].map(name => name.toLowerCase()));
   let name = base;
   for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base}${n}`;

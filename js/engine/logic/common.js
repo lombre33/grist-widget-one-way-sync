@@ -1,4 +1,4 @@
-// Logique pure de la synchro (dossier logic/) : ni DOM, ni `grist`, ni réseau. Tout ce qui décide
+// Logique pure de la synchro (dossier engine/logic/) : ni DOM, ni `grist`, ni réseau. Tout ce qui décide
 // (quelle version gagne, quoi écrire, quelle adresse accepter) y est, testé par tests/unit. Les
 // autres modules lisent Grist, appellent ces fonctions et appliquent le résultat.
 // Ici : les noms partagés par la SOURCE et la CIBLE, et de petits utilitaires.
@@ -17,8 +17,11 @@ export const ARCHIVE_COL = 'Supprimee_a_la_source';
 
 // SOURCE : la seule table technique du widget, quel que soit le nombre d'exports et de tables.
 // Chaque table d'un export y a ses lignes (voir KIND) ; le webhook d'un destinataire n'envoie que
-// celles de son export.
-export const SYNC_TABLE = 'Synchro';
+// celles de son export. Son nom, comme celui des journaux (JOURNAL_PREFIX), porte le préfixe
+// donné au démarrage du moteur (setTablePrefix) : sans préfixe, `Synchro` et `Journal_…`. Ce sont
+// des liaisons vivantes (`let`) : tout code les lit au moment de l'appel, jamais à l'import. Les
+// noms de colonnes, eux, ne changent pas : ils sont le protocole entre SOURCE et CIBLE.
+export let SYNC_TABLE = 'Synchro';
 export const EXPORT_COL = 'Synchro_Export'; // identifiant de l'export
 export const TABLE_COL = 'Synchro_Table'; // table SOURCE (et, dans le journal, table d'origine d'une ligne)
 export const TYPE_COL = 'Synchro_Type'; // voir KIND
@@ -51,9 +54,23 @@ export const KIND = {
 export const HUB = 'plusieurs';
 
 // CIBLE : un journal par export reçu, où le webhook dépose les lignes de Synchro.
-export const JOURNAL_PREFIX = 'Journal_';
+export let JOURNAL_PREFIX = 'Journal_';
+
+// Préfixe des tables du moteur (celles qu'il crée : Synchro, journaux, destinations proposées), donné
+// une fois au démarrage. Vide par défaut : les noms d'avant, aucun document existant ne change.
+// Une lettre majuscule d'abord (Grist met la première lettre d'une table en majuscule : un autre
+// nom ne se retrouverait pas), puis des lettres, chiffres ou soulignés.
+export let TABLE_PREFIX = '';
+export const TABLE_PREFIX_RULE = /^(?:[A-Z][A-Za-z0-9_]{0,31})?$/;
+export function setTablePrefix(prefix = '') {
+  if (typeof prefix !== 'string' || !TABLE_PREFIX_RULE.test(prefix)) throw new Error(`préfixe de tables invalide : ${JSON.stringify(prefix)}`);
+  TABLE_PREFIX = prefix;
+  SYNC_TABLE = `${prefix}Synchro`;
+  JOURNAL_PREFIX = `${prefix}Journal_`;
+}
+
 // Tables de la personne, que l'on peut envoyer ou choisir comme destination : pas celles du widget.
-export const isUserTable = id => id !== SYNC_TABLE && !id.startsWith('Synchro_') && !id.startsWith(JOURNAL_PREFIX);
+export const isUserTable = id => id !== SYNC_TABLE && !id.startsWith(`${SYNC_TABLE}_`) && !id.startsWith(JOURNAL_PREFIX);
 export const APPLIED_COL = 'Sync_Applique'; // version déjà recopiée dans la destination
 export const RECEIVED_COL = 'Sync_Recu'; // date d'arrivée de la ligne dans le journal (NOW())
 export const DATA_COL = 'Synchro_Donnees'; // colonnes envoyées d'une ligne, en un bloc JSON
@@ -160,6 +177,10 @@ export function toTableId(name, fallback = 'Table') {
   if (/^[0-9]/.test(id)) id = 'T_' + id;
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
+
+// Identifiant d'une table de destination que le moteur crée d'après un nom libre : le préfixe des
+// tables du moteur, puis le nom. Un nom donné tel quel (une table existante) ne passe pas par ici.
+export const destTableId = (name, fallback = 'Table') => TABLE_PREFIX + toTableId(name, fallback);
 
 // Premier identifiant libre : `base`, puis `base_2`, `base_3`… Grist ne distingue pas les
 // majuscules d'un identifiant à l'autre (`ANNUAIRE` prendrait la place d'`Annuaire`) : la

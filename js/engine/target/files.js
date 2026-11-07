@@ -3,7 +3,7 @@
 // (taille, SHA-1), le fichier est déposé dans le document avec les droits de la personne, sauf s'il
 // y est déjà, puis ses morceaux sont effacés. Les cellules qui le citent sont remplies par la
 // recopie (voir loop.js).
-import { apply, fetchRows, uploadAttachment } from '../../grist.js';
+import { apply, fetchRows, uploadAttachment } from '../port.js';
 import { chunk, nowS } from '../logic/common.js';
 import { fileArrivals, joinParts, parkedOverflow, sha1, shaOf, short } from '../logic/files.js';
 

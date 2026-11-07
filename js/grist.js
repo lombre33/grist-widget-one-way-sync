@@ -11,6 +11,7 @@ import { GRIST_ORIGINS } from './config.js';
 import { maskKey, parseDocBaseUrl, parseWebhookUrl } from './engine/logic/codes.js';
 import { parseJson, toRows } from './engine/logic/common.js';
 import { readShare } from './engine/logic/trust.js';
+import { schemaFrom } from './engine/logic/schema.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).
@@ -40,33 +41,10 @@ export const fetchRows = async tableId => toRows(await grist.docApi.fetchTable(t
 export const apply = actions => (actions.length ? grist.docApi.applyUserActions(actions) : null);
 
 // Instantané des métadonnées du document (tables et colonnes), lu en deux requêtes, et relu après
-// une écriture qui change le schéma. Les tables de résumé et les tables cachées de Grist ne sont
-// pas listées, mais `has` et `columns` les connaissent.
+// une écriture qui change le schéma (sa forme : engine/logic/schema.js).
 export async function readSchema() {
   const [tables, columns] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Tables_column')]);
-  const byId = new Map(tables.map(tb => [tb.tableId, tb]));
-  const colById = new Map(columns.map(c => [c.id, c]));
-  return {
-    tableIds: tables.filter(tb => !tb.summarySourceTable && !tb.tableId.startsWith('GristHidden')).map(tb => tb.tableId).sort(),
-    has: tableId => byId.has(tableId),
-    table: tableId => byId.get(tableId),
-    // Nom exact d'une table nommée `tableId` aux majuscules près (Grist ne les distingue pas), ou
-    // null.
-    resolve: tableId => (tables.find(tb => tb.tableId.toLowerCase() === String(tableId).toLowerCase()) || {}).tableId || null,
-    // Nom actuel de la table de numéro `ref` (il change si on la renomme), ou null.
-    tableIdOf: ref => (tables.find(tb => tb.id === ref) || {}).tableId || null,
-    // Colonnes d'une table, dans l'ordre de leur création ; null si la table n'existe pas.
-    // `visible` : colonne affichée d'une Référence, dans la table visée.
-    columns(tableId) {
-      const table = byId.get(tableId);
-      if (!table) return null;
-      return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
-        id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, formula: c.formula, label: c.label, description: c.description,
-        displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps, widgetOptions: c.widgetOptions,
-        visible: (colById.get(c.visibleCol) || {}).colId || '',
-      }));
-    },
-  };
+  return schemaFrom(tables, columns);
 }
 
 // Identité du document, déduite de l'adresse REST du jeton : instance, équipe, identifiant, et

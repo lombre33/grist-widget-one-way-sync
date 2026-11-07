@@ -17,13 +17,15 @@ import { hiddenTables } from '../engine/logic/acl.js';
 import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo } from '../grist.js';
 import { VERSION } from '../config.js';
 import { ensureForm, removeTechnicalTables } from '../engine/pages.js';
-import { formWhere, linkFigures, testUrl } from '../form-link.js';
+import { formWhere, linkFigures } from '../form-link.js';
+import { testUrl } from '../engine/form-link.js';
 import { addDeleteColumns, markHub } from '../engine/exchange.js';
 import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSourceNote } from '../engine/source/synchro.js';
 import { createJournal, storeKey, updateJournalNote } from '../engine/target/journals.js';
 import { receivedDests } from '../engine/logic/received.js';
 import { resendTables } from '../engine/source/resend.js';
-import { estimateLines, exportEstimate } from './flow.js';
+import { exportEstimate } from '../engine/source/estimate.js';
+import { estimateLines, progressTo } from './flow.js';
 import { publicCode } from './actions.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, failure, laterButton, message, openWizard, run,
@@ -327,7 +329,7 @@ async function showLoad({ exp, wizard, onClose }) {
   const send = async () => {
     wizard.show(STEP.load, [message('ok', t('send.connected')), report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
     report.replaceChildren(message('info', t('send.load.start')));
-    const n = await resendTables(exp.id, exp.tables.map(tb => tb.table), report);
+    const n = await resendTables(exp.id, exp.tables.map(tb => tb.table), progressTo(report));
     if (!report.isConnected) return onClose && onClose();
     return wizard.show(STEP.load + 1, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.done', { n })), closeButtons());
   };

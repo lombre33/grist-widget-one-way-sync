@@ -1,6 +1,6 @@
 // Pages du document : formulaires de réception (un par journal, chacun sur sa page) et ménage des
 // pages que laissent les tables techniques.
-import { apply, fetchRows, readSchema } from '../grist.js';
+import { apply, fetchRows, readSchema } from './port.js';
 import { parseJson, randomHex } from './logic/common.js';
 
 const published = section => (parseJson(section.shareOptions) || {}).publish === true;

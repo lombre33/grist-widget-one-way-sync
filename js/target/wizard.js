@@ -6,14 +6,16 @@ import { codeFacts, controlCode, linkKeys, newKeyPair, sameDoc } from '../engine
 import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../grist.js';
 import { VERSION } from '../config.js';
 import { ensureForm, removeTechnicalTables } from '../engine/pages.js';
-import { formWhere, linkFigures, testUrl } from '../form-link.js';
+import { formWhere, linkFigures } from '../form-link.js';
+import { testUrl } from '../engine/form-link.js';
 import { wireExchange } from '../engine/exchange.js';
 import { foreignSync } from '../engine/logic/strays.js';
 import { readSourceNote, syncRows } from '../engine/source/synchro.js';
 import { createJournal, prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
 import { missingColumns, optionsNote, receivedJournals } from '../engine/logic/received.js';
 import { consolidateAll } from '../engine/target/loop.js';
-import { checkDests, confirmOutgoing, destField, mappingBlock } from './dest.js';
+import { checkDests } from '../engine/target/dest.js';
+import { confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,
 } from '../ui.js';

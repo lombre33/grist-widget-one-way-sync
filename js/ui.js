@@ -2,6 +2,7 @@
 // document ou d'un code collé n'est interprété comme du HTML), fenêtres, confirmation, champ à
 // copier, liste avec recherche.
 import { t } from './i18n.js';
+import { errorText, failure, known, noteError, recentErrors } from './engine/errors.js';
 
 // Recherche sans accents ni majuscules : chaque mot tapé doit se trouver dans le libellé.
 const fold = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -319,25 +320,9 @@ export function pickField({ items, value, label, onChange = () => {} }) {
   return field;
 }
 
-// Texte d'une erreur pour la personne : celui de sa clé (`error.<message>`, avec ses valeurs
-// `vars`), sinon une phrase générique avec le détail technique.
-const known = e => t(`error.${e.message}`) !== `error.${e.message}`;
-// Refus d'une règle d'accès de Grist (« Blocked by table update access rules ») : dit où regarder.
-const RULES_REFUSAL = /Blocked by [a-z ]*access rules/i;
-export const errorText = (e) => {
-  if (known(e)) return t(`error.${e.message}`, e.vars || {});
-  const refusal = RULES_REFUSAL.exec(e.message || '');
-  return refusal ? t('error.blockedRules', { detail: refusal[0] }) : t('error.generic', { detail: e.message || String(e) });
-};
-export const failure = (code, vars) => Object.assign(new Error(code), { vars });
-
-// Erreurs récentes, pour le diagnostic (Réglages) : les ERRORS_KEPT dernières, avec leur heure.
-const ERRORS_KEPT = 10;
-export const recentErrors = [];
-export function noteError(e) {
-  recentErrors.push({ at: Date.now(), text: errorText(e) });
-  if (recentErrors.length > ERRORS_KEPT) recentErrors.shift();
-}
+// Erreurs prévues, leur texte et les dernières erreurs vues : dans le moteur (engine/errors.js), qui ne
+// dessine rien. Les écrans les prennent d'ici.
+export { errorText, failure, noteError, recentErrors };
 
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
@@ -354,4 +339,13 @@ export async function run(button, out, fn) {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+// Après un changement de règles d'accès (engine/acl.js), Grist recharge le document, et le widget
+// avec lui : l'onglet le dit au lieu de se dessiner pour rien (un assistant ouvert serait fermé par le
+// rechargement), et se redessine lui-même si le rechargement tarde (RELOAD_MS).
+const RELOAD_MS = 8000;
+export function reloading(root, render) {
+  root.replaceChildren(message('info', t('common.reloading')));
+  setTimeout(() => { if (root.isConnected) render(); }, RELOAD_MS);
 }

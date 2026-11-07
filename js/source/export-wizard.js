@@ -15,6 +15,7 @@ import { recordEvent, saveExport, syncRows, updateSourceNote } from '../engine/s
 import { receivedDests } from '../engine/logic/received.js';
 import { resendTables } from '../engine/source/resend.js';
 import { recipientWizard } from './recipient-wizard.js';
+import { progressTo } from './flow.js';
 import { backButton, cancelButton, checkList, closeButtons, el, failure, laterButton, message, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
@@ -228,7 +229,7 @@ async function showEdited({ exp, wizard, onClose }, { name, changed, report }) {
   await recordEvent(exp.id, changed.length ? 'editSent' : 'edit', { n: changed.length });
   if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, exp.id));
   if (changed.length) wizard.show(3, [report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
-  const n = changed.length ? await resendTables(exp.id, changed, report) : 0;
+  const n = changed.length ? await resendTables(exp.id, changed, progressTo(report)) : 0;
   if (changed.length && !report.isConnected) return onClose && onClose();
   const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
   return wizard.show(3, saved, closeButtons());

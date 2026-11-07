@@ -18,16 +18,14 @@ import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
-import { apply, docChanges, docIdentity, fetchRows, isOwner, publicRecords, readSchema, withLock } from '../../grist.js';
+import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
 import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
 import { attachments, receiveFiles } from './files.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
-import { errorText, failure, noteError } from '../../ui.js';
-import { t } from '../../i18n.js';
-import { readPref, writePref } from '../../prefs.js';
+import { errorText, failure, noteError } from '../errors.js';
 
 const POLL_MS = 10000;
 const IDLE_MS = 60000;
@@ -89,12 +87,11 @@ let choices = new Map(); // les décisions prises en compte par le passage en co
 export function startAutoConsolidation(render) {
   onChange = render;
   const tick = async () => {
-    if (document.visibilityState === 'visible' && await due()) await consolidateAll();
+    if (page.visible() && await due()) await consolidateAll();
     setTimeout(tick, POLL_MS);
   };
   setTimeout(tick, POLL_MS);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+  page.onShow(() => {
     lastArrival = Date.now();
     consolidateAll({ reread: true });
   });
@@ -128,8 +125,8 @@ async function due() {
 async function readLastVisit() {
   if (state.lastVisit !== null) return;
   const key = `visit.${(await docIdentity()).docId}`;
-  state.lastVisit = Number(readPref(key)) || 0;
-  writePref(key, String(Math.floor(nowS())));
+  state.lastVisit = Number(prefs.read(key)) || 0;
+  prefs.write(key, String(Math.floor(nowS())));
 }
 
 // Oublie ce qui est gardé d'un journal (réception arrêtée).
