@@ -1,19 +1,19 @@
 // SOURCE : assistant d'export, en trois étapes (Tables, Colonnes, Nom). Crée l'export, ou le
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
-import { isUserTable, nowS, randomHex } from '../logic/common.js';
-import { ownsSync } from '../logic/strays.js';
-import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../logic/exports.js';
-import { linkTables, linkable } from '../logic/links.js';
-import { hiddenTables } from '../logic/acl.js';
-import { putExport } from '../logic/notes.js';
-import { REFUSALS, RULES, exchangeRules } from '../logic/consolidation.js';
-import { STATES } from '../logic/journal.js';
-import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
+import { isUserTable, nowS, randomHex } from '../engine/logic/common.js';
+import { ownsSync } from '../engine/logic/strays.js';
+import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../engine/logic/exports.js';
+import { linkTables, linkable } from '../engine/logic/links.js';
+import { hiddenTables } from '../engine/logic/acl.js';
+import { putExport } from '../engine/logic/notes.js';
+import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
+import { STATES } from '../engine/logic/journal.js';
+import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../engine/logic/formulas.js';
 import { apply, fetchRows, readSchema, renameWebhook } from '../grist.js';
-import { recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
-import { receivedDests } from '../logic/received.js';
-import { resendTables } from './resend.js';
+import { recordEvent, saveExport, syncRows, updateSourceNote } from '../engine/source/synchro.js';
+import { receivedDests } from '../engine/logic/received.js';
+import { resendTables } from '../engine/source/resend.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { backButton, cancelButton, checkList, closeButtons, el, failure, laterButton, message, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';

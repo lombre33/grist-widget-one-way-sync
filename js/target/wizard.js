@@ -1,18 +1,18 @@
 // CIBLE : assistant de réception, en quatre étapes (Code, Destinations, Lien, Réponse). Une
 // réception en attente (ou à rebrancher) l'ouvre directement à l'étape Lien (`group`).
-import { APPLIED_COL, AUTHOR_COL, EXPORT_COL, LIST_COL, journalId, nowS } from '../logic/common.js';
-import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../logic/codes.js';
-import { codeFacts, controlCode, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
+import { APPLIED_COL, AUTHOR_COL, EXPORT_COL, LIST_COL, journalId, nowS } from '../engine/logic/common.js';
+import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../engine/logic/codes.js';
+import { codeFacts, controlCode, linkKeys, newKeyPair, sameDoc } from '../engine/logic/trust.js';
 import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../grist.js';
 import { VERSION } from '../config.js';
-import { ensureForm, removeTechnicalTables } from '../pages.js';
+import { ensureForm, removeTechnicalTables } from '../engine/pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
-import { wireExchange } from '../exchange.js';
-import { foreignSync } from '../logic/strays.js';
-import { readSourceNote, syncRows } from '../source/synchro.js';
-import { createJournal, prepareDest, storeKey, updateJournalNote } from './journals.js';
-import { missingColumns, optionsNote, receivedJournals } from '../logic/received.js';
-import { consolidateAll } from './loop.js';
+import { wireExchange } from '../engine/exchange.js';
+import { foreignSync } from '../engine/logic/strays.js';
+import { readSourceNote, syncRows } from '../engine/source/synchro.js';
+import { createJournal, prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
+import { missingColumns, optionsNote, receivedJournals } from '../engine/logic/received.js';
+import { consolidateAll } from '../engine/target/loop.js';
 import { checkDests, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,

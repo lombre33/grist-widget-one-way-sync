@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   JOURNAL_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules,
   publicAclRules, ruleText,
-} from '../../js/logic/acl.js';
+} from '../../js/engine/logic/acl.js';
 
 const E = '0123456789abcdef';
 const F = 'fedcba9876543210';

@@ -10,13 +10,13 @@ import {
   resendValue, rowsSince, startProg, trackState,
 } from '../logic/resend.js';
 import { exportFlow } from '../logic/health.js';
-import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../grist.js';
+import { apply, clearWebhookQueue, fetchRows, listWebhooks, readSchema, selectRows, withLock } from '../../grist.js';
 import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
 import { pauseDeadLinks } from './pausing.js';
-import { noteError } from '../ui.js';
-import { flowView } from './flow.js';
-import { readPref, writePref } from '../prefs.js';
+import { noteError } from '../../ui.js';
+import { flowView } from '../../source/flow.js';
+import { readPref, writePref } from '../../prefs.js';
 
 // Rythmes : file d'envoi relue (60 fois au plus, rapprochées au début : un envoi met en général
 // moins d'une seconde) ; rattrapage toutes les 10 s, la minute quand l'onglet est caché ; file

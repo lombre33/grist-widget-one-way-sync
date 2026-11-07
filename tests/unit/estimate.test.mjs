@@ -1,9 +1,9 @@
 // Estimation d'un envoi (SOURCE) : poids d'une ligne, lots, durée, texte de la durée.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LINE_OVERHEAD, LONG_SECONDS, LOT_SECONDS, durationParts, estimateSend, lineBytes, sizeParts, tableCost } from '../../js/logic/estimate.js';
-import { BUDGET_WINDOW, RESEND_BUDGET, RESEND_CHUNK } from '../../js/logic/resend.js';
-import { LOT_MAX } from '../../js/logic/formulas.js';
+import { LINE_OVERHEAD, LONG_SECONDS, LOT_SECONDS, durationParts, estimateSend, lineBytes, sizeParts, tableCost } from '../../js/engine/logic/estimate.js';
+import { BUDGET_WINDOW, RESEND_BUDGET, RESEND_CHUNK } from '../../js/engine/logic/resend.js';
+import { LOT_MAX } from '../../js/engine/logic/formulas.js';
 
 test('poids d\'une ligne du lot : valeurs, nom des colonnes répété, surcoût de la ligne', () => {
   assert.equal(lineBytes([]), LINE_OVERHEAD);

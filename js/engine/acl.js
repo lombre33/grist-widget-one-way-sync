@@ -6,9 +6,9 @@
 import { KEY_COL, isUserTable } from './logic/common.js';
 import { ownsSync } from './logic/strays.js';
 import { LOCK_MEMO, aclActions, currentRules, isPublicRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules, publicAclRules } from './logic/acl.js';
-import { apply, fetchRows, readSchema } from './grist.js';
-import { message } from './ui.js';
-import { t } from './i18n.js';
+import { apply, fetchRows, readSchema } from '../grist.js';
+import { message } from '../ui.js';
+import { t } from '../i18n.js';
 import { updateJournalNote } from './target/journals.js';
 import { receivedJournals } from './logic/received.js';
 import { readSourceNote } from './source/synchro.js';

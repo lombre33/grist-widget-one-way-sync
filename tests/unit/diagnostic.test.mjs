@@ -1,7 +1,7 @@
 // Diagnostic à copier : ce qu'il dit, et surtout ce qu'il ne dit jamais (adresses, clés, courriels).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { catchFact, diagnosticText, exportFacts, hookFacts, journalFacts, progressFact } from '../../js/logic/diagnostic.js';
+import { catchFact, diagnosticText, exportFacts, hookFacts, journalFacts, progressFact } from '../../js/engine/logic/diagnostic.js';
 
 const KEY = 'AbCdEfGhIjKlMnOpQrStUv';
 const hook = {

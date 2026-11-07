@@ -8,7 +8,7 @@ import {
 } from '../logic/common.js';
 import { syncColumns } from '../logic/formulas.js';
 import { addDestColumnsActions, journalNote, journalNoteAction, storeKeyActions } from '../logic/received.js';
-import { apply, readSchema } from '../grist.js';
+import { apply, readSchema } from '../../grist.js';
 import { dropPages, hideColumn } from '../pages.js';
 
 // Colonnes du journal : celles de la table Synchro (le webhook envoie chaque ligne entière), puis

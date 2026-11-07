@@ -1,8 +1,8 @@
 // Où en est l'envoi d'un export (SOURCE) : une phrase, avec la raison quand rien ne bouge.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { exportFlow, flowMoves } from '../../js/logic/health.js';
-import { LEASE_S, parseCharge, startProg, addProg } from '../../js/logic/resend.js';
+import { exportFlow, flowMoves } from '../../js/engine/logic/health.js';
+import { LEASE_S, parseCharge, startProg, addProg } from '../../js/engine/logic/resend.js';
 
 const E = '0123456789abcdef';
 const NOW = 10000;

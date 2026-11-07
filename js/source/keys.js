@@ -1,9 +1,9 @@
 // SOURCE : les clés `id_sync` des tables envoyées. Une ligne sans clé ne part pas, deux lignes de même clé
 // n'en font qu'une chez les destinataires (voir logic/keys.js) : l'onglet Envoyer le compte (une requête,
 // rien n'est lu en dehors des nombres) et propose de donner une clé neuve à ces lignes, puis les renvoie.
-import { KEY_COL, ORDER_COL, chunk, nowS } from '../logic/common.js';
-import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
-import { keyCountSql, keyCounts, keyProblems, repairActions } from '../logic/keys.js';
+import { KEY_COL, ORDER_COL, chunk, nowS } from '../engine/logic/common.js';
+import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../engine/logic/formulas.js';
+import { keyCountSql, keyCounts, keyProblems, repairActions } from '../engine/logic/keys.js';
 import { apply, fetchRows, querySql, readSchema, selectRows } from '../grist.js';
 import { confirmDialog, el, run, smallButton } from '../ui.js';
 import { t } from '../i18n.js';

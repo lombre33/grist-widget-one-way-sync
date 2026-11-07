@@ -1,8 +1,8 @@
 // Données et aides communes aux tests unitaires.
 import { Buffer } from 'node:buffer';
-import { buildInvitation } from '../../js/logic/codes.js';
-import { bucketOf } from '../../js/logic/common.js';
-import { planConsolidation } from '../../js/logic/consolidation.js';
+import { buildInvitation } from '../../js/engine/logic/codes.js';
+import { bucketOf } from '../../js/engine/logic/common.js';
+import { planConsolidation } from '../../js/engine/logic/consolidation.js';
 
 export const SECRET = '0123456789abcdef0123456789abcdef';
 export const j = (id, key, majle, extra = {}) => ({ id, id_sync: key, MajLe: majle, Supprime: false, Nom: `n${id}`, ...extra });

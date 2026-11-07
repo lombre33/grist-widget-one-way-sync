@@ -8,21 +8,21 @@
 // formulaire doit désigner le document que dit la fiche. Un code de contrôle, tiré de l'adresse, du
 // secret, des clés publiques et du niveau de sécurité, s'affiche des deux côtés ; en sécurité
 // renforcée (`renforce`), il faut l'avoir comparé.
-import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
-import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../logic/codes.js';
-import { exportCondition, exportEmail, hookLabel, hookMemo, hookName, readTables } from '../logic/exports.js';
-import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
-import { codeFacts, controlCode, expiresAt, isExpired, isPrivateKey, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
-import { hiddenTables } from '../logic/acl.js';
+import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../engine/logic/common.js';
+import { buildInvitation, buildWebhookUrl, loopingTables, maskKey, parseFormLink, parseReply } from '../engine/logic/codes.js';
+import { exportCondition, exportEmail, hookLabel, hookMemo, hookName, readTables } from '../engine/logic/exports.js';
+import { dropInvitation, putInvitation, setExport } from '../engine/logic/notes.js';
+import { codeFacts, controlCode, expiresAt, isExpired, isPrivateKey, linkKeys, newKeyPair, sameDoc } from '../engine/logic/trust.js';
+import { hiddenTables } from '../engine/logic/acl.js';
 import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo } from '../grist.js';
 import { VERSION } from '../config.js';
-import { ensureForm, removeTechnicalTables } from '../pages.js';
+import { ensureForm, removeTechnicalTables } from '../engine/pages.js';
 import { formWhere, linkFigures, testUrl } from '../form-link.js';
-import { addDeleteColumns, markHub } from '../exchange.js';
-import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
-import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
-import { receivedDests } from '../logic/received.js';
-import { resendTables } from './resend.js';
+import { addDeleteColumns, markHub } from '../engine/exchange.js';
+import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSourceNote } from '../engine/source/synchro.js';
+import { createJournal, storeKey, updateJournalNote } from '../engine/target/journals.js';
+import { receivedDests } from '../engine/logic/received.js';
+import { resendTables } from '../engine/source/resend.js';
 import { estimateLines, exportEstimate } from './flow.js';
 import { publicCode } from './actions.js';
 import {

@@ -1,7 +1,7 @@
 // Clés id_sync des lignes d'une table envoyée : comptées sans rien lire d'autre, réparées sans toucher aux données.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { keyCountSql, keyCounts, keyProblems, repairActions } from '../../js/logic/keys.js';
+import { keyCountSql, keyCounts, keyProblems, repairActions } from '../../js/engine/logic/keys.js';
 
 test('keyCountSql : une requête de comptage, et rien pour un nom de table douteux', () => {
   assert.match(keyCountSql('Contacts'), /^select count\(\*\) as n, .* from "Contacts"$/);

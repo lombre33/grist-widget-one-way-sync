@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import {
   INVITE_DAYS, checkSeals, checkSigned, codeFacts, controlCode, expiresAt, hmac, isExpired, isPrivateKey, isUnpacked, keptKeys, linkKeys,
   memoMatches, newKeyPair, readKeys, unkeyedRecipients, readShare, sameDoc, sealMark, sealRows, sealText, sealer, signText, signature,
-} from '../../js/logic/trust.js';
-import { planUnpack, unpackActions } from '../../js/logic/journal.js';
-import { PUBLIC_KEY } from '../../js/logic/common.js';
+} from '../../js/engine/logic/trust.js';
+import { planUnpack, unpackActions } from '../../js/engine/logic/journal.js';
+import { PUBLIC_KEY } from '../../js/engine/logic/common.js';
 
 const FULL = 'hX3ab9Kq2LmZ7pRtVw8yNc';
 

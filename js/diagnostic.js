@@ -1,15 +1,15 @@
 // Diagnostic à copier (Réglages) : relit le document et l'état des onglets, puis le met en texte
 // (choix de ce qui en fait partie et forme : logic/diagnostic.js).
-import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RECEIVED_COL, RESEND_COL, nowS } from './logic/common.js';
-import { ownsSync } from './logic/strays.js';
-import { catchFact, diagnosticText, exportFacts, journalFacts, progressFact } from './logic/diagnostic.js';
-import { conditionExport, exportDrift, exportTables, hooksOf } from './logic/exports.js';
-import { receivedJournals, receivedKey } from './logic/received.js';
-import { LEASE_S, budgetWait, dueRows, parseCharge } from './logic/resend.js';
+import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RECEIVED_COL, RESEND_COL, nowS } from './engine/logic/common.js';
+import { ownsSync } from './engine/logic/strays.js';
+import { catchFact, diagnosticText, exportFacts, journalFacts, progressFact } from './engine/logic/diagnostic.js';
+import { conditionExport, exportDrift, exportTables, hooksOf } from './engine/logic/exports.js';
+import { receivedJournals, receivedKey } from './engine/logic/received.js';
+import { LEASE_S, budgetWait, dueRows, parseCharge } from './engine/logic/resend.js';
 import { docIdentity, fetchRows, isOwner, isReadOnly, journalStats, listWebhooks, readSchema, webhookConditions } from './grist.js';
-import { catchState } from './source/resend.js';
-import { isCharge, readSourceNote } from './source/synchro.js';
-import { comparing, state, tableKey } from './target/loop.js';
+import { catchState } from './engine/source/resend.js';
+import { isCharge, readSourceNote } from './engine/source/synchro.js';
+import { comparing, state, tableKey } from './engine/target/loop.js';
 import { VERSION, servedFrom } from './config.js';
 import { recentErrors } from './ui.js';
 

@@ -14,10 +14,10 @@ import { readFile } from 'node:fs/promises';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { partRow } from '../../js/logic/files.js';
-import { decodeCode } from '../../js/logic/codes.js';
-import { linkKeys, newKeyPair, readKeys, signText } from '../../js/logic/trust.js';
-import { PUBLIC_KEY, bucketOf } from '../../js/logic/common.js';
+import { partRow } from '../../js/engine/logic/files.js';
+import { decodeCode } from '../../js/engine/logic/codes.js';
+import { linkKeys, newKeyPair, readKeys, signText } from '../../js/engine/logic/trust.js';
+import { PUBLIC_KEY, bucketOf } from '../../js/engine/logic/common.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));

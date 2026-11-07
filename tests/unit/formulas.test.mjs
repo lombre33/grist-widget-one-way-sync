@@ -1,7 +1,7 @@
 // Formules de la table Synchro et colonnes de synchro des tables envoyées (SOURCE).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deleteColumnAction, fillKeyActions, keyTriggerAction, majleAction, missingSyncColumns, prepareSourceActions, syncColumns, syncFormulas } from '../../js/logic/formulas.js';
+import { deleteColumnAction, fillKeyActions, keyTriggerAction, majleAction, missingSyncColumns, prepareSourceActions, syncColumns, syncFormulas } from '../../js/engine/logic/formulas.js';
 
 // Corps d'une formule signée (voir signed dans formulas.js), désindenté ; la signature est
 // vérifiée à part.

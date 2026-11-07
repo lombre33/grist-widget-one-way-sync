@@ -2,11 +2,11 @@
 // journal. Le cas vu (0.5.9) : une table Synchro faite à la main, avec les colonnes A, B et C de Grist.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { syncColumns } from '../../js/logic/formulas.js';
-import { exportCondition } from '../../js/logic/exports.js';
+import { syncColumns } from '../../js/engine/logic/formulas.js';
+import { exportCondition } from '../../js/engine/logic/exports.js';
 import {
   columnFault, foreignSync, freeTableName, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds, tableNameProblem,
-} from '../../js/logic/strays.js';
+} from '../../js/engine/logic/strays.js';
 
 // Colonnes telles que readSchema les rend.
 const col = (colId, extra = {}) => ({ id: 1, colId, label: colId, type: 'Text', isFormula: false, formula: '', ...extra });

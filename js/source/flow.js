@@ -1,11 +1,11 @@
 // SOURCE : ce que l'onglet Envoyer dit d'un envoi. Où il en est (lignes, lots, temps restant), ce
 // qu'il attend (budget, autre page, rattrapage), pourquoi il ne bouge pas (destinataire en erreur,
 // tout en pause), et ce qu'un envoi va coûter avant de le lancer.
-import { EXPORT_COL, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../logic/common.js';
-import { LONG_SECONDS, durationParts, estimateSend, lineBytes, sizeParts } from '../logic/estimate.js';
-import { BUDGET_WINDOW, RESEND_BUDGET, eligibleRows } from '../logic/resend.js';
+import { EXPORT_COL, LIST_COL, SYNC_TABLE, TABLE_COL, TYPE_COL } from '../engine/logic/common.js';
+import { LONG_SECONDS, durationParts, estimateSend, lineBytes, sizeParts } from '../engine/logic/estimate.js';
+import { BUDGET_WINDOW, RESEND_BUDGET, eligibleRows } from '../engine/logic/resend.js';
 import { fetchRows, selectRows } from '../grist.js';
-import { readHooks } from './synchro.js';
+import { readHooks } from '../engine/source/synchro.js';
 import { el, openModal } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 

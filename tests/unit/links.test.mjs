@@ -2,11 +2,11 @@
 // des lignes visées, cellules complétées à l'arrivée de la ligne visée.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideLinks, fillLinks, keyIds, linkActions, linkTables, linkable, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/logic/links.js';
-import { exportSchema } from '../../js/logic/codes.js';
-import { exportRowsActions } from '../../js/logic/exports.js';
-import { syncFormulas } from '../../js/logic/formulas.js';
-import { LINK_PREFIX, SCHEMA_COL, TYPE_COL } from '../../js/logic/common.js';
+import { decideLinks, fillLinks, keyIds, linkActions, linkTables, linkable, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/engine/logic/links.js';
+import { exportSchema } from '../../js/engine/logic/codes.js';
+import { exportRowsActions } from '../../js/engine/logic/exports.js';
+import { syncFormulas } from '../../js/engine/logic/formulas.js';
+import { LINK_PREFIX, SCHEMA_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 
 const col = (id, extra = {}) => ({ id, type: 'Text', label: id, source: 'Text', visible: '', ...extra });
 const lieu = col('Lieu', { source: 'Ref:Villes', visible: 'Nom' });

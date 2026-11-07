@@ -1,9 +1,9 @@
 // Renvois (SOURCE) : marques reprenables, listes des clés, budget par document.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addProg, addSpent, announceRest, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/logic/resend.js';
-import { RESEND_ALL } from '../../js/logic/common.js';
-import { parseList } from '../../js/logic/journal.js';
+import { addProg, addSpent, announceRest, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/engine/logic/resend.js';
+import { RESEND_ALL } from '../../js/engine/logic/common.js';
+import { parseList } from '../../js/engine/logic/journal.js';
 
 test('renvoi reprenable : lignes depuis la marque, dans l\'ordre de MajLe ; la marque avance par tranche', () => {
   const rows = [{ id: 1, MajLe: 30 }, { id: 2, MajLe: null }, { id: 3, MajLe: 10 }, { id: 4, MajLe: 20 }, { id: 5, MajLe: 10 }];

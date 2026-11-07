@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addDestColumnsActions, journalNote, journalNoteAction, keySlot, missingColumns, optionActions, optionsNote, receivedDests, receivedJournals, receivedKey, storeKeyActions, valueChoiceActions,
-} from '../../js/logic/received.js';
+} from '../../js/engine/logic/received.js';
 
 const K1 = '1'.repeat(32);
 const K2 = '2'.repeat(32);

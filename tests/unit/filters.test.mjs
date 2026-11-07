@@ -2,7 +2,7 @@
 // comparaisons par type (les mêmes que la formule), valeurs proposées.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OPERATORS, cellText, columnValues, filterColumns, filterKind, filterTester, operandOf, rowFilter } from '../../js/logic/filters.js';
+import { OPERATORS, cellText, columnValues, filterColumns, filterKind, filterTester, operandOf, rowFilter } from '../../js/engine/logic/filters.js';
 
 const cond = (id, source, op, values = [], more = {}) => ({ id, source, visible: '', op, values, ...more });
 const only = (...conds) => ({ mode: 'all', conds });

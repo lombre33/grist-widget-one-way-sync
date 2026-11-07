@@ -1,8 +1,8 @@
 // CIBLE : bilan des lignes annoncées par la SOURCE et reçues, sans fausse alerte.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TALLY_GRACE_S, liveKeys, nextTally, tallyDue, tallyGap } from '../../js/logic/tally.js';
-import { parseLot, planUnpack } from '../../js/logic/journal.js';
+import { TALLY_GRACE_S, liveKeys, nextTally, tallyDue, tallyGap } from '../../js/engine/logic/tally.js';
+import { parseLot, planUnpack } from '../../js/engine/logic/journal.js';
 
 // Version déjà dépliée d'une clé : id, heure de la version, case Supprime, état noté par la recopie.
 const version = (id, key, extra = {}) => ({ id, id_sync: key, MajLe: id, Supprime: false, Sync_Etat: '', Synchro_Table: 'Contacts', ...extra });

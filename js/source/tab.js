@@ -1,24 +1,24 @@
 // Onglet « Envoyer » (document SOURCE) : une carte par export (un nom, des tables et leurs
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
-import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, pool } from '../logic/common.js';
-import { maskKey, parseWebhookUrl } from '../logic/codes.js';
-import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../logic/exports.js';
-import { editorsEditStructure, hiddenTables } from '../logic/acl.js';
-import { STATES, parseLot } from '../logic/journal.js';
-import { eventsOf, vanishedRecipients } from '../logic/notes.js';
-import { exchangeRules } from '../logic/consolidation.js';
-import { listDue, lotLate, parseCharge } from '../logic/resend.js';
-import { flowMoves } from '../logic/health.js';
-import { LONG_SECONDS } from '../logic/estimate.js';
+import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, pool } from '../engine/logic/common.js';
+import { maskKey, parseWebhookUrl } from '../engine/logic/codes.js';
+import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
+import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
+import { STATES, parseLot } from '../engine/logic/journal.js';
+import { eventsOf, vanishedRecipients } from '../engine/logic/notes.js';
+import { exchangeRules } from '../engine/logic/consolidation.js';
+import { listDue, lotLate, parseCharge } from '../engine/logic/resend.js';
+import { flowMoves } from '../engine/logic/health.js';
+import { LONG_SECONDS } from '../engine/logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
-import { expiresAt, isExpired, memoMatches, unkeyedRecipients } from '../logic/trust.js';
-import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../logic/strays.js';
-import { reloading, syncRules } from '../acl.js';
-import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from './synchro.js';
-import { catchUp, currentCharge, flowOf, resendTables } from './resend.js';
+import { expiresAt, isExpired, memoMatches, unkeyedRecipients } from '../engine/logic/trust.js';
+import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
+import { reloading, syncRules } from '../engine/acl.js';
+import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from '../engine/source/synchro.js';
+import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { confirmSend, exportEstimate, flowView } from './flow.js';
-import { filesPending, resendFiles } from './files.js';
+import { filesPending, resendFiles } from '../engine/source/files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { foreignDialog, strayDialog } from './strays.js';

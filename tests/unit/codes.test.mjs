@@ -1,7 +1,7 @@
 // Codes d'invitation et de réponse, adresses : aller-retour, puis codes abîmés ou forgés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvitation, buildReply, buildWebhookUrl, decodeCode, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/logic/codes.js';
+import { buildInvitation, buildReply, buildWebhookUrl, decodeCode, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
 import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {

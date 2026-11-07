@@ -1,16 +1,16 @@
 // CIBLE : destination d'une table reçue, nouvelle (nom libre) ou existante (liste filtrable). Une
 // table existante passe ensuite par la correspondance des colonnes et le rattachement des lignes.
 // Aussi : la fenêtre d'une table que la SOURCE ajoute à un export déjà reçu.
-import { EXPORT_COL, KEY_COL, TABLE_COL, isUserTable, toTableId } from '../logic/common.js';
+import { EXPORT_COL, KEY_COL, TABLE_COL, isUserTable, toTableId } from '../engine/logic/common.js';
 import { docIdentity, isOwner, readSchema } from '../grist.js';
-import { exportSchema } from '../logic/codes.js';
-import { exportableColumns } from '../logic/exports.js';
-import { syncRows } from '../source/synchro.js';
-import { wireExchange } from '../exchange.js';
-import { destColumns, destProblem } from '../logic/journal.js';
-import { prepareDest, storeKey, updateJournalNote } from './journals.js';
-import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../logic/received.js';
-import { consolidateAll } from './loop.js';
+import { exportSchema } from '../engine/logic/codes.js';
+import { exportableColumns } from '../engine/logic/exports.js';
+import { syncRows } from '../engine/source/synchro.js';
+import { wireExchange } from '../engine/exchange.js';
+import { destColumns, destProblem } from '../engine/logic/journal.js';
+import { prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
+import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../engine/logic/received.js';
+import { consolidateAll } from '../engine/target/loop.js';
 import { backButton, confirmDialog, el, failure, laterButton, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
 import { t } from '../i18n.js';

@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import {
   autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
   hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
-} from '../../js/logic/exports.js';
-import { sentColumns } from '../../js/logic/journal.js';
-import { memoMatches } from '../../js/logic/trust.js';
+} from '../../js/engine/logic/exports.js';
+import { sentColumns } from '../../js/engine/logic/journal.js';
+import { memoMatches } from '../../js/engine/logic/trust.js';
 import { EXPORT } from './fixtures.mjs';
 
 test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'autre document', () => {

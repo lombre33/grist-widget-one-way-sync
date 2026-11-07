@@ -1,8 +1,8 @@
 // Journal (CIBLE) : dépliage des lignes reçues, lots et listes, purge, historique, lien public.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareVersion, destProblem, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../../js/logic/journal.js';
-import { KIND } from '../../js/logic/common.js';
+import { compareVersion, destProblem, expandRows, isRaw, latestByKey, nextGaps, parseList, parseLot, planPull, planPurge, planUnpack, recentChanges, rowsByTable, sentColumns, touchedTables } from '../../js/engine/logic/journal.js';
+import { KIND } from '../../js/engine/logic/common.js';
 import { j, list, done, gone, part, EXPORT } from './fixtures.mjs';
 
 test('la version la plus récente gagne, MajLe puis numéro de ligne', () => {

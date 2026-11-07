@@ -5,9 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { expandRows, planPurge, planUnpack, rowsByTable } from '../../js/logic/journal.js';
-import { planConsolidation } from '../../js/logic/consolidation.js';
-import { KIND } from '../../js/logic/common.js';
+import { expandRows, planPurge, planUnpack, rowsByTable } from '../../js/engine/logic/journal.js';
+import { planConsolidation } from '../../js/engine/logic/consolidation.js';
+import { KIND } from '../../js/engine/logic/common.js';
 
 const LOT_MAX = 250000; // octets d'un lot (formule du lot de la SOURCE)
 const NOW = 2e9;

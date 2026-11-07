@@ -4,11 +4,11 @@
 //  - rendre son nom à Synchro quand une table de ce nom n'est pas celle du widget.
 // Ni l'une ni l'autre n'efface rien sans que la personne l'ait lu : le texte dit ce que contiennent
 // les colonnes, et demande de sauvegarder avant.
-import { SYNC_TABLE } from '../logic/common.js';
-import { freeTableName, hasContent, tableNameProblem } from '../logic/strays.js';
+import { SYNC_TABLE } from '../engine/logic/common.js';
+import { freeTableName, hasContent, tableNameProblem } from '../engine/logic/strays.js';
 import { fetchRows, readSchema } from '../grist.js';
-import { removeStrayColumns, renameForeignSync } from './synchro.js';
-import { clearAndMark } from './resend.js';
+import { removeStrayColumns, renameForeignSync } from '../engine/source/synchro.js';
+import { clearAndMark } from '../engine/source/resend.js';
 import { el, message, openModal, run } from '../ui.js';
 import { t, typeName } from '../i18n.js';
 

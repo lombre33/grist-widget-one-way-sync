@@ -1,7 +1,7 @@
 // Outils communs : noms de tables, lignes, seaux de clés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bucketOf, chunk, columnNote, crc32, freeTableId, isSafeId, journalId, noteAction, pool, toRows, toTableId } from '../../js/logic/common.js';
+import { bucketOf, chunk, columnNote, crc32, freeTableId, isSafeId, journalId, noteAction, pool, toRows, toTableId } from '../../js/engine/logic/common.js';
 
 test('toRows et chunk', () => {
   assert.deepEqual(toRows({ id: [1, 2], A: ['x', 'y'] }), [{ id: 1, A: 'x' }, { id: 2, A: 'y' }]);

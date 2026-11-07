@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SHOWN, cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote,
-} from '../../js/logic/report.js';
+} from '../../js/engine/logic/report.js';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);

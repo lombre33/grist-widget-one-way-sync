@@ -1,8 +1,8 @@
 // Lien du formulaire de réception d'un journal (CIBLE, ou retour d'un Échange côté SOURCE) : où le
 // trouver, comment le copier, et le test qui vérifie qu'il écrit bien dans ce journal.
-import { AUTHOR_COL, KEY_COL, randomHex } from './logic/common.js';
+import { AUTHOR_COL, KEY_COL, randomHex } from './engine/logic/common.js';
 import { fetchRows, postRows, selectRows, withLock } from './grist.js';
-import { formPages } from './pages.js';
+import { formPages } from './engine/pages.js';
 import { el, failure } from './ui.js';
 import { t } from './i18n.js';
 

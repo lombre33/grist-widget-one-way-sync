@@ -13,7 +13,7 @@ import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
 import { addEvent } from '../logic/notes.js';
-import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../grist.js';
+import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../../grist.js';
 import { dropPages, isOnPage, removeTechnicalTables } from '../pages.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)

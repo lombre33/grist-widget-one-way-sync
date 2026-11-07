@@ -7,7 +7,7 @@ import { EXPORT_COL, KIND, LOT_COL, SYNC_TABLE, TYPE_COL, groupBy, randomHex } f
 import { hooksOf } from '../logic/exports.js';
 import { setFiles } from '../logic/notes.js';
 import { encodeParts, fileSends, forgetHooks, neededFiles, partRow, readTracking, recordSent, trackingNote } from '../logic/files.js';
-import { downloadAttachment, fetchRows, postToHook, readSchema, selectRows } from '../grist.js';
+import { downloadAttachment, fetchRows, postToHook, readSchema, selectRows } from '../../grist.js';
 import { readSourceNote, updateSourceNote } from './synchro.js';
 
 const pending = new Map(); // export -> envois de fichiers restants, pour la carte

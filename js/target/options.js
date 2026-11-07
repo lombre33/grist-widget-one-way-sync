@@ -6,9 +6,9 @@
 //    la page. Seul un propriétaire change ce réglage sur la carte, et seul un propriétaire retire la
 //    règle (`release` de syncRules) : une note réécrite par un éditeur est remise d'accord avec la
 //    règle au passage suivant d'un propriétaire.
-import { syncRules } from '../acl.js';
-import { updateJournalNote } from './journals.js';
-import { optionsNote } from '../logic/received.js';
+import { syncRules } from '../engine/acl.js';
+import { updateJournalNote } from '../engine/target/journals.js';
+import { optionsNote } from '../engine/logic/received.js';
 import { cancelButton, el, openModal, run } from '../ui.js';
 import { t } from '../i18n.js';
 

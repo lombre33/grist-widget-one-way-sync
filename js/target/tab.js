@@ -1,20 +1,20 @@
 // Onglet « Recevoir » (document CIBLE) : une carte par export reçu, avec ses tables, ce qui manque,
 // les arrivées suspectes, les valeurs retouchées à la main et l'historique des changements. Un
 // journal encore vide attend son lien.
-import { RECEIVED_COL, TYPE_COL, isBlank } from '../logic/common.js';
-import { REFUSED, STATES, awaitingPartner } from '../logic/journal.js';
-import { FILE_MAX, fileList } from '../logic/files.js';
+import { RECEIVED_COL, TYPE_COL, isBlank } from '../engine/logic/common.js';
+import { REFUSED, STATES, awaitingPartner } from '../engine/logic/journal.js';
+import { FILE_MAX, fileList } from '../engine/logic/files.js';
 import { fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
 import { diagnostic } from '../diagnostic.js';
-import { reloading, syncRules } from '../acl.js';
-import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../pages.js';
-import { closeExport } from '../exchange.js';
-import { updateJournalNote } from './journals.js';
-import { receivedJournals, receivedKey } from '../logic/received.js';
-import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from './loop.js';
-import { SHOWN } from '../logic/report.js';
-import { TALLY_GRACE_S } from '../logic/tally.js';
-import { uploadErrors } from './files.js';
+import { reloading, syncRules } from '../engine/acl.js';
+import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../engine/pages.js';
+import { closeExport } from '../engine/exchange.js';
+import { updateJournalNote } from '../engine/target/journals.js';
+import { receivedJournals, receivedKey } from '../engine/logic/received.js';
+import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from '../engine/target/loop.js';
+import { SHOWN } from '../engine/logic/report.js';
+import { TALLY_GRACE_S } from '../engine/logic/tally.js';
+import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';

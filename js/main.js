@@ -3,19 +3,19 @@
 import { GRIST_ORIGINS, VERSION, widgetUrl } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, writePref } from './prefs.js';
-import { sleep } from './logic/common.js';
-import { ownsSync } from './logic/strays.js';
+import { sleep } from './engine/logic/common.js';
+import { ownsSync } from './engine/logic/strays.js';
 import { readSchema } from './grist.js';
-import { readSourceNote } from './source/synchro.js';
-import { receivedJournals } from './logic/received.js';
+import { readSourceNote } from './engine/source/synchro.js';
+import { receivedJournals } from './engine/logic/received.js';
 import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
 import { accessHelp, tutorialView } from './tutorial.js';
 import { isOwnerHere, lostSynchro, refreshSource, renderSource } from './source/tab.js';
-import { startAutoCatchUp } from './source/resend.js';
+import { startAutoCatchUp } from './engine/source/resend.js';
 import { refreshTarget, renderTarget } from './target/tab.js';
-import { consolidateAll, startAutoConsolidation } from './target/loop.js';
+import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
 
 const $ = id => document.getElementById(id);
 const RETRY_MS = 3000; // Grist injoignable un instant : nouvel essai de l'onglet

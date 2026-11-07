@@ -8,9 +8,9 @@
 //    fiche d'un partage (shareInfo), lecture d'un document public (publicAccess, publicRecords).
 // Toutes passent par gristFetch, qui refuse une instance hors de la liste.
 import { GRIST_ORIGINS } from './config.js';
-import { maskKey, parseDocBaseUrl, parseWebhookUrl } from './logic/codes.js';
-import { parseJson, toRows } from './logic/common.js';
-import { readShare } from './logic/trust.js';
+import { maskKey, parseDocBaseUrl, parseWebhookUrl } from './engine/logic/codes.js';
+import { parseJson, toRows } from './engine/logic/common.js';
+import { readShare } from './engine/logic/trust.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).

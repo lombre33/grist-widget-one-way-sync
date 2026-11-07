@@ -2,7 +2,7 @@
 // filters.js). Chaque condition : une colonne, un opérateur selon son type, et ses valeurs, cochées
 // parmi celles de la colonne (avec leur nombre de lignes) ou tapées. Les lignes de la table sont lues
 // à la première ouverture (`load`), pour proposer les valeurs et dire combien de lignes partiront.
-import { OPERATORS, columnValues, filterKind, filterTester, operandOf, rowFilter } from '../logic/filters.js';
+import { OPERATORS, columnValues, filterKind, filterTester, operandOf, rowFilter } from '../engine/logic/filters.js';
 import { fetchRows } from '../grist.js';
 import { checkList, el, icon, message, pickField } from '../ui.js';
 import { LANG, t } from '../i18n.js';

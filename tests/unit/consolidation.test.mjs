@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   WAVE, WAVE_STRICT, addedColumns, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, newColumnsMap, planConsolidation, receivedColumns,
   refusedGaps, restoreActions, rowNumbers,
-} from '../../js/logic/consolidation.js';
+} from '../../js/engine/logic/consolidation.js';
 import { j, plan, marked, list, done, gone, part, replaced } from './fixtures.mjs';
 
 test('copyColumns ignore les colonnes techniques et les formules de la destination', () => {

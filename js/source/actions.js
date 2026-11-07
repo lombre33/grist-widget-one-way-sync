@@ -1,16 +1,16 @@
 // SOURCE : actions sur un export et ses destinataires, depuis sa carte.
-import { RESEND_ALL } from '../logic/common.js';
-import { buildInvitation } from '../logic/codes.js';
-import { rowsSince } from '../logic/resend.js';
+import { RESEND_ALL } from '../engine/logic/common.js';
+import { buildInvitation } from '../engine/logic/codes.js';
+import { rowsSince } from '../engine/logic/resend.js';
 import { docIdentity, fetchRows, readSchema, setWebhookEnabled } from '../grist.js';
 import { VERSION } from '../config.js';
-import { removeTechnicalTables } from '../pages.js';
-import { dropInvitation, setExport, setPause } from '../logic/notes.js';
-import { closeExport, removeRecipient } from '../exchange.js';
-import { hookLabel } from '../logic/exports.js';
-import { readSourceNote, recordEvent, saveExport, updateSourceNote } from './synchro.js';
-import { clearAndMark, resendTables } from './resend.js';
-import { pauseHook } from './pausing.js';
+import { removeTechnicalTables } from '../engine/pages.js';
+import { dropInvitation, setExport, setPause } from '../engine/logic/notes.js';
+import { closeExport, removeRecipient } from '../engine/exchange.js';
+import { hookLabel } from '../engine/logic/exports.js';
+import { readSourceNote, recordEvent, saveExport, updateSourceNote } from '../engine/source/synchro.js';
+import { clearAndMark, resendTables } from '../engine/source/resend.js';
+import { pauseHook } from '../engine/source/pausing.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
 import { handoffButton } from '../guide.js';
 import { t } from '../i18n.js';

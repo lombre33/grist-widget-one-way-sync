@@ -2,7 +2,7 @@
 // complétés sans rien écraser.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { columnOptions, fillOptions, ownsColumn, receivedChoices } from '../../js/logic/options.js';
+import { columnOptions, fillOptions, ownsColumn, receivedChoices } from '../../js/engine/logic/options.js';
 
 const CHOICES = JSON.stringify({
   choices: ['Oui', 'Non', 'Oui', 3, '', 'x'.repeat(201)], choiceOptions: { Oui: { fillColor: '#00FF00', textColor: 'red', fontBold: true }, Peut: { fillColor: '#000000' } },

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   FILE_MAX, PARKED_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, parkedOverflow, partRow, readPart, readTracking,
   recordSent, resolveCell, resolveRows, sha1, shaOf, short, trackingNote,
-} from '../../js/logic/files.js';
+} from '../../js/engine/logic/files.js';
 import { EXPORT } from './fixtures.mjs';
 
 const A = 'a'.repeat(40);

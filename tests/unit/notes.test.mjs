@@ -1,7 +1,7 @@
 // Note SOURCE : chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/logic/notes.js';
+import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/engine/logic/notes.js';
 
 const note = () => ({
   exports: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
