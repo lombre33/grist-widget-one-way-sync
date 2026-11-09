@@ -18,14 +18,14 @@
 
 export const PORT_SHAPE = {
   // Données du document : lire, écrire, schéma, identité, droits.
-  data: ['fetchRows', 'apply', 'readSchema', 'selectRows', 'querySql', 'docIdentity', 'isOwner', 'docChanges'],
+  data: ['fetchRows', 'apply', 'readSchema', 'selectRows', 'querySql', 'journalStats', 'docIdentity', 'isOwner', 'docChanges'],
   // Pièces jointes du document.
   files: ['downloadAttachment', 'uploadAttachment'],
   // Webhooks du document (propriétaires seulement) et envois directs à leur adresse.
-  hooks: ['listWebhooks', 'createWebhook', 'webhookConditions', 'setWebhookEnabled', 'deleteWebhook',
+  hooks: ['listWebhooks', 'createWebhook', 'webhookConditions', 'setWebhookEnabled', 'renameWebhook', 'deleteWebhook',
     'deleteWebhookWithNotice', 'clearWebhookQueue', 'postToHook', 'postRows'],
-  // Un document public, lu sans identifiant.
-  publicDoc: ['publicRecords'],
+  // Un document public, lu sans identifiant ; et le document que désigne la clé d'un formulaire (anonyme).
+  publicDoc: ['publicRecords', 'publicAccess', 'shareInfo'],
   // Ce qui vient de la page.
   environment: ['withLock', 'text'],
   page: ['visible', 'busy', 'onShow', 'onLeave'],
@@ -58,6 +58,7 @@ export const apply = call('apply');
 export const readSchema = call('readSchema');
 export const selectRows = call('selectRows');
 export const querySql = call('querySql');
+export const journalStats = call('journalStats');
 export const docIdentity = call('docIdentity');
 export const isOwner = call('isOwner');
 export const docChanges = call('docChanges');
@@ -67,12 +68,15 @@ export const listWebhooks = call('listWebhooks');
 export const createWebhook = call('createWebhook');
 export const webhookConditions = call('webhookConditions');
 export const setWebhookEnabled = call('setWebhookEnabled');
+export const renameWebhook = call('renameWebhook');
 export const deleteWebhook = call('deleteWebhook');
 export const deleteWebhookWithNotice = call('deleteWebhookWithNotice');
 export const clearWebhookQueue = call('clearWebhookQueue');
 export const postToHook = call('postToHook');
 export const postRows = call('postRows');
 export const publicRecords = call('publicRecords');
+export const publicAccess = call('publicAccess');
+export const shareInfo = call('shareInfo');
 export const withLock = call('withLock');
 
 // Texte pour la personne (messages d'erreur, résumés d'un passage, étiquette d'une colonne écrite

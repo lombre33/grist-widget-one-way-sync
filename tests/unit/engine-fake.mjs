@@ -4,8 +4,9 @@
 // essais y posent eux-mêmes ce que Grist aurait calculé. `fakePort` en fait un port du moteur
 // (engine/port.js) qui n'a rien de commun avec celui de Sync+.
 import { schemaFrom } from '../../js/engine/logic/schema.js';
+import { parseWebhookUrl } from '../../js/engine/logic/codes.js';
 
-export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local' } = {}) {
+export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', name = 'Document d\'essai' } = {}) {
   const tables = new Map(); // tableId -> { id, columns: [{ id, colId, ... }], rows: [{ id, ... }], next }
   let nextTable = 1;
   let nextColumn = 1;
@@ -44,15 +45,47 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local' } = 
     _grist_Tables_column: columnRows,
   };
 
+  // Les autres tables internes (pages, vues, partages, règles) : de simples listes de lignes, sans effet
+  // sur le reste, qu'on lit (`ensureForm` relit sa page) et qu'on complète par les mêmes actions.
+  const meta = new Map();
+  const metaTable = (id) => {
+    if (!meta.has(id)) meta.set(id, { rows: [], next: 1 });
+    return meta.get(id);
+  };
+  const runMeta = (name, tableId, args) => {
+    const table = metaTable(tableId);
+    const find = id => table.rows.find(r => r.id === id);
+    switch (name) {
+      case 'AddRecord': { const row = { id: args[0] ?? table.next++, ...args[1] }; table.rows.push(row); return row.id; }
+      case 'UpdateRecord': if (find(args[0])) Object.assign(find(args[0]), args[1]); return null;
+      case 'RemoveRecord': table.rows = table.rows.filter(r => r.id !== args[0]); return null;
+      case 'BulkRemoveRecord': table.rows = table.rows.filter(r => !args[0].includes(r.id)); return null;
+      case 'BulkUpdateRecord':
+        args[0].forEach((id, i) => { if (find(id)) Object.assign(find(id), Object.fromEntries(Object.entries(args[1]).map(([k, v]) => [k, v[i]]))); });
+        return null;
+      case 'BulkAddRecord':
+        return args[0].map((id, i) => { const row = { id: id ?? table.next++, ...Object.fromEntries(Object.entries(args[1]).map(([k, v]) => [k, v[i]])) }; table.rows.push(row); return row.id; });
+      default: return null;
+    }
+  };
+  // Un formulaire sur une table : sa vue, sa section et sa page (ce que Grist crée, comme `ensureForm` le lit).
+  const createFormSection = (tableRef) => {
+    const view = runMeta('AddRecord', '_grist_Views', [null, { name: 'New page' }]);
+    const section = runMeta('AddRecord', '_grist_Views_section', [null, { parentId: view, parentKey: 'form', tableRef, shareOptions: '' }]);
+    runMeta('AddRecord', '_grist_Pages', [null, { viewRef: view, shareRef: 0, indentation: 0, pagePos: view }]);
+    return { viewRef: view, sectionRef: section };
+  };
+
   const run = (action) => {
     const [name, tableId, ...args] = action;
     log.push(action);
+    if (name === 'CreateViewSection') return createFormSection(tableId);
     if (tableId === '_grist_Tables_column') {
       const column = columnRows().find(c => c.id === args[0]);
       if (name === 'UpdateRecord' && column) { Object.assign(column, args[1]); return null; }
       throw new Error(`fake : ${name} sur _grist_Tables_column`);
     }
-    if (tableId.startsWith('_grist_')) return null; // pages, partages, règles : sans effet ici
+    if (tableId.startsWith('_grist_')) return runMeta(name, tableId, args);
     switch (name) {
       case 'AddTable': {
         if (tables.has(tableId)) throw new Error(`Table already exists "${tableId}"`);
@@ -108,6 +141,8 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local' } = 
 
   const doc = {
     docId,
+    name,
+    email,
     log,
     tables,
     // Une table de la personne, avec ses lignes (ce que Grist aurait déjà là).
@@ -122,7 +157,7 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local' } = 
     now: () => clock,
     fetchRows(tableId) {
       if (records[tableId]) return records[tableId]().map(r => ({ ...r }));
-      if (tableId.startsWith('_grist_')) return [];
+      if (tableId.startsWith('_grist_')) return metaTable(tableId).rows.map(r => ({ ...r }));
       return doc.rows(tableId);
     },
     apply(actions) {
@@ -133,35 +168,97 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local' } = 
   return doc;
 }
 
+const ORIGIN = 'https://fake.example';
+const TEAM = '/o/equipe';
+
 // Le port du moteur : les fonctions de Grist parlent à `doc`, la page est toujours visible, le texte
-// rend sa clé (donc aucune erreur n'est « prévue » : voir errors.js).
-export function fakePort(doc, { owner = true } = {}) {
+// rend sa clé (donc aucune erreur n'est « prévue » : voir errors.js). Sans `world`, rien n'est joignable
+// hors du document (webhooks et formulaires publiés) ; avec, voir fakeWorld.
+export function fakePort(doc, { owner = true, world = null } = {}) {
   const prefs = new Map();
   const unsupported = name => async () => { throw new Error(`fake : ${name} n'est pas gérée`); };
+  const abroad = world ? world.hooksOf(doc) : null;
   return {
     fetchRows: async tableId => doc.fetchRows(tableId),
     apply: async actions => (actions.length ? doc.apply(actions) : null),
     readSchema: async () => schemaFrom(doc.fetchRows('_grist_Tables'), doc.fetchRows('_grist_Tables_column')),
     selectRows: async () => null,
     querySql: async () => null,
-    docIdentity: async () => ({ origin: 'https://fake.example', team: 'equipe', docId: doc.docId, baseUrl: `https://fake.example/o/equipe/api/docs/${doc.docId}` }),
+    journalStats: async () => null,
+    docIdentity: async () => ({ origin: ORIGIN, team: 'equipe', docId: doc.docId, baseUrl: `${ORIGIN}${TEAM}/api/docs/${doc.docId}` }),
     isOwner: async () => owner,
     docChanges: async () => null,
     downloadAttachment: unsupported('downloadAttachment'),
     uploadAttachment: unsupported('uploadAttachment'),
-    listWebhooks: async () => [],
-    createWebhook: unsupported('createWebhook'),
-    webhookConditions: async () => new Map(),
-    setWebhookEnabled: unsupported('setWebhookEnabled'),
-    deleteWebhook: unsupported('deleteWebhook'),
+    listWebhooks: async () => (abroad ? abroad.list() : []),
+    createWebhook: abroad ? async fields => abroad.create(fields) : unsupported('createWebhook'),
+    webhookConditions: async () => (abroad ? abroad.conditions() : new Map()),
+    setWebhookEnabled: abroad ? async (id, enabled) => abroad.patch(id, { enabled }) : unsupported('setWebhookEnabled'),
+    renameWebhook: abroad ? async (id, name) => abroad.patch(id, { name }) : async () => {},
+    deleteWebhook: abroad ? async id => abroad.remove(id) : unsupported('deleteWebhook'),
     deleteWebhookWithNotice: unsupported('deleteWebhookWithNotice'),
     clearWebhookQueue: async () => {},
     postToHook: unsupported('postToHook'),
-    postRows: unsupported('postRows'),
+    postRows: world ? async (url, rows) => world.postRows(url, rows) : unsupported('postRows'),
     publicRecords: unsupported('publicRecords'),
+    publicAccess: async () => '',
+    shareInfo: world ? async url => world.shareInfo(url) : async () => null,
     withLock: (name, fn) => fn(),
     text: (key, values) => (values && Object.keys(values).length ? `${key} ${JSON.stringify(values)}` : key),
     page: { visible: () => true, busy: () => false, onShow: () => {}, onLeave: () => {} },
     prefs: { read: name => prefs.get(name) ?? null, write: (name, value) => { prefs.set(name, value); return true; } },
   };
+}
+
+// Plusieurs documents sur la même instance : de quoi jouer une SOURCE puis une CIBLE. La personne
+// « publie » le formulaire d'un journal et en copie le lien (`formLink`) ; l'écriture par ce lien
+// (`postRows`) n'arrive que dans ce journal, comme chez Grist, et une colonne inconnue est refusée. Les
+// webhooks de chaque document sont gardés (`hooksOf`), mais rien ne les envoie : le test dépose lui-même,
+// dans le journal de la CIBLE, ce que le webhook y aurait posé (`deliver`).
+export function fakeWorld() {
+  const forms = new Map(); // clé de partage -> { doc, journal }
+  const hooks = new Map(); // document -> [{ id, fields }]
+  let counter = 0;
+  const world = {
+    port: (doc, options = {}) => fakePort(doc, { ...options, world }),
+    formLink(doc, journal) {
+      const key = `Form${String(++counter).padStart(3, '0')}abcdefghijklmn`;
+      forms.set(key, { doc, journal });
+      return `${ORIGIN}${TEAM}/forms/${key}/1`;
+    },
+    shareInfo(url) {
+      const target = parseWebhookUrl(url);
+      const form = target && target.origin === ORIGIN ? forms.get(target.key) : null;
+      return form ? { docId: form.doc.docId, name: form.doc.name, folder: 'Dossier', team: 'equipe', teamName: 'Équipe', personal: false } : null;
+    },
+    postRows(url, rows) {
+      const target = parseWebhookUrl(url);
+      if (!target || target.origin !== ORIGIN) throw new Error('otherInstance');
+      const form = forms.get(target.key);
+      if (!form) throw new Error('HTTP 404 Share not known');
+      if (form.journal !== target.table) throw new Error('HTTP 403 Blocked by table update access rules');
+      const columns = form.doc.tables.get(form.journal).columns.map(c => c.colId);
+      for (const row of rows) for (const key of Object.keys(row)) if (!columns.includes(key)) throw new Error(`HTTP 400 Invalid column "${key}"`);
+      for (const row of rows) form.doc.addRow(form.journal, row);
+    },
+    // Ce que le webhook de `fromDoc` a posé : les lignes `rows` ajoutées au journal que désigne son adresse.
+    deliver(url, rows) { world.postRows(url, rows); },
+    hooksOf(doc) {
+      if (!hooks.has(doc)) hooks.set(doc, []);
+      const list = hooks.get(doc);
+      return {
+        list: () => list.map(h => ({ id: h.id, fields: { ...h.fields }, usage: null })),
+        create: ({ name, memo, url, tableId, condition }) => {
+          const id = ++counter;
+          list.push({ id, fields: { name, memo, url, tableId, condition, enabled: true } });
+          return id;
+        },
+        conditions: () => new Map(list.map(h => [h.id, h.fields.condition])),
+        patch: (id, fields) => Object.assign(list.find(h => h.id === id).fields, fields),
+        remove: (id) => { const at = list.findIndex(h => h.id === id); if (at >= 0) list.splice(at, 1); },
+      };
+    },
+    webhooks: doc => world.hooksOf(doc).list(),
+  };
+  return world;
 }

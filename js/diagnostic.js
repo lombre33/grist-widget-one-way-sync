@@ -1,72 +1,8 @@
-// Diagnostic à copier (Réglages) : relit le document et l'état des onglets, puis le met en texte
-// (choix de ce qui en fait partie et forme : logic/diagnostic.js).
-import { SYNC_TABLE, TYPE_COL, EXPORT_COL, TABLE_COL, RECEIVED_COL, RESEND_COL, nowS } from './engine/logic/common.js';
-import { ownsSync } from './engine/logic/strays.js';
-import { catchFact, diagnosticText, exportFacts, journalFacts, progressFact } from './engine/logic/diagnostic.js';
-import { conditionExport, exportDrift, exportTables, hooksOf } from './engine/logic/exports.js';
-import { receivedJournals, receivedKey } from './engine/logic/received.js';
-import { LEASE_S, budgetWait, dueRows, parseCharge } from './engine/logic/resend.js';
-import { docIdentity, fetchRows, isOwner, isReadOnly, journalStats, listWebhooks, readSchema, webhookConditions } from './grist.js';
-import { catchState } from './engine/source/resend.js';
-import { isCharge, readSourceNote } from './engine/source/synchro.js';
-import { comparing, state, tableKey } from './engine/target/loop.js';
+// Diagnostic à copier (Réglages) : le moteur relit le document et écrit le texte (engine/diagnostic.js) ;
+// cet écran ne dit que ce qu'il est seul à savoir : la version, d'où le widget est servi, si la personne
+// ne fait que lire, et son navigateur.
+import { diagnostic as engineDiagnostic } from './engine/diagnostic.js';
+import { isReadOnly } from './grist.js';
 import { VERSION, servedFrom } from './config.js';
-import { recentErrors } from './ui.js';
 
-async function sourceFacts(schema) {
-  if (!ownsSync(schema)) return null;
-  const owner = await isOwner().catch(() => false);
-  const [hooks, conditions] = owner ? await Promise.all([listWebhooks(), webhookConditions()]) : [[], new Map()];
-  const all = await fetchRows(SYNC_TABLE);
-  const rows = all.filter(r => !isCharge(r));
-  const note = readSourceNote(schema);
-  const { late, lists } = dueRows(rows);
-  const ids = [...new Set([...note.exports.map(e => e.id), ...rows.map(r => r[EXPORT_COL])])].filter(Boolean);
-  const exports = ids.map((id) => {
-    const tables = exportTables(rows, id);
-    const of = list => list.filter(r => r[EXPORT_COL] === id).map(r => r[TABLE_COL]);
-    return exportFacts({
-      ...(note.exports.find(e => e.id === id) || { id, name: '' }), tables, ...exportDrift(schema, tables),
-      invitations: note.invitations.filter(i => i.export === id), late: of(late), lists: of(lists), recipients: hooksOf(hooks, conditions, id),
-    });
-  });
-  const charge = parseCharge((all.find(isCharge) || {})[RESEND_COL]);
-  const now = nowS();
-  const busy = charge.par && now - charge.le < LEASE_S ? `signe de vie il y a ${Math.round(now - charge.le)} s` : '';
-  const wait = budgetWait(charge, now);
-  return {
-    ownerOnly: !owner,
-    unsafe: hooks.filter(h => h.fields.tableId === SYNC_TABLE && !conditionExport(conditions.get(h.id))).length,
-    charge: [busy, wait ? `budget atteint, reprise dans ${Math.round(wait)} s` : ''].filter(Boolean).join(', '),
-    progress: progressFact(charge.prog, now),
-    catchUp: catchFact(catchState()),
-    exports,
-    kinds: rows.reduce((n, r) => ({ ...n, [r[TYPE_COL]]: (n[r[TYPE_COL]] || 0) + 1 }), {}),
-  };
-}
-
-async function targetFacts(schema) {
-  const journals = await Promise.all(receivedJournals(schema).map(async ({ journal, note }) => journalFacts({
-    journal, note, signed: receivedKey(schema, journal, note),
-    results: [state.results.get(journal), ...note.tables.map(tb => state.results.get(tableKey(journal, tb.table)))],
-    offers: (state.offers.get(journal) || []).length,
-    stats: await journalStats(journal, RECEIVED_COL, TYPE_COL),
-  })));
-  return { journals, compare: comparing(), visible: document.visibilityState === 'visible' };
-}
-
-export async function diagnostic() {
-  const schema = await readSchema();
-  const owner = await isOwner().catch(() => false);
-  return diagnosticText({
-    version: VERSION,
-    served: servedFrom(),
-    origin: await docIdentity().then(d => d.origin, () => ''),
-    access: isReadOnly() ? 'lecteur' : owner ? 'propriétaire' : 'éditeur',
-    at: Date.now(),
-    agent: navigator.userAgent,
-    source: await sourceFacts(schema),
-    target: await targetFacts(schema),
-    errors: recentErrors,
-  });
-}
+export const diagnostic = () => engineDiagnostic({ version: VERSION, served: servedFrom(), readOnly: isReadOnly(), agent: navigator.userAgent });

@@ -138,7 +138,7 @@ function diagnosticBlock() {
 }
 
 async function start() {
-  startEngine({ port: syncPort }); // le moteur parle à Grist par ce port (js/sync-port.js), noms de tables d'avant
+  startEngine({ port: syncPort, version: VERSION }); // le moteur parle à Grist par ce port (js/sync-port.js), noms de tables d'avant
   applyTheme();
   translatePage();
   $('settings').addEventListener('click', openSettings);

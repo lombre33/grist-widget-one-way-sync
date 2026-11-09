@@ -1,22 +1,19 @@
 // SOURCE : assistant d'export, en trois étapes (Tables, Colonnes, Nom). Crée l'export, ou le
 // modifie (`exp`) : ajouter ou retirer des tables, changer les colonnes ou le nom vaut pour tous
 // ses destinataires.
-import { isUserTable, nowS, randomHex } from '../engine/logic/common.js';
+import { isUserTable } from '../engine/logic/common.js';
 import { ownsSync } from '../engine/logic/strays.js';
-import { exportEmail, exportableColumns, hookName, isFileColumn, readTables } from '../engine/logic/exports.js';
-import { linkTables, linkable } from '../engine/logic/links.js';
-import { hiddenTables } from '../engine/logic/acl.js';
-import { putExport } from '../engine/logic/notes.js';
+import { exportableColumns, isFileColumn } from '../engine/logic/exports.js';
+import { linkable } from '../engine/logic/links.js';
 import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
+import { missingSyncColumns } from '../engine/logic/formulas.js';
 import { STATES } from '../engine/logic/journal.js';
-import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../engine/logic/formulas.js';
-import { apply, fetchRows, readSchema, renameWebhook } from '../grist.js';
-import { recordEvent, saveExport, syncRows, updateSourceNote } from '../engine/source/synchro.js';
+import { readSchema } from '../grist.js';
+import { finishEdit, saveChosenExport } from '../engine/source/export.js';
 import { receivedDests } from '../engine/logic/received.js';
-import { resendTables } from '../engine/source/resend.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
-import { backButton, cancelButton, checkList, closeButtons, el, failure, laterButton, message, openWizard, pickField, run } from '../ui.js';
+import { backButton, cancelButton, checkList, closeButtons, el, laterButton, message, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
@@ -169,55 +166,17 @@ function showName(ctx) {
     { label: ctx.exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(ctx, nameInput.value.trim() || fallback, report)) }]);
 }
 
-// Tables prêtes à partir (id_sync, MajLe…) et leurs colonnes choisies. Une table reçue (relais)
-// garde la clé de son document d'origine : une ligne ajoutée ici à la main reste sans clé, donc
-// locale (avec une clé, la prochaine liste de l'origine, qui ne la connaît pas, l'effacerait).
-// Un seul instantané suffit : chaque étape ne touche que sa table, et les colonnes que le widget
-// ajoute ne sont pas envoyables.
-async function prepareTables(ctx) {
-  const schema = await readSchema();
-  const relays = receivedDests(schema).map(d => d.dest);
-  const tables = [];
-  for (const table of ctx.chosen) {
-    await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
-    if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
-    const columns = exportableColumns(schema.columns(table)).filter(c => ctx.selected.get(table).includes(c.id));
-    tables.push({ table, columns, filter: ctx.filters.get(table) || null });
-  }
-  return linkTables(tables, Boolean(ctx.links));
-}
+// Les choix de la personne : par table, ses colonnes cochées et son filtre (saveChosenExport les écrit).
+const selectionOf = ctx => ctx.chosen.map(table => ({ table, columns: ctx.selected.get(table), filter: ctx.filters.get(table) || null }));
 
 async function save(ctx, name, report) {
   const { exp } = ctx;
-  const tables = await prepareTables(ctx);
-  if (exp?.public) await refuseHidden(tables);
-  const id = exp ? exp.id : randomHex(8);
-  const changed = await saveExport(id, tables, { isPublic: Boolean(exp?.public), swap: Boolean(exp?.echange) });
-  await noteExport(ctx, id, name);
-  return exp ? showEdited(ctx, { name, changed, report }) : showCreated(ctx, { id, name, tables });
-}
-
-// Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
-async function refuseHidden(tables) {
-  const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-  const hidden = hiddenTables(resources, rules, readTables(tables));
-  if (hidden.length) throw failure('publicHiddenEdit', { tables: hidden.join(', ') });
-}
-
-// Nom et date de l'export dans la note SOURCE. Règles d'un Échange administré ici : notées
-// seulement si elles ne sont pas toutes « Accepter ».
-async function noteExport({ exp, rules: chosen }, id, name) {
-  const rules = chosen ? exchangeRules({ regles: chosen, refus: chosen.refus }) : undefined;
-  await updateSourceNote((note) => {
-    const entry = { at: nowS(), ...note.exports.find(e => e.id === id), id, name };
-    if (chosen) Object.assign(entry, { regles: rules ? Object.fromEntries(STATES.map(st => [st, rules[st]])) : undefined, refus: rules?.refus });
-    return putExport(note, JSON.parse(JSON.stringify(entry)));
-  });
+  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, rules: ctx.rules });
+  return exp ? showEdited(ctx, { name, changed: saved.changed, report }) : showCreated(ctx, { name, created: saved.created });
 }
 
 // Export créé : la fenêtre propose d'ajouter tout de suite une personne.
-async function showCreated({ wizard, onClose }, { id, name, tables }) {
-  const created = { id, name, tables, recipients: [], invitations: [], public: false, email: exportEmail(await syncRows(), id) };
+async function showCreated({ wizard, onClose }, { name, created }) {
   wizard.show(3, [message('ok', t('send.created', { name })), el('p', {}, t('send.created.next'))], [
     laterButton(),
     { label: t('send.action.addPerson'), kind: 'btn-primary', onClick: () => { wizard.close(); recipientWizard(created, null, onClose); } }]);
@@ -226,10 +185,8 @@ async function showCreated({ wizard, onClose }, { id, name, tables }) {
 // Export modifié : webhooks renommés, tables changées renvoyées. Fenêtre fermée pendant le
 // renvoi, qui continue : l'onglet se redessine à la fin.
 async function showEdited({ exp, wizard, onClose }, { name, changed, report }) {
-  await recordEvent(exp.id, changed.length ? 'editSent' : 'edit', { n: changed.length });
-  if (name !== exp.name) for (const h of exp.recipients) await renameWebhook(h.id, hookName(name, exp.id));
   if (changed.length) wizard.show(3, [report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
-  const n = changed.length ? await resendTables(exp.id, changed, progressTo(report)) : 0;
+  const n = await finishEdit(exp, { name, changed }, progressTo(report));
   if (changed.length && !report.isConnected) return onClose && onClose();
   const saved = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
   return wizard.show(3, saved, closeButtons());

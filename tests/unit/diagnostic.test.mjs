@@ -2,6 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { catchFact, diagnosticText, exportFacts, hookFacts, journalFacts, progressFact } from '../../js/engine/logic/diagnostic.js';
+import { format } from '../../js/i18n.js';
+
+// Le texte comme le port le donnerait, dans une langue, sans les espaces insécables de la typographie française.
+const plain = lang => (key, vars) => format(lang, key, vars).replace(/[\u00a0\u202f]/g, ' ');
+const t = plain('fr');
 
 const KEY = 'AbCdEfGhIjKlMnOpQrStUv';
 const hook = {
@@ -42,10 +47,10 @@ test('erreur de Grist : adresse, document, équipe et jeton retirés ; dates abs
 
 test('texte : exports, réceptions, erreurs, sans secret, clé, courriel ni document', () => {
   const text = diagnosticText({
-    version: '0.12.0', served: 'bêta', origin: 'https://g.fr', access: 'propriétaire', at: 1760000000000, agent: 'Navigateur',
-    source: { ownerOnly: false, unsafe: 1, charge: '', kinds: { cles: 1, lot: 1 }, exports: [exportFacts(exp), exportFacts({ id: 'e2', name: 'Vide', public: true })] },
-    target: { compare: false, journals: [journalFacts({ journal: 'Journal_annuaire', note, signed: 'k', results: [undefined, { table: 'Contacts', error: 'x', text: `HTTP 403 /api/s/${KEY}` }], offers: 1 })] },
-    errors: [{ at: 1760000000000, text: 'Lien refusé' }],
+    version: '0.12.0', served: 'bêta', origin: 'https://g.fr', access: 'owner', at: 1760000000000, agent: 'Navigateur',
+    source: { ownerOnly: false, unsafe: 1, charge: '', kinds: { cles: 1, lot: 1 }, exports: [exportFacts(exp, t), exportFacts({ id: 'e2', name: 'Vide', public: true }, t)] },
+    target: { compare: false, journals: [journalFacts({ journal: 'Journal_annuaire', note, signed: 'k', results: [undefined, { table: 'Contacts', error: 'x', text: `HTTP 403 /api/s/${KEY}` }], offers: 1, t })] },
+    errors: [{ at: 1760000000000, text: 'Lien refusé' }], t,
   });
   for (const secret of [KEY.slice(4), 'ana@', 'bob@', 'chut', 'docXYZ', 'doc123', 'B'.repeat(20), 'abcd1234']) assert.ok(!text.includes(secret), secret);
   for (const said of ['Diagnostic Synchro Grist 0.12.0 (bêta)', 'Instance : https://g.fr', 'Export 01234567 « Annuaire » (echange, renforcé)',
@@ -58,34 +63,49 @@ test('texte : exports, réceptions, erreurs, sans secret, clé, courriel ni docu
 });
 
 test('texte : document sans export ni réception', () => {
-  const text = diagnosticText({ version: '1', served: 'officielle', origin: '', access: 'lecteur', at: 0, agent: '', source: null, target: { journals: [] } });
+  const text = diagnosticText({ version: '1', served: 'officielle', origin: '', access: 'reader', at: 0, agent: '', source: null, target: { journals: [] }, t });
   assert.ok(text.includes('Aucun export (pas de table Synchro).'));
   assert.ok(text.includes('Aucune réception.'));
   assert.ok(text.includes('Instance : inconnue'));
   assert.ok(text.endsWith('Aucune.'));
-  const owner = diagnosticText({ version: '1', served: '', origin: '', access: '', at: 0, agent: '', source: { ownerOnly: true, exports: [], charge: 'budget atteint' }, target: null });
+  const owner = diagnosticText({ version: '1', served: '', origin: '', access: '', at: 0, agent: '', source: { ownerOnly: true, exports: [], charge: 'budget atteint' }, target: null, t });
   assert.ok(owner.includes('lecture réservée aux propriétaires') && owner.includes('Aucun export.') && owner.includes('Renvoi en cours : budget atteint'));
-  assert.equal(journalFacts({ journal: 'J', note: { export: 'e' } }).reserve, 'non');
-  assert.equal(journalFacts({ journal: 'J', note: { export: 'e', reserve: true, reserved: true, ended: 10 } }).reserve, 'posée');
+  assert.equal(journalFacts({ journal: 'J', note: { export: 'e' }, t }).reserve, 'non');
+  assert.equal(journalFacts({ journal: 'J', note: { export: 'e', reserve: true, reserved: true, ended: 10 }, t }).reserve, 'posée');
 });
 
 test('avancement, rattrapage et arrivées : en une phrase, sans adresse ni identifiant entier', () => {
-  assert.equal(progressFact(null, 100), '');
+  assert.equal(progressFact(null, 100, t), '');
   const prog = { exp: '0123456789abcdef', table: 'Contacts', done: 12400, total: 30000, lots: 62, lotsTotal: 150, last: 1000 };
-  assert.equal(progressFact(prog, 1042.4), 'export 01234567, 12400 sur 30000 lignes, 62 lots sur environ 150, dernier lot il y a 42 s');
-  assert.equal(catchFact({ at: 0, why: '', running: false }), 'pas encore passé');
-  assert.equal(catchFact({ at: 1760000000000, why: 'blocked', running: false }), 'dernier passage 2025-10-09T08:53:20Z (bloqué : un destinataire est en erreur)');
-  assert.equal(catchFact({ at: 1760000000000, why: 'sent', running: true }), 'dernier passage 2025-10-09T08:53:20Z (a renvoyé), en cours');
-  const facts = journalFacts({ journal: 'Journal_x', note, stats: { n: 412, last: 1760000000, raw: 3 } });
+  assert.equal(progressFact(prog, 1042.4, t), 'export 01234567, 12400 sur 30000 lignes, 62 lots sur environ 150, dernier lot il y a 42 s');
+  assert.equal(catchFact({ at: 0, why: '', running: false }, t), 'pas encore passé');
+  assert.equal(catchFact({ at: 1760000000000, why: 'blocked', running: false }, t), 'dernier passage 2025-10-09T08:53:20Z (bloqué : un destinataire est en erreur)');
+  assert.equal(catchFact({ at: 1760000000000, why: 'sent', running: true }, t), 'dernier passage 2025-10-09T08:53:20Z (a renvoyé), en cours');
+  const facts = journalFacts({ journal: 'Journal_x', note, stats: { n: 412, last: 1760000000, raw: 3 }, t });
   assert.equal(facts.arrival, '412 lignes, dernière arrivée 2025-10-09T08:53:20Z, 3 envois bruts pas encore recopiés');
-  assert.equal(journalFacts({ journal: 'Journal_x', note }).arrival, '', 'journal illisible : rien');
+  assert.equal(journalFacts({ journal: 'Journal_x', note, t }).arrival, '', 'journal illisible : rien');
   const text = diagnosticText({
-    version: '0.12.3', served: 'x', origin: 'https://g.fr', access: 'propriétaire', at: 1760000000000, agent: 'test',
-    source: { ownerOnly: false, exports: [], unsafe: 0, charge: '', progress: progressFact(prog, 1042), catchUp: 'pas encore passé', kinds: {} },
-    target: { journals: [facts], compare: true, visible: false },
+    version: '0.12.3', served: 'x', origin: 'https://g.fr', access: 'owner', at: 1760000000000, agent: 'test',
+    source: { ownerOnly: false, exports: [], unsafe: 0, charge: '', progress: progressFact(prog, 1042, t), catchUp: 'pas encore passé', kinds: {} },
+    target: { journals: [facts], compare: true, visible: false }, t,
   });
   assert.match(text, /Avancement : export 01234567, 12400 sur 30000 lignes/);
   assert.match(text, /Rattrapage : pas encore passé/);
   assert.match(text, /journal : 412 lignes, dernière arrivée/);
   assert.match(text, /Page visible : non \(la recopie attend\)/);
+});
+
+test('texte en anglais : mêmes lignes, aucun mot de français laissé, mêmes secrets absents', () => {
+  const en = plain('en');
+  const text = diagnosticText({
+    version: '0.12.0', served: 'beta', origin: 'https://g.fr', access: 'editor', at: 1760000000000, agent: 'Browser',
+    source: { ownerOnly: true, unsafe: 0, charge: '', kinds: {}, exports: [exportFacts(exp, en)] },
+    target: { compare: true, visible: true, journals: [journalFacts({ journal: 'Journal_annuaire', note, signed: 'k', offers: 0, stats: { n: 5, last: 0, raw: 1 }, t: en })] },
+    errors: [], t: en,
+  });
+  for (const said of ['Synchro Grist diagnostic 0.12.0 (beta)', 'Access: editor', '== Send', '== Receive', '== Recent errors', 'Export 01234567 “Annuaire” (exchange, reinforced)',
+    'tables: Contacts (2 cols, filter)', 'changed columns: Contacts.Tel', 'recipient f00dcafe: active, retrying, queue 3', '5 rows, no arrival date, 1 raw sends not copied yet',
+    'Reception Journal_annuaire (export fedcba98, exchange, reinforced)', 'signed: yes, seal: yes, reserved for editors: waiting', 'Page visible: yes', 'None.']) assert.ok(text.includes(said), said);
+  for (const french of ['destinataire', 'Aucun', 'colonnes', 'réservée', 'Droits', 'Navigateur']) assert.ok(!text.includes(french), french);
+  for (const secret of [KEY.slice(4), 'ana@', 'bob@', 'chut', 'docXYZ', 'doc123', 'B'.repeat(20), 'abcd1234']) assert.ok(!text.includes(secret), secret);
 });

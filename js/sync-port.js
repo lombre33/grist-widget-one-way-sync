@@ -4,7 +4,7 @@
 // (GFS) écrit le sien, avec la même forme (PORT_SHAPE, engine/port.js).
 import {
   apply, clearWebhookQueue, createWebhook, deleteWebhook, deleteWebhookWithNotice, docChanges, docIdentity, downloadAttachment, fetchRows, isOwner,
-  listWebhooks, postRows, postToHook, publicRecords, querySql, readSchema, selectRows, setWebhookEnabled, uploadAttachment, webhookConditions, withLock,
+  journalStats, listWebhooks, postRows, postToHook, publicAccess, publicRecords, querySql, readSchema, renameWebhook, selectRows, setWebhookEnabled, shareInfo, uploadAttachment, webhookConditions, withLock,
 } from './grist.js';
 import { t } from './i18n.js';
 import { readPref, writePref } from './prefs.js';
@@ -20,14 +20,18 @@ export const syncPort = {
   downloadAttachment,
   fetchRows,
   isOwner,
+  journalStats,
   listWebhooks,
   postRows,
   postToHook,
+  publicAccess,
   publicRecords,
   querySql,
   readSchema,
+  renameWebhook,
   selectRows,
   setWebhookEnabled,
+  shareInfo,
   uploadAttachment,
   webhookConditions,
   withLock,

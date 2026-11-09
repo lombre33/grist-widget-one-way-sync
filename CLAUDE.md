@@ -317,10 +317,37 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
 - Fichiers scindés en deux parties (écran / moteur) : `form-link.js` (le test du lien), `source/{actions,estimate,keys}.js`,
   `target/dest.js` (`checkDests`) ; `schemaFrom` (`logic/schema.js`) bâtit le schéma pour n'importe quel port ; `resendTables`
   rend son avancement par un rappel (`progress`), l'écran le montre (`progressTo`).
-- **Reste côté écran, dit à GFS** : l'orchestration des assistants (`checkReply`, `approve`, `openBack` de
-  `source/recipient-wizard.js` ; `readInvitation`, `create`, `showReply`, `myEmail` de `target/wizard.js` ; `checkHooks` de
-  `source/tab.js`) et `js/diagnostic.js`. Les textes du moteur passent par `port.text(clé)` (qui rend la clé quand elle est
-  inconnue) ; restent en français fixe : les mémos des règles d'accès et le texte du diagnostic.
+- **Moteur 2.0.0 (9 novembre, consignes 003 second lot, 004 et 005)** : version **majeure** parce que le port exige quatre
+  fonctions de plus (`shareInfo`, `publicAccess`, `renameWebhook`, `journalStats` : un port écrit pour 1.0.0 est refusé par
+  `setPort`), toutes dans `createRestPort`. Ce qui est entré dans le moteur :
+  - **les requêtes REST, une seule fois** (`engine/rest-port.js`, `createRestPort({ docApi, http })`) : webhooks (condition
+    relue, file vidée avant l'effacement, avis de fin), `docChanges` (état perdu = inconnu), SQL, envois directs limités à
+    l'instance, fiche d'un partage, document public, pièces jointes. L'hôte ne donne que `http` (`request`, `anonymous`,
+    `download`, `upload`, `docBaseUrl` ; les refus **lèvent** une erreur à `status` et `message`, contrat dans
+    `engine/README.md`). `js/grist.js` n'est plus que l'`http` de Sync+ (jeton `auth=`, liste des instances) et la lecture
+    des tables. Essai : `tests/unit/rest-port.test.mjs`, `doc-changes.test.mjs`.
+  - **l'orchestration des assistants sans fenêtre** : `engine/source/export.js` (`saveChosenExport`, `finishEdit`),
+    `engine/source/invite.js` (invitation, code, lien public, retour d'Échange, `checkReply`, `approveReply`, `loadPlan`,
+    `sendExisting`), `engine/target/receive.js` (`readInvitation`, `knownReception`, `relinkReception`,
+    `checkDestinations`, `createReception`, `undoReception`, `receptionReply`, `myEmail`). Les écrans
+    (`source/export-wizard.js`, `source/recipient-wizard.js`, `target/wizard.js`) ne gardent que les fenêtres. Essai :
+    `tests/unit/engine-flow.test.mjs` (SOURCE puis CIBLE sur deux Grist en mémoire, lot signé recopié, reprise,
+    renouvellement, diagnostic).
+  - **le contrôle horaire des webhooks** (`engine/source/hook-check.js` : `checkHooks`, `hookCheck`, `personLabel`).
+  - **le diagnostic** (`engine/diagnostic.js`, `diagnostic({ version, served, readOnly, agent })` ; `logic/diagnostic.js` reçoit
+    `t` et reste pur ; 86 clés `diag.*` en fr et en ; espaces insécables retirées du texte rendu ; `js/diagnostic.js` ne dit
+    que version, origine du widget, lecture seule et navigateur). Le texte français est celui d'avant (mots `echange` et
+    `reponse` sans accent gardés). Seul changement visible : en anglais, le diagnostic est maintenant en anglais.
+  - **le jugement d'un lien collé, tout dans le moteur** (consigne 005, décision du porteur du 9 novembre : « le copier-coller
+    des liens, il faut garder le cœur du moteur de Sync+ ») : les écrans n'ont plus aucun contrôle de lien. La comparaison du
+    code de contrôle en sécurité renforcée (`codeNotCompared`) était une règle d'écran : elle est dans `approveReply(…, { compared })`
+    et, pour un Échange renforcé, dans `checkDestinations` et `createReception` (`mustCompare`) ; la durée de vie d'une
+    invitation (`invitationState`). Essai : `tests/unit/engine-links.test.mjs` (autre document, clé coupée, Grist muet, code
+    non comparé, clé publique remplacée, invitation périmée ou d'une autre instance).
+  - `startEngine({ version })` (version de l'application écrite dans les codes). Le comportement de Sync+ seul n'a pas changé
+    (unit et e2e complets verts avant le commit).
+- **Reste côté écran, dit à GFS** : les fenêtres, boutons et l'ordre des écrans des assistants (`js/source/*-wizard.js`,
+  `js/target/wizard.js`), les cartes. Restent en français fixe : les mémos des règles d'accès (consigne 003, point 1).
 - **Anciens chemins** : ceux que cite ce fichier plus bas (`js/logic/…`, `js/pages.js`, `js/acl.js`, `js/exchange.js`,
   `js/source/{synchro,files,pausing,resend}.js`, `js/target/{journals,files,loop}.js`) sont maintenant sous `js/engine/`.
 - Essais : `tests/unit/engine.test.mjs` (garde-fous, préfixe), `engine-port.test.mjs` (SOURCE et CIBLE sur un Grist en mémoire,

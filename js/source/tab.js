@@ -1,9 +1,9 @@
 // Onglet « Envoyer » (document SOURCE) : une carte par export (un nom, des tables et leurs
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
-import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS, pool } from '../engine/logic/common.js';
-import { maskKey, parseWebhookUrl } from '../engine/logic/codes.js';
-import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookLabel, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
+import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../engine/logic/common.js';
+import { maskKey } from '../engine/logic/codes.js';
+import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
 import { STATES, parseLot } from '../engine/logic/journal.js';
 import { eventsOf, vanishedRecipients } from '../engine/logic/notes.js';
@@ -11,13 +11,15 @@ import { exchangeRules } from '../engine/logic/consolidation.js';
 import { listDue, lotLate, parseCharge } from '../engine/logic/resend.js';
 import { flowMoves } from '../engine/logic/health.js';
 import { LONG_SECONDS } from '../engine/logic/estimate.js';
-import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, shareInfo, webhookConditions } from '../grist.js';
-import { expiresAt, isExpired, memoMatches, unkeyedRecipients } from '../engine/logic/trust.js';
+import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, webhookConditions } from '../grist.js';
+import { expiresAt, unkeyedRecipients } from '../engine/logic/trust.js';
 import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
 import { syncRules } from '../engine/acl.js';
 import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
+import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.js';
+import { invitationState } from '../engine/source/invite.js';
 import { confirmSend, flowView } from './flow.js';
 import { filesPending, resendFiles } from '../engine/source/files.js';
 import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
@@ -168,47 +170,6 @@ function resumeExchange(state) {
   if (pending && !resumed && !document.querySelector('.scrim')) openRecipient(...pending);
 }
 
-// Chaque destinataire est revérifié chez Grist au plus une fois par heure (voir shareInfo) : la clé
-// de son webhook désigne-t-elle toujours le document de sa fiche (mémo) ? Un co-propriétaire peut
-// changer l'adresse d'un webhook dans les réglages de Grist, même vers un autre site : une adresse
-// qui n'est pas celle d'un formulaire de cette instance est signalée sans rien demander à personne.
-// Le nom du document, lu au passage, complète la fiche affichée (voir hookLabel). Rend vrai si un
-// résultat ou une fiche a changé.
-const CHECK_MS = 3600000;
-const checked = new Map(); // webhook -> { at, url, other : document désigné à la place, ou '' ; bad ; docName }
-const checking = new Set(); // webhooks dont le contrôle est en cours (deux affichages de suite ne le font pas deux fois)
-const CHECK_AT_ONCE = 6; // contrôles de lien simultanés au plus
-const personLabel = h => hookLabel(h.fields.memo, (checked.get(h.id) || {}).docName) || '—';
-async function checkHooks(hooks) {
-  const { origin } = await docIdentity();
-  const due = hooks.filter((h) => {
-    const was = checked.get(h.id);
-    return !checking.has(h.id) && (!was || was.url !== h.fields.url || Date.now() - was.at > CHECK_MS);
-  });
-  if (!due.length) return false;
-  for (const h of due) checking.add(h.id);
-  let changed = false;
-  const note = (h, result) => {
-    const was = checked.get(h.id) || { other: '', bad: false };
-    const label = personLabel(h);
-    checked.set(h.id, { at: Date.now(), url: h.fields.url, ...result });
-    changed ||= was.other !== result.other || was.bad !== result.bad || label !== personLabel(h);
-  };
-  await pool(due, CHECK_AT_ONCE, async (h) => {
-    try {
-      const target = parseWebhookUrl(h.fields.url);
-      if (!target || !target.flat || target.origin !== origin) return note(h, { other: '', bad: true });
-      const info = await shareInfo(h.fields.url).catch(() => undefined);
-      if (info === undefined) return undefined; // Grist ne répond pas : au prochain affichage
-      const other = info && !memoMatches(h.fields.memo, info.docId) ? info.name || info.docId : '';
-      return note(h, { other, bad: false, docName: info && !other ? info.name : '' });
-    } finally {
-      checking.delete(h.id);
-    }
-  });
-  return changed;
-}
-
 const openRecipient = (exp, pending = null) => {
   resumed = true;
   recipientWizard(exp, pending, renderSource);
@@ -346,7 +307,7 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   // Vider la file ne règle ni un lien mort, ni un serveur qui n'en peut plus (l'envoi suivant échoue de la même
   // façon) : la pause libère les autres destinataires, ou l'on attend (Grist retente seul).
   const waits = failing && !columnFault(h.usage, syncCols) && NO_UNBLOCK.includes(hookErrorKey(h));
-  const { other, bad } = checked.get(h.id) || {};
+  const { other, bad } = hookCheck(h.id);
   const slot = { pill: el('span', {}), lines: el('div', {}), syncCols, status };
   personSlots.set(h.id, slot);
   fillPerson(slot, h);
@@ -442,8 +403,9 @@ async function tickFlows() {
 // son code peut être refait (nouveau secret) : il n'est gardé nulle part.
 // Une invitation vaut 7 jours : expirée, son code est à refaire.
 function inviteRow(exp, inv, ownerOnly, out) {
-  const back = inv.journal && !inv.ready;
-  const expired = !back && isExpired(inv.at, nowS());
+  const state = invitationState(inv);
+  const back = state === 'link';
+  const expired = state === 'expired';
   const until = t(expired ? 'send.invite.expiredOn' : 'send.invite.until', { at: dateText(expiresAt(inv.at) * 1000) });
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },

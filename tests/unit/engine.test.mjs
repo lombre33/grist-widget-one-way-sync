@@ -116,7 +116,7 @@ test('le moteur n\'importe que lui-même', () => {
 
 test('les écrans appellent le moteur, jamais l\'inverse', () => {
   // Aucun fichier du moteur ne cite un fichier d'écran (ui, i18n, prefs, config, guide, tutoriel, onglets).
-  const screens = /(?:^|\/)(ui|i18n|prefs|config|guide|tutorial|diagnostic|main|grist|sync-port)\.js$/;
+  const screens = /(?:^|\/)(ui|i18n|prefs|config|guide|tutorial|main|grist|sync-port)\.js$/;
   for (const file of walk(ENGINE)) {
     for (const m of readFileSync(file, 'utf8').matchAll(/^(?:import|export)\b[^;]*?\bfrom\s*(['"])(\.[^'"\n]+)\1;?[ \t]*$/gm)) assert.ok(!screens.test(m[2]), `${relative(ROOT, file)} : ${m[2]}`);
   }
