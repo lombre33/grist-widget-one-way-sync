@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.13.5 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.14.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -97,7 +97,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   TARGET chose is never changed. With a row filter the list is not sent: each recipient only gets the
   values of the rows sent.
 - **Attachments**: a ticked column arrives as a real Attachments column; each file is sent once
-  per recipient, while the SOURCE page is open, and stored only once.
+  per recipient, while the SOURCE page is open, and stored only once. In an Exchange, files travel
+  both ways: a row waits for the other document's files before being copied, and a received file
+  is not sent back.
 - **Links between tables**: a Reference column that points at another table of the export
   becomes, on the receiving side, a real Reference to the received table (“Keep the links between
   tables” box, ticked by default), showing the same column.

@@ -84,7 +84,12 @@ sont plus reconnus : leurs tables techniques s'effacent à la main.
   deux fois la taille des fichiers reçus. Une cellule retouchée à la main pendant qu'un fichier est
   attendu n'est pas complétée (la carte la signale, **Corriger** la remet). Un fichier que la CIBLE
   aurait perdu (pièce jointe purgée) ne revient qu'avec **Tout renvoyer**. Pas de pièces jointes
-  par lien public, ni de la CIBLE vers la SOURCE dans un Échange.
+  par lien public. Dans un Échange, les fichiers vont dans les deux sens (0.14) : l'export de retour
+  garde les colonnes Pièces jointes ; un fichier reçu du partenaire ne lui est pas renvoyé (champ `o`
+  du suivi `fichiers`, rempli par `noteHeldFiles` à partir des seules versions signées et scellées) ;
+  une version attend ses fichiers avant d'être recopiée (`waitingVersions`, `plan.waiting`), sinon une
+  cellule incomplète repartirait vers les autres participants comme la plus récente. À plusieurs, un
+  fichier d'un participant fait deux sauts (participant vers A, puis A vers les autres).
 - Tous les documents d'un export doivent avoir la version 0.7 ou plus pour qu'une colonne Pièces
   jointes y soit cochée : une version plus ancienne rejette ses lots.
 - Un export en Échange n'a que des participants à l'Échange ; en cas de conflit, la version la plus

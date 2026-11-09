@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FILE_MAX, PARKED_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, joinParts, neededFiles, parkedOverflow, partRow, readPart, readTracking,
-  recordSent, resolveCell, resolveRows, sha1, shaOf, short, trackingNote,
+  FILE_MAX, HELD_MAX, PARKED_MAX, PART_BYTES, citedFiles, encodeParts, fileArrivals, fileList, fileSends, fillActions, filesState, forgetHooks, holdFiles, joinParts, mergeHeld, neededFiles,
+  parkedOverflow, partRow, readPart, readTracking, recordSent, resolveCell, resolveRows, sha1, shaOf, short, trackingNote, waitingVersions,
 } from '../../js/engine/logic/files.js';
 import { EXPORT } from './fixtures.mjs';
 
@@ -65,7 +65,7 @@ test('SOURCE : suivi des envois, une fois par destinataire, noté sans grandir a
   assert.deepEqual(sends, [{ sha: A, hooks: [] }]);
   tracking = recordSent(tracking, A, []);
   assert.deepEqual(fileSends(tracking, new Map([[A, info(1)]]), ['h9'], ['h9']).sends, [{ sha: A, hooks: ['h9'] }]);
-  assert.deepEqual(readTracking({ f: 'zz abc', h: 'h1', p: [] }), { f: new Set(), h: new Set(), p: new Map() }, 'note abîmée : rien de reçu');
+  assert.deepEqual(readTracking({ f: 'zz abc', h: 'h1', p: [], o: 'x' }), { f: new Set(), h: new Set(), p: new Map(), o: new Map() }, 'note abîmée : rien de reçu');
 });
 
 test('morceaux : base64 de 512 Ko au plus, rassemblés à l\'identique', async () => {
@@ -170,4 +170,54 @@ test('CIBLE : un fichier arrivé complète les cellules restées telles que la r
   assert.deepEqual(fillActions({ ...args, arrived: new Set([short(B)]) }), [['BulkUpdateRecord', 'Fiches', [10], { Image: [['L', 11, 12]] }]]);
   assert.deepEqual(fillActions({ ...args, arrived: new Set() }), []);
   assert.deepEqual(fillActions({ ...args, copyCols: [], arrived: new Set([short(B)]) }), []);
+});
+
+// Échange : un fichier que le partenaire a envoyé (une version signée qu'il a envoyée le cite) ne lui est pas renvoyé.
+test('Échange : un fichier cité par le partenaire ne lui repart pas, et il est noté l\'avoir', () => {
+  const needed = new Map([[A, info(1)], [B, info(2)]]);
+  // Deux documents : le partenaire (h1) a envoyé A ; B est à moi.
+  let tracking = holdFiles(readTracking(undefined), ['h1'], new Set([short(A)]));
+  assert.deepEqual(trackingNote(tracking), { f: '', h: [], p: {}, o: { h1: short(A) } });
+  let { sends } = fileSends(tracking, needed, ['h1'], ['h1']);
+  assert.deepEqual(sends, [{ sha: A, hooks: [], held: ['h1'] }, { sha: B, hooks: ['h1'] }]);
+  for (const s of sends) tracking = recordSent(fileSends(tracking, needed, ['h1'], ['h1']).tracking, s.sha, [...s.hooks, ...(s.held || [])]);
+  assert.deepEqual(trackingNote(tracking), { f: [A, B].map(short).sort().join(' '), h: ['h1'], p: {}, o: { h1: short(A) } });
+  assert.deepEqual(fileSends(tracking, needed, ['h1'], ['h1']).sends, [], 'noté reçu : rien ne repart');
+  // Plusieurs participants : le fichier de h1 va à h2 et h3 seulement ; h2 en pause le reçoit à sa reprise.
+  tracking = holdFiles(readTracking(undefined), ['h1'], new Set([short(A)]));
+  ({ tracking, sends } = fileSends(tracking, new Map([[A, info(1)]]), ['h1', 'h2', 'h3'], ['h1', 'h3']));
+  assert.deepEqual(sends, [{ sha: A, hooks: ['h3'], held: ['h1'] }]);
+  tracking = recordSent(tracking, A, ['h3', 'h1']);
+  ({ sends } = fileSends(tracking, new Map([[A, info(1)]]), ['h1', 'h2', 'h3'], ['h1', 'h2', 'h3']));
+  assert.deepEqual(sends, [{ sha: A, hooks: ['h2'] }]);
+  // Webhook disparu : sa liste est oubliée ; « Tout renvoyer » garde ce que le partenaire a.
+  assert.deepEqual(trackingNote(fileSends(tracking, new Map([[A, info(1)]]), ['h3'], ['h3']).tracking).o, undefined);
+  const again = fileSends(forgetHooks(holdFiles(readTracking(undefined), ['h1'], new Set([short(A)]))), needed, ['h1'], ['h1']);
+  assert.deepEqual(again.sends.map(s => [s.sha, s.hooks, s.held || []]), [[A, [], ['h1']], [B, ['h1'], []]]);
+});
+
+test('Échange : empreintes notées bornées, ordre d\'arrivée gardé, écriture qui garde ce qui a été noté entre-temps', () => {
+  const shorts = Array.from({ length: HELD_MAX + 5 }, (_, i) => i.toString(16).padStart(16, '0'));
+  const held = holdFiles(readTracking(undefined), ['h1'], new Set(shorts));
+  assert.equal(held.o.get('h1').size, HELD_MAX);
+  assert.ok(!held.o.get('h1').has(shorts[0]) && held.o.get('h1').has(shorts[HELD_MAX + 4]), 'les plus anciennes partent');
+  assert.equal(holdFiles(readTracking(undefined), ['h1'], new Set(['pas-une-empreinte', 'zz'])).o.get('h1').size, 0, 'seules des empreintes abrégées');
+  assert.equal(trackingNote(holdFiles(readTracking(undefined), ['h1'], new Set(['zz']))).o, undefined, 'rien de noté : pas de champ');
+  // Un suivi planifié avant que la CIBLE ait noté un fichier, écrit après : le fichier noté reste.
+  const planned = recordSent(fileSends(readTracking(undefined), new Map([[A, info(1)]]), ['h1'], ['h1']).tracking, A, ['h1']);
+  const latest = holdFiles(planned, ['h1'], new Set([short(B)]));
+  assert.deepEqual(trackingNote(mergeHeld(planned, latest)).o, { h1: short(B) });
+  assert.deepEqual(trackingNote(mergeHeld(latest, planned)).o, { h1: short(B) });
+  assert.equal(trackingNote(mergeHeld(planned, holdFiles(planned, ['gone'], new Set([short(B)])))).o, undefined, 'un webhook qui n\'est plus là n\'est pas repris');
+  // Les anciennes notes (sans `o`) se lisent comme avant.
+  assert.deepEqual(trackingNote(readTracking({ f: short(A), h: ['h1'], p: {} })), { f: short(A), h: ['h1'], p: {} });
+});
+
+test('Échange : fichiers que chaque version attend', () => {
+  const cell = ['L', [`${A}.pdf`, 'a.pdf', 10], [`${B}.png`, 'b.png', 20]];
+  const rows = [{ id: 1, Photo: cell }, { id: 2, Photo: ['L', [`${A}.pdf`, 'a.pdf', 10]] }, { id: 3, Photo: null }, { id: 4, Nom: 'sans colonne' }, { id: 5, Photo: ['L', [`${C}.zip`, 'gros.zip', FILE_MAX + 1]] }];
+  const waiting = waitingVersions(rows, ['Photo'], new Map([[A, 11]]));
+  assert.deepEqual([...waiting], [[1, [{ sha: B, name: 'b.png', size: 20 }]], [5, [{ sha: C, name: 'gros.zip', size: FILE_MAX + 1 }]]]);
+  assert.equal(waitingVersions(rows, ['Photo'], new Map([[A, 11], [B, 12], [C, 13]])).size, 0);
+  assert.equal(waitingVersions(rows, [], new Map()).size, 0);
 });

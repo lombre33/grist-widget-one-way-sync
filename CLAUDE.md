@@ -173,8 +173,8 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
   10 min. La recopie ne met dans une cellule que les fichiers présents (`resolveRows`), note
   `waiting` (empreintes abrégées) dans la note du journal, et complète une cellule quand un fichier
   arrive si elle vaut encore la résolution partielle (`fillActions`). Carte : « N fichiers
-  attendus », fichiers de plus de 25 Mo, rien par lien public. En Échange, les colonnes Pièces
-  jointes ne sont pas proposées. Une CIBLE d'avant la 0.7 refuse un lot qui porte des fichiers.
+  attendus », fichiers de plus de 25 Mo, rien par lien public. Depuis la 0.14, en Échange, les
+  fichiers circulent dans les deux sens (voir l'état V0.14.0). Une CIBLE d'avant la 0.7 refuse un lot qui porte des fichiers.
   Testé de bout en bout dans `filesSteps` (`ONLY_FILES=1`). Depuis la 0.8, un fichier n'est déposé
   que si une version du journal ou une cellule en attente (`waiting`) le cite (`citedFiles`) : les
   morceaux ne sont pas signés ; un fichier non cité attend un jour (`old`), puis est effacé. Depuis
@@ -352,7 +352,39 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.13.5 (9 novembre 2026)
+## État : V0.14.0 (9 novembre 2026)
+
+V0.14.0 (Antoine, 9 novembre : « prévoir une sync dans les deux sens pour les pj également » ; proposition
+`/mnt/project-files/notes/pieces-jointes-deux-sens.md`, carte de décision : « Complet, dans la Bêta »). Moteur **2.3.0**
+(mineure, dit dans `GFS-ETAT.md`). Seul l'Échange a un flux CIBLE vers SOURCE : le sens unique ne change pas.
+- **Avant** : `exchangeTables` retirait toute colonne Pièces jointes de l'export de retour ; pire, la modification suivante de
+  A sur une ligne remplaçait la cellule de B (`['L',5,6]` devenait `['L',5]`). **Maintenant** (`exchangeTables` garde les
+  colonnes cochées par A) un fichier ajouté, remplacé ou retiré chez l'un arrive chez l'autre, par le mécanisme du sens
+  unique (liste dans le lot, morceaux postés par la page d'un propriétaire, dépôt après contrôle taille et SHA-1).
+- **Pas d'écho** : champ `o` du suivi `fichiers` de la note SOURCE (`{ webhook: "empreinte16 …" }`, `HELD_MAX` = 1000 par
+  webhook) = fichiers que le partenaire a déjà, remplis (`noteHeldFiles`, `source/files.js`, appelé par `consolidate` avant
+  `receiveFiles`) à partir des fichiers cités par les versions **déjà signées et scellées** du journal. `fileSends` n'envoie pas à
+  un webhook ce qu'il détient (`holdFiles`, `mergeHeld`) ; les marques sont écrites **avant** le dépôt et `mergeHeld` garde `o`
+  à chaque écriture du suivi (course entre deux onglets). Un participant ne peut que se priver lui-même d'un fichier.
+- **Une ligne attend ses fichiers (Échange seulement)** : `waitingVersions` (`logic/files.js`) donne à `planConsolidation` les
+  versions dont un fichier cité manque ; elles ne sont pas recopiées (`plan.waiting`, ni écriture, ni refus, ni « À valider »,
+  restent dans le journal, gardées par la purge) et s'appliquent à l'arrivée du fichier ; une suppression n'attend rien ; une
+  version plus récente de la ligne remplace celle qui attend. `fillActions` (complément de cellule) est sauté en Échange : une
+  cellule incomplète repartirait comme la plus récente. Carte : « N lignes attendent leurs fichiers » (`recv.files.held`,
+  `filesSummary` rend `held`, état « incomplet »), `recv.files.bigHeld` pour un fichier de plus de 25 Mo (la ligne ne se
+  recopie jamais tant qu'il est dans la cellule).
+- **Échange à plusieurs** : deux sauts (participant vers A, puis A vers les autres), sans copie pour l'émetteur. Chaque saut
+  demande la page ouverte d'un propriétaire du document qui envoie. Aucune table technique ni colonne de plus.
+- **Sécurité** : rien de nouveau sur le fil. Ce qui change : un participant peut faire déposer des fichiers (25 Mo au plus) dans
+  le document de A, dans les colonnes cochées seulement, et A les relaie ; dit dans `SECURITY.md` (« Pièces jointes », « Risques
+  acceptés »). `CODE_FORMAT` inchangé parce que la Bêta n'est pas publiée : les deux documents d'un Échange doivent avoir la
+  0.14 (un participant plus ancien écrirait des cellules incomplètes) ; après la publication il faudrait relever `CODE_FORMAT`.
+- Testé : unit (`files`, `consolidation`, `exports`) ; e2e `exchangeFilesSteps` (`ONLY_EXCHANGE_FILES=1`, dans le parcours
+  complet après `filesSteps`) : fichiers de A chez B sans renvoi, ligne de B qui attend son fichier chez A puis recopiée avec lui,
+  modification de A qui ne défait pas la cellule de B, fichier retiré, puis C qui rejoint (fichier de B chez C par A, sans copie
+  pour B).
+
+## État précédent : V0.13.5 (9 novembre 2026)
 
 V0.13.5 (Antoine, 9 novembre : « côté cible on ne voit pas le nom du doc d'où proviennent les données […] et côté cible et
 source rajouter le lien du document, pas de lien public, le lien fonctionnel […] dans un nouvel onglet au clic » ; carte de

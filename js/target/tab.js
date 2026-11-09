@@ -138,13 +138,13 @@ function cardStatus(group) {
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
   if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
-  const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && r.files.waiting);
+  const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && (r.files.waiting || r.files.held));
   return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }
 
 // Pièces jointes d'une table reçue : fichiers attendus (ils partent quand un propriétaire de la
-// SOURCE ouvre la page du widget), trop gros pour partir, refusés par Grist ici ; aucun par lien
-// public.
+// SOURCE ouvre la page du widget), lignes d'un Échange qui les attendent avant d'être recopiées, trop
+// gros pour partir, refusés par Grist ici ; aucun par lien public.
 const MB = 1024 * 1024;
 const megabytes = bytes => (bytes / MB).toLocaleString(LANG, { maximumFractionDigits: 1 });
 function filesNotes(group, entry) {
@@ -153,8 +153,9 @@ function filesNotes(group, entry) {
   const named = list => list.map(f => t('recv.files.named', { name: f.name, size: megabytes(f.size) })).join(', ');
   return [
     files.public ? message('info', t('recv.files.public', { dest: entry.dest })) : null,
-    files.waiting ? message('info', t('recv.files.waiting', { n: files.waiting, dest: entry.dest })) : null,
-    files.big.length ? message('warn', t('recv.files.big', { files: named(files.big), max: FILE_MAX / MB })) : null,
+    files.held ? message('info', t('recv.files.held', { n: files.held, dest: entry.dest }))
+      : files.waiting ? message('info', t('recv.files.waiting', { n: files.waiting, dest: entry.dest })) : null,
+    files.big.length ? message('warn', t(files.held ? 'recv.files.bigHeld' : 'recv.files.big', { files: named(files.big), max: FILE_MAX / MB })) : null,
   ];
 }
 

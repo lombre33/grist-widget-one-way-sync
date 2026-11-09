@@ -456,3 +456,60 @@ test('colonnes reçues : une colonne nouvelle prend un nom libre et est notée ;
   const swap = receivedColumns(entry, described([{ id: 'Nom', type: 'Text' }, { id: 'Secret', type: 'Text' }]), schema, new Set(['Nom']), 100);
   assert.deepEqual(swap.sent.map(c => c.id), ['Nom'], 'Échange : une colonne que cet export n\'envoie pas est écartée');
 });
+
+// Échange et pièces jointes : une version n'est écrite qu'avec tous ses fichiers (sinon la cellule incomplète
+// repartirait vers les autres participants comme la version la plus récente de la ligne).
+test('Échange : une version qui attend ses fichiers n\'est ni écrite ni marquée, elle l\'est à leur arrivée', () => {
+  const base = {
+    journalRows: [j(1, 'a', 20, { Nom: 'n2', Piece: ['L', 5] })], destRows: [{ id: 11, id_sync: 'a', MajLe: 10, Nom: 'n', Piece: ['L', 5, 6] }],
+    copyCols: [['Nom', 'Nom'], ['Piece', 'Piece']], destTable: 'D', journalTable: 'J', exchange: true,
+  };
+  const files = [{ sha: 'b'.repeat(40), name: 'b.png', size: 20 }];
+  const held = planConsolidation({ ...base, waiting: new Map([[1, files]]) });
+  assert.deepEqual(held.actions, []);
+  assert.deepEqual(held.stats, { added: 0, updated: 0, removed: 0 });
+  assert.deepEqual(held.waiting, [{ id: 1, key: 'a', files, n: 1 }]);
+  const arrived = planConsolidation({ ...base, waiting: new Map() });
+  assert.equal(arrived.actions.length > 0, true, 'les fichiers sont là : la version est écrite');
+  assert.deepEqual(arrived.stats, { added: 0, updated: 1, removed: 0 });
+  assert.deepEqual(arrived.waiting, []);
+  // Un ajout attend aussi : la ligne n'existe pas ici tant que ses fichiers ne sont pas arrivés.
+  const added = planConsolidation({ ...base, destRows: [], waiting: new Map([[1, files]]) });
+  assert.deepEqual([added.actions, added.stats, added.waiting.map(w => w.key)], [[], { added: 0, updated: 0, removed: 0 }, ['a']]);
+  // En sens unique, la recopie ne s'arrête pas : la cellule est complétée à l'arrivée (fillActions).
+  assert.equal(planConsolidation({ ...base, exchange: false, waiting: new Map([[1, files]]) }).stats.updated, 1);
+});
+
+test('Échange : une suppression, une version sans effet et un refus n\'attendent aucun fichier', () => {
+  const files = [{ sha: 'b'.repeat(40), name: 'b.png', size: 20 }];
+  const waiting = new Map([[1, files]]);
+  const run = (version, extra = {}) => planConsolidation({
+    journalRows: [j(1, 'a', version.at, version.row)], destRows: [{ id: 11, id_sync: 'a', MajLe: 10, Nom: 'n', Piece: ['L', 5] }],
+    copyCols: [['Nom', 'Nom'], ['Piece', 'Piece']], destTable: 'D', journalTable: 'J', exchange: true, waiting, ...extra,
+  });
+  const deleted = run({ at: 20, row: { Supprime: true, Piece: ['L', 5] } });
+  assert.deepEqual(deleted.waiting, []);
+  assert.equal(deleted.stats.removed, 1, 'la ligne est effacée sans attendre');
+  const older = run({ at: 5, row: { Piece: ['L', 5] } });
+  assert.deepEqual([older.waiting, older.actions.length], [[], 1], 'plus ancienne que la ligne d\'ici : marquée sans effet');
+  const rules = { ajout: 'accepter', modif: 'refuser', suppression: 'accepter', refus: 'signaler' };
+  const refused = run({ at: 20, row: { Nom: 'autre', Piece: ['L', 5] } }, { rules });
+  assert.deepEqual([refused.waiting, refused.pending], [[], []], 'refusée : rien à attendre');
+  assert.equal(refused.actions.some(a => a[0] === 'BulkUpdateRecord' && a[1] === 'J' && a[3].Sync_Etat?.includes('refus')), true);
+});
+
+test('Échange : une version à valider qui attend ses fichiers n\'est montrée à valider qu\'une fois ses fichiers là', () => {
+  const files = [{ sha: 'b'.repeat(40), name: 'b.png', size: 20 }];
+  const args = {
+    journalRows: [j(1, 'a', 20, { Nom: 'n2', Piece: ['L', 5] })], destRows: [{ id: 11, id_sync: 'a', MajLe: 10, Nom: 'n', Piece: ['L', 5] }],
+    copyCols: [['Nom', 'Nom'], ['Piece', 'Piece']], destTable: 'D', journalTable: 'J', exchange: true, hub: true,
+    rules: { ajout: 'accepter', modif: 'valider', suppression: 'accepter', refus: 'corriger' },
+  };
+  const early = planConsolidation({ ...args, waiting: new Map([[1, files]]) });
+  assert.deepEqual([early.pending.length, early.waiting.length, early.actions], [0, 1, []]);
+  const later = planConsolidation(args);
+  assert.deepEqual([later.pending.map(p => p.id), later.waiting.length, later.actions], [[1], 0, []]);
+  // Décision d'accepter avant l'arrivée des fichiers : la version attend encore, elle sera écrite ensuite.
+  const accepted = planConsolidation({ ...args, decisions: new Map([[1, 'accepter']]), waiting: new Map([[1, files]]) });
+  assert.deepEqual([accepted.pending.length, accepted.waiting.length], [0, 1]);
+});

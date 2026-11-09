@@ -119,8 +119,9 @@ test('Échange : colonnes renvoyées sous leur nom d\'origine, correspondance d�
   const entries = [{ table: 'Contacts', dest: 'Fiches', columns: [{ id: 'Nom' }, { id: 'Ville' }], map: { Ville: 'Commune' } }, { table: 'Vide', dest: 'Rien', columns: [{ id: 'X' }] }];
   entries[0].columns.push({ id: 'Photo' });
   const columnsOf = dest => (dest === 'Fiches' ? [{ id: 'Nom', type: 'Text' }, { id: 'Commune', type: 'Text' }, { id: 'Note', type: 'Text' }, { id: 'Photo', type: 'Attachments' }] : []);
-  assert.deepEqual(exchangeTables(entries, columnsOf), [{ table: 'Fiches', filter: null, columns: [{ id: 'Nom', type: 'Text', as: 'Nom' }, { id: 'Commune', type: 'Text', as: 'Ville' }] }],
-    'seules les colonnes reçues repartent (pas les pièces jointes) ; une destination sans colonne ne part pas');
+  assert.deepEqual(exchangeTables(entries, columnsOf), [{ table: 'Fiches', filter: null, columns: [
+    { id: 'Nom', type: 'Text', as: 'Nom' }, { id: 'Commune', type: 'Text', as: 'Ville' }, { id: 'Photo', type: 'Attachments', as: 'Photo' }] }],
+    'seules les colonnes reçues repartent, pièces jointes comprises (leurs fichiers repartent à part) ; une destination sans colonne ne part pas');
   const allowed = new Set(['Ville', 'Nom', 'Lieu']);
   assert.deepEqual(exchangeColumns([{ id: 'Commune', as: 'Ville' }, { id: 'Nom' }], allowed),
     { sent: [{ id: 'Commune', as: 'Ville' }, { id: 'Nom' }], map: { Commune: 'Ville', Nom: 'Nom' } });

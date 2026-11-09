@@ -42,20 +42,63 @@ export function neededFiles(rows) {
 }
 
 // Ce que les destinataires d'un export ont reçu (note de Synchro, `fichiers` : { export: { f, h,
-// p } }) : chaque webhook de `h` a tous les fichiers de `f` ; `p` : ce qu'a reçu un webhook qui n'en
-// est pas encore là (nouveau destinataire, ou en pause quand un fichier est arrivé). Des empreintes
-// abrégées, séparées par une espace : la note grandit avec le nombre de fichiers, pas avec celui
-// des destinataires.
+// p, o } }) : chaque webhook de `h` a tous les fichiers de `f` ; `p` : ce qu'a reçu un webhook qui
+// n'en est pas encore là (nouveau destinataire, ou en pause quand un fichier est arrivé) ; `o` (Échange
+// seulement) : ce que le partenaire d'un webhook a déjà, parce qu'une version signée qu'il a envoyée
+// cite ces fichiers (HELD_MAX au plus par webhook, les plus anciens oubliés d'abord) : ils ne lui sont
+// pas renvoyés. Des empreintes abrégées, séparées par une espace : la note grandit avec le nombre de
+// fichiers, pas avec celui des destinataires.
+export const HELD_MAX = 1000;
 export function readTracking(noted) {
   const words = s => new Set(typeof s === 'string' ? s.split(' ').filter(w => /^[0-9a-f]{16}$/.test(w)) : []);
   const x = noted && typeof noted === 'object' ? noted : {};
-  const p = x.p && typeof x.p === 'object' && !Array.isArray(x.p) ? Object.entries(x.p) : [];
-  return { f: words(x.f), h: new Set(Array.isArray(x.h) ? x.h.filter(id => typeof id === 'string') : []), p: new Map(p.map(([id, s]) => [id, words(s)])) };
+  const map = v => (v && typeof v === 'object' && !Array.isArray(v) ? Object.entries(v) : []);
+  return {
+    f: words(x.f), h: new Set(Array.isArray(x.h) ? x.h.filter(id => typeof id === 'string') : []),
+    p: new Map(map(x.p).map(([id, s]) => [id, words(s)])), o: new Map(map(x.o).map(([id, s]) => [id, words(s)])),
+  };
 }
 
-export const trackingNote = ({ f, h, p }) => ({
-  f: [...f].sort().join(' '), h: [...h].sort(), p: Object.fromEntries([...p].map(([id, s]) => [id, [...s].sort().join(' ')])),
+const copyTracking = tracking => ({
+  f: new Set(tracking.f), h: new Set(tracking.h), p: new Map([...tracking.p].map(([id, s]) => [id, new Set(s)])),
+  o: new Map([...(tracking.o || [])].map(([id, s]) => [id, new Set(s)])),
 });
+
+export const trackingNote = ({ f, h, p, o = new Map() }) => {
+  const held = Object.fromEntries([...o].filter(([, s]) => s.size).map(([id, s]) => [id, [...s].join(' ')]));
+  return {
+    f: [...f].sort().join(' '), h: [...h].sort(), p: Object.fromEntries([...p].map(([id, s]) => [id, [...s].sort().join(' ')])),
+    ...(Object.keys(held).length ? { o: held } : {}),
+  };
+};
+
+// Échange : les fichiers que les versions signées d'un partenaire citent (`cited`, empreintes
+// abrégées, voir citedFiles) sont chez lui : ils sont notés pour ses webhooks `hookIds`. L'ordre
+// d'arrivée est gardé, le plus ancien part quand la borne est dépassée.
+export function holdFiles(tracking, hookIds, cited) {
+  const valid = [...cited].filter(k => /^[0-9a-f]{16}$/.test(k));
+  const next = copyTracking(tracking);
+  for (const id of hookIds) {
+    const set = next.o.get(id) || new Set();
+    for (const k of valid) set.add(k);
+    for (const k of [...set].slice(0, Math.max(0, set.size - HELD_MAX))) set.delete(k);
+    next.o.set(id, set);
+  }
+  return next;
+}
+
+// Suivi `tracking` (planifié ou mis à jour par un envoi, parfois bien avant d'être écrit) avec ce que
+// `o` du suivi plus récent `latest` y a ajouté entre-temps (voir holdFiles) : une page note ce que le
+// partenaire a déjà pendant qu'une autre envoie, et l'écriture de l'une ne doit pas défaire l'autre.
+export function mergeHeld(tracking, latest) {
+  const next = copyTracking(tracking);
+  for (const id of new Set([...tracking.h, ...tracking.p.keys()])) {
+    const set = new Set([...(latest.o?.get(id) || []), ...(next.o.get(id) || [])]);
+    for (const k of [...set].slice(0, Math.max(0, set.size - HELD_MAX))) set.delete(k);
+    if (set.size) next.o.set(id, set);
+  }
+  return next;
+}
 
 // Un webhook de `p` qui a tous les fichiers de `f` passe dans `h`.
 function promote({ f, h, p }) {
@@ -69,9 +112,11 @@ function promote({ f, h, p }) {
 
 // Envois de fichiers dus pour un export : `needed` (neededFiles), `hooks` (ses webhooks), `active`
 // (ceux qui reçoivent : ni en pause, ni en échec). Rend le suivi nettoyé (fichiers plus utiles,
-// webhooks disparus oubliés) et les envois [{ sha, hooks }] : un fichier nouveau va aux
+// webhooks disparus oubliés) et les envois [{ sha, hooks, held? }] : un fichier nouveau va aux
 // destinataires à jour, et chacun des autres reçoit ce qui lui manque ; un fichier sans
-// destinataire à servir est seulement noté (`hooks` vide). Un fichier trop gros ne part pas.
+// destinataire à servir est seulement noté (`hooks` vide). `held` : les webhooks qui l'auraient reçu
+// mais ont déjà ce fichier (Échange, voir holdFiles) : rien ne leur part, ils sont notés comme l'ayant.
+// Un fichier trop gros ne part pas.
 export function fileSends(tracking, needed, hooks, active) {
   const live = new Set(hooks);
   const sendable = [...needed].filter(([, file]) => file.size <= FILE_MAX).map(([sha]) => sha);
@@ -80,14 +125,18 @@ export function fileSends(tracking, needed, hooks, active) {
   const next = {
     f: kept(tracking.f), h: new Set([...tracking.h].filter(id => live.has(id))),
     p: new Map([...tracking.p].filter(([id]) => live.has(id) && !tracking.h.has(id)).map(([id, s]) => [id, kept(s)])),
+    o: new Map([...(tracking.o || [])].filter(([id]) => live.has(id)).map(([id, s]) => [id, new Set(s)])),
   };
   for (const id of hooks) if (!next.h.has(id) && !next.p.has(id)) next.p.set(id, new Set());
   promote(next);
   const served = [...next.h].filter(id => active.includes(id));
   const late = [...next.p].filter(([id]) => active.includes(id));
-  const sends = sendable.map(sha => ({
-    sha, hooks: [...(next.f.has(short(sha)) ? [] : served), ...late.filter(([, have]) => !have.has(short(sha))).map(([id]) => id)],
-  })).filter(s => s.hooks.length || !next.f.has(short(s.sha)));
+  const holds = (id, sha) => Boolean(next.o.get(id)?.has(short(sha)));
+  const sends = sendable.map((sha) => {
+    const due = [...(next.f.has(short(sha)) ? [] : served), ...late.filter(([, have]) => !have.has(short(sha))).map(([id]) => id)];
+    const held = due.filter(id => holds(id, sha));
+    return { sha, hooks: due.filter(id => !holds(id, sha)), ...(held.length ? { held } : {}) };
+  }).filter(s => s.hooks.length || s.held || !next.f.has(short(s.sha)));
   return { tracking: next, sends };
 }
 
@@ -95,7 +144,7 @@ export function fileSends(tracking, needed, hooks, active) {
 // webhook à jour qui ne l'a pas reçu (en pause, en échec) passe dans `p`, avec tout ce qu'il avait.
 export function recordSent(tracking, sha, hookIds) {
   const k = short(sha);
-  const next = { f: new Set(tracking.f), h: new Set(tracking.h), p: new Map([...tracking.p].map(([id, s]) => [id, new Set(s)])) };
+  const next = copyTracking(tracking);
   for (const id of hookIds) if (!next.h.has(id)) next.p.set(id, new Set([...(next.p.get(id) || []), k]));
   if (!next.f.has(k)) {
     for (const id of [...next.h]) {
@@ -109,8 +158,9 @@ export function recordSent(tracking, sha, hookIds) {
   return next;
 }
 
-// « Tout renvoyer » : chaque destinataire reçoit de nouveau tous les fichiers.
-export const forgetHooks = tracking => ({ f: new Set(tracking.f), h: new Set(), p: new Map() });
+// « Tout renvoyer » : chaque destinataire reçoit de nouveau tous les fichiers, sauf ceux que son
+// partenaire a lui-même envoyés (`o`).
+export const forgetHooks = tracking => ({ ...copyTracking(tracking), h: new Set(), p: new Map() });
 
 // Contenu en base64, par morceaux de PART_BYTES octets (un fichier vide : un morceau vide).
 export function encodeParts(bytes) {
@@ -249,6 +299,22 @@ export function resolveRows(rows, cols, present) {
     const here = cols.filter(c => Object.hasOwn(row, c));
     return here.length ? { ...row, ...Object.fromEntries(here.map(c => [c, resolveCell(row[c], present)])) } : row;
   });
+}
+
+// Échange : fichiers que chaque version reçue cite et que le document n'a pas encore (`rows` : lignes
+// du journal d'une table, `cols` : ses colonnes Pièces jointes, `present` : voir attachments). Une
+// version qui en attend n'est pas recopiée (voir planConsolidation) : une cellule recopiée sans tous
+// ses fichiers repartirait vers les autres participants comme la version la plus récente de la
+// ligne et leur ferait perdre des fichiers. Rend Map(numéro de la ligne du journal -> [{ sha, name,
+// size }]).
+export function waitingVersions(rows, cols, present) {
+  const waiting = new Map();
+  if (!cols.length) return waiting;
+  for (const row of rows) {
+    const missing = cols.flatMap(c => fileList(row[c])).filter(f => !present.has(f.sha));
+    if (missing.length) waiting.set(row.id, missing);
+  }
+  return waiting;
 }
 
 // Fichiers que la destination attend encore (`waiting` : empreintes) et ceux trop gros pour partir

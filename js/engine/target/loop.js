@@ -15,13 +15,14 @@ import {
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
 import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
-import { citedFiles, fillActions, resolveRows, short } from '../logic/files.js';
+import { citedFiles, fillActions, resolveRows, short, waitingVersions } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
 import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
+import { noteHeldFiles } from '../source/files.js';
 import { attachments, receiveFiles } from './files.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
@@ -313,28 +314,31 @@ async function copyTable(ctx, noted) {
   const tableRows = ctx.groups.get(renamed.table) || [];
   const { entry, copyCols, types, dropped, fileCols, links } = await prepareColumns(ctx, renamed, tableRows);
   const present = fileCols.length ? await ctx.files() : new Map();
+  // Échange : une version dont un fichier n'est pas encore arrivé attend (voir waitingVersions).
+  const waiting = ctx.exchange ? waitingVersions(tableRows, fileCols.map(([from]) => from), present) : new Map();
   const key = tableKey(ctx.journal, entry.table);
   const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest, present.size, links.map(s => [s.to, s.target])]);
   if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, wrote: false, ...lastRead.get(key) };
-  // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent
-  // ensuite complètent les cellules (fillActions).
   // Références conservées : la cellule porte le numéro de la ligne d'ici qui a la clé citée.
   const lookups = await linkLookups(links);
   const rows = resolveLinks(resolveRows(tableRows, fileCols.map(([from]) => from), present), links, lookups);
   const destRows = await fetchRows(entry.dest);
-  const plan = planTable(ctx, entry, { rows, destRows, copyCols });
+  const plan = planTable(ctx, entry, { rows, destRows, copyCols, waiting });
   const presentKeys = new Set([...present.keys()].map(short));
+  // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent ensuite
+  // complètent les cellules (fillActions). Pas en Échange : une version n'y est écrite qu'avec tous ses
+  // fichiers (voir `waiting`), une cellule complétée repartirait comme une modification d'ici.
   const fill = [
-    ...fillActions({
+    ...(ctx.exchange ? [] : fillActions({
       journalRows: tableRows, destRows, copyCols: fileCols, present, destTable: entry.dest, arrived: new Set((entry.waiting || []).filter(k => presentKeys.has(k))),
-    }),
+    })),
     ...fillLinks({ journalRows: tableRows, destRows, specs: links, lookups, destTable: entry.dest }),
   ];
   const destChanged = await writeTable(ctx, entry, plan, fill);
   if (plan.actions.length || destChanged) settled.delete(key);
   else settled.set(key, { signature, at: Date.now(), dest: entry.dest, deps: links.map(s => s.target) });
   const after = destChanged ? await fetchRows(entry.dest) : destRows;
-  const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public');
+  const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public', plan.waiting);
   lastRead.set(key, {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
@@ -357,10 +361,10 @@ function unchanged(key, signature) {
 
 // Recopie d'une table, planifiée (voir planConsolidation) : les suppressions de la SOURCE sont
 // appliquées telles quelles (la CIBLE est passive), sauf en archive (rien n'y est effacé).
-function planTable(ctx, entry, { rows, destRows, copyCols }) {
+function planTable(ctx, entry, { rows, destRows, copyCols, waiting }) {
   return planConsolidation({
     journalRows: rows, destRows, copyCols, destTable: entry.dest, journalTable: ctx.journal, matchCol: entry.match || '',
-    exchange: ctx.exchange, hub: ctx.hub, rules: ctx.rules, decisions: ctx.decisions,
+    exchange: ctx.exchange, hub: ctx.hub, rules: ctx.rules, decisions: ctx.decisions, waiting,
     deleteCol: ctx.schema.columns(entry.dest).some(c => c.colId === DELETE_COL),
     now: nowS(), archive: ctx.archive,
   });
@@ -521,6 +525,8 @@ async function consolidate(schema, { journal, note: noteBefore }, owner) {
   let present = null;
   const files = async () => (present ||= await attachments());
   const cited = citedFiles(unpacked.rows, note.tables.flatMap(tb => tb.waiting || []));
+  // Échange : ce que le partenaire cite, il l'a (voir noteHeldFiles).
+  await noteHeldFiles(journal, note, cited);
   const { rows, rejected } = await receiveFiles(journal, note.export, unpacked.rows, files, cited, !unpacked.left);
   if (rejected) {
     const suspect = nextSuspect(note.suspect, rejected, false, nowS());

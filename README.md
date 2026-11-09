@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.13.5 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.14.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -100,7 +100,8 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   ne part pas : chaque destinataire ne reçoit que les valeurs des lignes envoyées.
 - **Pièces jointes** : une colonne cochée arrive comme une vraie colonne Pièces jointes ; chaque
   fichier part une fois par destinataire, quand la page SOURCE est ouverte, et n'est déposé
-  qu'une fois.
+  qu'une fois. Dans un Échange, les fichiers vont dans les deux sens : une ligne attend les
+  fichiers de l'autre document avant d'être recopiée, et un fichier reçu n'est pas renvoyé.
 - **Liens entre tables** : une colonne Référence qui vise une autre table de l'export devient,
   chez le destinataire, une vraie Référence vers la table reçue (case « Garder les liens entre les
   tables », cochée d'emblée), qui affiche la même colonne.

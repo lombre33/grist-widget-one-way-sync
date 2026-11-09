@@ -325,8 +325,10 @@ export function exchangeTables(entries, columnsOf) {
   return entries.map((entry) => {
     const map = entry.map || {};
     const back = new Map([...new Set([...(entry.columns || []).map(c => c.id), ...Object.keys(map)])].map(id => [map[id] || id, id]));
-    // Les fichiers ne vont, pour l'instant, que de la SOURCE vers la CIBLE.
-    const columns = (columnsOf(entry.dest) || []).filter(c => !isFileColumn(c) && back.has(c.id)).map(c => ({ ...c, as: back.get(c.id) }));
+    // Les colonnes Pièces jointes reviennent aussi : leurs fichiers repartent par la ligne `fichiers` de
+    // cet export (voir files.js), vers le journal de retour de la SOURCE, qui n'écrit que les colonnes
+    // que son export envoie.
+    const columns = (columnsOf(entry.dest) || []).filter(c => back.has(c.id)).map(c => ({ ...c, as: back.get(c.id) }));
     return { table: entry.dest, columns, filter: null };
   }).filter(tb => tb.columns.length);
 }

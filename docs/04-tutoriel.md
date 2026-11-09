@@ -350,6 +350,12 @@ arrivée :
 ![Fichier attendu, signalé par la CIBLE](images/26-cible-fichiers-attendus.png)
 
 - Un fichier remplacé ou retiré dans la SOURCE l'est aussi dans la CIBLE, comme une valeur.
+- **Dans un Échange, les fichiers vont dans les deux sens** : un fichier ajouté, remplacé ou retiré chez l'un
+  arrive chez l'autre (seule une colonne que A a cochée revient). Un fichier reçu n'est pas renvoyé à celui qui
+  l'a envoyé. Une ligne qui porte un fichier pas encore arrivé **n'est pas recopiée** tant qu'il manque (la carte
+  dit « N lignes attendent leurs fichiers ») : sinon la cellule incomplète repartirait vers les autres
+  participants. Les fichiers avancent quand un propriétaire du document qui envoie a la page de son widget
+  ouverte ; à plusieurs, le fichier d'un participant passe par A avant d'arriver chez les autres.
 - Un fichier que la CIBLE a déjà (même contenu) n'est ni renvoyé ni déposé deux fois.
 - Un nouveau destinataire reçoit tous les fichiers ; **Tout renvoyer** les renvoie à chacun.
 - Un fichier de plus de **25 Mo** ne part pas : la CIBLE le nomme sur sa carte. Les envois de

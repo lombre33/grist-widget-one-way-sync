@@ -4,11 +4,11 @@
 // l'adresse de son webhook (le lien du formulaire de son journal). Ce qui est parti est noté dans
 // la note de Synchro (`fichiers`, voir readTracking) : aucune table de plus.
 import { EXPORT_COL, KIND, LOT_COL, SYNC_TABLE, TYPE_COL, groupBy, randomHex } from '../logic/common.js';
-import { hooksOf } from '../logic/exports.js';
+import { hooksOf, ownJournal } from '../logic/exports.js';
 import { setFiles } from '../logic/notes.js';
-import { encodeParts, fileSends, forgetHooks, neededFiles, partRow, readTracking, recordSent, trackingNote } from '../logic/files.js';
+import { encodeParts, fileSends, forgetHooks, holdFiles, mergeHeld, neededFiles, partRow, readTracking, recordSent, trackingNote } from '../logic/files.js';
 import { downloadAttachment, fetchRows, postToHook, readSchema, selectRows } from '../port.js';
-import { readSourceNote, updateSourceNote } from './synchro.js';
+import { exportHooks, readSourceNote, syncRows, updateSourceNote } from './synchro.js';
 
 const pending = new Map(); // export -> envois de fichiers restants, pour la carte
 // Webhook dont un envoi direct a échoué (lien coupé, instance qui refuse) : il attend FAIL_HOLD_MS
@@ -26,6 +26,13 @@ async function fileRows() {
 }
 
 const saveTracking = change => updateSourceNote(note => setFiles(note, change({ ...(note.fichiers || {}) })));
+// Suivi d'export écrit en gardant ce que la CIBLE y a noté entre-temps (voir mergeHeld) ; `entries` :
+// { export: suivi }. Avec `only`, les autres exports de la note restent tels quels ; sinon la note ne garde
+// que ceux-là.
+const saveTracked = (entries, only = true) => saveTracking(all => ({
+  ...(only ? all : {}),
+  ...Object.fromEntries(Object.entries(entries).map(([id, tracking]) => [id, trackingNote(mergeHeld(tracking, readTracking(all[id])))])),
+}));
 
 // Envois dus, par export qui envoie des fichiers : { exportId, needed, tracking, sends, hooks }.
 // Le suivi nettoyé (fichiers retirés, destinataires partis) est écrit s'il a changé. `ok(h)` : le
@@ -43,23 +50,23 @@ export async function planFiles(hooks, conditions, ok) {
   pending.clear();
   for (const p of plans) pending.set(p.exportId, p.sends.reduce((n, s) => n + s.hooks.length, 0));
   const next = Object.fromEntries(plans.map(p => [p.exportId, trackingNote(p.tracking)]));
-  if (JSON.stringify(next) !== JSON.stringify(noted)) await saveTracking(() => next);
+  if (JSON.stringify(next) !== JSON.stringify(noted)) await saveTracked(Object.fromEntries(plans.map(p => [p.exportId, p.tracking])), false);
   return plans.filter(p => p.sends.length);
 }
 
 // Envoie les fichiers dus, un à la fois : téléchargé une fois, puis, pour chaque destinataire, tous
-// ses morceaux à la suite ; il est noté reçu quand le dernier morceau est accepté. Les envois
-// suivent le budget des renvois (`spend`, qui attend s'il est dépassé ; `spend(0)` attend seulement)
-// : les modifications ordinaires, elles, partent toujours. Rend le nombre d'envois faits.
+// ses morceaux à la suite ; il est noté reçu quand le dernier morceau est accepté. Un webhook dont le
+// partenaire a déjà le fichier (`held`, Échange) n'en reçoit rien et est noté l'avoir. Les envois
+// suivent le budget des renvois (`spend`, qui attend s'il est dépassé ; `spend(0)` attend seulement) :
+// les modifications ordinaires, elles, partent toujours. Rend le nombre d'envois faits.
 export async function sendFiles(plans, spend) {
   let done = 0;
   for (const plan of plans) {
     let { tracking } = plan;
-    for (const { sha, hooks: ids } of plan.sends) {
+    for (const { sha, hooks: ids, held = [] } of plan.sends) {
       const sent = ids.length ? await sendFile(plan, sha, ids, spend) : [];
-      tracking = recordSent(tracking, sha, sent);
-      const noted = trackingNote(tracking);
-      await saveTracking(all => ({ ...all, [plan.exportId]: noted }));
+      tracking = recordSent(tracking, sha, [...sent, ...held]);
+      await saveTracked({ [plan.exportId]: tracking });
       pending.set(plan.exportId, Math.max(0, filesPending(plan.exportId) - ids.length));
       done += sent.length;
     }
@@ -95,6 +102,34 @@ async function sendFile(plan, sha, ids, spend) {
 export async function resendFiles(exportId) {
   const noted = readSourceNote(await readSchema()).fichiers || {};
   if (!noted[exportId]) return;
-  const tracking = trackingNote(forgetHooks(readTracking(noted[exportId])));
-  await saveTracking(all => ({ ...all, [exportId]: tracking }));
+  await saveTracked({ [exportId]: forgetHooks(readTracking(noted[exportId])) });
+}
+
+// Échange : les fichiers que les versions signées reçues dans le journal `journal` citent (`cited`,
+// empreintes abrégées, voir citedFiles) sont chez le partenaire qui les a envoyés : ils sont notés
+// pour son ou ses webhooks, et ne lui seront pas renvoyés (voir holdFiles). Fait avant le dépôt, pour
+// qu'aucun envoi ne parte entre l'arrivée d'un fichier et le remplissage de sa cellule. Rien n'est
+// écrit pour un export qui n'envoie pas de fichiers. Les empreintes déjà notées par cette page ne
+// sont pas relues. Un refus d'écrire la note (document en lecture seule, droits) est sans suite :
+// le prochain passage d'un propriétaire la complète.
+const noted = new Map(); // journal -> empreintes déjà notées par cette page
+
+export async function noteHeldFiles(journal, note, cited) {
+  const have = noted.get(journal) || new Set();
+  const fresh = [...cited].filter(k => !have.has(k));
+  if (!fresh.length || note.mode !== 'echange') return;
+  try {
+    if (!(await syncRows()).some(r => r[EXPORT_COL] === note.export && r[TYPE_COL] === KIND.files)) return;
+    const hooks = note.retour && note.hook ? [{ id: note.hook }] : (await exportHooks(note.export)).filter(h => !note.retour || ownJournal(h)({ note }));
+    if (!hooks.length) return;
+    const ids = hooks.map(h => h.id);
+    const held = tracking => trackingNote(holdFiles(tracking, ids, fresh));
+    const was = readTracking((readSourceNote(await readSchema()).fichiers || {})[note.export]);
+    if (JSON.stringify(held(was)) !== JSON.stringify(trackingNote(was))) {
+      await saveTracking(all => ({ ...all, [note.export]: held(readTracking(all[note.export])) }));
+    }
+    noted.set(journal, new Set([...have, ...fresh]));
+  } catch (e) {
+    // Sans suite : un envoi de trop au pire, jamais un fichier perdu.
+  }
 }

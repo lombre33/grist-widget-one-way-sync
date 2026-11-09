@@ -37,13 +37,14 @@ export function offersOf(groups, note) {
 }
 
 // Pièces jointes d'une table : pour la note, les fichiers attendus (`waiting`, empreintes abrégées) ;
-// pour la carte, leur nombre et les fichiers trop gros. Un lien public n'attend aucun fichier.
-export function filesSummary(tableRows, fileCols, present, isPublic) {
+// pour la carte, leur nombre, les fichiers trop gros et les versions d'un Échange qui les attendent avant
+// d'être recopiées (`held`, voir waitingVersions). Un lien public n'attend aucun fichier.
+export function filesSummary(tableRows, fileCols, present, isPublic, held = []) {
   if (!fileCols.length) return { waiting: undefined, card: undefined };
   const files = filesState(tableRows, fileCols.map(([from]) => from), present);
   return {
     waiting: files.waiting.length && !isPublic ? files.waiting.map(short).slice(0, WAITING_KEPT) : undefined,
-    card: { waiting: isPublic ? 0 : files.waiting.length, big: files.big.slice(0, BIG_KEPT), public: isPublic },
+    card: { waiting: isPublic ? 0 : files.waiting.length, big: files.big.slice(0, BIG_KEPT), public: isPublic, held: held.length },
   };
 }
 

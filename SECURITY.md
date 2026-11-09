@@ -123,8 +123,13 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   morceaux en attente (envois en cours, fichiers non cités) sont bornés à 50 Mo par journal : au-delà,
   les plus anciens sont effacés, et un envoi incomplet en trop compte parmi les « Arrivées
   suspectes ». Le nom d'un fichier perd aussi ses caractères invisibles et de sens d'écriture
-  (« facture\u202Efdp.exe »). Les fichiers ne vont jamais de la CIBLE vers la SOURCE, ni par lien
-  public.
+  (« facture\u202Efdp.exe »). Pas de fichiers par lien public. **Dans un Échange (0.14)**, les fichiers vont
+  aussi du participant vers A, par le même mécanisme et les mêmes contrôles : l'export de retour garde les colonnes
+  Pièces jointes que A a cochées, et rien d'autre ne passe. Un fichier n'est toujours déposé que si une version
+  **signée et scellée** le cite. Pour ne pas renvoyer à un partenaire ce qu'il vient d'envoyer, le widget note
+  (`o` dans le suivi `fichiers`) les empreintes citées par ses versions déjà vérifiées : un participant ne peut que
+  se priver lui-même d'un fichier. En Échange, une version dont un fichier n'est pas encore arrivé n'est pas
+  recopiée (elle attend, gardée par la purge), pour qu'une cellule incomplète ne reparte pas comme la plus récente.
 - **`Synchro` réservée aux propriétaires** : ses formules lisent les tables sans les règles
   d'accès, et elle porte les clés de signature des destinataires. À l'ouverture de l'onglet Envoyer par un
   propriétaire, le widget pose des règles de mémo « Synchro : réservée aux propriétaires », avant
@@ -388,7 +393,9 @@ Pour un usage en production :
   la clé d'une réception ne le peut plus sans la clé de signature de cette réception (signature et
   sceau), ni un autre destinataire du même export, sauf pour une réception branchée avant la 0.8. Couper le lien y met fin. Pour un export qui envoie des pièces jointes, la SOURCE dépose
   ses fichiers (25 Mo chacun au plus) : un fichier reçu s'ouvre avec la même prudence qu'une pièce
-  jointe de courriel. Qui n'a que la clé du formulaire peut faire attendre des morceaux de fichier
+  jointe de courriel ; dans un Échange, un participant peut aussi faire déposer des fichiers (25 Mo au plus chacun) dans le
+  document de A, dans les colonnes que A a cochées seulement, et A les relaie aux autres : c'est le pouvoir qu'il a déjà
+  sur les valeurs, avec le contenu en plus. Qui n'a que la clé du formulaire peut faire attendre des morceaux de fichier
   dans le journal (50 Mo au plus, un jour au plus), sans dépôt.
 - Les lignes dépliées présentes quand la CIBLE pose son sceau pour la première fois (ou pour une
   nouvelle clé) sont tenues pour bonnes. Un onglet resté ouvert sur une version d'avant la 0.9

@@ -396,13 +396,16 @@ export function refusedGaps({ journalRows, destRows, copyCols }) {
 // REFUSED et, à corriger, rend les écritures qui font repartir la ligne d'ici (`fix` : actions et
 // clés, voir fixActions), à appliquer à part.
 // `now` : heure du passage (secondes), pour dater un refus corrigé dont la version n'a pas d'heure.
+// Échange, pièces jointes (`waiting` : voir waitingVersions) : une version qui cite un fichier pas encore
+// arrivé n'est ni écrite ni marquée (`waiting` du résultat) ; elle l'est à son arrivée. Elle n'est
+// montrée à valider qu'une fois ses fichiers là.
 // Réception en archive (`archive`, jamais en Échange) : rien n'est effacé ici ; une ligne partie de
 // la SOURCE reste, cochée ARCHIVE_COL, et n'est plus suivie par les listes ; une nouvelle version
 // de sa clé la décoche. Décocher l'archive n'efface pas les lignes déjà archivées : elles restent
 // cochées (`archived` se lit toujours), seules les suivantes sont effacées.
 export function planConsolidation({
   journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
-  now = 0, archive = false,
+  now = 0, archive = false, waiting = new Map(),
 }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
@@ -412,8 +415,8 @@ export function planConsolidation({
   const followed = archived.size ? new Map([...dest.byKey].filter(([key]) => !archived.has(key))) : dest.byKey;
   const { gone, listGone, leftGone } = exchange ? { gone: new Set(), listGone: [], leftGone: [] } : droppedKeys(pending, latest, followed, marks);
   if (exchange) pending.forEach(({ row }) => marks.set(row.id, ''));
-  const ctx = { ...consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest), archived };
-  const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], stats: { added: 0, updated: 0, removed: 0 } };
+  const ctx = { ...consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest), archived, waiting: exchange ? waiting : new Map() };
+  const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], waiting: [], stats: { added: 0, updated: 0, removed: 0 } };
   planVersions(ctx, plan, latest, decisions);
   const { removed, numbers } = planRemovals({ plan, dest, destRows, archived });
   plan.stats.removed += removed.length;
@@ -425,6 +428,7 @@ export function planConsolidation({
     ],
     stats: plan.stats, gone,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
+    waiting: plan.waiting.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol, now), keys: plan.fixes.map(f => f.key) },
   };
 }
@@ -440,18 +444,23 @@ function consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, 
 }
 
 // Effet de la dernière version de chaque clé pas encore recopiée, noté dans `plan` : écrit,
-// refusé, ou en attente d'une décision (règles d'un Échange, `decisions` d'abord).
+// refusé, en attente de ses fichiers (Échange, voir waitingVersions) ou d'une décision (règles d'un
+// Échange, `decisions` d'abord). Une version qui attend ses fichiers reste dans le journal, sans
+// marque ; une suppression, une version sans effet et une version refusée n'en attendent aucun.
 const STATS = { ajout: 'added', modif: 'updated' };
+const WRITES = new Set(['ajout', 'modif']);
 function planVersions(ctx, plan, latest, decisions) {
   for (const [key, version] of latest) {
     if (isTrue(version.row[APPLIED_COL])) continue;
     const state = versionEffect(ctx, key, version, plan.gone);
     const rule = ctx.rules && STATES.includes(state) ? decisions.get(version.id) || ctx.rules[state] : RULES[0];
-    if (rule === 'valider') {
-      plan.pending.push(reviewItem(ctx, key, version, state));
-    } else if (rule === 'refuser') {
+    if (rule === 'refuser') {
       refuseEffect(ctx, plan, key, version, state);
       plan.marks.set(version.id, REFUSED);
+    } else if (ctx.waiting.has(version.id) && WRITES.has(state)) {
+      plan.waiting.push({ id: version.id, key, files: ctx.waiting.get(version.id) });
+    } else if (rule === 'valider') {
+      plan.pending.push(reviewItem(ctx, key, version, state));
     } else {
       const written = writeEffect(ctx, plan, key, version, state);
       plan.marks.set(version.id, written);
@@ -469,7 +478,7 @@ function planVersions(ctx, plan, latest, decisions) {
 // l'archive garde les lignes, par choix de la CIBLE).
 function planRemovals({ plan, dest, destRows, archived }) {
   const removed = [...plan.gone].filter(key => dest.byKey.has(key) && !archived.has(key));
-  const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
+  const numbers = removed.length || plan.pending.length || plan.waiting.length ? rowNumbers(destRows) : new Map();
   return { removed, numbers };
 }
 

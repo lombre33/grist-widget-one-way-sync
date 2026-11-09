@@ -328,12 +328,12 @@
       "fr": [
         "Une colonne Pièces jointes part si on la coche dans l’export. La CIBLE la reçoit comme une vraie colonne Pièces jointes : les fichiers s’ouvrent, se téléchargent et se prévisualisent comme les siens.",
         "La liste des fichiers part avec la ligne, tout de suite ; leur contenu part quand un propriétaire de la SOURCE a la page du widget ouverte (même repliée), une fois par destinataire, en morceaux. En attendant, la carte de la CIBLE dit combien de fichiers sont attendus, et la cellule se remplit dès leur arrivée. Un fichier que la CIBLE a déjà n’est pas déposé deux fois.",
-        "Un fichier de plus de 25 Mo ne part pas : la CIBLE le signale. Les fichiers ne passent pas par le lien public, et ne vont que de la SOURCE vers la CIBLE dans un Échange."
+        "Un fichier de plus de 25 Mo ne part pas : la CIBLE le signale. Les fichiers ne passent pas par le lien public. Dans un Échange, ils vont dans les deux sens : une ligne attend les fichiers de l’autre document avant d’être recopiée, et un fichier reçu n’est pas renvoyé."
       ],
       "en": [
         "An Attachments column is sent if you tick it in the export. The TARGET receives it as a real Attachments column: files open, download and preview like its own.",
         "The list of files leaves with the row, right away; their content leaves while an owner of the SOURCE has the widget page open (even collapsed), once per recipient, in parts. Meanwhile, the TARGET card says how many files are expected, and the cell fills as soon as they arrive. A file the TARGET already has is not stored twice.",
-        "A file over 25 MB is not sent: the TARGET says so. Files do not travel through the public link, and only go from SOURCE to TARGET in an Exchange."
+        "A file over 25 MB is not sent: the TARGET says so. Files do not travel through the public link. In an Exchange they go both ways: a row waits for the other document’s files before being copied, and a received file is not sent back."
       ]
     },
     "images": ["25-source-pieces-jointes", "26-cible-fichiers-attendus"]

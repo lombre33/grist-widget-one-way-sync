@@ -911,6 +911,166 @@ try {
     assert.equal((await records(dst.doc, '_grist_Attachments')).length, 3, 'le premier destinataire ne reçoit rien de plus');
     step('Pièces jointes : un nouveau destinataire reçoit tous les fichiers');
   }
+  // --- Pièces jointes dans les deux sens d'un Échange : les fichiers de B arrivent chez A comme ceux de A
+  // chez B ; un fichier reçu du partenaire ne lui est pas renvoyé ; une ligne attend ses fichiers avant
+  // d'être recopiée (sinon une cellule incomplète repartirait vers les autres) ; à plusieurs, un fichier de B
+  // va chez C par A, sans copie pour B.
+  async function exchangeFilesSteps() {
+    const auth = { Authorization: `Bearer ${env.apiKey}` };
+    const upload = async (doc, name, bytes) => {
+      const form = new FormData();
+      form.append('upload', new Blob([bytes]), name);
+      return (await (await fetch(`${TEAM}/api/docs/${doc}/attachments`, { method: 'POST', headers: auth, body: form })).json())[0];
+    };
+    const download = async (doc, id) => new Uint8Array(await (await fetch(`${TEAM}/api/docs/${doc}/attachments/${id}/download`, { headers: auth })).arrayBuffer());
+    const sha = bytes => createHash('sha1').update(bytes).digest('hex').slice(0, 16);
+    const text = value => new TextEncoder().encode(value);
+    const medium = Uint8Array.from({ length: 600000 }, (_, i) => (i * 37 + (i >> 8)) % 253); // deux morceaux
+    const a = await newDocWithWidget('Échange fichiers A', [
+      ['AddTable', 'Dossiers', [{ id: 'Nom', type: 'Text' }, { id: 'Statut', type: 'Text' }, { id: 'Piece', type: 'Attachments' }]],
+      ['BulkAddRecord', 'Dossiers', [null, null], { Nom: ['Un', 'Deux'], Statut: ['ouvert', 'ouvert'] }],
+    ]);
+    const b = await newDocWithWidget('Échange fichiers B');
+    const c = await newDocWithWidget('Échange fichiers C');
+    const hello = text('bonjour');
+    const ids = [await upload(a.doc, 'bonjour.txt', hello), await upload(a.doc, 'moyen.bin', medium)];
+    await applyActions(a.doc, [['BulkUpdateRecord', 'Dossiers', [1, 2], { Piece: ids.map(id => ['L', id]) }]]);
+    await startExport(a, 'Dossiers', 'Partage', async () => {
+      await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
+      await dialog().getByRole('checkbox', { name: /Piece/ }).check();
+    });
+    await dialogButton('Ajouter un destinataire').click();
+    await dialog().getByRole('radio', { name: /Échange/ }).check();
+    await dialogButton('Créer l’invitation').click();
+    const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
+    await openWidget(a.url);
+    const code = await testLink('Lien du formulaire de retour', await formLink(a.doc, back[0]), 'Transmettez ce code');
+    await dialogButton('Plus tard').click();
+    const exportId = (await records(a.doc, 'Synchro'))[0].Synchro_Export;
+    const answer = await accept(b.doc, b.url, code, '« Partage » : table Dossiers.');
+    await approve(answer, { url: a.url });
+    const journalOf = async doc => (await records(doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_')).tableId;
+    const aJournal = await journalOf(a.doc);
+    const bJournal = await journalOf(b.doc);
+    // Morceaux de fichiers vus passer dans un journal (ils y sont effacés une fois le fichier déposé).
+    const spy = (doc, journal) => {
+      const seen = new Set();
+      let on = true;
+      (async () => {
+        while (on) {
+          for (const r of await rawRows(doc, journal).catch(() => [])) if (r.Synchro_Type === 'fichier') seen.add(r.id);
+          await new Promise(r => setTimeout(r, 300).unref());
+        }
+      })();
+      return { seen: () => seen.size, stop: () => { on = false; } };
+    };
+    // La note SOURCE est dans la description de Synchro_Export de la table Synchro (les journaux ont la même colonne).
+    const noted = async doc => {
+      const note = (await records(doc, '_grist_Tables_column')).filter(col => col.colId === 'Synchro_Export').map(col => JSON.parse(col.description || '{}')).find(n => n.exports) || {};
+      return (note.fichiers || {})[exportId] || { f: '', h: [], o: {} };
+    };
+    const dossiers = async doc => Object.fromEntries((await records(doc, 'Dossiers')).map(r => [r.Nom, r]));
+    const pieces = async (doc, nom) => ((await dossiers(doc))[nom] || {}).Piece;
+    // Ouvre le widget du document `w` et attend que `ok()` soit vrai.
+    const seenIn = async (w, ok, what) => { await openWidget(w.url); return waitFor(ok, what, 60000); };
+    const filesOf = async (doc, nom) => { const p = await pieces(doc, nom); return Array.isArray(p) ? p.slice(1) : []; };
+    // A vers B : les fichiers de A arrivent chez B, qui n'en renvoie aucun.
+    const toA = spy(a.doc, aJournal);
+    // La page de A, ouverte, envoie ses fichiers (rattrapage d'un propriétaire) ; puis B les dépose.
+    await waitFor(async () => { const n = await noted(a.doc); return n.f === [sha(hello), sha(medium)].sort().join(' ') && n.h.length === 1; }, 'A envoie ses fichiers, page ouverte', 90000);
+    await openWidget(b.url);
+    await waitFor(async () => (await filesOf(b.doc, 'Un')).length === 1 && (await filesOf(b.doc, 'Deux')).length === 1, 'B reçoit les fichiers de A', 90000);
+    assert.deepEqual(await download(b.doc, (await filesOf(b.doc, 'Deux'))[0]), medium, 'fichier de deux morceaux reconstitué chez B');
+    // La page de B reste ouverte : son rattrapage passe plusieurs fois (toutes les 10 s) sans rien renvoyer.
+    await waitFor(async () => { const n = await noted(b.doc); return n.f === [sha(hello), sha(medium)].sort().join(' ') && n.h.length === 1; }, 'B : fichiers reçus notés comme déjà chez A', 60000);
+    assert.deepEqual(Object.values((await noted(b.doc)).o || {}).map(s => s.split(' ').sort().join(' ')), [[sha(hello), sha(medium)].sort().join(' ')], 'B : ce que A a envoyé est noté chez A');
+    await new Promise(r => setTimeout(r, 25000));
+    assert.equal(toA.seen(), 0, 'les fichiers de A ne repartent pas vers A');
+    assert.equal((await records(a.doc, '_grist_Attachments')).length, 2);
+    step('Échange et pièces jointes : les fichiers de A arrivent chez B, qui ne les renvoie pas à A');
+
+    // B ajoute un fichier en changeant aussi le statut : A reçoit la version tout de suite, mais la ligne attend
+    // son fichier (B n'a pas sa page ouverte) ; elle est recopiée, statut compris, quand le fichier est arrivé.
+    toA.stop();
+    const extra = text('pièce de B');
+    const extraId = await upload(b.doc, 'de-b.txt', extra);
+    const bUn = (await dossiers(b.doc)).Un;
+    await applyActions(b.doc, [['UpdateRecord', 'Dossiers', bUn.id, { Statut: 'à revoir', Piece: [...bUn.Piece, extraId] }]]);
+    await openWidget(a.url);
+    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    await widget().getByText(/1 ligne attend son fichier avant d.être recopiée dans Dossiers/).waitFor({ timeout: 60000 });
+    await widget().getByText('Incomplet', { exact: true }).waitFor();
+    assert.equal((await dossiers(a.doc)).Un.Statut, 'ouvert', 'la ligne attend son fichier : rien n\'est recopié');
+    assert.equal((await filesOf(a.doc, 'Un')).length, 1, 'cellule de A inchangée');
+    await openWidget(b.url);
+    await waitFor(async () => (await noted(b.doc)).f.includes(sha(extra)), 'B envoie le fichier à l\'ouverture de sa page', 60000);
+    await openWidget(a.url);
+    await waitFor(async () => (await dossiers(a.doc)).Un.Statut === 'à revoir' && (await filesOf(a.doc, 'Un')).length === 2, 'A recopie la ligne avec le fichier de B', 60000);
+    const aUn = await filesOf(a.doc, 'Un');
+    assert.deepEqual(await download(a.doc, aUn[aUn.length - 1]), extra, 'fichier de B reconstitué chez A');
+    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    await widget().getByText(/attend son fichier/).waitFor({ state: 'detached' });
+    step('Échange et pièces jointes : une ligne de B attend son fichier chez A, puis est recopiée avec lui');
+
+    // A modifie la même ligne : B garde ses fichiers (la modification de A ne remplace plus sa cellule).
+    await applyActions(a.doc, [['UpdateRecord', 'Dossiers', (await dossiers(a.doc)).Un.id, { Statut: 'clos' }]]);
+    await openWidget(b.url);
+    await waitFor(async () => (await dossiers(b.doc)).Un.Statut === 'clos', 'B reçoit la modification de A', 60000);
+    assert.equal((await filesOf(b.doc, 'Un')).length, 2, 'B garde ses deux fichiers');
+    // B retire son fichier : A le retire aussi (tous les fichiers de la version sont là : pas d'attente).
+    await applyActions(b.doc, [['UpdateRecord', 'Dossiers', (await dossiers(b.doc)).Un.id, { Piece: ['L', (await filesOf(b.doc, 'Un'))[0]] }]]);
+    await seenIn(a, async () => (await filesOf(a.doc, 'Un')).length === 1, 'A retire le fichier retiré chez B');
+    step('Échange et pièces jointes : la modification de A ne défait pas la cellule de B, un fichier retiré chez B l\'est chez A');
+
+    // A ajoute un fichier : B le reçoit, ne le renvoie pas.
+    const later = text('envoi de A');
+    const laterId = await upload(a.doc, 'de-a.txt', later);
+    const aDeux = (await dossiers(a.doc)).Deux;
+    await applyActions(a.doc, [['UpdateRecord', 'Dossiers', aDeux.id, { Piece: [...aDeux.Piece, laterId] }]]);
+    const toA2 = spy(a.doc, aJournal);
+    await openWidget(a.url);
+    await waitFor(async () => (await noted(a.doc)).f.includes(sha(later)), 'A envoie son nouveau fichier', 60000);
+    await openWidget(b.url);
+    await waitFor(async () => (await filesOf(b.doc, 'Deux')).length === 2, 'B reçoit le nouveau fichier de A', 60000);
+    await waitFor(async () => (await noted(b.doc)).f.includes(sha(later)), 'B note le fichier de A comme déjà chez A', 60000);
+    await new Promise(r => setTimeout(r, 25000));
+    assert.equal(toA2.seen(), 0, 'le fichier reçu de A ne repart pas');
+    toA2.stop();
+    step('Échange et pièces jointes : un fichier ajouté chez A arrive chez B sans repartir');
+
+    // Échange à plusieurs : C rejoint ; ce que B ajoute arrive chez C par A, et B n'en reçoit pas de copie.
+    await openWidget(a.url);
+    await button('Ajouter un participant').click();
+    await dialogButton('Créer l’invitation').click();
+    const backC = await waitFor(async () => { const f = (await publishedForms(a.doc)).filter(x => x.id !== back[0].id); return f.length === 1 && f; }, 'second formulaire de retour publié');
+    await openWidget(a.url);
+    const codeC = await testLink('Lien du formulaire de retour', await formLink(a.doc, backC[0]), 'Transmettez ce code');
+    await dialogButton('Plus tard').click();
+    const answerC = await accept(c.doc, c.url, codeC, '« Partage » : table Dossiers.');
+    await approve(answerC, { url: a.url });
+    // La page de A, ouverte, envoie à C tous les fichiers (B les a, il n'en reçoit pas) ; puis C les dépose.
+    await waitFor(async () => (await noted(a.doc)).h.length === 2, 'A envoie ses fichiers à C, page ouverte', 120000);
+    await openWidget(c.url);
+    await waitFor(async () => (await filesOf(c.doc, 'Un')).length === 1 && (await filesOf(c.doc, 'Deux')).length === 2, 'C reçoit tous les fichiers de A', 120000);
+    const viaA = text('pièce de B pour C');
+    const viaAId = await upload(b.doc, 'pour-c.txt', viaA);
+    const bUn2 = (await dossiers(b.doc)).Un;
+    await applyActions(b.doc, [['UpdateRecord', 'Dossiers', bUn2.id, { Piece: [...bUn2.Piece, viaAId] }]]);
+    const intoB = spy(b.doc, bJournal);
+    await openWidget(b.url);
+    await waitFor(async () => (await noted(b.doc)).f.includes(sha(viaA)), 'B envoie son fichier à A', 60000);
+    await openWidget(a.url);
+    await waitFor(async () => (await filesOf(a.doc, 'Un')).length === 2, 'A recopie la ligne avec le fichier de B', 60000);
+    await waitFor(async () => { const n = await noted(a.doc); return n.f.includes(sha(viaA)) && n.h.length === 2; }, 'A envoie le fichier de B à C, et note que B l\'a', 60000);
+    await openWidget(c.url);
+    await waitFor(async () => (await filesOf(c.doc, 'Un')).length === 2, 'C reçoit le fichier de B', 60000);
+    const cUn = await filesOf(c.doc, 'Un');
+    assert.deepEqual(await download(c.doc, cUn[cUn.length - 1]), viaA, 'fichier de B reconstitué chez C');
+    assert.equal(intoB.seen(), 0, 'B ne reçoit pas de copie de son propre fichier');
+    intoB.stop();
+    assert.ok(Object.values((await noted(a.doc)).o || {}).some(s => s.includes(sha(viaA))), 'A : le fichier de B est noté chez B');
+    step('Échange à plusieurs et pièces jointes : le fichier de B arrive chez C par A, sans copie pour B');
+  }
   // --- Table Synchro remise en état. Cas vu avec l'Alpha 0.5.9 : une table Synchro faite à la main (colonnes A, B et C
   // de Grist) reprise par le widget ; chaque envoi emportait A, le journal du destinataire le refusait (« Invalid column »)
   // et la file se bloquait. D'abord une table du widget qui porte des colonnes en trop (envoi bloqué, carte, fenêtre qui
@@ -1111,8 +1271,8 @@ try {
     await opensDoc(personLink, dst.doc);
     step('Document de l\'autre côté : nom saisi côté SOURCE (retenu, corrigeable), lien dans un nouvel onglet des deux côtés, jamais de HTML');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2048,6 +2208,7 @@ try {
 
   await exchangeSteps();
   await filesSteps();
+  await exchangeFilesSteps();
   await optionsSteps();
   await choicesSteps();
   await linksSteps();
