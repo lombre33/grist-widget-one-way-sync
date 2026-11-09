@@ -2,7 +2,8 @@
 // { exports: [{ id, name, at, public, renforce, echange, retour, regles, refus }],
 //   invitations: [{ id, export, hash, at, renforce, journal, ready, pub, prive }],
 //   pauses: [{ hook, export, at, columns }], fichiers: { <export>: { f, h, p } },
-//   historique: { <export>: [{ at, kind, who, n }] } }.
+//   historique: { <export>: [{ at, kind, who, n }] },
+//   lignes: { <export>: { at, n: { <table>: nombre de lignes } } } }.
 // Chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 
 // Élément remplacé à sa place (même `id`), sinon ajouté à la fin.
@@ -17,18 +18,21 @@ export const clearExport = (note, id) => ({ ...note, invitations: note.invitatio
 export function dropExport(note, id) {
   const next = { ...clearExport(note, id), exports: note.exports.filter(e => e.id !== id) };
   delete next.historique;
+  delete next.lignes;
   const { [id]: gone, ...history } = note.historique || {};
-  return Object.keys(history).length ? { ...next, historique: history } : next;
+  const { [id]: noRows, ...rows } = note.lignes || {};
+  return { ...next, ...(Object.keys(history).length ? { historique: history } : {}), ...(Object.keys(rows).length ? { lignes: rows } : {}) };
 }
 
 // Historique des envois d'un export : les événements que le widget a lui-même conduits (renvois,
 // rattrapages, pauses, destinataires), du plus récent au plus ancien, les EVENTS_KEPT derniers.
 // Les envois ordinaires partent de Grist sans le widget : l'état de chaque destinataire (dernier
 // succès, erreur) les dit. `event` : { at (secondes), kind ('join', 'resend', 'catchup', 'unblock',
-// 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent'), who (destinataire, texte), n (lignes ou tables) }.
+// 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'), who (destinataire, ou table pour
+// 'shrink'), n (lignes ou tables) }.
 export const EVENTS_KEPT = 30;
 const WHO_MAX = 80;
-const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent'];
+const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'];
 export function addEvent(note, exportId, { at, kind, who = '', n = 0 }) {
   const event = { at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(n ? { n } : {}) };
   return { ...note, historique: { ...(note.historique || {}), [exportId]: [event, ...((note.historique || {})[exportId] || [])].slice(0, EVENTS_KEPT) } };
@@ -63,4 +67,54 @@ export function setFiles(note, fichiers) {
   const rest = { ...note };
   delete rest.fichiers;
   return Object.keys(fichiers).length ? { ...rest, fichiers } : rest;
+}
+
+// Lignes qui quittent un export (la CIBLE est passive : elle applique les suppressions de la SOURCE, qui
+// répond de ses données ; la SOURCE en est avertie, après coup, car aucune confirmation ne peut précéder un
+// envoi que fait le webhook de Grist sans le widget). Le widget, page d'un propriétaire ouverte, compare le
+// nombre de lignes de chaque table de l'export (suivi de Synchro) à celui de sa dernière observation, gardée
+// dans la note (`lignes`). Au moins ROWS_DROP.min lignes et une part ROWS_DROP.share de la table en moins :
+// événement `shrink` dans l'historique (`who` : la table, `n` : combien), montré en avis pendant DROP_SHOWN_S.
+// Supprimées, ou sorties du filtre de l'export : le compte ne les distingue pas.
+export const ROWS_DROP = { min: 11, share: 0.2 };
+export const ROWS_REFRESH_S = 300; // l'observation de référence se renouvelle au plus toutes les 5 minutes
+export const DROP_SHOWN_S = 86400;
+
+// Dernière observation d'un export : { at, n: { table: nombre } }, ou null si elle manque ou est mal formée
+// (note retouchée à la main : jamais d'erreur à l'affichage).
+export function rowsOf(note, exportId) {
+  const seen = (note.lignes || {})[exportId];
+  if (!seen || !Number.isFinite(seen.at) || !seen.n || typeof seen.n !== 'object' || Array.isArray(seen.n)) return null;
+  const n = Object.fromEntries(Object.entries(seen.n).filter(([, v]) => Number.isInteger(v) && v >= 0));
+  return { at: seen.at, n };
+}
+
+// Tables dont le nombre de lignes a tombé au-delà du seuil : [{ table, n (lignes en moins), was }].
+export function rowDrops(before, counts) {
+  return Object.keys(counts).filter(table => table in before).map(table => ({ table, n: before[table] - counts[table], was: before[table] }))
+    .filter(d => d.n >= ROWS_DROP.min && d.n > ROWS_DROP.share * d.was);
+}
+
+// La note après observation de `counts` (table -> nombre de lignes, celles que le suivi de Synchro dit) à
+// l'instant `now`, ou null s'il n'y a rien à écrire : la référence est écrite à la première observation, puis
+// renouvelée quand les nombres ont changé et qu'elle a plus de ROWS_REFRESH_S ; une baisse au-delà du seuil
+// l'écrit aussitôt avec son événement, si `warn` (export qui a des destinataires : sans eux, rien ne part).
+export function observeRows(note, exportId, counts, now, warn = true) {
+  const tables = Object.keys(counts);
+  if (!tables.length) return null;
+  const before = rowsOf(note, exportId);
+  const drops = warn && before ? rowDrops(before.n, counts) : [];
+  const changed = !before || tables.some(table => before.n[table] !== counts[table]) || Object.keys(before.n).some(table => !(table in counts));
+  if (!drops.length && !(changed && (!before || now - before.at >= ROWS_REFRESH_S))) return null;
+  let next = { ...note, lignes: { ...(note.lignes || {}), [exportId]: { at: now, n: counts } } };
+  for (const d of drops) next = addEvent(next, exportId, { at: now, kind: 'shrink', who: d.table, n: d.n });
+  return next;
+}
+
+// Baisses récentes à montrer en avis : la plus récente de chaque table, `at` et `n`, dans les DROP_SHOWN_S
+// secondes avant `now` (événements du plus récent au plus ancien, voir eventsOf).
+export function recentDrops(events, now) {
+  const seen = new Set();
+  return events.filter(e => e.kind === 'shrink' && e.who && now - e.at < DROP_SHOWN_S && !seen.has(e.who) && seen.add(e.who))
+    .map(e => ({ table: e.who, n: e.n || 0, at: e.at }));
 }

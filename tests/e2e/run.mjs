@@ -452,15 +452,6 @@ try {
     await dialog().waitFor({ state: 'detached' });
   }
   const rawRows = async (doc, journal) => (await records(doc, journal)).filter(r => r.Synchro_Type);
-  // CIBLE (page ouverte) : vague de suppressions retenue (plus de 10 lignes et de 20 %), rien
-  // d'effacé avant la décision ; « Appliquer » sur la carte.
-  async function applyWave(dest, timeout = 120000) {
-    const wave = widget().locator('.wave', { hasText: new RegExp(`${dest}\\s:\\sla SOURCE a supprimé`) });
-    await wave.waitFor({ timeout });
-    await wave.getByRole('button', { name: 'Appliquer' }).click();
-    await dialogButton('Appliquer').click();
-    await wave.waitFor({ state: 'detached', timeout });
-  }
 
   // --- Échange : deux documents se tiennent à jour l'un l'autre. A invite (formulaire de retour
   // publié chez A, son lien dans le code), B accepte et répond, A approuve. Une modification va
@@ -1334,18 +1325,36 @@ try {
   assert.notEqual(key1, key2, 'une clé par destinataire');
   const sourceKeys = async () => Object.values(readKeys((await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'signature').Synchro_Colonnes));
   assert.deepEqual((await sourceKeys()).sort(), [key1, key2].sort(), 'la SOURCE signe pour chacun, rien d\'autre');
-  // Sécurité renforcée : une ligne effacée dans la SOURCE attend la décision ici ; « Ignorer » la
-  // garde, détachée de la SOURCE.
+  // La CIBLE est passive, même en sécurité renforcée : une ligne effacée dans la SOURCE est effacée ici sans rien
+  // demander (plus de carte « Appliquer / Ignorer »).
   const ulysse = (await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Ulysse' }]])).retValues[0];
   await waitFor(async () => (await records(target2.doc, 'Contacts')).some(r => r.Nom === 'Ulysse'), 'ajout reçu');
   await applyActions(source.doc, [['RemoveRecord', 'Contacts', ulysse]]);
-  const wave2 = widget().locator('.wave');
-  await wave2.getByText(/Contacts\s:\sla SOURCE a supprimé 1 ligne/).waitFor({ timeout: 60000 });
-  assert.ok((await records(target2.doc, 'Contacts')).some(r => r.Nom === 'Ulysse'), 'rien d\'effacé avant la décision');
-  await wave2.getByRole('button', { name: 'Ignorer' }).click();
-  await dialogButton('Ignorer').click();
-  await wave2.waitFor({ state: 'detached', timeout: 30000 });
-  assert.equal((await records(target2.doc, 'Contacts')).find(r => r.Nom === 'Ulysse').id_sync, '', 'gardée ici, détachée de la SOURCE');
+  await waitFor(async () => !(await records(target2.doc, 'Contacts')).some(r => r.Nom === 'Ulysse'), 'suppression appliquée sans décision', 90000);
+  assert.equal(await widget().locator('.wave').count(), 0, 'aucune carte de décision côté CIBLE');
+  // La SOURCE est avertie après coup quand beaucoup de lignes quittent l'export : la référence est notée à
+  // l'ouverture de sa page, puis 14 lignes (plus de 10, et plus de 20 % de la table) s'en vont : avis sur la
+  // carte de l'export et ligne d'historique, avec le rappel de Ctrl+Z.
+  const moreRows = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', Array(14).fill(null), { Nom: Array.from({ length: 14 }, (_, i) => `Plus${i}`) }]])).retValues[0];
+  const syncRef2 = await tableRef(source.doc, 'Synchro');
+  const noteColumn = async () => (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export' && c.parentId === syncRef2);
+  const rowsNote = async () => JSON.parse((await noteColumn()).description);
+  // La référence d'une observation plus ancienne est vieillie : elle se renouvelle à l'ouverture (avec les 14 lignes de plus).
+  const seenBefore = await rowsNote();
+  if ((seenBefore.lignes || {})[signExport]) {
+    seenBefore.lignes[signExport].at = 1;
+    await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', (await noteColumn()).id, { description: JSON.stringify(seenBefore) }]]);
+  }
+  await openWidget(source.url);
+  await page.bringToFront(); // une page en arrière-plan ne se rattrape qu'une fois par minute
+  const withMore = (await records(source.doc, 'Contacts')).length;
+  await waitFor(async () => (((await rowsNote()).lignes || {})[signExport] || { n: {} }).n.Contacts === withMore, 'nombre de lignes de l\'export noté', 60000);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', moreRows]]);
+  await widget().locator('.notice').getByText(/Contacts\s:\s14 lignes de moins dans l’export/).waitFor({ timeout: 90000 });
+  await widget().getByText(/Ctrl\+Z/).first().waitFor();
+  assert.ok((await rowsNote()).historique[signExport].some(e => e.kind === 'shrink' && e.who === 'Contacts' && e.n === 14), 'événement dans l\'historique de la note');
+  await shot('13b-source-lignes-en-moins', 'card');
+  await waitFor(async () => (await records(target2.doc, 'Contacts')).map(r => r.Nom).sort().join() === 'Alice,Bob,Denis', 'lignes en moins suivies chez le second destinataire', 90000);
   await openWidget(target.url);
   await waitFor(async () => !(await rawRows(target.doc, 'Journal_Annuaire')).length && !(await records(target.doc, 'Journal_Annuaire')).some(r => !r.Sync_Applique && r.id_sync), 'renvoi reçu par le premier');
   assert.equal((await records(target.doc, 'Contacts')).find(r => r.Nom === 'Bob').Ville, 'retouche', 'le renvoi ne défait pas la retouche');
@@ -1585,7 +1594,6 @@ try {
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before + imported.length, 'gros import reçu en entier', 120000);
   await waitFor(async () => !(await widget().getByText('pas encore arrivées').count()), 'avis de la CIBLE retiré', 30000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', imported]]);
-  await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'gros import effacé', 120000);
   step('SOURCE : un import de 4 000 lignes part en entier, le widget SOURCE envoie seul ce qu\'un envoi n\'a pas porté');
 
@@ -1662,7 +1670,6 @@ try {
   }, 'tout reçu après le déblocage', 240000);
   await widget().locator('.drift').waitFor({ state: 'detached', timeout: 30000 }); // la SOURCE a changé la ligne de Bob : plus d'écart
   await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', blocIds]]);
-  await applyWave('Contacts');
   await waitFor(async () => (await records(target.doc, 'Contacts')).length === before, 'bloc effacé', 120000);
   step('SOURCE : une file bloquée par un envoi de plus de 1 Mo est vidée et tout est renvoyé, seul');
 
@@ -1695,7 +1702,6 @@ try {
   await page.bringToFront();
   const grandeIds = (await records(source.doc, 'Grande')).map(r => r.id);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(0, 5500)]]);
-  await applyWave('Grande', 300000);
   await waitFor(async () => await grande() === N - 5500, 'suppression de 5 500 lignes suivie (liste complète)', 300000);
   await applyActions(source.doc, [['BulkRemoveRecord', 'Grande', grandeIds.slice(5500, 5502)]]);
   await waitFor(async () => await grande() === N - 5502, 'suppression de 2 lignes suivie (seaux)', 120000);

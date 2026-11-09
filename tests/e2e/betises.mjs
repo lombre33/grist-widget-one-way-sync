@@ -82,7 +82,7 @@ const cases = {
   cleSupprimee: { note: 'colonne id_sync supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'id_sync']]), after: repairKeys },
   majleSupprimee: { note: 'colonne MajLe supprimée dans la SOURCE', act: p => applyActions(p.src.doc, [['RemoveColumn', 'Contacts', 'MajLe']]), after: repairKeys },
   typeChange: { note: 'type d\'une colonne exportée changé (Texte vers Entier) dans la SOURCE', act: p => applyActions(p.src.doc, [['ModifyColumn', 'Contacts', 'Quantite', { type: 'Text' }], ['ModifyColumn', 'Contacts', 'Nom', { type: 'Int' }]]) },
-  toutSupprimer: { note: 'toutes les lignes de la table exportée supprimées dans la SOURCE (vague de suppressions)', act: async p => { await applyActions(p.src.doc, [['BulkRemoveRecord', 'Contacts', (await records(p.src.doc, 'Contacts')).map(r => r.id)]]); }, probe: false },
+  toutSupprimer: { note: 'toutes les lignes de la table exportée supprimées dans la SOURCE (la CIBLE les applique sans retenue, la SOURCE est avertie)', act: async p => { await applyActions(p.src.doc, [['BulkRemoveRecord', 'Contacts', (await records(p.src.doc, 'Contacts')).map(r => r.id)]]); }, probe: false },
   lignesEnDouble: { note: 'dix lignes dupliquées avec leur clé dans la SOURCE', act: async p => { const rows = (await records(p.src.doc, 'Contacts')).slice(0, 10); await applyActions(p.src.doc, [['BulkAddRecord', 'Contacts', rows.map(() => null), Object.fromEntries(columnsOf(8).map(c => [c.id, rows.map(r => r[c.id])]).concat([['id_sync', rows.map(r => r.id_sync)]]))]]); }, probe: false },
   synchroLignesSupprimees: {
     note: 'lignes de la table Synchro supprimées',

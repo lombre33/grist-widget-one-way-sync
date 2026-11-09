@@ -135,6 +135,17 @@ export function eligibleRows(syncRows, exportId, table) {
   return m ? Number(m[1]) : null;
 }
 
+// Lignes que peut envoyer chaque table de chaque export : { export: { table: nombre } }, lues dans les lignes
+// 'suivi' (voir eligibleRows). Les tables sans suivi lisible n'y sont pas.
+export function trackedCounts(syncRows) {
+  const counts = {};
+  for (const row of syncRows) {
+    const m = row[TYPE_COL] === KIND.track ? /^(\d+):[0-9a-f]+$/.exec(String(row[LIST_COL] || '')) : null;
+    if (m) (counts[row[EXPORT_COL]] ||= {})[row[TABLE_COL]] = Number(m[1]);
+  }
+  return counts;
+}
+
 // Une autre page renvoie, et a donné signe de vie depuis moins de LEASE_S secondes. Une page se
 // nomme `navigateur.page` ; la question n'est posée que sous le verrou du navigateur (une page de ce
 // navigateur qui renverrait encore le tiendrait) : une page du même navigateur est donc fermée.

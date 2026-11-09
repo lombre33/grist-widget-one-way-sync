@@ -12,7 +12,7 @@ import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } f
 import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
-import { addEvent } from '../logic/notes.js';
+import { addEvent, observeRows } from '../logic/notes.js';
 import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../port.js';
 import { dropPages, isOnPage, removeTechnicalTables } from '../pages.js';
 
@@ -57,6 +57,22 @@ export const updateSourceNote = change => withLock('gristsync-source-note', asyn
 // Événement d'envoi noté pour l'historique de l'export (voir addEvent) ; un échec de la note ne
 // fait jamais échouer l'action qu'il raconte.
 export const recordEvent = (exportId, kind, fields = {}) => updateSourceNote(note => addEvent(note, exportId, { at: nowS(), kind, ...fields })).catch(console.warn);
+
+// Lignes des tables de chaque export (`counts` : { export: { table: nombre } }, voir trackedCounts) comparées à la
+// dernière observation de la note : une baisse au-delà du seuil y laisse son événement `shrink`, que la carte de
+// l'export montre (voir observeRows). `recipients(export)` : combien de personnes reçoivent cet export ; un
+// Échange ne prévient pas (ses suppressions passent par la case Supprime), un export public compte un
+// destinataire. `note` : celle déjà lue, pour ne rien écrire quand rien n'a changé. Rend vrai si la note a changé.
+export async function watchRows(note, counts, recipients) {
+  const now = nowS();
+  const observed = Object.entries(counts).map(([id, n]) => ({ id, entry: note.exports.find(e => e.id === id), counts: n }))
+    .filter(o => o.entry)
+    .map(o => ({ ...o, warn: !o.entry.echange && !o.entry.retour && recipients(o.id) + (o.entry.public ? 1 : 0) > 0 }));
+  const observe = base => observed.reduce((next, o) => observeRows(next, o.id, o.counts, now, o.warn) || next, base);
+  if (observe(note) === note) return false;
+  await updateSourceNote(observe).catch(console.warn);
+  return true;
+}
 
 // Les formules de Synchro nomment les tables qu'elles lisent : réécrites quand l'ensemble change.
 // Une table renommée ou effacée dans la SOURCE n'y figure plus (la carte de l'export le signale) :

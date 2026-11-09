@@ -11,7 +11,7 @@ import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink 
 import { closeExport } from '../engine/exchange.js';
 import { updateJournalNote } from '../engine/target/journals.js';
 import { receivedJournals, receivedKey } from '../engine/logic/received.js';
-import { consolidateAll, decide, decideWave, forgetJournal, isAccessError, restoreSource, state, tableKey } from '../engine/target/loop.js';
+import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from '../engine/target/loop.js';
 import { SHOWN } from '../engine/logic/report.js';
 import { TALLY_GRACE_S } from '../engine/logic/tally.js';
 import { uploadErrors } from '../engine/target/files.js';
@@ -131,7 +131,7 @@ function cardStatus(group) {
   if (note.ended) return ['ended', 'off'];
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
-  if (tables.some(r => r.pendingCount || r.held)) return ['review', 'pending'];
+  if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
   const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && r.files.waiting);
   return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }
@@ -221,7 +221,7 @@ function syncCard(group) {
     cardNotes(group),
     note.tables.map(entry => filesNotes(group, entry)),
     uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
-    note.tables.map(entry => [waveBlock(group, entry), reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
+    note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'report-out' }),
     el('div', { class: 'card-actions' },
@@ -408,32 +408,6 @@ async function correct(group, entry, { driftCount, driftGone = 0, droppedCols = 
   if (!(await confirmDialog({ title: t('recv.drift.fixTitle', { dest: entry.dest }), body, confirmLabel: t('recv.drift.fix') }))) return;
   await restoreSource(group.journal, entry.table);
   await renderTarget();
-}
-
-// Vague de suppressions retenue (voir WAVE) : rien n'est effacé avant la décision. « Appliquer »
-// efface les lignes ; « Ignorer » les garde ici, détachées de la SOURCE (après confirmation).
-function waveBlock(group, entry) {
-  const { held } = state.results.get(tableKey(group.journal, entry.table)) || {};
-  if (!held) return null;
-  const out = () => container.querySelector('.out');
-  const texts = {
-    appliquer: [t('recv.wave.applyTitle', { n: held.n, dest: entry.dest }), t('recv.wave.applyBody', { n: held.n }), t('recv.wave.apply')],
-    ignorer: [t('recv.wave.ignoreTitle', { n: held.n, dest: entry.dest }), t('recv.wave.ignoreBody', { n: held.n }), t('recv.wave.ignore')],
-  };
-  const choose = async (e, choice) => {
-    const target = e.currentTarget;
-    const [title, body, confirmLabel] = texts[choice];
-    if (!(await confirmDialog({ title, body, confirmLabel }))) return;
-    await run(target, out(), async () => {
-      await decideWave(group.journal, entry.table, choice);
-      await renderTarget();
-    });
-  };
-  return notice({
-    tone: 'warn', className: 'wave', title: t('recv.wave.title', { n: held.n, dest: entry.dest }),
-    lines: [t(group.note.renforce ? 'recv.wave.strict' : 'recv.wave.body'), held.numbers.length ? t('recv.wave.rows', { rows: held.numbers.join(', ') }) : null],
-    actions: [button(t('recv.wave.apply'), 'trash', e => choose(e, 'appliquer'), 'btn-danger-text'), button(t('recv.wave.ignore'), 'ignore', e => choose(e, 'ignorer'))],
-  });
 }
 
 // ---------------------------------------------------------------------------------------------

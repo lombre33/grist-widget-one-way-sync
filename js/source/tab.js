@@ -6,16 +6,16 @@ import { maskKey } from '../engine/logic/codes.js';
 import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
 import { STATES, parseLot } from '../engine/logic/journal.js';
-import { eventsOf, vanishedRecipients } from '../engine/logic/notes.js';
+import { eventsOf, recentDrops, vanishedRecipients } from '../engine/logic/notes.js';
 import { exchangeRules } from '../engine/logic/consolidation.js';
-import { listDue, lotLate, parseCharge } from '../engine/logic/resend.js';
+import { listDue, lotLate, parseCharge, trackedCounts } from '../engine/logic/resend.js';
 import { flowMoves } from '../engine/logic/health.js';
 import { LONG_SECONDS } from '../engine/logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, webhookConditions } from '../grist.js';
 import { expiresAt, unkeyedRecipients } from '../engine/logic/trust.js';
 import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
 import { syncRules } from '../engine/acl.js';
-import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions } from '../engine/source/synchro.js';
+import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
 import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.js';
@@ -137,6 +137,9 @@ async function upgradeSource(state) {
   if (await ensureSyncTable(current.schema, current.rows)) current = await loadState();
   if (await refreshMajLe(current.schema, current.rows)) current = await loadState();
   if (await refreshOptions(current.schema, current.rows)) current = await loadState();
+  // Lignes qui quittent un export (la CIBLE est passive, la SOURCE est prévenue) : voir observeRows.
+  const recipientsOf = id => (current.exports.find(exp => exp.id === id) || { recipients: [] }).recipients.length;
+  if (await watchRows(current.note, trackedCounts(current.rows), recipientsOf)) current = await loadState();
   catchUp(refreshSource);
   return current;
 }
@@ -247,6 +250,7 @@ function exportCard(exp, state, open, out) {
     keyNotice(exp, state),
     behindNotice(exp, state),
     vanishedNotice(exp),
+    shrinkNotices(exp),
     exportNotes(exp),
     flowSlot(exp, state.charge),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
@@ -272,6 +276,11 @@ function vanishedNotice(exp) {
   const n = exp.retour || exp.public ? 0 : vanishedRecipients(exp.events, exp.recipients.length);
   return n ? message('warn', t('send.vanished', { n }), t('send.vanished.title', { n })) : null;
 }
+
+// Lignes en moins dans une table de l'export depuis la dernière observation (voir observeRows) : la CIBLE les
+// supprime aussi, et la SOURCE peut encore revenir en arrière.
+const shrinkNotices = exp => recentDrops(exp.events, nowS()).map(d => message('warn',
+  t('send.shrink.body', { date: dateText(d.at * 1000) }), t('send.shrink.title', { table: d.table, n: d.n })));
 
 // Clés manquantes ou en double dans les tables de l'export (voir keysBlock).
 function keyNotice(exp, state) {

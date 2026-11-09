@@ -1,7 +1,7 @@
 // Renvois (SOURCE) : marques reprenables, listes des clés, budget par document.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addProg, addSpent, announceRest, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState } from '../../js/engine/logic/resend.js';
+import { addProg, addSpent, announceRest, BUDGET_WINDOW, chunkCount, eligibleRows, etaSeconds, lotCut, nextChunkSize, parseProg, percent, startProg, windowSpent, budgetWait, chargeBusy, chunkMark, dueRows, LEASE_S, listOverdue, lotLate, listRequest, parseCharge, RESEND_BUDGET, resendValue, rowsSince, trackState, trackedCounts } from '../../js/engine/logic/resend.js';
 import { RESEND_ALL } from '../../js/engine/logic/common.js';
 import { parseList } from '../../js/engine/logic/journal.js';
 
@@ -129,6 +129,7 @@ test('lignes qui peuvent partir : le nombre du suivi de la table, null sans suiv
   assert.equal(eligibleRows(rows, 'e', 'B'), null);
   assert.equal(eligibleRows(rows, 'e', 'C'), null);
   assert.equal(eligibleRows(rows, 'e', 'D'), null, 'la ligne des clés n\'est pas le suivi');
+  assert.deepEqual(trackedCounts([...rows, { Synchro_Export: 'f', Synchro_Table: 'A', Synchro_Type: 'suivi', Synchro_Ids: '5:ff' }]), { e: { A: 29871 }, f: { A: 5 } }, 'comptes par export et par table, suivis lisibles seulement');
   assert.equal(eligibleRows(rows, 'autre', 'A'), null);
 });
 

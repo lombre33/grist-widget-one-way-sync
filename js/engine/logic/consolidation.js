@@ -308,29 +308,6 @@ function reviewItem(ctx, key, version, state) {
   return { id: version.id, key, state, row: version.row, cells };
 }
 
-// Vague de suppressions retenue (voir WAVE) : rend ce qui remplace les suppressions du plan. En
-// attente de décision (`held` : nombre et premiers numéros de lignes), rien n'est effacé ni noté :
-// les listes et les versions qui suppriment restent à traiter, et le passage suivant refait le
-// même calcul. Ignorées (`wave` : 'ignorer') : les lignes sont détachées (`detach`), et leurs
-// versions notées parties (LEFT) ; les listes, traitées.
-const HELD_SHOWN = 10; // numéros de lignes montrés sur la carte
-function holdWave({ removed, latest, marks, pending, listGone, leftGone, dest, numbers, wave }) {
-  const versions = removed.map(key => latest.get(key)).filter(Boolean);
-  const ids = new Set(versions.map(v => v.id));
-  const kept = { listGone: listGone.filter(([id]) => !ids.has(id)), leftGone: [...leftGone] };
-  if (wave === 'ignorer') {
-    for (const v of versions) {
-      if (marks.has(v.id)) marks.set(v.id, LEFT);
-      else kept.leftGone.push(v.id);
-    }
-    return { ...kept, detach: removed.flatMap(key => dest.byKey.get(key).map(r => r.id)) };
-  }
-  for (const id of ids) marks.delete(id);
-  for (const { row } of pending) marks.delete(row.id);
-  const shown = removed.map(key => numbers.get(key)).filter(Boolean).sort((a, b) => a - b).slice(0, HELD_SHOWN);
-  return { ...kept, detach: [], held: { n: removed.length, numbers: shown } };
-}
-
 // Le plan en actions Grist : ajouts et modifications par clé, rattachements, suppressions, puis
 // marques dans le journal et, pour l'historique, ce qui a été remplacé.
 function consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol, archive, uncheck }, { upserts, attached, removeIds, marks, listGone, leftGone, before }) {
@@ -418,21 +395,14 @@ export function refusedGaps({ journalRows, destRows, copyCols }) {
 // (`decisions` : version du journal -> accepter ou refuser) ; un changement refusé est marqué
 // REFUSED et, à corriger, rend les écritures qui font repartir la ligne d'ici (`fix` : actions et
 // clés, voir fixActions), à appliquer à part.
-// Vague de suppressions : au-delà de WAVE.min lignes et d'une part WAVE.share des lignes reçues ici
-// (une SOURCE vidée par erreur, ou une liste forgée), ou dès une ligne en sécurité renforcée
-// (WAVE_STRICT), les suppressions d'un passage attendent une décision sur la carte : les appliquer,
-// ou les ignorer (les lignes restent ici, détachées : leur clé est effacée, plus rien ne les suit).
 // `now` : heure du passage (secondes), pour dater un refus corrigé dont la version n'a pas d'heure.
 // Réception en archive (`archive`, jamais en Échange) : rien n'est effacé ici ; une ligne partie de
 // la SOURCE reste, cochée ARCHIVE_COL, et n'est plus suivie par les listes ; une nouvelle version
 // de sa clé la décoche. Décocher l'archive n'efface pas les lignes déjà archivées : elles restent
 // cochées (`archived` se lit toujours), seules les suivantes sont effacées.
-export const WAVE = { min: 11, share: 0.2 };
-export const WAVE_STRICT = { min: 1, share: 0 };
-
 export function planConsolidation({
   journalRows, destRows, copyCols, destTable, journalTable, matchCol = '', exchange = false, hub = false, deleteCol = false, rules = null, decisions = new Map(),
-  hold = null, wave = '', now = 0, archive = false,
+  now = 0, archive = false,
 }) {
   const dest = indexDest(destRows, matchCol);
   const latest = latestByKey(journalRows);
@@ -445,16 +415,15 @@ export function planConsolidation({
   const ctx = { ...consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, deleteCol, rules }, dest), archived };
   const plan = { gone, marks, upserts: [], attached: [], before: new Map(), fixes: [], pending: [], stats: { added: 0, updated: 0, removed: 0 } };
   planVersions(ctx, plan, latest, decisions);
-  const { removed, numbers, waved } = planRemovals({ plan, dest, destRows, hold: archive ? null : hold, wave, latest, pending, listGone, leftGone, archived });
+  const { removed, numbers } = planRemovals({ plan, dest, destRows, archived });
   plan.stats.removed += removed.length;
   const removeIds = removed.flatMap(key => dest.byKey.get(key).map(r => r.id));
   for (const key of removed) if (latest.has(key)) plan.before.set(latest.get(key).id, { n: numbers.get(key) });
   return {
     actions: [
-      ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol, archive: archive && !exchange, uncheck: archived.size > 0 || (archive && !exchange) }, { ...plan, removeIds, ...(waved || { listGone, leftGone }) }),
-      ...chunk(waved?.detach || []).map(part => ['BulkUpdateRecord', destTable, part, { [KEY_COL]: part.map(() => '') }]),
+      ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol, archive: archive && !exchange, uncheck: archived.size > 0 || (archive && !exchange) }, { ...plan, removeIds, listGone, leftGone }),
     ],
-    stats: plan.stats, gone, held: waved?.held || null,
+    stats: plan.stats, gone,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol, now), keys: plan.fixes.map(f => f.key) },
   };
@@ -494,15 +463,14 @@ function planVersions(ctx, plan, latest, decisions) {
   }
 }
 
-// Suppressions du passage (clés de `plan.gone` encore ici, sauf celles déjà gardées en archive), ou
-// rien si elles forment une vague retenue (`waved`, voir holdWave) ; `numbers` : numéros des
-// lignes d'ici, s'il en faut.
-function planRemovals({ plan, dest, destRows, hold, wave, latest, pending, listGone, leftGone, archived }) {
+// Suppressions du passage : clés de `plan.gone` encore ici, sauf celles déjà gardées en archive ;
+// `numbers` : numéros des lignes d'ici, s'il en faut. La CIBLE est passive : ce que la SOURCE
+// supprime, elle le supprime, quel qu'en soit le nombre (la SOURCE répond de ses données ; seule
+// l'archive garde les lignes, par choix de la CIBLE).
+function planRemovals({ plan, dest, destRows, archived }) {
   const removed = [...plan.gone].filter(key => dest.byKey.has(key) && !archived.has(key));
   const numbers = removed.length || plan.pending.length ? rowNumbers(destRows) : new Map();
-  const isWave = hold && wave !== 'appliquer' && removed.length >= hold.min && removed.length > hold.share * dest.byKey.size;
-  if (!isWave) return { removed, numbers, waved: null };
-  return { removed: [], numbers, waved: holdWave({ removed, latest, marks: plan.marks, pending, listGone, leftGone, dest, numbers, wave }) };
+  return { removed, numbers };
 }
 
 // Colonnes reçues pour une table, et la correspondance. Échange, côté du document qui a invité

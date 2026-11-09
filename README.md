@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.13.3 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.13.4 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -190,8 +190,9 @@ publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_UR
   puis toutes les heures ; un code de contrôle de six caractères se compare par téléphone.
 - Les envois sont signés, avec une clé propre à chaque destinataire que les deux documents tirent
   de leurs codes sans jamais la transmettre : la clé d'écriture d'une réception ne suffit pas pour
-  y faire recopier quoi que ce soit, et un destinataire ne peut pas signer pour un autre. Une vague
-  de suppressions attend une décision sur la carte.
+  y faire recopier quoi que ce soit, et un destinataire ne peut pas signer pour un autre. La CIBLE est
+  passive : les suppressions faites dans la SOURCE s'appliquent telles quelles (l'option Archive garde les lignes), et la
+  SOURCE est avertie quand beaucoup de lignes disparaissent.
 - La table technique est réservée aux propriétaires de la SOURCE, les journaux aux éditeurs de la
   CIBLE (règles d'accès posées par le widget).
 - Les codes ne contiennent que des noms de tables et de colonnes, une fiche, une adresse

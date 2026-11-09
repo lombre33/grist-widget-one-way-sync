@@ -1,7 +1,9 @@
 // Note SOURCE : chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENTS_KEPT, addEvent, clearExport, dropExport, eventsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause } from '../../js/engine/logic/notes.js';
+import {
+  DROP_SHOWN_S, EVENTS_KEPT, ROWS_REFRESH_S, addEvent, clearExport, dropExport, eventsOf, observeRows, recentDrops, rowDrops, rowsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause,
+} from '../../js/engine/logic/notes.js';
 
 const note = () => ({
   exports: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
@@ -67,4 +69,48 @@ test('destinataires disparus : webhook supprimé à la main dans Grist', () => {
   assert.equal(vanishedRecipients([ev('join', 5), ev('join', 4), ev('revoke', 3)], 1), 0);
   assert.equal(vanishedRecipients([ev('join', 5), ev('join', 4), ev('join', 3)], 1), 2);
   assert.equal(vanishedRecipients([ev('revoke', 4)], 0), 0, 'jamais négatif (ajout sorti de l\'historique)');
+});
+
+test('lignes en moins dans un export : référence, seuil (plus de 10 lignes et 20 %), événement, avis de 24 h', () => {
+  const frozen = JSON.stringify(note());
+  // Première observation : la référence est écrite, sans avis.
+  const first = observeRows(note(), 'a', { Contacts: 100, Notes: 5 }, 1000);
+  assert.deepEqual(first.lignes, { a: { at: 1000, n: { Contacts: 100, Notes: 5 } } });
+  assert.equal(JSON.stringify(note()), frozen, 'la note reçue est intacte');
+  assert.equal(observeRows(first, 'a', { Contacts: 100, Notes: 5 }, 1100), null, 'rien n\'a changé : rien à écrire');
+  assert.equal(observeRows(first, 'a', { Contacts: 101, Notes: 5 }, 1100), null, 'changé mais référence récente : pas de nouvelle écriture');
+  assert.deepEqual(observeRows(first, 'a', { Contacts: 101, Notes: 5 }, 1000 + ROWS_REFRESH_S).lignes.a, { at: 1000 + ROWS_REFRESH_S, n: { Contacts: 101, Notes: 5 } }, 'référence renouvelée');
+  // Seuils : plus de 10 lignes ET plus de 20 % de la table. 10 en moins : non ; 11 sur 100 : non (11 %) ;
+  // 11 sur 50 : oui (22 %) ; 20 sur 100 : non (pas plus de 20 %) ; 21 sur 100 : oui.
+  assert.deepEqual(rowDrops({ T: 100 }, { T: 90 }), []);
+  assert.deepEqual(rowDrops({ T: 100 }, { T: 89 }), []);
+  assert.deepEqual(rowDrops({ T: 50 }, { T: 39 }), [{ table: 'T', n: 11, was: 50 }]);
+  assert.deepEqual(rowDrops({ T: 100 }, { T: 80 }), []);
+  assert.deepEqual(rowDrops({ T: 100 }, { T: 79 }).map(d => d.n), [21]);
+  assert.deepEqual(rowDrops({ T: 1000 }, { T: 950 }), [], '50 lignes sur 1 000 : moins de 20 %');
+  assert.deepEqual(rowDrops({ T: 1000 }, { T: 700 }).map(d => d.n), [300]);
+  assert.deepEqual(rowDrops({ T: 10 }, { T: 0 }), [], 'moins de 11 lignes : jamais');
+  assert.deepEqual(rowDrops({ T: 50 }, { U: 0 }), [], 'une table qui n\'était pas observée, ou perdue : pas de baisse');
+  // Une baisse s'écrit aussitôt, avec son événement, référence récente ou non.
+  const dropped = observeRows(first, 'a', { Contacts: 70, Notes: 5 }, 1010);
+  assert.deepEqual(dropped.lignes.a, { at: 1010, n: { Contacts: 70, Notes: 5 } });
+  assert.deepEqual(eventsOf(dropped, 'a'), [{ at: 1010, kind: 'shrink', who: 'Contacts', n: 30 }]);
+  assert.deepEqual(recentDrops(eventsOf(dropped, 'a'), 1010 + 60), [{ table: 'Contacts', n: 30, at: 1010 }]);
+  assert.deepEqual(recentDrops(eventsOf(dropped, 'a'), 1010 + DROP_SHOWN_S), [], 'l\'avis dure 24 heures');
+  // Sans destinataire (warn faux) : aucun événement ; la référence suit au rythme habituel.
+  assert.equal(observeRows(first, 'a', { Contacts: 70, Notes: 5 }, 1010, false), null);
+  const quiet = observeRows(first, 'a', { Contacts: 70, Notes: 5 }, 1000 + ROWS_REFRESH_S, false);
+  assert.deepEqual(quiet.lignes.a.n, { Contacts: 70, Notes: 5 });
+  assert.deepEqual(eventsOf(quiet, 'a'), []);
+  // La plus récente de chaque table seulement.
+  const twice = observeRows(dropped, 'a', { Contacts: 40, Notes: 5 }, 1020);
+  assert.deepEqual(recentDrops(eventsOf(twice, 'a'), 1030).map(d => [d.table, d.n]), [['Contacts', 30]], 'deux baisses de la même table : une seule ligne d\'avis, la plus récente');
+  assert.equal(eventsOf(twice, 'a').length, 2, 'les deux restent dans l\'historique');
+  // Note retouchée à la main : référence mal formée ignorée, jamais d'erreur.
+  assert.equal(rowsOf({ lignes: { a: { at: 'x', n: 3 } } }, 'a'), null);
+  assert.deepEqual(rowsOf({ lignes: { a: { at: 5, n: { T: 3, U: -1, V: 'x' } } } }, 'a'), { at: 5, n: { T: 3 } });
+  assert.equal(observeRows(note(), 'a', {}, 1), null, 'aucune table observée : rien');
+  // Un export retiré emporte sa référence.
+  assert.equal(dropExport(first, 'a').lignes, undefined);
+  assert.deepEqual(dropExport(observeRows(first, 'b', { X: 1 }, 1000), 'a').lignes, { b: { at: 1000, n: { X: 1 } } });
 });

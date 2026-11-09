@@ -251,10 +251,14 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   toujours une nouvelle clé : elle se confirme, fiche de la SOURCE affichée.
 - **Dates du futur** : une version ou une liste datée de plus de 10 minutes après l'heure de la
   CIBLE est rejetée (même instance, même horloge) : elle l'emporterait sur toutes les vraies.
-- **Vague de suppressions** : quand un passage effacerait plus de 10 lignes et plus de 20 % des
-  lignes reçues d'une table, rien n'est effacé ; la carte demande « Appliquer » ou « Ignorer »
-  (les lignes restent ici, détachées de la SOURCE). En Renforcé, toute suppression reçue attend
-  cette décision. Pas en Échange, où les suppressions passent par la case `Supprime`.
+- **Suppressions** (depuis la 0.13.4, décision d'Antoine du 9 novembre : « côté CIBLE on est passif,
+  la SOURCE répond de ses données ») : la CIBLE applique les suppressions de la SOURCE telles quelles,
+  quel qu'en soit le nombre, Renforcé compris. Avant, une vague (plus de 10 lignes et 20 %, ou toute
+  suppression en Renforcé) attendait « Appliquer » ou « Ignorer » sur la carte. La signature et le
+  sceau (0.9, 0.10) ferment déjà la liste forgée par une clé de formulaire ; la CIBLE qui veut garder
+  ses lignes coche **Archive**. C'est la SOURCE qui est avertie, après coup : plus de 10 lignes et
+  plus de 20 % d'une table de l'export disparues (suppressions ou sortie du filtre) donnent un avis
+  de 24 h sur la carte de l'export et une ligne d'historique, avec le rappel de Ctrl+Z.
 - **Ce que la CIBLE accepte** : l'expéditeur fait foi pour le contenu de son export (versions,
   suppressions, colonnes ajoutées à l'export, tables proposées). Une table nouvelle n'est jamais
   rangée sans l'accord d'un éditeur ; une colonne nouvelle prend un nom libre dans la destination,
@@ -323,7 +327,7 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   envoyées, une par journal de retour.
 - CIBLE : les tables de destination (plus `id_sync`, masquée, dont la description garde la clé de
   signature), les pièces jointes reçues, un journal par export reçu avec sa note (destinations,
-  colonnes, tables refusées, fichiers attendus, vagues de suppressions en attente, secret, clés
+  colonnes, tables refusées, fichiers attendus, secret, clés
   publiques des deux côtés) dans la
   description de `Synchro_Ids`, le formulaire de réception sur sa page, et la règle des journaux.
 - Un renvoi ne modifie jamais les tables de la personne : il n'écrit que dans `Synchro`.
@@ -361,9 +365,8 @@ Pour un usage en production :
 ## Risques acceptés
 
 - L'expéditeur d'un export peut écrire dans les tables de destination ce que l'export pourrait y
-  écrire : c'est le principe de la synchro (une vague de suppressions attend une décision, une date
-  du futur est refusée). La vague se compte par passage : une SOURCE qui efface peu à la fois n'est
-  pas retenue (en Renforcé, toute suppression l'est). Seule la SOURCE peut le faire : qui a obtenu
+  écrire : c'est le principe de la synchro (une date du futur est refusée ; la CIBLE n'a plus de
+  retenue sur les suppressions depuis la 0.13.4, voir « Suppressions » plus haut). Seule la SOURCE peut le faire : qui a obtenu
   la clé d'une réception ne le peut plus sans la clé de signature de cette réception (signature et
   sceau), ni un autre destinataire du même export, sauf pour une réception branchée avant la 0.8. Couper le lien y met fin. Pour un export qui envoie des pièces jointes, la SOURCE dépose
   ses fichiers (25 Mo chacun au plus) : un fichier reçu s'ouvre avec la même prudence qu'une pièce

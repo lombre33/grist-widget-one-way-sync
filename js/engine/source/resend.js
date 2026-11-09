@@ -7,11 +7,12 @@ import { ownsSync } from '../logic/strays.js';
 import { parseList, parseLot } from '../logic/journal.js';
 import {
   RESEND_CHUNK, addProg, addSpent, announceRest, budgetWait, chargeBusy, chunkCount, chunkMark, dueRows, eligibleRows, listRequest, lotCut, nextChunkSize, parseCharge,
-  resendValue, rowsSince, startProg, trackState,
+  resendValue, rowsSince, startProg, trackState, trackedCounts,
 } from '../logic/resend.js';
 import { exportFlow } from '../logic/health.js';
+import { rowDrops } from '../logic/notes.js';
 import { apply, clearWebhookQueue, fetchRows, listWebhooks, page, prefs, readSchema, selectRows, withLock } from '../port.js';
-import { chargeRow, isCharge, readHooks, recordEvent, syncRows, writeSync } from './synchro.js';
+import { chargeRow, isCharge, readHooks, readSourceNote, recordEvent, syncRows, watchRows, writeSync } from './synchro.js';
 import { planFiles, sendFiles } from './files.js';
 import { pauseDeadLinks } from './pausing.js';
 import { noteError } from '../errors.js';
@@ -221,7 +222,11 @@ export async function catchUp(onDone = () => {}) {
   caughtAt = Date.now();
   lastPass.at = caughtAt;
   try {
-    if (await withLock('gristsync-resend', catchUpLocked)) await onDone();
+    const sent = await withLock('gristsync-resend', catchUpLocked);
+    if (sent || shrunk) {
+      shrunk = false;
+      await onDone();
+    }
   } catch (e) {
     if (e.message === 'ownerOnly') notOwner = true;
     else if (e.message === 'resendBusy') lastPass.why = 'busy';
@@ -255,6 +260,7 @@ async function catchUpLocked() {
   let { hooks, conditions, of: recipients } = await readHooks();
   // Un lien de réception mort bloque la file de tout le document : le widget met ce destinataire en pause.
   if (await pauseDeadLinks(hooks, conditions)) ({ hooks, conditions, of: recipients } = await readHooks());
+  await watchShrink(recipients).catch(console.warn);
   if (hooks.some(tooLarge) && Date.now() - repairedAt > REPAIR_MS) {
     repairedAt = Date.now();
     await clearAndMark();
@@ -283,6 +289,28 @@ async function catchUpLocked() {
   });
   lastPass.why = 'sent';
   return late.length + lists.length + sent + files.length;
+}
+
+// Lignes qui quittent un export (la CIBLE est passive, la SOURCE est prévenue, voir watchRows) : à chaque passage,
+// un relevé léger des comptes de suivi (une requête, quelques octets par table) ; la note n'est lue que si un compte a
+// changé, et au plus toutes les WATCH_MS. `shrunk` : un avertissement est noté, la carte se redessine.
+const WATCH_MS = 30000;
+let watched = ''; // derniers comptes traités (JSON)
+let watchedAt = 0;
+let lastCounts = {}; // comptes du passage précédent : une baisse d'un passage à l'autre passe sans attendre WATCH_MS
+let shrunk = false;
+async function watchShrink(recipients) {
+  const rows = await selectRows(SYNC_TABLE, [EXPORT_COL, TABLE_COL, TYPE_COL, LIST_COL], { [TYPE_COL]: KIND.track });
+  if (!rows) return;
+  const counts = trackedCounts(rows);
+  const seen = JSON.stringify(counts);
+  const falling = Object.entries(counts).some(([id, tables]) => rowDrops(lastCounts[id] || {}, tables).length);
+  lastCounts = counts;
+  if (seen === watched || (!falling && Date.now() - watchedAt < WATCH_MS)) return;
+  watched = seen;
+  watchedAt = Date.now();
+  const note = readSourceNote(await readSchema());
+  if (await watchRows(note, counts, id => recipients(id).length)) shrunk = true;
 }
 
 // Lignes de Synchro utiles au rattrapage, sans les lots ni les listes (de grosses cellules), car

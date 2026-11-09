@@ -266,11 +266,9 @@ Plan : `/mnt/project-files/notes/beta-plan.md` ; pièces jointes :
     pendant le démarrage l'emporte sur le premier écran (`picked`, `ready` dans `js/main.js` ; le
     test clique dès que la barre d'onglets paraît). Un lecteur de la CIBLE ne voit plus le journal, donc pas la réception (accueil
     à deux tuiles, puis `recv.emptyViewer`).
-  - Vague de suppressions (`WAVE` : plus de 10 lignes et plus de 20 % ; `WAVE_STRICT` en Renforcé :
-    toute suppression ; jamais en Échange) : rien n'est effacé, `held` sur la carte, Appliquer ou
-    Ignorer (`decideWave` ; Ignorer détache les lignes, `id_sync` vide, versions `partie`).
+  - Vague de suppressions : **retirée en 0.13.4** (voir l'état ci-dessus) ; la CIBLE applique toutes les suppressions.
   - Renforcé (case à l'invitation, `renforce` dans l'invitation et la note) : comparaison du code
-    exigée (`codeNotCompared`), vague stricte, pas de lien public. Lien public refusé si une règle
+    exigée (`codeNotCompared`), pas de lien public (la vague stricte a été retirée en 0.13.4). Lien public refusé si une règle
     d'autrui cache des lignes ou colonnes d'une table de l'export (`hiddenTables` ; depuis la 0.9,
     une règle sur `*` les vise toutes, et les tables affichées par une Référence de l'export comptent,
     `readTables` ; revérifié à chaque « Modifier » d'un export public, refus `publicHiddenEdit`, et à
@@ -354,7 +352,31 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.13.3 (9 novembre 2026)
+## État : V0.13.4 (9 novembre 2026)
+
+V0.13.4 (Antoine, 9 novembre : « ce n'est pas à la cible de faire ce genre de choix, c'est bien un enjeu de la source
+d'être responsable des données. Côté cible on est passif » ; carte de décision : « CIBLE passive partout, SOURCE
+avertie », renforcé compris) :
+- **CIBLE passive** : la retenue des grosses suppressions est retirée du moteur (`WAVE`, `WAVE_STRICT`, `holdWave`,
+  `decideWave`, `held`, la carte `waveBlock`, les textes `recv.wave.*`). Toute suppression de la SOURCE (ligne effacée,
+  sortie du filtre, case Supprime) est appliquée, quel qu'en soit le nombre, en Renforcé aussi. Ce qui reste à la CIBLE :
+  l'option **Archive** (les lignes restent, cochées). La signature et le sceau (0.9, 0.10) ferment déjà la liste forgée.
+  Les textes du Renforcé (`send.renforce.help`, `recv.renforce`) ne parlent plus de suppressions à valider.
+- **SOURCE avertie, après coup** (aucune confirmation avant l'envoi n'est possible : le webhook de Grist envoie sans le
+  widget) : page d'un propriétaire ouverte, `watchRows` (`engine/source/synchro.js`, appelé par `upgradeSource`) compare le
+  nombre de lignes de chaque table de l'export (suivi `N:crc`, `eligibleRows`) à la dernière observation gardée dans la note
+  SOURCE (`lignes` : `{ <export>: { at, n: { <table>: nombre } } }`, renouvelée au plus toutes les 5 minutes). Plus de 10 lignes
+  **et** plus de 20 % de la table en moins : événement `shrink` dans l'historique (`who` = table, `n`) et avis de 24 h sur la
+  carte de l'export (`shrinkNotices`, textes `send.shrink.*`, rappel de Ctrl+Z / « Historique du document »). Logique pure
+  dans `logic/notes.js` (`observeRows`, `rowDrops`, `recentDrops`, `rowsOf`, testée). Pas pour les exports en Échange (leurs
+  suppressions passent par la case Supprime) ; l'export public compte un destinataire. **Limites dites** : le compte ne distingue pas
+  une suppression d'une sortie du filtre ; une baisse faite page fermée n'est vue qu'à l'ouverture suivante, comparée à la
+  dernière observation (« constaté le … ») ; sans destinataire, la référence suit sans événement.
+- Moteur 2.1.0 (`engine/version.js`), dit dans `GFS-ETAT.md` : GFS aussi applique désormais toute suppression.
+- Testé : unit (`notes` : seuils, référence, avis de 24 h ; `consolidation` : tout est effacé, un seul ou tout) ; e2e : la
+  suppression d'une ligne en Renforcé s'applique seule, 14 lignes ajoutées puis retirées font apparaître l'avis côté SOURCE.
+
+## État précédent : V0.13.3 (9 novembre 2026)
 
 V0.13.3 (Antoine, 9 novembre, carte de décision « Tout, parcours compris » sur les constats 1 à 10 de l'audit UI/UX de
 la 0.13.1) : écran seul, rien dans le moteur (`hookShown` est dans `js/source/shown.js`).
@@ -374,8 +396,7 @@ la 0.13.1) : écran seul, rien dans le moteur (`hookShown` est dans `js/source/s
   replié (`s.more`). Image d'aide `img/aide-partager.png` rognée sur les trois boutons (`helpShots`) ; cibles de clic
   de 24 px au moins sur les `summary`.
 - **Pas fait** : constats 11 à 15 (débordement de 1 px à 380 px, phrase flottante de mise à jour, badge « À jour »
-  contre avis, réception sans journal, noms du produit) ; la retenue des grosses suppressions côté CIBLE (`WAVE`) est en
-  question (Antoine : « côté cible on est passif », la SOURCE répond de ses données), carte de décision ouverte.
+  contre avis, réception sans journal, noms du produit).
 
 V0.13.2 (état précédent, 6 novembre 2026) :
 

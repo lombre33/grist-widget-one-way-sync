@@ -402,12 +402,17 @@ même réception reprend avec ses tables (le widget montre d'abord d'où vient l
 Une réception créée avant la version 0.5 peut avoir son formulaire sur la même page qu'un autre :
 la carte le signale (**Lien commun à d'autres formulaires**), et **Couper le lien** l'en sépare.
 
-### Vague de suppressions
+### Suppressions
 
-Quand un passage effacerait d'un coup plus de 10 lignes et plus d'une sur cinq des lignes reçues
-d'une table (toutes les suppressions, en sécurité renforcée), rien n'est effacé : la carte demande
-**Appliquer** (les lignes sont supprimées ici aussi) ou **Ignorer** (elles restent ici, détachées
-de la SOURCE, qui ne les tiendra plus à jour).
+La CIBLE est passive : une ligne supprimée dans la SOURCE (ou sortie du filtre de l'export) est
+supprimée ici aussi, quel qu'en soit le nombre. La SOURCE répond de ses données ; la décision ne
+vous est pas demandée. Pour garder chez vous ce qu'elle retire, cochez **Archive** (dans
+« Options avancées » à l'acceptation, ou dans **Options** de la carte) : la ligne reste, cochée.
+
+Côté SOURCE, quand plus de 10 lignes et plus d'une sur cinq d'une table ont disparu de l'export
+d'un coup, la carte de l'export le dit (avis pendant 24 heures, et ligne dans l'historique des
+envois), avec le rappel qu'une suppression faite par erreur s'annule dans Grist (**Ctrl+Z**, ou
+« Historique du document ») : les lignes repartent chez les destinataires.
 
 ## Échange, dans les deux sens
 

@@ -79,7 +79,6 @@ test('carte d\'une table : colonne qui nomme les lignes, historique et colonnes 
   assert.equal(card.labelCol, 'Ville');
   assert.deepEqual(card.recent.map(r => [r.label, r.n]), [['Lyon', 4]]);
   assert.deepEqual(card.added.map(a => a.id), ['Mail']);
-  assert.equal(card.held, null);
   assert.equal(card.pendingCount, 0);
   assert.equal(tableResult({ ...base, entry: { ...entry, label: 'Absente' } }, groups, 0).labelCol, 'Nom');
   assert.equal(tableResult({ ...base, entry: { table: 'Vide' } }, new Map(), 0).recent.length, 0);

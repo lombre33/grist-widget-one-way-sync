@@ -10,7 +10,7 @@ import {
   awaitingPartner, currentRows, expandRows, isRaw, nextGaps, planPull, planPurge, planUnpack, rowsByTable, sentColumns, touchedTables, unpackActions,
 } from '../logic/journal.js';
 import {
-  WAVE, WAVE_STRICT, copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, planConsolidation, receivedColumns, refusedGaps,
+  copyColumns, destRefs, droppedColumns, exchangeRules, followRenames, manualEdits, planConsolidation, receivedColumns, refusedGaps,
   restoreActions, rowNumbers,
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
@@ -337,7 +337,7 @@ async function copyTable(ctx, noted) {
   const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public');
   lastRead.set(key, {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
-    pending: plan.pending, held: plan.held, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
+    pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
   return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, links, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
@@ -355,14 +355,14 @@ function unchanged(key, signature) {
   return Boolean(was && was.signature === signature && Date.now() - was.at < REREAD_MS && lastRead.has(key));
 }
 
-// Recopie d'une table, planifiée (voir planConsolidation) : vague de suppressions retenue selon
-// le niveau Renforcé, jamais en Échange ni en archive (rien n'y est effacé).
+// Recopie d'une table, planifiée (voir planConsolidation) : les suppressions de la SOURCE sont
+// appliquées telles quelles (la CIBLE est passive), sauf en archive (rien n'y est effacé).
 function planTable(ctx, entry, { rows, destRows, copyCols }) {
   return planConsolidation({
     journalRows: rows, destRows, copyCols, destTable: entry.dest, journalTable: ctx.journal, matchCol: entry.match || '',
     exchange: ctx.exchange, hub: ctx.hub, rules: ctx.rules, decisions: ctx.decisions,
     deleteCol: ctx.schema.columns(entry.dest).some(c => c.colId === DELETE_COL),
-    hold: ctx.exchange ? null : ctx.renforce ? WAVE_STRICT : WAVE, wave: ctx.waves.get(entry.table) || '', now: nowS(), archive: ctx.archive,
+    now: nowS(), archive: ctx.archive,
   });
 }
 
@@ -412,9 +412,8 @@ async function copyContext(schema, journal, note, groups) {
   if (review) await clearFixMarks([...lots.values()]);
   const prefix = `${journal}|`;
   return {
-    schema, journal, groups, exchange, swap, review, lots, rows, mode: note.mode, renforce: Boolean(note.renforce), archive: Boolean(note.archive) && !exchange,
+    schema, journal, groups, exchange, swap, review, lots, rows, mode: note.mode, archive: Boolean(note.archive) && !exchange,
     dests: new Map(note.tables.map(tb => [tb.table, tb])),
-    waves: new Map([...choices].filter(([k]) => k.startsWith(`${journal}#`)).map(([k, v]) => [k.slice(journal.length + 1), v])),
     hub: Boolean(review && swap && swap[SCHEMA_COL] === HUB),
     rules: review ? exchangeRules(readSourceNote(schema).exports.find(e => e.id === note.export)) : null,
     decisions: new Map([...choices].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [Number(k.slice(prefix.length)), v])),
@@ -605,10 +604,6 @@ async function passAll() {
 // Décision prise sur la carte pour des changements à valider (versions du journal `journal`) :
 // appliquée par un passage lancé aussitôt, ou par le suivant si un passage est déjà en cours.
 export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${journal}|${id}`), choice);
-
-// Décision sur une vague de suppressions retenue (table `table` du journal) : 'appliquer' ou
-// 'ignorer' (voir WAVE), pour le passage lancé aussitôt.
-export const decideWave = (journal, table, choice) => applyDecisions([`${journal}#${table}`], choice);
 
 // Décisions notées, puis un passage, dès que celui en cours est fini.
 async function applyDecisions(keys, choice) {
