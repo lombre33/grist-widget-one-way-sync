@@ -81,3 +81,29 @@ test('CIBLE : un lot déposé dans le journal est recopié dans la destination',
   assert.equal(doc.has('Journal_Annuaire'), false);
   assert.equal(doc.has('Contacts'), false, 'seul le nom préfixé existe');
 });
+
+test('CIBLE : une destination donnée par l\'hôte reste intacte, sans y remettre le préfixe', async () => {
+  const doc = fakeDoc();
+  startEngine({ port: fakePort(doc), prefix: 'GFS_' });
+  const journal = journalId('Dossiers', (await readSchema()).tableIds);
+  assert.equal(journal, 'GFS_Journal_Dossiers');
+  // L'hôte (un écran de GFS) a choisi l'identifiant exact de la destination : `dest` n'est pas préfixé,
+  // le moteur ne le préfixe pas (seul le nom que l'écran de Sync+ propose passe par destTableId).
+  const entry = { table: 'Contacts', dest: 'Dossiers_recus', columns: COLUMNS, own: ['Nom', 'Ville'] };
+  await createJournal(journal, {
+    id: '0123456789abcdef', export: EXPORT, name: 'Dossiers', secret: '', from: { email: 'source@fake.local', docId: 'zyxwvutsrqpo', docName: 'Source' }, tables: [entry], refused: [], missing: {},
+  });
+  await prepareDest({ dest: entry.dest, columns: COLUMNS });
+  assert.ok(doc.has('Dossiers_recus'), 'la destination porte exactement l\'identifiant donné');
+  assert.ok(!doc.has('GFS_Dossiers_recus'));
+
+  doc.addRow(journal, {
+    [EXPORT_COL]: EXPORT, [TABLE_COL]: 'Contacts', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: JSON.stringify(COLUMNS),
+    [LOT_COL]: JSON.stringify({ lignes: [['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }]], total: 1 }), Sync_Recu: doc.now(),
+  });
+  await consolidateAll();
+  assert.deepEqual(doc.rows('Dossiers_recus').map(r => `${r[KEY_COL]}:${r.Nom}`), ['k1:Alice']);
+  assert.ok(!doc.has('GFS_Dossiers_recus'));
+  const result = state.results.get(`${journal}|Contacts`);
+  assert.ok(result && !result.error, JSON.stringify(result));
+});

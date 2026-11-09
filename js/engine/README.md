@@ -45,6 +45,11 @@ startEngine({ port, prefix: '' });   // une fois, avant tout appel ; le même pr
 | `page` | `visible()`, `busy()`, `onShow(fn)`, `onLeave(fn)` |
 | `prefs` | `read(nom)`, `write(nom, valeur)` : deux petites valeurs par navigateur (dernière visite d'un document, identifiant du navigateur), jamais une donnée de table |
 
+Contrat de `docChanges(since)` : rend `null` si l'hôte ne sait pas comparer (droits), sinon `{ hash, tables }` où `hash` est le
+nouvel état de départ et `tables` l'ensemble des tables touchées depuis `since`, ou **`null` = inconnu, tout relire** (pas
+d'état de départ, état que Grist ne connaît plus, table renommée, Grist muet). Un ensemble **vide** ne se rend que pour un
+état connu et sans changement : un état perdu ne doit jamais passer pour « rien n'a changé » (`tests/unit/doc-changes.test.mjs`).
+
 Sync+ seul remplit ce port avec `js/sync-port.js`. `tests/unit/engine-fake.mjs` en est un autre : un Grist en mémoire.
 `readSchema` rend un schéma bâti par `logic/schema.js` (`schemaFrom(lignes de _grist_Tables, lignes de _grist_Tables_column)`).
 

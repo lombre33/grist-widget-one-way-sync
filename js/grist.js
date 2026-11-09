@@ -130,8 +130,8 @@ export async function uploadAttachment(name, bytes) {
 
 // Ce qui a changé dans le document depuis l'état `since` (empreinte d'une action de son
 // historique) : l'état actuel (`hash`) et les tables touchées, lignes ou colonnes (`tables` ; null
-// si `since` est vide ou sorti de l'historique, si une table a été renommée, ou si Grist n'a pas
-// pu répondre). Lu par la comparaison de deux états de Grist (GET /compare, quelques
+// = inconnu, tout relire : si `since` est vide ou sorti de l'historique, si une table a été renommée,
+// ou si Grist n'a pas pu répondre). Lu par la comparaison de deux états de Grist (GET /compare, quelques
 // millisecondes ; une valeur au plus par colonne revient). Null si Grist refuse : la comparaison
 // est réservée à qui peut lire tout le document.
 export async function docChanges(since) {
@@ -139,11 +139,18 @@ export async function docChanges(since) {
   try {
     let response = await read(since || 'HEAD');
     if ([401, 403].includes(response.status)) return null;
-    if (!response.ok && since) response = await read('HEAD');
+    // Un état que Grist ne connaît plus (500 « Cannot read hash » sur la 1.7.19) : on repart de HEAD, mais
+    // les changements arrivés pendant que l'état était perdu ne se savent plus. La réponse de HEAD contre
+    // HEAD n'a aucun changement : elle ne doit pas passer pour « rien n'a changé » (`tables` null).
+    let lost = !since;
+    if (!response.ok && since) {
+      lost = true;
+      response = await read('HEAD');
+    }
     if (!response.ok) return response.status === 404 ? null : { hash: since, tables: null };
     const { right, details } = await response.json();
     const delta = (details || {}).rightChanges;
-    const known = since && delta && !(delta.tableRenames || []).length;
+    const known = !lost && delta && !(delta.tableRenames || []).length;
     return { hash: right.h, tables: known ? new Set(Object.keys(delta.tableDeltas || {})) : null };
   } catch (e) {
     return { hash: since, tables: null };
