@@ -99,7 +99,7 @@ async function showDest(ctx, invitation) {
     invitation.mode === 'echange' ? message('info', t('recv.consent.echange')) : null,
     el('p', { class: 'muted small' }, t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
     el('label', { class: 'check' }, reserveBox, t('recv.reserve')),
-    options ? options.node : null,
+    options ? el('details', { class: 'guide options-more' }, el('summary', {}, t('recv.options.advanced')), options.node) : null,
     askCompared ? el('label', { class: 'check' }, compared, t('recv.backCompared')) : null,
     report, stepHelp(['t-dest']), roleGuide({ you: 'target', mode: invitation.mode, current: 1 }),
   ], [back(() => showCode(ctx)), cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);

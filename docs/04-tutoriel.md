@@ -43,7 +43,9 @@ ou celle de la copie hébergée par votre organisation ; jamais une adresse reç
 ![Vue Personnalisée](images/00b-installer-page.png)
 ![URL personnalisée](images/00c-installer-url.png)
 
-**Accepter l'accès complet.** Dans le **panneau de droite** de Grist (icône tout en haut à droite
+### Donner l'accès complet au document
+
+Dans le **panneau de droite** de Grist (icône tout en haut à droite
 si le panneau est fermé), cliquer sur le widget, puis, dans la section **Niveau d'accès**,
 cliquer **Accepter**, ou choisir **Accès complet au document** dans la liste. Sans cet accès, le
 widget reste bloqué sur un message, avec ces mêmes images.

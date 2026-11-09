@@ -29,9 +29,13 @@ import { checkKeys } from '../engine/source/keys.js';
 import { keysBlock } from './keys.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
+import { hookShown } from './shown.js';
 import { confirmDialog, el, icon, message, noteError, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
+
+// Fiche affichée d'un destinataire : sans l'identifiant du document (il reste dans l'infobulle, `personLabel`).
+const personShown = h => hookShown(h.fields.memo, hookCheck(h.id).docName) || '—';
 
 let container;
 let notice = null; // message à montrer au prochain affichage (fin d'un renvoi)
@@ -156,7 +160,7 @@ function sourceView(state, access, open) {
   if (state.foreign) cards.unshift(foreignCard(state, out));
   if (state.lost) cards.unshift(lostCard(state.lost, out));
   return [toolbar,
-    state.ownerOnly ? message('warn', t('send.ownersOnly')) : null,
+    state.ownerOnly ? message('info', t('send.ownersOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : state.ownerOnly ? null : el('p', { class: 'muted' }, t('send.empty')),
@@ -259,14 +263,14 @@ function exportCard(exp, state, open, out) {
 function behindNotice(exp, { blocker }) {
   if (!blocker) return null;
   const n = exp.recipients.filter(h => h.id !== blocker.id && hookStatus(h)[0] !== 'error' && (h.usage || {}).numWaiting > 0).length;
-  return n ? message('warn', t('send.behind', { n, who: personLabel(blocker) })) : null;
+  return n ? message('warn', t('send.behind', { n, who: personShown(blocker) })) : null;
 }
 
 // Destinataires dont le webhook a disparu des réglages de Grist (supprimé à la main) : rien ne leur est plus envoyé,
 // et la carte n'en montre aucun.
 function vanishedNotice(exp) {
   const n = exp.retour || exp.public ? 0 : vanishedRecipients(exp.events, exp.recipients.length);
-  return n ? message('warn', t('send.vanished', { n })) : null;
+  return n ? message('warn', t('send.vanished', { n }), t('send.vanished.title', { n })) : null;
 }
 
 // Clés manquantes ou en double dans les tables de l'export (voir keysBlock).
@@ -311,12 +315,13 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   const slot = { pill: el('span', {}), lines: el('div', {}), syncCols, status };
   personSlots.set(h.id, slot);
   fillPerson(slot, h);
-  return el('li', { class: 'person' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who' }, personLabel(h)), slot.pill),
+  return el('li', { class: 'person', 'data-memo': h.fields.memo || '' },
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who', title: personLabel(h) }, personShown(h)), slot.pill),
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     exp.unkeyed.has(h.id) ? message('err', t('send.person.noKey')) : null,
     autoPaused ? message('info', t(autoPaused.why === 'slow' ? 'send.paused.slow' : 'send.paused.auto')) : null,
+    status === 'paused' && !autoPaused ? message('info', t('send.paused.manual')) : null,
     slot.lines,
     el('div', { class: 'person-actions' },
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),

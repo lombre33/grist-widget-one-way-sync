@@ -24,11 +24,27 @@ function figure(name) {
       buttons: closeButtons() }) }, img);
 }
 
+// Les paragraphes « 1. … » qui se suivent forment une vraie liste numérotée (lecteurs d'écran compris).
+const NUMBERED = /^\d+\.\s+/;
+function paragraphs(list) {
+  const nodes = [];
+  let steps = null;
+  for (const text of list) {
+    const mark = NUMBERED.exec(text);
+    if (!mark) { steps = null; nodes.push(el('p', {}, text)); continue; }
+    if (!steps) { steps = el('ol', { class: 'tuto-steps' }); nodes.push(steps); }
+    steps.append(el('li', {}, text.slice(mark[0].length)));
+  }
+  return nodes;
+}
+
+// Une section : son texte, puis (facultatif) `more`, un complément replié, puis ses captures.
 function section(s, number) {
   return el('section', { class: 'tuto-section', id: `tuto-${s.id}`, 'data-role': s.role },
     el('h2', {}, number ? `${number}. ` : '', pickText(s.title),
       s.role === 'both' ? null : el('span', { class: `role-badge role-${s.role}` }, t(`guide.role.${s.role}`))),
-    pick(s.text).map(p => el('p', {}, p)),
+    paragraphs(pick(s.text)),
+    s.more ? el('details', { class: 'guide tuto-more' }, el('summary', {}, pickText(s.more.title)), paragraphs(pick(s.more.text))) : null,
     s.images.length ? el('div', { class: 'tuto-shots' }, s.images.map(figure)) : null);
 }
 

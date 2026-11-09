@@ -18,7 +18,7 @@ import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
-import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
+import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
 
@@ -27,9 +27,9 @@ let container;
 let wizardOpened = false; // l'assistant ne se rouvre seul qu'une fois par chargement
 // Avis de la dernière action (lien coupé), gardé une minute : le passage de recopie qui suit
 // l'action redessine l'onglet (vu au test : l'avis disparaissait aussitôt).
-let notice = null; // { node, until }
+let flash = null; // { node, until }
 const NOTICE_MS = 60000;
-const lastNotice = () => (notice && Date.now() < notice.until ? notice.node : null);
+const lastNotice = () => (flash && Date.now() < flash.until ? flash.node : null);
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
 // Historiques et lignes d'historique ouverts : repliés par défaut, ils le restent d'un dessin à
 // l'autre de l'onglet (un passage qui change quelque chose le redessine).
@@ -235,9 +235,8 @@ function syncCard(group) {
 // sinon l'identifiant), lien public, sens de l'Échange.
 function cardOrigin({ note, public: isPublic }) {
   const { email: from, docName, docId } = note.from || {};
-  const fromDoc = docName || docId || '';
   return [
-    from ? el('p', { class: 'small' }, t(fromDoc ? 'recv.fromDoc' : 'recv.from', { from, doc: fromDoc })) : null,
+    from ? el('p', { class: 'small', title: docId ? t('recv.docId', { doc: docId }) : null }, t(docName ? 'recv.fromDoc' : 'recv.from', { from, doc: docName })) : null,
     isPublic ? el('p', { class: 'muted small' }, t('recv.public')) : null,
     note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
   ];
@@ -264,8 +263,7 @@ function safeCard(group) {
   }
 }
 
-const alertBlock = (title, lines, actions) => el('div', { class: 'msg msg-warn suspect', role: 'status' },
-  el('strong', {}, title), lines.filter(Boolean).map(line => el('p', { class: 'small' }, line)), el('div', { class: 'card-actions' }, actions));
+const alertBlock = (title, lines, actions) => notice({ tone: 'warn', className: 'suspect', title, lines, actions });
 
 // Arrivées suspectes : lignes rejetées (elles ne pouvaient pas venir du webhook de cet export) et
 // arrivée anormale. Le lien du formulaire est peut-être connu d'un autre : on peut le couper.
@@ -290,7 +288,7 @@ async function cutLink(group) {
   if (!(await confirmDialog({ title: t('recv.cut.title'), body: t('recv.cut.body'), confirmLabel: t('recv.suspect.cut') }))) return;
   await updateJournalNote(group.journal, ({ suspect, ...note }) => note);
   await renewFormLink(group.journal);
-  notice = { node: message('ok', t('recv.cut.done')), until: Date.now() + NOTICE_MS };
+  flash = { node: message('ok', t('recv.cut.done')), until: Date.now() + NOTICE_MS };
   await renderTarget();
 }
 
@@ -378,6 +376,10 @@ function diffGrid(lines, { types = {}, labelCol = '', otherHead }) {
 
 const more = n => (n > 0 ? el('p', { class: 'small' }, t('recv.history.more', { n })) : null);
 
+// Au-delà de FOLD_FROM retouches, le détail se replie (il reste ouvert d'un dessin à l'autre, comme l'historique).
+const FOLD_FROM = 5;
+const fold = (id, summary, content) => el('details', { class: 'fold', open: opened.has(id), ontoggle: keepOpen(id) }, el('summary', {}, summary), content);
+
 // Retouches faites à la main dans une destination : colonnes reçues effacées, cellules qui
 // diffèrent de la dernière version reçue (avec leur numéro de ligne), lignes reçues effacées. Elles
 // restent jusqu'à ce que la SOURCE change leur ligne, ou que l'on clique sur « Corriger ». Le
@@ -391,11 +393,12 @@ function driftBlock(group, entry) {
     ...(result.drift || []).map(d => (d.gone ? { label: d.label, said: t('recv.drift.rowGone') } : d)),
   ];
   const { grid, rows } = diffGrid(lines, { types: result.types, labelCol: result.labelCol, otherHead: t('recv.drift.source') });
-  return el('div', { class: 'msg msg-warn drift', role: 'status' },
-    el('strong', {}, t('recv.drift.title', { dest: entry.dest, n: total })),
-    el('p', { class: 'small' }, t('recv.drift.body', { n: total })),
-    grid, more(total - rows),
-    el('div', { class: 'card-actions' }, button(t('recv.drift.fix'), 'undo', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))));
+  const detail = [grid, more(total - rows)];
+  return notice({
+    tone: 'info', className: 'drift', title: t('recv.drift.title', { dest: entry.dest, n: total }), lines: [t('recv.drift.body', { n: total })],
+    body: total > FOLD_FROM ? fold(`drift:${group.journal}:${entry.table}`, t('recv.drift.show', { n: total }), detail) : detail,
+    actions: [button(t('recv.drift.fix'), 'undo', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))],
+  });
 }
 
 // « Corriger » : la table reprend l'état exact de la SOURCE, après confirmation.
@@ -426,13 +429,11 @@ function waveBlock(group, entry) {
       await renderTarget();
     });
   };
-  return el('div', { class: 'msg msg-warn wave', role: 'status' },
-    el('strong', {}, t('recv.wave.title', { n: held.n, dest: entry.dest })),
-    el('p', { class: 'small' }, t(group.note.renforce ? 'recv.wave.strict' : 'recv.wave.body')),
-    held.numbers.length ? el('p', { class: 'small' }, t('recv.wave.rows', { rows: held.numbers.join(', ') })) : null,
-    el('div', { class: 'card-actions' },
-      button(t('recv.wave.apply'), 'trash', e => choose(e, 'appliquer'), 'btn-danger-text'),
-      button(t('recv.wave.ignore'), 'ignore', e => choose(e, 'ignorer'))));
+  return notice({
+    tone: 'warn', className: 'wave', title: t('recv.wave.title', { n: held.n, dest: entry.dest }),
+    lines: [t(group.note.renforce ? 'recv.wave.strict' : 'recv.wave.body'), held.numbers.length ? t('recv.wave.rows', { rows: held.numbers.join(', ') }) : null],
+    actions: [button(t('recv.wave.apply'), 'trash', e => choose(e, 'appliquer'), 'btn-danger-text'), button(t('recv.wave.ignore'), 'ignore', e => choose(e, 'ignorer'))],
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -466,14 +467,11 @@ function reviewBlock(group, entry) {
     p.cells.length ? miniGrid(['', ...p.cells.map(([, to]) => to)], [
       p.state === 'ajout' ? null : values('before', p.cells, 2),
       p.state === 'suppression' ? null : values('after', p.cells, 3)].filter(Boolean)) : null));
-  return el('div', { class: 'msg msg-info review', role: 'status' },
-    el('strong', {}, t('recv.review.title', { dest: entry.dest, n: total })),
-    el('p', { class: 'small' }, t('recv.review.body')),
-    el('ul', { class: 'review-rows' }, items),
-    more(total - items.length),
-    el('div', { class: 'card-actions' },
-      button(t('recv.review.accepterAll'), 'check', e => all(e, 'accepter')),
-      button(t('recv.review.refuserAll'), 'refuse', e => all(e, 'refuser'), 'btn-danger-text')));
+  return notice({
+    tone: 'warn', className: 'review', title: t('recv.review.title', { dest: entry.dest, n: total }), lines: [t('recv.review.body')],
+    body: [el('ul', { class: 'review-rows' }, items), more(total - items.length)],
+    actions: [button(t('recv.review.accepterAll'), 'check', e => all(e, 'accepter')), button(t('recv.review.refuserAll'), 'refuse', e => all(e, 'refuser'), 'btn-danger-text')],
+  });
 }
 
 // Refus avec écart signalé : la ligne refusée reste différente chez le participant, jusqu'à la
@@ -485,10 +483,7 @@ function gapBlock(group, entry) {
   if (!total) return null;
   const lines = result.gaps.map(g => (g.state !== 'modif' || !g.cells.length ? { n: g.n, label: g.label, said: t(`recv.gap.${g.state}`) } : g));
   const { grid, lines: shown } = diffGrid(lines, { types: result.types, labelCol: result.labelCol, otherHead: t('recv.gap.theirs') });
-  return el('div', { class: 'msg msg-warn drift', role: 'status' },
-    el('strong', {}, t('recv.gap.title', { dest: entry.dest, n: total })),
-    el('p', { class: 'small' }, t('recv.gap.body')),
-    grid, more(total - shown));
+  return notice({ tone: 'info', className: 'drift', title: t('recv.gap.title', { dest: entry.dest, n: total }), lines: [t('recv.gap.body')], body: [grid, more(total - shown)] });
 }
 
 // ---------------------------------------------------------------------------------------------

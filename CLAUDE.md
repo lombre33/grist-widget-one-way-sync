@@ -354,7 +354,30 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.13.2 (6 novembre 2026)
+## État : V0.13.3 (9 novembre 2026)
+
+V0.13.3 (Antoine, 9 novembre, carte de décision « Tout, parcours compris » sur les constats 1 à 10 de l'audit UI/UX de
+la 0.13.1) : écran seul, rien dans le moteur (`hookShown` est dans `js/source/shown.js`).
+- **Un seul composant d'avis** (`notice` de `js/ui.js`, `message(kind, text, titre)` pour un avis à titre) : ton `info`
+  (à savoir), `warn` (à décider ou à surveiller), `err` (ne marche plus, `role="alert"` ; les autres `role="status"`) ;
+  titre en gras, lignes `small`, corps libre, boutons en pied. Alerte de retouches, vague de suppressions, écarts,
+  clés manquantes (`keysBlock`), avis réservés aux propriétaires l'emploient. `flowView` n'a volontairement aucun rôle
+  vivant (redessiné toutes les 10 s).
+- **Retouches à la main** : au-delà de `FOLD_FROM` (5) lignes, le détail est replié (`fold`, mémorisé par `opened`).
+- **Destinataire** : la ligne montre « courriel · équipe/nom du document » sans l'identifiant brut (`hookShown`, le
+  complet reste dans `title`) ; la carte CIBLE dit « Données de … » + document (`recv.docId`) ; la pause manuelle a sa
+  phrase (`send.paused.manual`).
+- **Assistants** : ancrés en haut (plus de centrage vertical, les boutons ne sautent plus d'une étape à l'autre) ;
+  options de la CIBLE (archive, lecture seule) repliées sous « Options avancées » (`recv.options.advanced`) : l'e2e
+  les ouvre avant de cocher (`accept()` de `run.mjs`).
+- **Tutoriel** : étape 1 scindée (`install` + `access`), listes numérotées en vraie `<ol>` (`paragraphs`), « Pourquoi »
+  replié (`s.more`). Image d'aide `img/aide-partager.png` rognée sur les trois boutons (`helpShots`) ; cibles de clic
+  de 24 px au moins sur les `summary`.
+- **Pas fait** : constats 11 à 15 (débordement de 1 px à 380 px, phrase flottante de mise à jour, badge « À jour »
+  contre avis, réception sans journal, noms du produit) ; la retenue des grosses suppressions côté CIBLE (`WAVE`) est en
+  question (Antoine : « côté cible on est passif », la SOURCE répond de ses données), carte de décision ouverte.
+
+V0.13.2 (état précédent, 6 novembre 2026) :
 
 V0.13.2 (Antoine, 6 novembre : « refaire un audit UI/UX pour vérifier que tout est cohérent, fluide »). Rapport
 classé (15 constats, captures) : Claude Doc « Audit UI/UX de la Bêta V0.13.1 », captures dans

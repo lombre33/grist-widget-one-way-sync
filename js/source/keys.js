@@ -2,7 +2,7 @@
 // supprimées) et son bouton « Réparer les clés ». Le compte et la réparation sont dans le moteur
 // (engine/source/keys.js).
 import { repairKeys } from '../engine/source/keys.js';
-import { confirmDialog, el, run, smallButton } from '../ui.js';
+import { confirmDialog, el, notice, run, smallButton } from '../ui.js';
 import { t } from '../i18n.js';
 
 // Avis d'un export : ce qui ne partira pas, pourquoi, et le bouton qui répare (`onDone` : redessin de l'onglet).
@@ -15,14 +15,16 @@ export function keysBlock(problems, onDone, { ownerOnly = false } = {}) {
     for (const table of problems.keys()) await repairKeys(table);
     await onDone();
   }), { kind: 'btn-primary', disabled: ownerOnly });
-  return el('div', { class: 'msg msg-warn', 'data-keys': '' },
-    el('strong', {}, t('send.keys.title')),
-    el('p', { class: 'small' }, t('send.keys.help')),
-    el('ul', { class: 'small' }, [...problems].flatMap(([table, c]) => [
+  const box = notice({
+    tone: 'warn', title: t('send.keys.title'), lines: [t('send.keys.help')], 'data-keys': '',
+    body: el('ul', { class: 'small' }, [...problems].flatMap(([table, c]) => [
       c.missing.length ? el('li', {}, t('send.keys.missing', { table, cols: c.missing.join(', '), n: c.missing.length })) : null,
       c.blank || c.dup ? el('li', {}, t('send.keys.line', { table, blank: c.blank, dup: c.dup })) : null,
     ].filter(Boolean))),
-    el('div', { class: 'person-actions' }, repair), out);
+    actions: [repair],
+  });
+  box.append(out);
+  return box;
 }
 
 const total = problems => [...problems.values()].reduce((n, c) => n + c.blank + c.dup, 0);

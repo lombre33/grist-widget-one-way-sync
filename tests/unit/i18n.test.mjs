@@ -72,6 +72,10 @@ test('tutoriel : sections complètes dans les deux langues, aides et images exis
     assert.ok(['source', 'target', 'both'].includes(s.role), s.id);
     assert.ok(s.title.fr && s.title.en, `${s.id} : titre`);
     assert.equal(s.text.fr.length, s.text.en.length, `${s.id} : autant de paragraphes en fr et en en`);
+    if (s.more) {
+      assert.ok(s.more.title.fr && s.more.title.en, `${s.id} : titre du complément`);
+      assert.equal(s.more.text.fr.length, s.more.text.en.length, `${s.id} : complément, autant de paragraphes en fr et en en`);
+    }
   }
   const asked = [...code.matchAll(/stepHelp\(\[([^\]]*)\]/g)].flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(n => n[1]));
   assert.deepEqual(asked.filter(id => !ids.includes(id)), [], 'toute aide d’étape existe');

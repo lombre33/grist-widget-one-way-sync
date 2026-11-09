@@ -121,7 +121,12 @@ async function helpShots(formUrl, back) {
   };
   const share = page.getByRole('button', { name: 'Partager', exact: true }).first();
   const banner = share.locator('xpath=ancestor::div[.//button[normalize-space()="Dépublier"]][1]');
-  await pad(banner, 'aide-partager.png');
+  // Seuls les trois boutons (Vue, Partager, Dépublier) : la bannière entière, large et vide, devenait illisible en vignette.
+  const grouped = await banner.boundingBox();
+  const shareBox = await share.boundingBox();
+  const left = shareBox.x - 70 - 12;
+  await page.screenshot({ path: join(ROOT, 'img', 'aide-partager.png'), clip: {
+    x: Math.max(0, left), y: Math.max(0, grouped.y - 12), width: grouped.x + grouped.width + 12 - left, height: grouped.height + 24 } });
   await share.click();
   const copy = page.getByText('Copier le lien', { exact: true }).first();
   await copy.waitFor();
@@ -409,6 +414,7 @@ try {
     await dialog().locator('textarea.code').first().fill(code);
     await dialogButton('Continuer').click();
     await dialog().getByText(tables).waitFor();
+    if (checks.length) await dialog().getByText('Options avancées').click();
     for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
     await dialogButton('Continuer').click();
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
@@ -574,7 +580,7 @@ try {
     await seenIn(b, r => !r.Damien, 'B efface Damien');
 
     await openWidget(a.url);
-    await revoke(widget().locator('.person', { hasText: c.doc.slice(0, 10) }));
+    await revoke(widget().locator(`.person[data-memo*="${c.doc.slice(0, 10)}"]`));
     await waitFor(async () => (await api('GET', `/docs/${a.doc}/webhooks`)).webhooks.length === 1, 'un participant de moins');
     assert.deepEqual((await publishedForms(a.doc)).map(f => f.id), [back[0].id], 'son journal de retour et sa clé sont effacés, pas ceux de B');
     assert.equal((await swapRow()).Synchro_Colonnes, '', 'retour à l\'Échange à deux');
@@ -1365,15 +1371,15 @@ try {
   const first = hooksNow.find(h => h.id !== second.id);
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: first.fields.url });
   await openWidget(source.url);
-  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByText(/envoie maintenant vers un autre document/).waitFor({ timeout: 30000 });
+  await widget().locator(`.person[data-memo*="${target2.doc.slice(0, 10)}"]`).getByText(/envoie maintenant vers un autre document/).waitFor({ timeout: 30000 });
   // Adresse qui n'est plus celle d'un formulaire (ici, une barre en plus : Grist l'accepte encore).
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: second.fields.url.replace('/records?', '/records/?') });
   await openWidget(source.url);
-  await widget().locator('.person', { hasText: target2.doc.slice(0, 10) }).getByText(/n’est plus celle d’un formulaire de cette instance/).waitFor({ timeout: 30000 });
+  await widget().locator(`.person[data-memo*="${target2.doc.slice(0, 10)}"]`).getByText(/n’est plus celle d’un formulaire de cette instance/).waitFor({ timeout: 30000 });
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: second.fields.url });
   await openWidget(source.url);
   assert.equal(await widget().getByText(/envoie maintenant vers un autre document|n’est plus celle d’un formulaire/).count(), 0);
-  await revoke(widget().locator('.person', { hasText: target2.doc.slice(0, 10) }));
+  await revoke(widget().locator(`.person[data-memo*="${target2.doc.slice(0, 10)}"]`));
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.length === 1, 'un webhook en moins');
   await waitFor(async () => (await sourceKeys()).join() === key1, 'clé du révoqué retirée : plus rien n\'est signé pour lui');
   await moveAlice('Nancy', 'le premier reçoit toujours');

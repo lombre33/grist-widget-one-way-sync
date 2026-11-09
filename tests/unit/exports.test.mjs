@@ -5,6 +5,7 @@ import {
   autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
   hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/engine/logic/exports.js';
+import { hookShown } from '../../js/source/shown.js';
 import { sentColumns } from '../../js/engine/logic/journal.js';
 import { memoMatches } from '../../js/engine/logic/trust.js';
 import { EXPORT } from './fixtures.mjs';
@@ -210,6 +211,14 @@ test('état d\'un destinataire et d\'un export : pastille, erreur dite simplemen
   assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {})], echange: true })), ['participants', 'ok']);
   assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {})], echange: true, retour: true })), ['people', 'ok'], 'un retour d\'Échange n\'a qu\'un destinataire');
   assert.deepEqual(exportStatus(exp({ recipients: [hook(true, {}), hook(true, { lastHttpStatus: 403 })] })), ['error', 'err'], 'une erreur l\'emporte');
+});
+
+test('fiche affichée d\'un destinataire : sans l\'identifiant du document, sauf quand rien d\'autre ne le désigne', () => {
+  assert.equal(hookShown('a@b.fr · docA12345678 · equipe/Suivi 2027'), 'a@b.fr · equipe/Suivi 2027');
+  assert.equal(hookShown('a@b.fr · docA12345678 · equipe', 'Suivi RH'), 'a@b.fr · equipe/Suivi RH', 'nom lu au contrôle horaire');
+  assert.equal(hookShown('a@b.fr · docA12345678', 'Perso'), 'a@b.fr · Perso', 'sans équipe');
+  assert.equal(hookShown('a@b.fr · docA12345678'), 'a@b.fr · docA12345678', 'aucun nom connu : l\'identifiant reste');
+  assert.equal(hookShown('', ''), '');
 });
 
 test('fiche d\'un destinataire : mémo, journal de retour, auteur de l\'export', () => {

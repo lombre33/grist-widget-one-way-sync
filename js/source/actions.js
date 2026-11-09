@@ -5,6 +5,7 @@ import {
   cancelPendingInvitation, pauseRecipient, publicCode as makePublicCode, endExport, resumePlan, resumeRecipient, revokeRecipient, revokesOne, stopPublicShare,
 } from '../engine/source/actions.js';
 import { clearAndMark } from '../engine/source/resend.js';
+import { hookShown } from './shown.js';
 import { progressTo } from './flow.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
 import { handoffButton } from '../guide.js';
@@ -35,7 +36,7 @@ function resumeChoice(title, help) {
 export async function resume(exp, h, out) {
   const { since, n, all } = await resumePlan(exp, h);
   const help = [t('send.resume.catchup.help', { n }), all ? t('send.resume.all') : ''].filter(Boolean).join(' ');
-  const picked = await resumeChoice(t('send.resume.title', { name: h.fields.memo || exp.name }), help);
+  const picked = await resumeChoice(t('send.resume.title', { name: hookShown(h.fields.memo) || exp.name }), help);
   if (!picked) return;
   await resumeRecipient(exp, h, { catchup: picked === 'catchup', since }, progressTo(out));
 }

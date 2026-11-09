@@ -35,8 +35,21 @@ export const smallButton = (label, iconName, onclick, { kind = '', disabled = fa
   class: `btn btn-small ${kind}`, type: 'button', disabled, title, onclick,
 }, icon(iconName), label);
 
-export function message(kind, text) {
-  return el('p', { class: `msg msg-${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
+// Avis d'une carte : un seul composant. Le ton dit la gravité : « info » (à savoir), « warn » (à décider ou à
+// surveiller), « err » (ne marche plus ; annoncé aux lecteurs d'écran). Un avis qui demande un geste a un
+// titre, une ou deux phrases et ses boutons ; une simple information tient en une phrase (`message`).
+// `body` : nœuds en plus des phrases (tableau, liste) ; `attrs` : attributs de l'avis (data-…).
+export function notice({ tone = 'info', title = '', lines = [], body = [], actions = [], className = '', ...attrs } = {}) {
+  return el('div', { class: `msg msg-${tone} notice${className ? ` ${className}` : ''}`, role: tone === 'err' ? 'alert' : 'status', ...attrs },
+    title ? el('strong', { class: 'notice-title' }, title) : null,
+    lines.filter(Boolean).map(line => el('p', { class: 'small' }, line)),
+    body,
+    actions.length ? el('div', { class: 'card-actions' }, actions) : null);
+}
+
+// Une phrase, ou un titre et sa phrase quand `title` est donné.
+export function message(kind, text, title = '') {
+  return title ? notice({ tone: kind, title, lines: [text] }) : el('p', { class: `msg msg-${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
 }
 
 // ---------------------------------------------------------------------------------------------
