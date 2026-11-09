@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DROP_SHOWN_S, EVENTS_KEPT, ROWS_REFRESH_S, addEvent, clearExport, dropExport, eventsOf, observeRows, recentDrops, rowDrops, rowsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause,
+  DROP_SHOWN_S, EVENTS_KEPT, docNameOf, setDocName, ROWS_REFRESH_S, addEvent, clearExport, dropExport, eventsOf, observeRows, recentDrops, rowDrops, rowsOf, vanishedRecipients, dropInvitation, putExport, putInvitation, setExport, setFiles, setPause,
 } from '../../js/engine/logic/notes.js';
 
 const note = () => ({
@@ -113,4 +113,19 @@ test('lignes en moins dans un export : référence, seuil (plus de 10 lignes et 
   // Un export retiré emporte sa référence.
   assert.equal(dropExport(first, 'a').lignes, undefined);
   assert.deepEqual(dropExport(observeRows(first, 'b', { X: 1 }, 1000), 'a').lignes, { b: { at: 1000, n: { X: 1 } } });
+});
+
+test('nom du document : saisi par la personne, nettoyé, effacé par un nom vide, sans toucher au reste de la note', () => {
+  const before = note();
+  const frozen = JSON.stringify(before);
+  assert.equal(docNameOf(before), '');
+  const named = setDocName(before, '  Budget\u202E 2026  ');
+  assert.equal(named.nomDoc, 'Budget 2026');
+  assert.equal(docNameOf(named), 'Budget 2026');
+  assert.deepEqual(named.exports, before.exports, 'le reste de la note est gardé');
+  assert.equal(JSON.stringify(before), frozen, 'la note reçue n\'est pas modifiée');
+  assert.equal('nomDoc' in setDocName(named, '   '), false, 'un nom vide l\'efface');
+  assert.equal(docNameOf({ nomDoc: '\u202Ex\n y' }), 'x y', 'une note retouchée à la main est nettoyée à la lecture');
+  assert.equal(docNameOf({ nomDoc: 42 }), '42');
+  assert.equal('nomDoc' in dropExport(named, 'a'), true, 'supprimer un export garde le nom du document');
 });

@@ -352,7 +352,37 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.13.4 (9 novembre 2026)
+## État : V0.13.5 (9 novembre 2026)
+
+V0.13.5 (Antoine, 9 novembre : « côté cible on ne voit pas le nom du doc d'où proviennent les données […] et côté cible et
+source rajouter le lien du document, pas de lien public, le lien fonctionnel […] dans un nouvel onglet au clic » ; carte de
+décision : « A, mais récupérer par défaut le nom du document, et laisser corriger au choix de l'user ») : nom et lien du
+document de l'autre côté, des deux côtés.
+- **Un widget ne peut pas lire le nom de son propre document** (vérifié sur Grist 1.7) : `grist.docApi.getDocName()` rend
+  l'identifiant, la fiche REST `GET /api/docs/<id>` est refusée (403) à un jeton d'accès (lecture seule comme complet),
+  `document.referrer` n'a que l'origine. Seule la clé de **partage d'un formulaire** donne le nom (`GET /api/s/<clé>`, anonyme :
+  `shareInfo`, `readShare`) : la SOURCE connaît ainsi le nom de la CIBLE (déjà en 0.10.1), la CIBLE ne connaissait celui de la
+  SOURCE qu'en Échange. « Récupérer par défaut » est donc impossible pour une SOURCE privée : l'assistant de destinataire a un
+  champ « Nom de ce document » (`showOptions`), vide la première fois, **retenu** dans la note SOURCE (`nomDoc`, `docNameOf`,
+  `setDocName`, `rememberDocName`, `sourceDocName`) puis proposé de nouveau, corrigeable. Il part dans l'invitation et la
+  réponse publique (`from.docName`, `from.team`, `sourceFrom`).
+- **Liens** : `docUrl(origin, team, docId)` (`logic/codes.js`) refait `<instance>[/o/<équipe>]/doc/<id>` de l'instance de CE
+  document (https, ou http sur localhost), équipe et identifiant en `[A-Za-z0-9_-]` : jamais une adresse tirée d'un code.
+  `docLink` (`js/ui.js`) : `target="_blank" rel="noopener noreferrer"`, icône, texte réservé aux lecteurs d'écran, infobulle (« Nom
+  indiqué par la SOURCE, non vérifié » côté CIBLE sauf en Échange, où le nom vient de Grist). Montré sur la carte de réception
+  (`js/target/source-line.js`), à la fiche de l'assistant CIBLE (`sourceFiche`), à la ligne du destinataire côté SOURCE
+  (`hookDoc`, `memoDoc`, `personWho`) et à la fiche de réponse. Sans équipe (code d'avant), pas de lien. Le nom reste un
+  « dire » : jamais dans une décision ni dans le code de contrôle. Piège : une adresse sans équipe échoue sur un site à équipes
+  (`/doc/<id>` seul).
+- Moteur 2.2.0 (mineure : champs facultatifs, `CODE_FORMAT` inchangé), dit dans `GFS-ETAT.md`. `sourceOf` exporté de
+  `target/receive.js`. `updateSourceNote` ne réécrit plus une note inchangée.
+- Testé : unit (304 : `docUrl`, `cleanLabel`, `memoDoc`, `nomDoc`, `readShare`, parcours moteur) ; e2e `ONLY_DOCLINK=1`
+  (`docLinkSteps` : champ vide puis retenu, nom `<i>…</i>` rendu en texte, adresse, `target`/`rel`, clic = nouvel onglet,
+  captures avec `SHOTS=<dossier>`).
+- Le texte de `docs/04-tutoriel.md` sur le Renforcé (« fait valider toute suppression reçue par la CIBLE ») date d'avant la
+  0.13.4 : à corriger à la prochaine passe de tutoriel.
+
+## État précédent : V0.13.4 (9 novembre 2026)
 
 V0.13.4 (Antoine, 9 novembre : « ce n'est pas à la cible de faire ce genre de choix, c'est bien un enjeu de la source
 d'être responsable des données. Côté cible on est passif » ; carte de décision : « CIBLE passive partout, SOURCE

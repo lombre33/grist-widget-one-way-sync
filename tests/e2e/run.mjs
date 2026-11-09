@@ -1024,8 +1024,95 @@ try {
     await widget().getByText('Export « Autre export » créé.').waitFor();
     step('Widget posé sur la table Synchro : supprimer le dernier export garde la table et la page, un nouvel export repart');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1, ONLY_ACCESS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // --- Le document de l'autre côté : son nom et un lien (nouvel onglet) sur la ligne du destinataire (SOURCE), la
+  // carte de réception et l'assistant (CIBLE). Le widget ne peut pas lire le nom de son document (getDocName rend
+  // l'identifiant, la fiche REST est refusée au jeton) : la SOURCE le saisit, une fois, et peut le corriger.
+  async function docLinkSteps() {
+    const src = await fichesDoc('Lien SOURCE');
+    const dst = await newDocWithWidget('Lien CIBLE');
+    const shortId = doc => doc.slice(0, 12);
+    // Un clic sur le lien ouvre le document voulu dans un nouvel onglet (les liens du widget ne quittent pas Grist).
+    const opensDoc = async (link, doc) => {
+      const [tab] = await Promise.all([page.waitForEvent('popup'), link.click()]);
+      await tab.waitForURL(url => url.pathname.startsWith(`/o/${env.team}/${shortId(doc)}`), { timeout: 60000 });
+      await tab.close();
+    };
+    // CIBLE : coller le code de l'invitation dans l'assistant de réception.
+    const pasteInvitation = async (url, code) => {
+      await openWidget(url);
+      await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
+      await button('Accepter une invitation').click();
+      await dialog().locator('textarea.code').first().fill(code);
+      await dialogButton('Continuer').click();
+    };
+    // SHOTS=<dossier> : captures de contrôle (pas celles du README).
+    // Une carte redessinée pendant la prise de vue (toutes les 10 s) : la capture se refait, sans faire échouer le test.
+    const keep = async (name, locator) => {
+      for (let i = 0; process.env.SHOTS && i < 3; i++) {
+        try { await locator.screenshot({ path: join(process.env.SHOTS, `${name}.png`), timeout: 5000 }); return; } catch (e) { await page.waitForTimeout(500); }
+      }
+    };
+    await startExport(src, 'Fiches', 'Annuaire');
+    await dialogButton('Ajouter un destinataire').click();
+    const nameField = dialog().getByLabel('Nom de ce document');
+    assert.equal(await nameField.inputValue(), '', 'rien à lire : le nom du document n\'est pas donné au widget, le champ attend la saisie');
+    await dialog().locator('p.muted.small', { hasText: 'Grist ne permet pas au widget de lire le nom du document' }).waitFor(); // l'aide du tutoriel le redit : une seule phrase du champ
+    await nameField.fill('Lien SOURCE <i>saisi</i> & co');
+    await keep('28-source-nom-du-document', dialog());
+    await dialogButton('Créer l’invitation').click();
+    await dialog().getByText('Transmettez ce code').waitFor();
+    const code = await dialog().locator('textarea.code').first().inputValue();
+    assert.equal(JSON.parse(Buffer.from(code.slice('GRISTSYNC2.'.length), 'base64url')).from.docName, 'Lien SOURCE <i>saisi</i> & co', 'le nom part dans l\'invitation');
+    await dialogButton('Plus tard').click();
+    // Le nom est gardé pour l'invitation suivante, et se corrige.
+    await button('Ajouter un destinataire').click();
+    assert.equal(await dialog().getByLabel('Nom de ce document').inputValue(), 'Lien SOURCE <i>saisi</i> & co', 'nom retenu, proposé de nouveau');
+    await dialogButton('Annuler').click();
+
+    // CIBLE : la fiche de l'invitation montre le document en lien, avant toute écriture.
+    await pasteInvitation(dst.url, code);
+    await dialog().getByText('« Annuaire » : table Fiches.').waitFor();
+    const wizardLink = dialog().locator('a.doc-link');
+    assert.equal(await wizardLink.count(), 1);
+    assert.ok((await wizardLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(src.doc)}`), 'adresse refaite : instance et équipe de ce document, identifiant de la SOURCE');
+    assert.deepEqual([await wizardLink.getAttribute('target'), await wizardLink.getAttribute('rel')], ['_blank', 'noopener noreferrer']);
+    assert.equal(await wizardLink.evaluate(a => a.firstChild.textContent), 'Lien SOURCE <i>saisi</i> & co', 'le nom est du texte, jamais du HTML');
+    assert.equal(await wizardLink.locator('i').count(), 0);
+    await keep('29-cible-document-source', dialog());
+    await dialogButton('Annuler').click();
+
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.');
+    await approve(answer, { url: src.url });
+
+    // CIBLE : la carte de réception.
+    await openWidget(dst.url);
+    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    const cardLink = widget().locator('.card a.doc-link');
+    await cardLink.waitFor();
+    assert.equal(await cardLink.evaluate(a => a.firstChild.textContent), 'Lien SOURCE <i>saisi</i> & co');
+    assert.ok((await cardLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(src.doc)}`));
+    assert.match(await cardLink.getAttribute('title'), /Ouvrir le document dans un nouvel onglet — Nom indiqué par la SOURCE, non vérifié/);
+    assert.equal(await cardLink.locator('.sr-only').textContent(), ' (s’ouvre dans un nouvel onglet)');
+    await widget().getByText(`Données de ${env.email}`).waitFor();
+    await keep('30-cible-carte-document', widget().locator('.card').first());
+    await opensDoc(cardLink, src.doc);
+    assert.ok(await widget().locator('.card').isVisible(), 'l\'onglet du widget est resté en place');
+
+    // SOURCE : la ligne du destinataire, avec le nom du document vu chez Grist.
+    await openWidget(src.url);
+    await widget().getByRole('tab', { name: 'Envoyer' }).click();
+    const personLink = widget().locator('.person .person-who a.doc-link');
+    await personLink.waitFor();
+    assert.equal(await personLink.evaluate(a => a.firstChild.textContent), `${env.team}/Lien CIBLE`, 'équipe/nom du document, comme la fiche');
+    assert.ok((await personLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(dst.doc)}`));
+    assert.deepEqual([await personLink.getAttribute('target'), await personLink.getAttribute('rel')], ['_blank', 'noopener noreferrer']);
+    assert.ok(!(await widget().locator('.person .person-who').innerText()).includes(shortId(dst.doc)), 'l\'identifiant brut reste dans l\'infobulle');
+    await keep('31-source-document-destinataire', widget().locator('.card').first());
+    await opensDoc(personLink, dst.doc);
+    step('Document de l\'autre côté : nom saisi côté SOURCE (retenu, corrigeable), lien dans un nouvel onglet des deux côtés, jamais de HTML');
+  }
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -1312,7 +1399,8 @@ try {
   assert.ok(firstHook.fields.memo.endsWith(`${env.team}/Cible`), 'nom du document dans le mémo');
   await api('PATCH', `/docs/${source.doc}/webhooks/${firstHook.id}`, { memo: firstHook.fields.memo.replace('/Cible', '') });
   await openWidget(source.url);
-  await widget().locator('.person-who', { hasText: new RegExp(`${env.team}/Cible$`) }).waitFor({ timeout: 30000 });
+  // Le nom est un lien : le texte réservé aux lecteurs d'écran le suit.
+  await widget().locator('.person-who', { hasText: new RegExp(`${env.team}/Cible(?! 2)`) }).waitFor({ timeout: 30000 });
   await waitFor(async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.every(h => !(h.usage || {}).numWaiting), 'file vide');
   await shot('13-source-actif', 'card');
   await openWidget(target2.url);
@@ -1964,6 +2052,7 @@ try {
   await choicesSteps();
   await linksSteps();
   await straySteps();
+  await docLinkSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

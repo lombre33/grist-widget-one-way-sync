@@ -4,7 +4,7 @@
 import { RECEIVED_COL, TYPE_COL, isBlank } from '../engine/logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../engine/logic/journal.js';
 import { FILE_MAX, fileList } from '../engine/logic/files.js';
-import { fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
+import { docIdentity, fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
 import { diagnostic } from '../diagnostic.js';
 import { syncRules } from '../engine/acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../engine/pages.js';
@@ -18,6 +18,7 @@ import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
 import { receiveWizard } from './wizard.js';
+import { sourceLine } from './source-line.js';
 import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { LANG, dateText, t, timeText } from '../i18n.js';
@@ -69,8 +70,13 @@ async function receivedGroups(schema, owner) {
 
 const button = (label, iconName, onclick, kind = '') => smallButton(label, iconName, onclick, { kind, disabled: state.readOnly });
 
+// Instance de CE document : le lien vers le document de la SOURCE en est refait (il ne quitte pas l'instance).
+let here = '';
+const knowHere = async () => { here ||= await docIdentity().then(d => d.origin, () => ''); };
+
 export async function renderTarget(root = container, { periodic = false } = {}) {
   if (!container) state.viewer = isReadOnly();
+  await knowHere();
   container = root;
   state.readOnly ||= state.viewer;
   // Règles d'accès du widget (journaux cachés aux lecteurs, Synchro d'un Échange réservée aux
@@ -231,12 +237,10 @@ function syncCard(group) {
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
 
-// D'où vient la réception : la personne et son document (le nom vérifié chez Grist en Échange,
-// sinon l'identifiant), lien public, sens de l'Échange.
+// D'où vient la réception : la personne et son document (en lien, voir sourceLine), lien public, sens de l'Échange.
 function cardOrigin({ note, public: isPublic }) {
-  const { email: from, docName, docId } = note.from || {};
   return [
-    from ? el('p', { class: 'small', title: docId ? t('recv.docId', { doc: docId }) : null }, t(docName ? 'recv.fromDoc' : 'recv.from', { from, doc: docName })) : null,
+    sourceLine(note.from, { verified: note.mode === 'echange', origin: here }),
     isPublic ? el('p', { class: 'muted small' }, t('recv.public')) : null,
     note.mode === 'echange' ? el('p', { class: 'muted small' }, t(note.retour ? 'recv.exchange.back' : 'recv.exchange')) : null,
   ];

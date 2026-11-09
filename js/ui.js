@@ -27,6 +27,15 @@ export function el(tag, attrs = {}, ...children) {
 
 export const icon = name => el('span', { class: `icon icon-${name}`, 'aria-hidden': 'true' });
 
+// Lien vers un document Grist, dans un nouvel onglet (`url` : voir docUrl, qui la refait d'après l'instance de
+// CE document, jamais d'après un code). Sans adresse sûre, le texte seul. `note` : ce qu'il faut savoir du nom
+// montré (vérifié chez Grist, ou dit par l'autre document), dans l'infobulle.
+export function docLink(text, url, note = '') {
+  if (!url) return text;
+  return el('a', { class: 'doc-link', href: url, target: '_blank', rel: 'noopener noreferrer', title: [t('common.docOpen'), note].filter(Boolean).join(' — ') },
+    text, icon('external'), el('span', { class: 'sr-only' }, ` ${t('common.newTab')}`));
+}
+
 // Pastille d'état d'une carte ou d'une ligne (`tone` : ok, pending, err, off).
 export const pill = (text, tone) => el('span', { class: `pill pill-${tone}` }, text);
 

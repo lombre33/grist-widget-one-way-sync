@@ -29,13 +29,27 @@ import { checkKeys } from '../engine/source/keys.js';
 import { keysBlock } from './keys.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
-import { hookShown } from './shown.js';
-import { confirmDialog, el, icon, message, noteError, pill, redraw, reloading, run, smallButton } from '../ui.js';
+import { hookDoc, hookShown } from './shown.js';
+import { confirmDialog, docLink, el, icon, message, noteError, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 
 // Fiche affichée d'un destinataire : sans l'identifiant du document (il reste dans l'infobulle, `personLabel`).
 const personShown = h => hookShown(h.fields.memo, hookCheck(h.id).docName) || '—';
+
+// Instance de CE document (les liens vers les documents des destinataires en sont refaits : ils ne quittent pas
+// l'instance), lue à chaque affichage.
+let here = '';
+
+// La même fiche, le document en lien (nouvel onglet) tant que le lien du destinataire désigne bien le document
+// approuvé : pas de lien quand le contrôle horaire dit le contraire (autre document, adresse qui n'est pas celle d'un
+// formulaire), le texte reste.
+function personWho(h) {
+  const { other, bad, docName } = hookCheck(h.id);
+  const { who, place, url } = hookDoc(h.fields.memo, docName, other || bad ? '' : here);
+  if (!place) return personShown(h);
+  return [who, who ? ' · ' : null, docLink(place, url)];
+}
 
 let container;
 let notice = null; // message à montrer au prochain affichage (fin d'un renvoi)
@@ -114,7 +128,9 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même. Lien public réglé
   // sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus rien. Réponse
   // inconnue (null) : rien ne change.
-  const access = await publicAccess((await docIdentity()).baseUrl);
+  const identity = await docIdentity();
+  here = identity.origin;
+  const access = await publicAccess(identity.baseUrl);
   const open = access === null ? null : Boolean(access);
   if (!periodic && !state.ownerOnly && await syncRules({ publicIds: state.exports.filter(e => e.public).map(e => e.id), open })) {
     reloading(container, renderSource);
@@ -325,7 +341,7 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   personSlots.set(h.id, slot);
   fillPerson(slot, h);
   return el('li', { class: 'person', 'data-memo': h.fields.memo || '' },
-    el('div', { class: 'person-head' }, el('span', { class: 'person-who', title: personLabel(h) }, personShown(h)), slot.pill),
+    el('div', { class: 'person-head' }, el('span', { class: 'person-who', title: personLabel(h) }, personWho(h)), slot.pill),
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     exp.unkeyed.has(h.id) ? message('err', t('send.person.noKey')) : null,

@@ -6,7 +6,7 @@ import {
   DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LOT_COL, ORDER_COL, SCHEMA_COL, SEAL_COL, SIG_KEY, TABLE_COL, TYPE_COL, is, isBlank,
   digest, isTrue, sha256, toHex,
 } from './common.js';
-import { parseWebhookUrl } from './codes.js';
+import { cleanLabel, parseWebhookUrl } from './codes.js';
 
 // ---------------------------------------------------------------------------------------------
 // Document désigné par une clé de formulaire
@@ -18,7 +18,7 @@ export function readShare(json) {
   if (!json || typeof json !== 'object' || !is(/^[A-Za-z0-9_-]{12,}$/, json.id)) return null;
   const ws = json.workspace && typeof json.workspace === 'object' ? json.workspace : {};
   const org = ws.org && typeof ws.org === 'object' ? ws.org : {};
-  const text = v => (typeof v === 'string' ? v.slice(0, 200) : '');
+  const text = v => (typeof v === 'string' ? cleanLabel(v) : '');
   const team = text(org.domain);
   return {
     docId: json.id, name: text(json.name), folder: text(ws.name), team, teamName: text(org.name),

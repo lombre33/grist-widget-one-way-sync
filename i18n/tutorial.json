@@ -102,10 +102,10 @@
     },
     "text": {
       "fr": [
-        "Sur la carte de l’export, Ajouter un destinataire. Mode « dans un seul sens » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas. La case Sécurité renforcée impose de comparer le code de contrôle avec la personne avant de brancher."
+        "Sur la carte de l’export, Ajouter un destinataire. Mode « dans un seul sens » (recommandé) : Grist pousse chaque modification, même page fermée. Le secret garantit que la réponse vient de quelqu’un qui a reçu l’invitation. Deux autres modes : Échange (dans les deux sens) et Lien public, plus bas. La case Sécurité renforcée impose de comparer le code de contrôle avec la personne avant de brancher. Le champ « Nom de ce document », facultatif, est montré au destinataire avec un lien vers ce document (Grist ne permet pas au widget de lire le nom du document : saisissez-le une fois, il est retenu et se corrige à tout moment)."
       ],
       "en": [
-        "On the export card, Add a recipient. “One way” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below. The Enhanced security box requires comparing the control code with the person before connecting."
+        "On the export card, Add a recipient. “One way” mode (recommended): Grist pushes every change, even with the page closed. The secret guarantees the reply comes from someone who received the invitation. Two other modes: Exchange (both ways) and Public link, below. The Enhanced security box requires comparing the control code with the person before connecting. The optional “Name of this document” field is shown to the recipient with a link to this document (Grist does not let the widget read the document name: type it once, it is remembered and can be corrected at any time)."
       ]
     },
     "images": ["04-source-options"]

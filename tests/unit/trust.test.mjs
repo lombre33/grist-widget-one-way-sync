@@ -19,6 +19,8 @@ test('fiche du document d\'une clé de formulaire : lue dans la réponse de Gris
   assert.equal(readShare({ ...answer, workspace: { name: 'Home', org: { name: 'Personal', domain: 'docs-12' } } }).personal, true);
   assert.equal(readShare({ ...answer, workspace: undefined }).personal, true, 'sans équipe : rien de vérifiable');
   assert.equal(readShare({ ...answer, name: 'x'.repeat(500) }).name.length, 200);
+  const tricky = readShare({ ...answer, name: 'Suivi\u202E RH\n', workspace: { name: ' Service\u2066 RH ', org: { name: 'Mairie\tX', domain: 'mairie-x' } } });
+  assert.deepEqual([tricky.name, tricky.folder, tricky.teamName], ['Suivi RH', 'Service RH', 'Mairie X'], 'noms lus chez Grist : sans sens d\'écriture ni retours');
   for (const bad of [null, 'texte', {}, { id: 'court' }, { id: `${FULL}"` }]) assert.equal(readShare(bad), null);
 });
 

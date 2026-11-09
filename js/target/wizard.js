@@ -1,9 +1,10 @@
 // CIBLE : assistant de réception, en quatre étapes (Code, Destinations, Lien, Réponse). Une
 // réception en attente (ou à rebrancher) l'ouvre directement à l'étape Lien (`group`).
-import { readSchema } from '../grist.js';
+import { docIdentity, readSchema } from '../grist.js';
 import { VERSION } from '../config.js';
 import { formWhere, linkFigures } from '../form-link.js';
-import { canRelink, checkDestinations, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, undoReception } from '../engine/target/receive.js';
+import { canRelink, checkDestinations, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
+import { sourceLine } from './source-line.js';
 import { confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,
@@ -31,6 +32,7 @@ function showCode(ctx) {
   const report = el('div', { class: 'report' });
   const next = async () => {
     const invitation = await readInvitation(area.value);
+    ctx.origin = (await docIdentity()).origin; // pour le lien vers le document de la SOURCE (voir sourceLine)
     const known = await knownReception(invitation);
     return known ? showRelink(ctx, known, invitation) : showDest(ctx, invitation);
   };
@@ -50,17 +52,17 @@ function showRelink(ctx, known, invitation) {
   if (!canRelink(known, invitation)) throw new Error('alreadyReceived');
   const report = el('div', { class: 'report' });
   const relink = async () => showLink(ctx, await relinkReception(known, invitation), message('info', t('recv.relink')));
-  ctx.wizard.show(STEP.dest, [message('info', t('recv.relink.confirm', { name: known.note.name, journal: known.journal })), sourceFiche(invitation), report],
+  ctx.wizard.show(STEP.dest, [message('info', t('recv.relink.confirm', { name: known.note.name, journal: known.journal })), sourceFiche(invitation, ctx.origin), report],
     [back(() => showCode(ctx)), cancel, { label: t('recv.relink.ok'), kind: 'btn-primary', onClick: () => run(null, report, relink) }]);
 }
 
 // D'où vient une invitation : export, tables, personne et document qui l'ont faite ; pour un
 // Échange, le document vérifié chez Grist et le code de contrôle de l'envoi de retour.
-function sourceFiche(invitation) {
-  const { from, share } = invitation;
+function sourceFiche(invitation, origin) {
+  const { share } = invitation;
   return el('div', {},
     message('info', t('recv.invite.summary', { name: invitation.name, n: invitation.tables.length, tables: invitation.tables.map(tb => tb.table).join(', ') })),
-    from.email ? el('p', { class: 'small' }, t(from.docId ? 'recv.fromDoc' : 'recv.from', { from: from.email, doc: from.docId })) : null,
+    sourceLine(sourceOf(invitation), { verified: Boolean(share), origin }),
     share ? el('p', { class: 'small' }, t('recv.backDoc', { doc: shareText(share) })) : null,
     share && share.personal ? message('warn', t('recv.backPersonal')) : null,
     invitation.backCode ? controlLine(t('recv.backCode'), invitation.backCode) : null,
@@ -92,7 +94,7 @@ async function showDest(ctx, invitation) {
     return create(ctx, invitation, plans);
   };
   ctx.wizard.show(STEP.dest, [
-    sourceFiche(invitation),
+    sourceFiche(invitation, ctx.origin),
     el('p', {}, t('recv.dest')),
     el('div', { class: 'dest-grid' }, el('span', { class: 'dest-head' }, t('recv.dest.from')), el('span', { class: 'dest-head' }, t('recv.dest.to')),
       ...rows.flatMap(r => [el('span', { class: 'dest-from' }, r.tb.table), r.pick.node])),

@@ -1,7 +1,7 @@
 // Codes d'invitation et de réponse, adresses : aller-retour, puis codes abîmés ou forgés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvitation, buildReply, buildWebhookUrl, decodeCode, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
+import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
 import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
@@ -213,4 +213,40 @@ test('version : portée par les codes, un code d\'une forme plus récente refus�
   assert.throws(() => parseInvitation(forge({ ...raw, f: 2, v: '0.14.0' }), '0.12.0'), e => e.message === 'codeNewer' && e.vars.theirs === '0.14.0' && e.vars.mine === '0.12.0');
   assert.throws(() => parseReply(forge({ kind: 'reponse', f: 9, v: 'bizarre' }), 'https://g.fr'), e => e.message === 'codeNewer' && e.vars.theirs === '?' && e.vars.mine === '?');
   assert.throws(() => decodeCode(forge({ ...raw, f: 2 }), 'reponse'), /codeNewer/, 'la forme est lue avant le type');
+});
+
+test('document de la SOURCE dans l\'invitation : équipe et nom lus avec méfiance', () => {
+  const columns = [{ id: 'Nom', type: 'Text' }];
+  const make = from => parseInvitation(buildInvitation({ pub: PUB, id: ID, exportId: EXPORT, name: 'x', origin: 'https://g.fr', secret: SECRET, from, tables: [{ table: 'T', columns }] })).from;
+  assert.deepEqual(make({ email: 'a@b.fr', docId: 'doc123456789', team: 'dinum', docName: 'Budget 2026' }),
+    { email: 'a@b.fr', docId: 'doc123456789', team: 'dinum', docName: 'Budget 2026' });
+  assert.deepEqual(make({ email: 'a@b.fr', docId: 'doc123456789' }), { email: 'a@b.fr', docId: 'doc123456789' }, 'invitation d\'avant : ni équipe ni nom, donc aucun lien');
+  assert.equal(make({ docId: 'd', team: '' }).team, '', 'site sans équipe dans le chemin : connu, vide');
+  for (const team of ['a/b', '../x', 'x y', 'é', 'x'.repeat(121), 7, null, {}]) assert.equal('team' in make({ docId: 'd', team }), false, `équipe refusée : ${JSON.stringify(team)}`);
+  assert.equal(make({ docId: 'd', docName: '<img src=x onerror=alert(1)>' }).docName, '<img src=x onerror=alert(1)>', 'le texte est gardé tel quel : il n\'est jamais interprété comme du HTML (textContent)');
+  assert.equal('docName' in make({ docId: 'd', docName: '   ' }), false, 'nom vide : absent');
+  assert.equal(make({ docId: 'd', docName: 'x'.repeat(500) }).docName.length, 200);
+  assert.equal(make({ docId: 'd', docName: 42 }).docName, '42');
+  assert.equal(make({ docId: 'd', docName: { a: 1 } }).docName, '[object Object]'.slice(0, 200), 'jamais d\'erreur à la lecture d\'un code forgé');
+});
+
+test('cleanLabel : contrôles et sens d\'écriture ôtés, espaces ramenées à une, 200 caractères', () => {
+  assert.equal(cleanLabel('  a \n\t b\u0000c\u202Ed\u2066e\u200Bf\ufeffg  '), 'a b c d e f g');
+  assert.equal(cleanLabel(undefined), '');
+  assert.equal(cleanLabel(null), '');
+  assert.equal(cleanLabel('é « ça » 日本'), 'é « ça » 日本');
+  assert.equal(cleanLabel('x'.repeat(300)).length, 200);
+});
+
+test('docUrl : adresse du document dans Grist, refaite d\'après l\'instance de ce document', () => {
+  assert.equal(docUrl('https://g.fr', 'dinum', 'Abc123xyz789'), 'https://g.fr/o/dinum/doc/Abc123xyz789');
+  assert.equal(docUrl('https://g.fr', '', 'Abc123xyz789'), 'https://g.fr/doc/Abc123xyz789', 'sans équipe');
+  assert.equal(docUrl('http://localhost:8484', 'synctest', 'Abc123xyz789'), 'http://localhost:8484/o/synctest/doc/Abc123xyz789', 'Grist local d\'essai');
+  assert.equal(docUrl('http://127.0.0.1:8484', 'e', 'd'), 'http://127.0.0.1:8484/o/e/doc/d');
+  for (const origin of ['', undefined, 'g.fr', 'http://g.fr', 'ftp://g.fr', 'javascript:alert(1)', 'https://g.fr/o/x', 'https://g.fr/', 'https://u:p@g.fr', 'https://g.fr?x=1', 'data:text/html,x']) {
+    assert.equal(docUrl(origin, 'e', 'doc123456789'), '', `instance refusée : ${origin}`);
+  }
+  for (const [team, docId] of [['e/x', 'd'], ['e', 'd/..'], ['e', 'd?x=1'], ['e', 'd#x'], ['e', ''], ['e', undefined], ['e x', 'd'], ['e', 'd'.repeat(121)], ['e\n', 'd'], ['e', 'd\n']]) {
+    assert.equal(docUrl('https://g.fr', team, docId), '', `refusé : ${team} ${docId}`);
+  }
 });

@@ -9,18 +9,19 @@
 // secret, des clés publiques et du niveau de sécurité, s'affiche des deux côtés ; en sécurité
 // renforcée (`renforce`), il faut l'avoir comparé.
 import { nowS } from '../engine/logic/common.js';
-import { maskKey } from '../engine/logic/codes.js';
+import { docUrl, maskKey } from '../engine/logic/codes.js';
 import { docIdentity } from '../grist.js';
 import { VERSION } from '../config.js';
 import { ensureForm } from '../engine/pages.js';
 import { formWhere, linkFigures } from '../form-link.js';
 import { cancelPendingInvitation } from '../engine/source/actions.js';
+import { rememberDocName, sourceDocName } from '../engine/source/synchro.js';
 import {
   approveReply, checkReply, enablePublicLink, invitationCode, invitationState, linkReturn, loadPlan, renewInvitation, sendExisting, startInvitation, startReturn,
 } from '../engine/source/invite.js';
 import { estimateLines, progressTo } from './flow.js';
 import {
-  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, el, laterButton, message, openWizard, run,
+  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, docLink, el, laterButton, message, openWizard, run,
   versionNote,
 } from '../ui.js';
 import { handoffButton, roleGuide } from '../guide.js';
@@ -49,8 +50,12 @@ export async function recipientWizard(exp, pending, onClose) {
 // grisée ; un export renforcé ne peut pas être public). L'Échange suppose un export sans autre
 // destinataire, ou déjà en Échange : un participant de plus (Échange à plusieurs, ce document
 // administre) ; un export en Échange n'a que des participants.
-function showOptions(ctx) {
+async function showOptions(ctx) {
   const { exp } = ctx;
+  // Le widget ne peut pas lire le nom de son document : la personne le donne une fois (gardé dans la note), il part
+  // dans les invitations, que la CIBLE montre à côté du lien vers ce document.
+  const nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-doc-name', maxlength: 200, autocomplete: 'off', value: await sourceDocName() });
+  const namePart = el('div', { class: 'form' }, el('label', { for: 'gristsync-doc-name' }, t('send.docName')), nameInput, el('p', { class: 'muted small' }, t('send.docName.help')));
   const more = (exp.echange && !exp.retour) || exp.invitations.some(inv => inv.journal);
   const strongBox = el('input', { type: 'checkbox', checked: Boolean(exp.renforce) });
   const strongPart = el('div', { class: 'form' }, el('label', { class: 'check' }, strongBox, t('send.renforce')), el('p', { class: 'muted small' }, t('send.renforce.help')));
@@ -75,8 +80,11 @@ function showOptions(ctx) {
       el('p', { class: 'muted small' }, t('send.mode.others')),
       radio('echange', more ? t('send.mode.echange.more') : exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), more, !exchangeOk),
       radio('public', exp.public ? t('send.mode.publicDone') : exp.renforce ? t('send.mode.publicStrong') : t('send.mode.public'), false, exp.public || more || exp.renforce)),
-    strongPart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
-  ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, () => invite(ctx, mode(), mode() !== 'public' && strongBox.checked)) }]);
+    strongPart, namePart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
+  ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
+    await rememberDocName(nameInput.value);
+    return invite(ctx, mode(), mode() !== 'public' && strongBox.checked);
+  }) }]);
 }
 
 // Colonnes qu'un lien public rend lisibles par tous, table par table.
@@ -120,7 +128,7 @@ async function showInvitation(ctx, entry, secret, retour = '') {
 async function backToOptions(ctx, inv) {
   if (!(await confirmDialog({ title: t('send.backOptions.title'), body: t('send.backOptions.body'), confirmLabel: t('common.back') }))) return;
   await cancelPendingInvitation(inv);
-  showOptions(ctx);
+  await showOptions(ctx);
 }
 
 // Retour à l'invitation depuis l'étape Réponse : le même code s'il a été fait dans cette fenêtre
@@ -175,7 +183,8 @@ function showReply(ctx, inv) {
   const check = async () => {
     const reply = await checkReply(ctx.exp, inv, area.value);
     const compared = el('input', { type: 'checkbox' });
-    fiche.replaceChildren(...replyFiche(reply, (await docIdentity()).docId),
+    const identity = await docIdentity();
+    fiche.replaceChildren(...replyFiche(reply, identity),
       ...(inv.renforce ? [el('label', { class: 'check' }, compared, t('send.reply.compared'))] : []));
     const go = () => approve(ctx, inv, reply, compared.checked); // le moteur refuse sans elle en sécurité renforcée
     ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, go) }]);
@@ -193,11 +202,13 @@ const replyDate = (at) => {
 
 // Fiche de la personne qui répond, à vérifier avant d'approuver : le document, son dossier et son
 // équipe sont dits par Grist ; l'e-mail et la date, par le code collé.
-function replyFiche(reply, docId) {
+function replyFiche(reply, { docId, origin }) {
   const r = reply.recipient;
   const { share } = reply;
-  const doc = `${share.name} (${share.folder || '—'}${share.personal ? '' : ` · ${share.teamName || share.team}`})`;
-  const fiche = [[t('send.reply.tables'), reply.tables], [t('send.reply.doc'), r.docId === docId ? `${doc} · ${t('send.reply.sameDoc')}` : doc],
+  // Le document en lien (nouvel onglet) : son adresse est refaite d'après l'équipe et l'identifiant que dit Grist.
+  const place = ` (${share.folder || '—'}${share.personal ? '' : ` · ${share.teamName || share.team}`})`;
+  const doc = [docLink(share.name, docUrl(origin, share.team, share.docId), t('common.docChecked')), place];
+  const fiche = [[t('send.reply.tables'), reply.tables], [t('send.reply.doc'), r.docId === docId ? [...doc, ` · ${t('send.reply.sameDoc')}`] : doc],
     [t('send.reply.team'), share.personal ? t('send.reply.personalSpace') : share.teamName || share.team], [t('send.reply.email'), r.email], [t('send.reply.at'), replyDate(r.at)]];
   return [el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
     el('p', { class: 'muted small' }, t('send.reply.verified')),

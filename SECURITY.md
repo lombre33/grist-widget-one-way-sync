@@ -48,6 +48,13 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   construite avec des nœuds texte (`js/ui.js`, fonction `el`). Aucun `innerHTML`, `eval` ou
   `Function`. Les classes CSS ne viennent que du code (l'état d'une ligne d'historique est l'un de
   trois mots connus).
+- Liens vers les documents (0.13.5) : la ligne d'un destinataire (SOURCE) et la carte d'une réception
+  (CIBLE) montrent le document de l'autre côté en lien (`docLink`, `js/ui.js`), dans un nouvel onglet
+  (`target="_blank"`, `rel="noopener noreferrer"`). L'adresse n'est jamais celle d'un code : `docUrl`
+  (`js/engine/logic/codes.js`) la refait de l'instance de **ce** document (https, ou http sur `localhost`
+  pour un Grist d'essai), d'une équipe et d'un identifiant qui n'ont que la forme `[A-Za-z0-9_-]`, sous
+  `/o/<équipe>/doc/<identifiant>`. Un lien ne quitte donc pas l'instance, et le seul lien externe du widget
+  reste celui des crédits.
 - Stockage local du navigateur : langue, thème, date de la dernière visite par document CIBLE
   (historique), identifiant tiré au hasard pour ce navigateur (renvois). Aucune donnée du document.
 - Accès demandé à Grist : **complet**. Le widget crée des tables et des colonnes, lit les
@@ -196,6 +203,17 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   publique ni retiré la sécurité renforcée en route (vérifié par les tests) : à comparer par
   téléphone, ce qui ferme le cas d'un attaquant dans la même équipe ou placé entre les deux. Conseillé en Standard ; en Renforcé, une case « J'ai comparé » est exigée avant
   d'approuver (et, en Échange, côté CIBLE avant de répondre).
+- **Document de la SOURCE : nom et équipe (0.13.5)** : l'invitation porte `from.team` (l'équipe du document,
+  pour refaire son adresse) et `from.docName`, le nom que la personne a saisi (un widget ne peut pas lire le
+  nom de son document : `getDocName` rend l'identifiant, la fiche REST est refusée au jeton ; vérifié sur
+  Grist 1.7). Ce nom est un **dire** comme l'e-mail de la fiche : montré en texte seul (jamais en HTML),
+  nettoyé à la lecture (`cleanLabel` : caractères de contrôle et de sens d'écriture ôtés, 200 caractères),
+  et l'infobulle du lien le dit (« non vérifié »). Il n'entre dans aucune décision, ni dans le code de
+  contrôle. En Échange, le nom et l'équipe lus chez Grist à partir de la clé de retour l'emportent et sont
+  dits vérifiés. Côté SOURCE, le nom du document du destinataire est celui que Grist donne pour la clé de
+  sa réponse, et le lien se refait de l'identifiant et de l'équipe de la fiche : sans lien quand le contrôle
+  horaire a vu un autre document ou une adresse qui n'est plus celle d'un formulaire. Les noms lus chez
+  Grist sont nettoyés de même (`readShare`). Un code d'avant (sans `team`) n'a pas de lien.
 - Contrôles à la lecture (`js/engine/logic/codes.js`) : préfixe et version, identifiants, secret,
   colonnes (noms Grist, types connus, 400 au plus), textes coupés à 200 caractères, adresses de la
   forme exacte `/api/s/<clé>/tables/<table>/records?flat=1` sur la **même instance**, sans
@@ -385,6 +403,11 @@ Pour un usage en production :
   (50 Mo au plus) ; une seconde fois seulement si la recopie y a écrit.
 - La clé du formulaire lit la note de son journal, dont le secret de l'invitation, et le nom du
   document : le secret ne sert plus une fois l'invitation acceptée.
+- **Nom du document de la SOURCE (0.13.5)** : saisi par la personne, il n'est pas vérifié ; qui fait une
+  invitation peut y écrire ce qu'il veut (comme l'e-mail et le nom de l'export) et faire passer son document
+  pour un autre auprès d'une CIBLE peu attentive. Le lien mène à l'identifiant réel du document, l'infobulle
+  rappelle que le nom est dit par la SOURCE, et le code de contrôle, comparé par téléphone, reste ce qui
+  prouve qui est à l'autre bout.
 - Un envoi en échec bloque la file de tous les webhooks du document SOURCE environ 15 minutes
   (comportement de Grist) : un destinataire qui refuse ses envois retarde les autres. Le widget
   le signale et propose de débloquer la file.

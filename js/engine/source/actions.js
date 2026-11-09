@@ -9,7 +9,7 @@ import { removeTechnicalTables } from '../pages.js';
 import { dropInvitation, setExport, setPause } from '../logic/notes.js';
 import { closeExport, removeRecipient } from '../exchange.js';
 import { hookLabel } from '../logic/exports.js';
-import { readSourceNote, recordEvent, saveExport, updateSourceNote } from './synchro.js';
+import { readSourceNote, recordEvent, saveExport, sourceFrom, updateSourceNote } from './synchro.js';
 import { resendTables } from './resend.js';
 import { pauseHook } from './pausing.js';
 
@@ -70,8 +70,9 @@ export const endExport = exp => closeExport(exp.id, { keepExport: false });
 
 // `version` : la version de l'application qui fait le code (elle y est écrite, voir versionNote).
 export async function publicCode(exp, version) {
-  const { origin, docId, baseUrl } = await docIdentity();
-  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: { email: exp.email, docId }, tables: exp.tables, version });
+  const identity = await docIdentity();
+  const { origin, baseUrl } = identity;
+  return buildInvitation({ id: exp.id, exportId: exp.id, name: exp.name, origin, base: baseUrl, from: await sourceFrom(exp.email, identity), tables: exp.tables, version });
 }
 
 // Couper le lien public d'un export : ses instantanés disparaissent, les règles d'accès suivent au

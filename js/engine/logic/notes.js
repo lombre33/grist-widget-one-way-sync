@@ -1,10 +1,23 @@
 // Note SOURCE (description de la colonne Synchro_Export, voir source/synchro.js) :
-// { exports: [{ id, name, at, public, renforce, echange, retour, regles, refus }],
+// { nomDoc: nom que la personne a donné à ce document (voir setDocName),
+//   exports: [{ id, name, at, public, renforce, echange, retour, regles, refus }],
 //   invitations: [{ id, export, hash, at, renforce, journal, ready, pub, prive }],
 //   pauses: [{ hook, export, at, columns }], fichiers: { <export>: { f, h, p } },
 //   historique: { <export>: [{ at, kind, who, n }] },
 //   lignes: { <export>: { at, n: { <table>: nombre de lignes } } } }.
 // Chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
+import { cleanLabel } from './codes.js';
+
+// Nom de ce document, tel que la personne l'a saisi : un widget ne peut pas lire le nom de son document
+// (`getDocName` rend l'identifiant, la fiche REST est refusée au jeton, vérifié sur Grist 1.7). Il part dans les
+// invitations (`from.docName`) pour que la CIBLE reconnaisse d'où viennent les données. Une note retouchée à la
+// main est nettoyée à la lecture ; un nom vide l'efface.
+export const docNameOf = note => cleanLabel(note.nomDoc);
+export function setDocName(note, name) {
+  const { nomDoc, ...rest } = note;
+  const clean = cleanLabel(name);
+  return clean ? { ...rest, nomDoc: clean } : rest;
+}
 
 // Élément remplacé à sa place (même `id`), sinon ajouté à la fin.
 const put = (list, entry) => (list.some(x => x.id === entry.id) ? list.map(x => (x.id === entry.id ? entry : x)) : [...list, entry]);

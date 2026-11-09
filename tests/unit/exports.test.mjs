@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookLabel, hookMemo, hookName, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
+  hookLabel, hookMemo, hookName, memoDoc, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/engine/logic/exports.js';
-import { hookShown } from '../../js/source/shown.js';
+import { hookDoc, hookShown } from '../../js/source/shown.js';
 import { sentColumns } from '../../js/engine/logic/journal.js';
 import { memoMatches } from '../../js/engine/logic/trust.js';
 import { EXPORT } from './fixtures.mjs';
@@ -328,4 +328,31 @@ test('envoi en cours chez un destinataire : la carte se relit tant qu\'il dure',
   assert.equal(hookBusy(hook({ status: 'retrying' })), true);
   assert.equal(hookBusy(hook({ status: 'sending', numWaiting: 3 }, false)), false, 'en pause : rien ne part');
   assert.equal(hookBusy(hook(undefined)), false);
+});
+
+test('memoDoc : le document d\'un destinataire d\'après son mémo, toutes les formes écrites par hookMemo', () => {
+  assert.deepEqual(memoDoc('a@b.fr · docA12345678 · equipe/Suivi 2027'), { email: 'a@b.fr', docId: 'docA12345678', team: 'equipe', name: 'Suivi 2027' });
+  assert.deepEqual(memoDoc('a@b.fr · docA12345678 · equipe'), { email: 'a@b.fr', docId: 'docA12345678', team: 'equipe', name: '' }, 'mémo d\'avant la 0.10.1');
+  assert.deepEqual(memoDoc('a@b.fr · docA12345678'), { email: 'a@b.fr', docId: 'docA12345678', team: '', name: '' }, 'ni équipe ni nom');
+  assert.deepEqual(memoDoc('a@b.fr · docA12345678 · /Perso'), { email: 'a@b.fr', docId: 'docA12345678', team: '', name: 'Perso' }, 'nom sans équipe');
+  assert.deepEqual(memoDoc('docA12345678 · equipe/Suivi'), { email: '', docId: 'docA12345678', team: 'equipe', name: 'Suivi' }, 'sans e-mail');
+  assert.deepEqual(memoDoc('docA12345678'), { email: '', docId: 'docA12345678', team: '', name: '' });
+  assert.deepEqual(memoDoc('a@b.fr · docA12345678 · equipe/Rapport 2026/2027'), { email: 'a@b.fr', docId: 'docA12345678', team: 'equipe', name: 'Rapport 2026/2027' }, 'une barre dans le nom');
+  assert.deepEqual(memoDoc(''), { email: '', docId: '', team: '', name: '' });
+  assert.deepEqual(memoDoc(undefined), { email: '', docId: '', team: '', name: '' });
+  for (const recipient of [{ email: 'a@b.fr', docId: 'docA12345678', team: 'equipe', docName: 'Suivi · RH' }, { email: 'a@b.fr', docId: 'docA12345678', team: 'equipe' }, { email: 'a@b.fr', docId: 'docA12345678' }]) {
+    const doc = memoDoc(hookMemo(recipient));
+    assert.deepEqual([doc.email, doc.docId, doc.team], [recipient.email, recipient.docId, recipient.team || ''], hookMemo(recipient));
+  }
+});
+
+test('hookDoc : la fiche en morceaux, le document en lien tant que l\'instance est connue', () => {
+  const memo = 'a@b.fr · docA12345678 · equipe/Suivi 2027';
+  assert.deepEqual(hookDoc(memo, '', 'https://g.fr'), { who: 'a@b.fr', place: 'equipe/Suivi 2027', url: 'https://g.fr/o/equipe/doc/docA12345678' });
+  assert.equal([hookDoc(memo).who, hookDoc(memo).place].join(' · '), hookShown(memo), 'le même texte que hookShown');
+  assert.equal(hookDoc(memo, 'Suivi RH').place, 'equipe/Suivi RH', 'nom lu au contrôle horaire');
+  assert.equal(hookDoc(memo).url, '', 'sans instance : pas de lien');
+  assert.deepEqual(hookDoc('a@b.fr · docA12345678', '', 'https://g.fr'), { who: 'a@b.fr', place: 'docA12345678', url: 'https://g.fr/doc/docA12345678' }, 'ni équipe ni nom : l\'identifiant, lien sans équipe');
+  assert.deepEqual(hookDoc('', '', 'https://g.fr'), { who: '', place: '', url: '' });
+  assert.equal(hookDoc('a@b.fr · docA12345678 · eq uipe/x', '', 'https://g.fr').url, '', 'équipe qui n\'a pas la forme d\'un identifiant : pas de lien');
 });

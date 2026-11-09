@@ -126,6 +126,14 @@ quelqu'un qui l'a reçue, et vaut 7 jours. La case **Sécurité renforcée** ren
 comparaison du code de contrôle (étape 10), fait valider toute suppression reçue par la CIBLE et
 interdit le lien public pour cet export : à cocher pour des données sensibles.
 
+Le champ **Nom de ce document** (facultatif) est montré à la CIBLE, avec un lien vers ce document
+qui s'ouvre dans un nouvel onglet (le lien suffit à ceux qui ont accès au document ; les autres
+tombent sur le message d'erreur de Grist). Grist ne permet pas au widget de lire le nom du
+document : il se saisit une fois, tel qu'il s'affiche en haut de la page, le widget le retient pour
+les invitations suivantes et il se corrige à chaque fois. Sans nom, la CIBLE voit seulement un lien
+« Document source ». De son côté, la SOURCE voit le nom du document du destinataire (lu chez Grist,
+donc vérifié) en lien sur sa ligne.
+
 À la première invitation, le widget réserve la table `Synchro` aux propriétaires du document (une
 règle d'accès, reconnaissable à son mémo) : Grist recharge alors la page une fois.
 

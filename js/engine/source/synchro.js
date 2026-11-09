@@ -7,13 +7,14 @@
 import {
   EXPORT_COL, KIND, LIST_COL, LOT_COL, SIG_KEY, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, columnNote, noteAction, nowS,
 } from '../logic/common.js';
+import { cleanLabel } from '../logic/codes.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } from '../logic/exports.js';
 import { filterColumns } from '../logic/filters.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
-import { addEvent, observeRows } from '../logic/notes.js';
-import { apply, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../port.js';
+import { addEvent, docNameOf, observeRows, setDocName } from '../logic/notes.js';
+import { apply, docIdentity, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../port.js';
 import { dropPages, isOnPage, removeTechnicalTables } from '../pages.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
@@ -48,11 +49,27 @@ export const readSourceNote = schema => ({ exports: [], invitations: [], pauses:
 // Relit la note, la change (`change` rend la nouvelle note, voir logic/notes.js) et l'écrit. Une
 // seule lecture-modification-écriture à la fois entre les onglets du navigateur (le rattrapage, une
 // action et l'historique écrivent tous dans cette note : la dernière écriture ferait perdre l'autre).
+// Une note que `change` rend telle quelle n'est pas réécrite.
 export const updateSourceNote = change => withLock('gristsync-source-note', async () => {
   const schema = await readSchema();
   const column = exportColumn(schema);
-  if (column) await apply([noteAction(column, change(readSourceNote(schema)))]);
+  if (!column) return;
+  const note = readSourceNote(schema);
+  const next = change(note);
+  if (next !== note) await apply([noteAction(column, next)]);
 });
+
+// Nom que la personne a donné à ce document, pour les invitations (voir setDocName) : le widget ne peut pas le lire
+// lui-même. `rememberDocName('')` l'efface.
+export const sourceDocName = async () => docNameOf(readSourceNote(await readSchema()));
+export const rememberDocName = name => updateSourceNote(note => (docNameOf(note) === cleanLabel(name) ? note : setDocName(note, name)));
+
+// Ce que l'invitation dit du document SOURCE : qui l'envoie, son identifiant, son équipe (la CIBLE en refait
+// l'adresse du document, voir docUrl) et le nom saisi, s'il y en a un. `identity` : docIdentity().
+export async function sourceFrom(email, { docId, team }) {
+  const docName = await sourceDocName();
+  return { email, docId, team, ...(docName ? { docName } : {}) };
+}
 
 // Événement d'envoi noté pour l'historique de l'export (voir addEvent) ; un échec de la note ne
 // fait jamais échouer l'action qu'il raconte.

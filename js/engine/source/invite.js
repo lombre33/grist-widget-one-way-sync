@@ -32,7 +32,7 @@ import { failure } from '../errors.js';
 import { testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
 import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
-import { pruneKeys, putRecipientKey, recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
+import { pruneKeys, putRecipientKey, recordEvent, saveExport, sourceFrom, syncRows, updateSourceNote } from './synchro.js';
 import { publicCode } from './actions.js';
 import { resendTables } from './resend.js';
 import { exportEstimate } from './estimate.js';
@@ -69,10 +69,11 @@ export async function startInvitation(exp, { renforce = false } = {}) {
 // journal de retour d'un Échange. Rend le code, sa date d'expiration (secondes) et, pour un Échange, le
 // code de contrôle de l'envoi de retour que la CIBLE voit en lisant l'invitation (`backCode`).
 export async function invitationCode(exp, entry, secret, retour = '') {
-  const [{ origin, docId }, rows] = await Promise.all([docIdentity(), syncRows()]);
+  const [identity, rows] = await Promise.all([docIdentity(), syncRows()]);
+  const { origin } = identity;
   const expire = expiresAt(entry.at);
   const code = buildInvitation({
-    id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: { email: exportEmail(rows, exp.id), docId }, tables: exp.tables, retour,
+    id: entry.id, exportId: exp.id, name: exp.name, origin, secret, from: await sourceFrom(exportEmail(rows, exp.id), identity), tables: exp.tables, retour,
     expire, renforce: Boolean(entry.renforce), pub: entry.pub, version: appVersion(),
   });
   return { code, expire, backCode: retour ? await controlCode(retour, secret, codeFacts(entry)) : null };

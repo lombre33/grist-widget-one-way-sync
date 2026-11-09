@@ -9,7 +9,7 @@ import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
-import { readSourceNote, syncRows } from '../../js/engine/source/synchro.js';
+import { readSourceNote, rememberDocName, sourceDocName, syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { approveReply, checkReply, invitationCode, loadPlan, renewInvitation, startInvitation } from '../../js/engine/source/invite.js';
 import { canRelink, checkDestinations, createReception, knownReception, readInvitation, receptionReply, relinkReception } from '../../js/engine/target/receive.js';
@@ -44,6 +44,10 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
   });
 
   await t.test('SOURCE : une invitation, son code, ce que l\'existant coûterait', async () => {
+    // Le widget ne peut pas lire le nom de son document : la personne le donne une fois, il part dans l'invitation.
+    assert.equal(await sourceDocName(), '', 'aucun nom tant que la personne n\'en a pas donné');
+    await rememberDocName('  Annuaire\u202E de   la source ');
+    assert.equal(await sourceDocName(), 'Annuaire de la source', 'nettoyé : sens d\'écriture et espaces');
     const { entry, secret } = await startInvitation(story.exp);
     story.entry = entry;
     const { code, expire, backCode } = await invitationCode(story.exp, entry, secret);
@@ -62,6 +66,8 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
     const invitation = await readInvitation(story.code);
     assert.equal(invitation.name, 'Annuaire');
     assert.equal(invitation.from.docId, source.docId);
+    assert.equal(invitation.from.team, 'equipe', 'l\'équipe de la SOURCE sert à refaire l\'adresse de son document');
+    assert.equal(invitation.from.docName, 'Annuaire de la source', 'le nom saisi côté SOURCE');
     assert.equal(invitation.version, '9.9.9', 'la version de l\'application est dans le code');
     assert.equal(await knownReception(invitation), null);
     const plans = invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' }));
@@ -74,6 +80,8 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
     assert.deepEqual(made.created, ['Annuaire_recu']);
     assert.ok(target.has('Annuaire_recu') && target.has('Journal_Annuaire'));
     assert.deepEqual(receivedJournals(await readSchema()).map(r => r.journal), ['Journal_Annuaire']);
+    const kept = receivedJournals(await readSchema())[0].note.from;
+    assert.deepEqual([kept.docId, kept.team, kept.docName], [source.docId, 'equipe', 'Annuaire de la source'], 'la note garde le document de la SOURCE');
     assert.ok(target.fetchRows('_grist_Pages').length === 1, 'un formulaire publié sur sa propre page');
   });
 
