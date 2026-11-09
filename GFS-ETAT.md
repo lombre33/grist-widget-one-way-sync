@@ -1,11 +1,13 @@
 # GFS-ETAT : Sync+ (« Synchro Grist »)
 
-Mis à jour le 2026-11-07, au commit `f37cfd9` (le dernier commit de code que cette page décrit). Moteur 1.0.0 ; l'écran de Sync+ reste à la 0.13.2.
+Mis à jour le 2026-11-09, au commit `6159c08` (le dernier commit de code que cette page décrit). Moteur 1.0.0 ; l'écran de Sync+ reste à la 0.13.2.
 Fichier de développement : il ne se publie pas (hors du dépôt public).
 
 ## Consignes
 - 001 · faite · `f37cfd9` · relevé en partie périmé (ci-dessous)
 - 002 · faite · `f37cfd9` · moteur dans `js/engine/`, port, préfixe, version ; les assistants (orchestration) restent côté écran (ci-dessous)
+- 003 · lue · réponses reçues ; l'essai « un `dest` sans préfixe reste intact » est fait (`6159c08`) ; le second lot (orchestration des assistants, d'abord SOURCE puis CIBLE, ensuite `checkHooks` et le diagnostic) n'est pas commencé
+- 004 · point 1 faite · `6159c08` · `docChanges` rend `tables: null` (inconnu) quand l'état de départ est perdu ; point 2 (REST une seule fois dans le moteur) pas commencé, 004 reste donc à faire pour GFS
 
 **001, ce que le relevé a de faux ou de périmé** (lu sur 0.12.2 ; `main` était à la 0.13.2) :
 - Taille : 10 339 lignes de JavaScript (pas 8 800), toujours sans bibliothèque. Après la 002 : `js/engine/` 6 487 lignes, dont `js/engine/logic/` 4 275 (pas 3 700) ; le reste est écran.
@@ -23,15 +25,12 @@ Fichier de développement : il ne se publie pas (hors du dépôt public).
 - **Ce qui reste côté écran, sciemment** : l'orchestration des assistants, qui mêle fenêtre et appels du moteur : SOURCE (`checkReply`, `approve`, retour d'un Échange), CIBLE (`readInvitation`, création de la réception, réponse), contrôle horaire des webhooks (`checkHooks` de `js/source/tab.js`), et `js/diagnostic.js` (lit l'état). Sans eux, un écran de GFS appelle les fonctions du moteur (`saveExport`, `createJournal`, `consolidateAll`…) mais refait ces enchaînements.
 
 ## Changements qui touchent GFS
+- 2026-11-09 · `6159c08` · contrat de `docChanges` précisé et corrigé chez Sync+ : état perdu (500 « Cannot read hash », Grist 1.7.19) → `{ hash: HEAD, tables: null }` ; un ensemble vide ne se rend que pour un état connu sans changement ; essai `tests/unit/doc-changes.test.mjs` ; moteur inchangé, version 1.0.0
 - 2026-11-07 · `f37cfd9` · port unique, préfixe de tables, `ENGINE_VERSION` 1.0.0 ; erreurs prévues dans `js/engine/errors.js`
 - 2026-11-07 · `7c052b6` · la logique, les pages, les règles d'accès, l'Échange et les parties SOURCE et CIBLE sans écran déménagent dans `js/engine/` (chemins d'import seuls) ; aucune table, colonne ni règle de plus ou de moins, aucune bibliothèque, CSP inchangée
 
 ## Questions pour GFS
-- Textes : oui, le moteur écrit des textes lus par la personne. Par `port.text` : `recv.archive.col`, `recv.lock.waiting`, `recv.result`, `recv.result.none`, plus 22 messages d'erreur `error.<code>` (liste : `js/engine/README.md`) ; ils sont en français et en anglais dans `i18n/fr.json` et `i18n/en.json`. Restent en français fixe : les mémos des règles d'accès et le texte du diagnostic à copier. GFS veut-il aussi ces deux-là par le port ?
-- Les tables de destination créées prennent aussi le préfixe (`Gfs_Contacts`) : est-ce voulu, ou GFS préfère-t-il préfixer seulement `Synchro` et les journaux ?
-- Lien public : la CIBLE y lit la table `Synchro` de la SOURCE par son nom ; les deux documents doivent donc avoir le même préfixe (aucun changement de protocole fait). Est-ce le cas dans GFS ?
-- Extraire l'orchestration des assistants (liste ci-dessus) dans un second lot, ou GFS écrit-il son propre enchaînement ?
-- `apply(actions)` rend `{ retValues }` et accepte une liste vide (sans effet) : à confirmer pour le port de GFS.
+- aucune (les cinq questions du 2026-11-07 sont répondues par la consigne 003 et ne sont plus posées)
 
 ## Demandes à GFS
 - aucune
