@@ -139,6 +139,8 @@ tests/e2e/start-grist.sh      # Grist jetable dans Docker
 npm run test:e2e              # parcours complet dans un vrai Grist et un vrai navigateur
 ```
 
+`tests/unit/formulas-golden.test.mjs` garde le texte des formules de `Synchro` octet pour octet (référence : `tests/unit/golden/formulas.json`, à réécrire par `UPDATE_GOLDEN=1 npm test` seulement pour un changement voulu, avec la version du moteur relevée). `tests/tools/mesure-moteur.mjs` mesure les fonctions de `js/engine/` avec l'outil d'audit de GFS (80 lignes, complexité 15 au plus ; voir `GWAUDIT_DIR` en tête du fichier).
+
 Le test d'intégration déroule tout le parcours avec plusieurs documents : envoi des lignes
 existantes, recopie, ajout, modification, suppressions, retouche manuelle préservée et signalée, historique avec avant et après,
 second destinataire et révocation d'un seul, table et colonne ajoutées à l'export (table existante

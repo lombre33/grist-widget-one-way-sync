@@ -74,28 +74,43 @@ export function catchFact({ at, why, running }, t) {
 }
 
 const JOURNAL_MODES = { public: 'public', echange: 'exchange' };
+
+// Les faits d'une réception sont rangés un par un, chacun dans sa petite fonction : l'arrivée, le mode, la réserve,
+// les comptes par table, l'écart annoncé, le soupçon, les erreurs.
+const arrivalFact = (stats, t) => {
+  if (!stats) return '';
+  const count = { n: String(stats.n), raw: String(stats.raw), when: stats.last ? when(stats.last * 1000) : '' };
+  return t(stats.last ? 'diag.arrival' : 'diag.arrival.nodate', count);
+};
+const journalMode = (note, t) => `${t(`diag.mode.${JOURNAL_MODES[note.mode] || 'reply'}`)}${note.retour ? t('diag.suffix.return') : ''}${note.renforce ? t('diag.suffix.renforce') : ''}`;
+const reserveFact = (note, t) => t(note.reserve ? (note.reserved ? 'diag.reserve.set' : 'diag.reserve.waiting') : 'diag.no');
+// Une ligne par table d'une note : `{ table: valeur }` devient « table: … ».
+const perTable = (byTable, say) => Object.entries(byTable || {}).map(([table, value]) => say(table, value));
+const gapFacts = (results, t) => results.flatMap(r => perTable(r && r.tally, (table, g) => t('diag.gap', { table, got: String(g.got), expected: String(g.expected) })));
+const suspectFact = (suspect, t) => (suspect ? t(suspect.flood ? 'diag.suspect.flood' : 'diag.suspect', { n: String(suspect.n || 0), when: when((suspect.at || 0) * 1000) }) : '');
+const errorFacts = (results, journal) => results.filter(r => r && r.error).map(r => `${r.table || journal}: ${clip(r.text || r.error)}`);
+
 // Réception (CIBLE) : note du journal sans son secret, ses clés ni l'adresse de la SOURCE ; état
 // du dernier passage (erreurs) et tables proposées.
 export function journalFacts({ journal, note, signed, results = [], offers = 0, stats = null, t }) {
-  const count = { n: String(stats ? stats.n : 0), raw: String(stats ? stats.raw : 0), when: stats && stats.last ? when(stats.last * 1000) : '' };
   return {
-    arrival: stats ? t(stats.last ? 'diag.arrival' : 'diag.arrival.nodate', count) : '',
+    arrival: arrivalFact(stats, t),
     journal,
     export: short(note.export),
-    mode: `${t(`diag.mode.${JOURNAL_MODES[note.mode] || 'reply'}`)}${note.retour ? t('diag.suffix.return') : ''}${note.renforce ? t('diag.suffix.renforce') : ''}`,
+    mode: journalMode(note, t),
     tables: (note.tables || []).map(tb => `${tb.table} → ${tb.dest}`),
     refused: (note.refused || []).length,
     offers,
     signed: Boolean(signed),
     sealed: Boolean(note.sceau),
-    reserve: t(note.reserve ? (note.reserved ? 'diag.reserve.set' : 'diag.reserve.waiting') : 'diag.no'),
+    reserve: reserveFact(note, t),
     ended: note.ended ? when(note.ended * 1000) : '',
-    missing: Object.entries(note.missing || {}).map(([table, n]) => `${table}: ${n}`),
-    announced: Object.entries(note.tally || {}).map(([table, a]) => `${table}: ${a.n}`),
-    gap: results.flatMap(r => Object.entries((r && r.tally) || {}).map(([table, g]) => t('diag.gap', { table, got: String(g.got), expected: String(g.expected) }))),
-    big: Object.entries(note.big || {}).map(([table, keys]) => `${table}: ${(keys || []).length}`),
-    suspect: note.suspect ? t(note.suspect.flood ? 'diag.suspect.flood' : 'diag.suspect', { n: String(note.suspect.n || 0), when: when((note.suspect.at || 0) * 1000) }) : '',
-    errors: results.filter(r => r && r.error).map(r => `${r.table || journal}: ${clip(r.text || r.error)}`),
+    missing: perTable(note.missing, (table, n) => `${table}: ${n}`),
+    announced: perTable(note.tally, (table, a) => `${table}: ${a.n}`),
+    gap: gapFacts(results, t),
+    big: perTable(note.big, (table, keys) => `${table}: ${(keys || []).length}`),
+    suspect: suspectFact(note.suspect, t),
+    errors: errorFacts(results, journal),
   };
 }
 
@@ -129,37 +144,51 @@ function journalLines(j, t) {
   ];
 }
 
+// Texte du diagnostic : une fonction par section (en-tête, envoi, réception, erreurs), mises bout à bout.
+const headerLines = ({ version, served, origin, access, at, agent }, t) => [
+  t('diag.title', { version, served }),
+  t('diag.date', { value: when(at) }),
+  t('diag.instance', { value: origin || t('diag.unknown') }),
+  t('diag.access', { value: t(`diag.access.${access}`) }),
+  t('diag.browser', { value: agent }),
+];
+
+const sendLines = (source, t) => {
+  if (!source) return [t('diag.send.none')];
+  const kinds = Object.entries(source.kinds || {}).map(([kind, n]) => `${kind} ${n}`).join(', ');
+  return [
+    source.ownerOnly ? t('diag.send.ownerOnly') : null,
+    source.unsafe ? t('diag.send.unsafe', { n: String(source.unsafe) }) : null,
+    source.charge ? t('diag.send.charge', { value: source.charge }) : null,
+    source.progress ? t('diag.send.progress', { value: source.progress }) : null,
+    source.catchUp ? t('diag.send.catchUp', { value: source.catchUp }) : null,
+    t('diag.send.kinds', { value: kinds || t('diag.none') }),
+    ...(source.exports.length ? source.exports.flatMap(e => exportLines(e, t)) : [t('diag.send.noExport')]),
+  ];
+};
+
+const receiveLines = (target, t) => {
+  if (!target || !target.journals.length) return [t('diag.recv.none')];
+  return [
+    target.compare === false ? t('diag.recv.compare') : null,
+    target.visible === undefined ? null : t('diag.recv.visible', { value: t(target.visible ? 'diag.yes' : 'diag.recv.hidden') }),
+    ...target.journals.flatMap(j => journalLines(j, t)),
+  ];
+};
+
+const errorLines = (errors, t) => (errors.length ? errors.map(e => `${when(e.at)} ${clip(e.text)}`) : [t('diag.errors.none')]);
+
 // Texte du diagnostic. `facts` : { version, served, origin, access, at (ms), agent, source
 // ({ ownerOnly, exports, unsafe, charge, kinds } ou null), target ({ journals, compare } ou null),
 // errors ([{ at, text }]), t }. `access` : 'reader', 'editor' ou 'owner'.
 export function diagnosticText({ version, served, origin, access, at, agent, source, target, errors = [], t }) {
-  const kinds = Object.entries((source && source.kinds) || {}).map(([kind, n]) => `${kind} ${n}`).join(', ');
   return [
-    t('diag.title', { version, served }),
-    t('diag.date', { value: when(at) }),
-    t('diag.instance', { value: origin || t('diag.unknown') }),
-    t('diag.access', { value: t(`diag.access.${access}`) }),
-    t('diag.browser', { value: agent }),
+    ...headerLines({ version, served, origin, access, at, agent }, t),
     '',
-    t('diag.send'),
-    ...(!source ? [t('diag.send.none')] : [
-      source.ownerOnly ? t('diag.send.ownerOnly') : null,
-      source.unsafe ? t('diag.send.unsafe', { n: String(source.unsafe) }) : null,
-      source.charge ? t('diag.send.charge', { value: source.charge }) : null,
-      source.progress ? t('diag.send.progress', { value: source.progress }) : null,
-      source.catchUp ? t('diag.send.catchUp', { value: source.catchUp }) : null,
-      t('diag.send.kinds', { value: kinds || t('diag.none') }),
-      ...(source.exports.length ? source.exports.flatMap(e => exportLines(e, t)) : [t('diag.send.noExport')]),
-    ]),
+    t('diag.send'), ...sendLines(source, t),
     '',
-    t('diag.receive'),
-    ...(!target || !target.journals.length ? [t('diag.recv.none')] : [
-      target.compare === false ? t('diag.recv.compare') : null,
-      target.visible === undefined ? null : t('diag.recv.visible', { value: t(target.visible ? 'diag.yes' : 'diag.recv.hidden') }),
-      ...target.journals.flatMap(j => journalLines(j, t)),
-    ]),
+    t('diag.receive'), ...receiveLines(target, t),
     '',
-    t('diag.errors'),
-    ...(errors.length ? errors.map(e => `${when(e.at)} ${clip(e.text)}`) : [t('diag.errors.none')]),
+    t('diag.errors'), ...errorLines(errors, t),
   ].filter(l => l !== null).join('\n');
 }

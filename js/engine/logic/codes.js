@@ -236,6 +236,19 @@ export function docSlug(name) {
   return String(name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 80).replace(/^-+|-+$/g, '');
 }
 
+// L'origine telle qu'on l'a reçue si c'est exactement une origine sûre (https, ou http pour un Grist local d'essai, sans
+// chemin ni rien d'autre), sinon ''.
+function safeOrigin(origin) {
+  let base;
+  try {
+    base = new URL(String(origin || ''));
+  } catch (e) {
+    return '';
+  }
+  const secure = base.protocol === 'https:' || (base.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(base.hostname));
+  return secure && base.origin === origin ? origin : '';
+}
+
 // Adresse d'ouverture d'un document dans Grist, sous la forme que Grist écrit lui-même :
 // `<instance>[/o/<équipe>]/<identifiant>/<nom>` (identifiant de 12 caractères au moins ; plus court, Grist écrit
 // `/doc/<identifiant>`). Le nom est celui qu'on connaît (`name`, voir docSlug), « document » à défaut : Grist ne s'en
@@ -245,14 +258,7 @@ export function docSlug(name) {
 // que pour son propriétaire. `origin` est celle de CE document, jamais celle d'un code : un lien ne quitte donc pas
 // l'instance. https seulement (http pour un Grist local d'essai). '' si l'adresse n'est pas sûre.
 export function docUrl(origin, team, docId, name = '') {
-  let base;
-  try {
-    base = new URL(String(origin || ''));
-  } catch (e) {
-    return '';
-  }
-  const secure = base.protocol === 'https:' || (base.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(base.hostname));
-  if (!secure || base.origin !== origin || !TEAM_ID.test(String(docId || '')) || (team && !TEAM_ID.test(String(team)))) return '';
+  if (!safeOrigin(origin) || !TEAM_ID.test(String(docId || '')) || (team && !TEAM_ID.test(String(team)))) return '';
   const site = /^docs-\d+$/.test(team || '') ? 'docs' : team;
   const where = `${origin}${site ? `/o/${site}` : ''}`;
   return docId.length >= 12 ? `${where}/${docId}/${docSlug(name) || 'document'}` : `${where}/doc/${docId}`;

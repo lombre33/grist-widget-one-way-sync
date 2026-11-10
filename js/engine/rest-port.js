@@ -48,19 +48,21 @@ const answer = async (promise) => {
   }
 };
 
-export function createRestPort({ docApi, http }) {
-  let owner = null;
-  let ownOrigin = '';
+// Une requête REST du document avec les droits de la personne ; le corps rendu, ou 'ownerOnly' (403 : seul un
+// propriétaire lit les webhooks) ou une erreur qui cite le début de la réponse. Une erreur de Grist peut citer
+// l'adresse d'un webhook : sa clé n'est jamais montrée en entier.
+const restOf = http => async (method, path, body) => {
+  const response = await answer(http.request(method, path, { body, full: true }));
+  if (response.status >= 300) throw new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 200)}`));
+  return response.body;
+};
 
-  // Une requête REST du document avec les droits de la personne ; le corps rendu, ou 'ownerOnly' (403 : seul un
-  // propriétaire lit les webhooks) ou une erreur qui cite le début de la réponse. Une erreur de Grist peut citer
-  // l'adresse d'un webhook : sa clé n'est jamais montrée en entier.
-  async function rest(method, path, body) {
-    const response = await answer(http.request(method, path, { body, full: true }));
-    if (response.status >= 300) throw new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 200)}`));
-    return response.body;
-  }
+// Chaque groupe de requêtes est une fonction du module qui reçoit ce qu'il lui faut (`http`, `rest`, `docApi`) et rend sa
+// part du port ; `createRestPort`, en bas, ne fait qu'assembler. L'état qu'un groupe retient pour la session (le droit de
+// propriétaire, l'origine du document) reste dans sa fermeture : un port créé a le sien.
 
+// Lectures SQL du document, avec les droits de la personne.
+function sqlPort(http) {
   // Une requête SQL de lecture sur le document, avec les droits de la personne (Grist la réserve à qui peut
   // lire tout le document) ; rend les lignes, ou null si Grist refuse (droits, table absente, requête invalide).
   async function querySql(query) {
@@ -89,6 +91,11 @@ export function createRestPort({ docApi, http }) {
     return row ? { n: Number(row.n) || 0, last: Number(row.last) || 0, raw: Number(row.raw) || 0 } : null;
   }
 
+  return { querySql, selectRows, journalStats };
+}
+
+// Comparaison de deux états du document.
+function changesPort(http) {
   // Ce qui a changé dans le document depuis l'état `since` (empreinte d'une action de son historique) :
   // l'état actuel (`hash`) et les tables touchées, lignes ou colonnes (`tables` ; null = inconnu, tout relire :
   // si `since` est vide ou sorti de l'historique, si une table a été renommée, ou si Grist n'a pas pu répondre).
@@ -117,7 +124,12 @@ export function createRestPort({ docApi, http }) {
     }
   }
 
-  // Webhooks (propriétaires du document seulement : Grist refuse sinon en 403).
+  return { docChanges };
+}
+
+// Webhooks, lectures (propriétaires du document seulement : Grist refuse sinon en 403).
+function webhookListPort({ rest, docApi }) {
+  let owner = null;
   const listWebhooks = async () => (await rest('GET', '/webhooks')).webhooks;
 
   // Propriétaire du document : seul un propriétaire lit la liste des webhooks. Une réponse sûre est gardée pour
@@ -147,6 +159,30 @@ export function createRestPort({ docApi, http }) {
     return conditions;
   }
 
+  return { listWebhooks, isOwner, webhookConditions };
+}
+
+// Envoi direct de lignes à une adresse d'écriture.
+function directPort(http) {
+  let ownOrigin = '';
+
+  // Envoi direct de lignes à une adresse d'écriture (clé d'un formulaire publié : elle n'accepte qu'un ajout de
+  // lignes, sans identifiant), comme le webhook les enverrait. Une erreur cite le début de la réponse, jamais la
+  // clé. Seulement vers l'instance du document, comme le webhook : une adresse d'une autre instance (lien collé,
+  // webhook changé à la main) est refusée avant tout envoi.
+  async function postRows(url, rows, timeout = POST_MS) {
+    ownOrigin ||= new URL(await http.docBaseUrl()).origin;
+    if (new URL(url).origin !== ownOrigin) throw new Error('otherInstance');
+    const response = await answer(http.anonymous('POST', url, { body: rows, timeout }));
+    if (response.status >= 300) throw new Error(maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 120)}`));
+  }
+  const postToHook = (h, rows, timeout) => postRows(h.fields.url, rows, timeout);
+
+  return { postRows, postToHook };
+}
+
+// Webhooks, écritures : création avec sa condition relue, réglages, effacement (file vidée d'abord, avis de fin).
+function webhookEditPort({ rest, webhookConditions, postToHook }) {
   // Effacer un webhook ne coupe pas l'envoi que Grist retente pour lui (20 essais espacés jusqu'à 64 s, un quart
   // d'heure) : cet envoi garde la file de tout le document et les autres destinataires attendent derrière (vu au
   // test de charge : plus de deux minutes après la révocation). Vider d'abord la file de ce webhook seul abandonne
@@ -179,18 +215,6 @@ export function createRestPort({ docApi, http }) {
     return id;
   }
 
-  // Envoi direct de lignes à une adresse d'écriture (clé d'un formulaire publié : elle n'accepte qu'un ajout de
-  // lignes, sans identifiant), comme le webhook les enverrait. Une erreur cite le début de la réponse, jamais la
-  // clé. Seulement vers l'instance du document, comme le webhook : une adresse d'une autre instance (lien collé,
-  // webhook changé à la main) est refusée avant tout envoi.
-  async function postRows(url, rows, timeout = POST_MS) {
-    ownOrigin ||= new URL(await http.docBaseUrl()).origin;
-    if (new URL(url).origin !== ownOrigin) throw new Error('otherInstance');
-    const response = await answer(http.anonymous('POST', url, { body: rows, timeout }));
-    if (response.status >= 300) throw new Error(maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 120)}`));
-  }
-  const postToHook = (h, rows, timeout) => postRows(h.fields.url, rows, timeout);
-
   // Webhook effacé après un dernier envoi direct à son adresse. Un lien déjà mort ou trop lent ne retient pas
   // l'effacement.
   async function deleteWebhookWithNotice(h, rows) {
@@ -198,6 +222,18 @@ export function createRestPort({ docApi, http }) {
     await deleteWebhook(h.id);
   }
 
+  return {
+    createWebhook,
+    setWebhookEnabled: (id, enabled) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { enabled }),
+    renameWebhook: (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name }),
+    deleteWebhook,
+    deleteWebhookWithNotice,
+    clearWebhookQueue: () => rest('DELETE', '/webhooks/queue'),
+  };
+}
+
+// Partage d'un formulaire et lecture d'un document public : requêtes sans jeton.
+function sharePort(http) {
   // Document que désigne l'adresse d'écriture `url` (clé d'un formulaire publié), lu chez Grist par une requête
   // anonyme : nom, dossier, équipe, identifiant (voir readShare). Null si la clé n'existe pas (lien coupé) ; une
   // erreur si Grist ne répond pas.
@@ -233,6 +269,11 @@ export function createRestPort({ docApi, http }) {
     return (response.body || {}).records || [];
   }
 
+  return { shareInfo, publicAccess, publicRecords };
+}
+
+// Pièces jointes du document.
+function attachmentPort(http) {
   // Contenu d'une pièce jointe du document (numéro dans _grist_Attachments).
   async function downloadAttachment(id) {
     try {
@@ -251,6 +292,19 @@ export function createRestPort({ docApi, http }) {
     }
   }
 
+  return { downloadAttachment, uploadAttachment };
+}
+
+export function createRestPort({ docApi, http }) {
+  const rest = restOf(http);
+  const { querySql, selectRows, journalStats } = sqlPort(http);
+  const { docChanges } = changesPort(http);
+  const { listWebhooks, isOwner, webhookConditions } = webhookListPort({ rest, docApi });
+  const { postRows, postToHook } = directPort(http);
+  const { createWebhook, setWebhookEnabled, renameWebhook, deleteWebhook, deleteWebhookWithNotice, clearWebhookQueue } = webhookEditPort({ rest, webhookConditions, postToHook });
+  const { shareInfo, publicAccess, publicRecords } = sharePort(http);
+  const { downloadAttachment, uploadAttachment } = attachmentPort(http);
+
   return {
     querySql,
     selectRows,
@@ -262,11 +316,11 @@ export function createRestPort({ docApi, http }) {
     listWebhooks,
     createWebhook,
     webhookConditions,
-    setWebhookEnabled: (id, enabled) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { enabled }),
-    renameWebhook: (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name }),
+    setWebhookEnabled,
+    renameWebhook,
     deleteWebhook,
     deleteWebhookWithNotice,
-    clearWebhookQueue: () => rest('DELETE', '/webhooks/queue'),
+    clearWebhookQueue,
     postRows,
     postToHook,
     publicRecords,

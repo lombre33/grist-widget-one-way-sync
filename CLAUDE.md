@@ -344,6 +344,19 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
     non comparé, clé publique remplacée, invitation périmée ou d'une autre instance).
   - `startEngine({ version })` (version de l'application écrite dans les codes). Le comportement de Sync+ seul n'a pas changé
     (unit et e2e complets verts avant le commit).
+- **Moteur 2.6.0 (10 novembre, consigne 006 de GFS, sans changement visible)** : l'outil d'audit lit `js/engine/` quand il juge GFS ;
+  cinq fonctions passaient ses seuils (80 lignes, complexité 15) : `createRestPort` (226 lignes), `lotFormula` (87), `journalFacts`
+  (22), `diagnosticText` (18), et `docUrl` (16, venue avec la 2.5.0, que GFS n'avait pas mesurée). Découpées sans rien changer à ce
+  qu'elles rendent : `createRestPort` n'assemble plus que des groupes (`sqlPort`, `changesPort`, `webhookListPort`, `directPort`,
+  `webhookEditPort`, `sharePort`, `attachmentPort`, chacun avec son état de session dans sa fermeture), mêmes vingt noms dans le même
+  ordre ; `lotFormula` met bout à bout sept fonctions d'étapes (`lotHeadLines`… `lotTallyLines`). **Le texte des formules de `Synchro` est
+  gardé octet pour octet** par `tests/unit/formulas-golden.test.mjs` (référence `tests/unit/golden/formulas.json`, trois montages :
+  sans préfixe, `Gfs_`, aucune table ; `UPDATE_GOLDEN=1` ne se lance que pour un changement voulu, avec la version du moteur relevée).
+  Avant/après comparés sur des cas en masse hors dépôt (diagnostic : 1 056 cas fr et en ; `docUrl` : 22 869 combinaisons ; `createRestPort` :
+  196 appels sur sept serveurs simulés, requêtes comprises). Mesure : `tests/tools/mesure-moteur.mjs` (fonctions de l'outil d'audit,
+  `GWAUDIT_DIR=<dépôt de l'outil>`, ce n'est pas gwaudit) : 51 fichiers, 1 680 fonctions, plus grande 49 lignes, complexité 15 au plus.
+  Mineure, par la règle de `version.js` (rien d'ajouté ni de retiré au port, aux tables, aux codes). Règle ajoutée au `README` du moteur
+  (5 et 6) : une fonction qui grossit se découpe, le texte des formules ne change pas sans décision.
 - **Reste côté écran, dit à GFS** : les fenêtres, boutons et l'ordre des écrans des assistants (`js/source/*-wizard.js`,
   `js/target/wizard.js`), les cartes. Restent en français fixe : les mémos des règles d'accès (consigne 003, point 1).
 - **Anciens chemins** : ceux que cite ce fichier plus bas (`js/logic/…`, `js/pages.js`, `js/acl.js`, `js/exchange.js`,

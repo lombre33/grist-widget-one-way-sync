@@ -211,93 +211,128 @@ function keysFormula(pick) {
 // donc ce qu'un participant envoie repart vers les autres, avec l'heure de sa version ; celui
 // d'où il vient le reçoit aussi, sans effet chez lui (même version).
 // `Supprime` part telle quelle : la CIBLE la lit comme une case à cocher (« Non » ne supprime pas).
+// Le lot se lit en sept étapes, chacune une petite fonction qui rend ses lignes de Python ; `lotFormula` les met bout
+// à bout, dans cet ordre, et `signed` les enveloppe. Le texte obtenu est celui que le moteur pose dans les colonnes des
+// documents déjà partagés : il ne change pas d'un octet quand on range ces fonctions autrement (tests/unit/formulas-golden).
 function lotFormula(pick) {
   return signed([
-    `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...readLines(),
-    `cols = json.loads($${SCHEMA_COL} or "[]")`,
-    `asked = ($${RESEND_COL} or "").split(":")`,
-    'again = set(int(i) for i in asked[-1].split(",") if i.strip().isdigit())',
-    // Un renvoi en tranches annonce combien de lignes partiront encore après celle-ci (`marque:reste:numéros`).
-    'rest = int(asked[1]) if len(asked) == 3 and asked[1].isdigit() else None',
-    `if $${TYPE_COL} != "${KIND.lot}": rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
-    `if $${TYPE_COL} == "${KIND.files}":`,
-    '  files = {}',
-    '  for r in rows:',
-    '    for c in cols:',
-    '      if c.get("source") != "Attachments": continue',
-    '      try:',
-    '        for y in getattr(r, c["id"]): files[y.fileIdent] = [y.id, y.fileName, y.fileSize]',
-    '      except Exception:',
-    '        pass',
-    '  return json.dumps(files, ensure_ascii=False)',
-    'undone = set()',
-    `if $${TYPE_COL} == "${KIND.lot}":`,
-    `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}")`,
-    `  mute = swap.id and swap.${SCHEMA_COL} != "${HUB}"`,
-    `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
-    // L'heure est lue par time.time() et non NOW() : Grist recalcule toutes les heures les formules
-    // qui appellent NOW(), sur toutes les lignes (voir RECALC_SPEC).
-    '  import time',
-    `  cut = datetime.datetime.fromtimestamp(time.time() - ${WINDOW_S}, datetime.timezone.utc)`,
-    // Le lot est recalculé à chaque modification de la table : seule RECALC_COL (un nombre : lu
-    // vite) est lue sur toutes les lignes ; le reste (clé, filtre, dates, bien plus lentes à lire)
-    // seulement sur les lignes recalculées depuis moins de WINDOW_S secondes et celles à renvoyer.
-    '  c = v(cut)',
-    `  hit = [r for r in src.all if (getattr(r, "${RECALC_COL}", None) or 0) > c or r.id in again]`,
-    `  hit = [r for r in hit if r.${KEY_COL} and keep(r)]`,
-    `  touched = [r for r in hit if (getattr(r, "${RECALC_COL}", None) or 0) > c]`,
-    '  def echo(r):',
-    `    t, m = v(getattr(r, "${RECALC_COL}")) or 0, v(r.${ORDER_COL}) or 0`,
-    '    return any(abs(t - s) < 1 and m < s for s in stamps)',
-    `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut and not (mute and echo(r)))`,
-    '  fresh = set() if mute else set(r.id for r in touched if r.id not in recent and echo(r))',
-    '  undone = set(r.id for r in touched if r.id not in recent and r.id not in fresh and not echo(r))',
-    // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
-    // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
-    `  if len(touched) > (0 if swap.id else ${SMALL_TABLE}) and len(touched) == sum(1 for r in src.all if r.${KEY_COL} and keep(r)): undone = set()`,
-    '  rows = [r for r in hit if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
-    // Une ligne renvoyée part au plus tôt à son dernier recalcul (hors Échange) : un rechargement
-    // du document a pu la faire partir à cette heure-là (petite table), et la CIBLE ignorerait
-    // sinon le renvoi, plus ancien, par exemple celui d'une colonne ajoutée à l'export (vérifié).
-    // En Échange, un renvoi garde l'heure de sa version, pour ne pas l'emporter à tort.
-    'def when(r):',
-    `  if r.id in undone: return v(getattr(r, "${RECALC_COL}"))`,
-    `  if r.id in again and $${TYPE_COL} == "${KIND.lot}" and not swap.id: return max(v(r.${ORDER_COL}) or 0, v(getattr(r, "${RECALC_COL}", None)) or 0)`,
-    `  return v(r.${ORDER_COL})`,
-    // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles
-    // laissent.
-    `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
-    `room = ${POST_MAX} - sum(len(r.${LIST_COL} or "") for r in lists)`,
-    `budget = max(${LOT_MIN}, min(${LOT_MAX}, room // max(1, len(lists))))`,
-    `capped = $${TYPE_COL} == "${KIND.lot}"`,
-    'out, size, big = [], 0, []',
-    `for r in sorted(rows, key=lambda r: when(r) or 0, reverse=True):`,
-    `  line = [r.${KEY_COL}, when(r), v(getattr(r, "${DELETE_COL}", False)), data(r, cols)]`,
-    '  n = len(json.dumps(line, ensure_ascii=False))',
-    // Une ligne plus grosse qu'un envoi ne partira jamais : signalée, pas renvoyée sans fin.
-    `  if capped and n > max(budget, room):`,
-    `    big.append(r.${KEY_COL})`,
-    '    continue',
-    // Le premier venu part même s'il dépasse le plafond du lot : seul, il tient dans un envoi.
-    '  if capped and out and size + n > budget: break',
-    '  size += n',
-    `  if not capped and size > ${PUBLIC_MAX}: return json.dumps({"lignes": [], "total": len(rows), "trop": True})`,
-    '  out.append(line)',
-    'lot = {"lignes": out, "total": len(rows)}',
-    'if big: lot["tropGros"] = big',
-    `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
-    'if capped and rest is not None: lot["restant"] = rest',
-    // Bilan : combien de clés la table a pour cet export (lues dans la ligne 'suivi', déjà recalculée à
-    // chaque changement des clés), et depuis quand. La CIBLE compare avec ce qui lui est arrivé (voir
-    // tally.js). Le texte ne change que si les clés changent : pas d'envoi de plus. Pas en Échange.
-    'if capped and not swap.id:',
-    `  tr = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
-    `  head = str(tr.${LIST_COL} or "").split(":")[0]`,
-    `  st = json.loads(tr.${TRACK_COL}) if isinstance(tr.${TRACK_COL}, str) and tr.${TRACK_COL}.startswith("{") else {}`,
-    '  if tr.id and head.isdigit() and st.get("t"): lot["bilan"] = {"n": int(head), "t": int(st["t"])}',
+    ...lotHeadLines(pick), ...lotFilesLines(), ...lotWindowLines(), ...lotWhenLines(), ...lotPackLines(), ...lotAnnounceLines(), ...lotTallyLines(),
     'return json.dumps(lot, ensure_ascii=False)',
   ], KIND.lot).join('\n');
 }
+
+// Étape 1, l'entrée : le type de la ligne (lot, complet ou fichiers), la table (`src`), les colonnes de l'export (`cols`),
+// les numéros à renvoyer (`again`), le reste annoncé (`rest`), et `rows` : toutes les lignes gardées, pour les lignes qui
+// ne sont pas un lot courant.
+const lotHeadLines = pick => [
+  `if $${TYPE_COL} not in ("${KIND.lot}", "${KIND.full}", "${KIND.files}"): return ""`, pick, 'if src is None: return ""', ...readLines(),
+  `cols = json.loads($${SCHEMA_COL} or "[]")`,
+  `asked = ($${RESEND_COL} or "").split(":")`,
+  'again = set(int(i) for i in asked[-1].split(",") if i.strip().isdigit())',
+  // Un renvoi en tranches annonce combien de lignes partiront encore après celle-ci (`marque:reste:numéros`).
+  'rest = int(asked[1]) if len(asked) == 3 and asked[1].isdigit() else None',
+  `if $${TYPE_COL} != "${KIND.lot}": rows = [r for r in src.all if r.${KEY_COL} and keep(r)]`,
+];
+
+// Étape 2, la ligne 'fichiers' : les fichiers des colonnes Pièces jointes de toutes les lignes, rendus tout de suite.
+const lotFilesLines = () => [
+  `if $${TYPE_COL} == "${KIND.files}":`,
+  '  files = {}',
+  '  for r in rows:',
+  '    for c in cols:',
+  '      if c.get("source") != "Attachments": continue',
+  '      try:',
+  '        for y in getattr(r, c["id"]): files[y.fileIdent] = [y.id, y.fileName, y.fileSize]',
+  '      except Exception:',
+  '        pass',
+  '  return json.dumps(files, ensure_ascii=False)',
+];
+
+// Étape 3, la fenêtre des lignes recalculées d'un lot courant : lesquelles partent (`rows`), lesquelles reviennent d'une
+// annulation (`undone`), lesquelles viennent de l'autre document d'un Échange (`fresh`, `mute`).
+const lotWindowLines = () => [
+  'undone = set()',
+  `if $${TYPE_COL} == "${KIND.lot}":`,
+  `  swap = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.swap}")`,
+  `  mute = swap.id and swap.${SCHEMA_COL} != "${HUB}"`,
+  `  stamps = [x.${MISSING_COL} for x in ${SYNC_TABLE}.lookupRecords(${TYPE_COL}="${KIND.swap}") if isinstance(x.${MISSING_COL}, (int, float))]`,
+  // L'heure est lue par time.time() et non NOW() : Grist recalcule toutes les heures les formules
+  // qui appellent NOW(), sur toutes les lignes (voir RECALC_SPEC).
+  '  import time',
+  `  cut = datetime.datetime.fromtimestamp(time.time() - ${WINDOW_S}, datetime.timezone.utc)`,
+  // Le lot est recalculé à chaque modification de la table : seule RECALC_COL (un nombre : lu
+  // vite) est lue sur toutes les lignes ; le reste (clé, filtre, dates, bien plus lentes à lire)
+  // seulement sur les lignes recalculées depuis moins de WINDOW_S secondes et celles à renvoyer.
+  '  c = v(cut)',
+  `  hit = [r for r in src.all if (getattr(r, "${RECALC_COL}", None) or 0) > c or r.id in again]`,
+  `  hit = [r for r in hit if r.${KEY_COL} and keep(r)]`,
+  `  touched = [r for r in hit if (getattr(r, "${RECALC_COL}", None) or 0) > c]`,
+  '  def echo(r):',
+  `    t, m = v(getattr(r, "${RECALC_COL}")) or 0, v(r.${ORDER_COL}) or 0`,
+  '    return any(abs(t - s) < 1 and m < s for s in stamps)',
+  `  recent = set(r.id for r in touched if r.${ORDER_COL} and r.${ORDER_COL} >= cut and not (mute and echo(r)))`,
+  '  fresh = set() if mute else set(r.id for r in touched if r.id not in recent and echo(r))',
+  '  undone = set(r.id for r in touched if r.id not in recent and r.id not in fresh and not echo(r))',
+  // Toutes les lignes recalculées d'un coup : un rechargement du document, pas une annulation (une
+  // petite table repart, sauf dans un Échange, où une version ancienne écraserait l'autre côté).
+  `  if len(touched) > (0 if swap.id else ${SMALL_TABLE}) and len(touched) == sum(1 for r in src.all if r.${KEY_COL} and keep(r)): undone = set()`,
+  '  rows = [r for r in hit if r.id in again or r.id in recent or r.id in undone or r.id in fresh]',
+];
+
+// Étape 4, l'heure d'une ligne (`when`).
+const lotWhenLines = () => [
+  // Une ligne renvoyée part au plus tôt à son dernier recalcul (hors Échange) : un rechargement
+  // du document a pu la faire partir à cette heure-là (petite table), et la CIBLE ignorerait
+  // sinon le renvoi, plus ancien, par exemple celui d'une colonne ajoutée à l'export (vérifié).
+  // En Échange, un renvoi garde l'heure de sa version, pour ne pas l'emporter à tort.
+  'def when(r):',
+  `  if r.id in undone: return v(getattr(r, "${RECALC_COL}"))`,
+  `  if r.id in again and $${TYPE_COL} == "${KIND.lot}" and not swap.id: return max(v(r.${ORDER_COL}) or 0, v(getattr(r, "${RECALC_COL}", None)) or 0)`,
+  `  return v(r.${ORDER_COL})`,
+];
+
+// Étape 5, le plafond d'un envoi : les lignes qui entrent dans le lot (`out`), celles qui sont trop grosses pour jamais partir
+// (`big`).
+const lotPackLines = () => [
+  // Les listes de l'export partent dans le même envoi : chaque lot prend sa part de ce qu'elles
+  // laissent.
+  `lists = ${SYNC_TABLE}.lookupRecords(${EXPORT_COL}=$${EXPORT_COL}, ${TYPE_COL}="${KIND.keys}")`,
+  `room = ${POST_MAX} - sum(len(r.${LIST_COL} or "") for r in lists)`,
+  `budget = max(${LOT_MIN}, min(${LOT_MAX}, room // max(1, len(lists))))`,
+  `capped = $${TYPE_COL} == "${KIND.lot}"`,
+  'out, size, big = [], 0, []',
+  `for r in sorted(rows, key=lambda r: when(r) or 0, reverse=True):`,
+  `  line = [r.${KEY_COL}, when(r), v(getattr(r, "${DELETE_COL}", False)), data(r, cols)]`,
+  '  n = len(json.dumps(line, ensure_ascii=False))',
+  // Une ligne plus grosse qu'un envoi ne partira jamais : signalée, pas renvoyée sans fin.
+  `  if capped and n > max(budget, room):`,
+  `    big.append(r.${KEY_COL})`,
+  '    continue',
+  // Le premier venu part même s'il dépasse le plafond du lot : seul, il tient dans un envoi.
+  '  if capped and out and size + n > budget: break',
+  '  size += n',
+  `  if not capped and size > ${PUBLIC_MAX}: return json.dumps({"lignes": [], "total": len(rows), "trop": True})`,
+  '  out.append(line)',
+];
+
+// Étape 6, ce que le lot dit de lui : le total, les lignes trop grosses, depuis quand il est coupé, ce qui reste à venir.
+const lotAnnounceLines = () => [
+  'lot = {"lignes": out, "total": len(rows)}',
+  'if big: lot["tropGros"] = big',
+  `if capped and len(out) + len(big) < len(rows): lot.update(depuis=v(cut), renvoi=bool(again))`,
+  'if capped and rest is not None: lot["restant"] = rest',
+];
+
+// Étape 7, le bilan : combien de clés la table a pour cet export (lues dans la ligne 'suivi', déjà recalculée à
+// chaque changement des clés), et depuis quand. La CIBLE compare avec ce qui lui est arrivé (voir
+// tally.js). Le texte ne change que si les clés changent : pas d'envoi de plus. Pas en Échange.
+const lotTallyLines = () => [
+  'if capped and not swap.id:',
+  `  tr = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
+  `  head = str(tr.${LIST_COL} or "").split(":")[0]`,
+  `  st = json.loads(tr.${TRACK_COL}) if isinstance(tr.${TRACK_COL}, str) and tr.${TRACK_COL}.startswith("{") else {}`,
+  '  if tr.id and head.isdigit() and st.get("t"): lot["bilan"] = {"n": int(head), "t": int(st["t"])}',
+];
 
 // Sync_Etat (formule de déclenchement). Lignes 'suivi' : l'heure du dernier changement des clés
 // (`t`), le plus grand numéro de ligne vu (`top`), la somme des CRC-32 des clés de chaque seau

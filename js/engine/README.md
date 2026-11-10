@@ -19,6 +19,14 @@ codes (`CODE_FORMAT`). Majeure : un port, un nom de table ou un format qui ne se
    `error.<code>`). Le port rend **la clé elle-même** quand elle est inconnue : `errors.js` s'en sert pour reconnaître
    une erreur prévue.
 
+5. Aucune fonction ne dépasse les seuils de l'outil d'audit de GFS (80 lignes, complexité 15, imbrication 5) : une fonction qui
+   grossit se découpe en petites fonctions nommées, comme `createRestPort` (un groupe de requêtes par fonction du module),
+   `lotFormula` (une étape par fonction) ou `diagnosticText` (une section par fonction). `tests/tools/mesure-moteur.mjs`
+   le mesure avec les fonctions mêmes de l'outil (`GWAUDIT_DIR=<outil> node tests/tools/mesure-moteur.mjs`).
+6. Le texte des formules de `Synchro` (`syncFormulas` : `keys`, `lot`, `state`) est celui que le moteur pose dans les colonnes
+   des documents déjà partagés : il ne change pas d'un octet sans décision (version du moteur relevée, dite à GFS).
+   `tests/unit/formulas-golden.test.mjs` compare ce texte à une référence (`tests/unit/golden/formulas.json`).
+
 ## Démarrer
 
 ```js
