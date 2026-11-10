@@ -53,7 +53,7 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   (`target="_blank"`, `rel="noopener noreferrer"`). L'adresse n'est jamais celle d'un code : `docUrl`
   (`js/engine/logic/codes.js`) la refait de l'instance de **ce** document (https, ou http sur `localhost`
   pour un Grist d'essai), d'une équipe et d'un identifiant qui n'ont que la forme `[A-Za-z0-9_-]`, sous
-  `/o/<équipe>/doc/<identifiant>`. Un lien ne quitte donc pas l'instance, et le seul lien externe du widget
+  `/o/<équipe>/<identifiant>/<nom>` (la forme que Grist écrit ; le nom n'est que cosmétique). Un lien ne quitte donc pas l'instance, et le seul lien externe du widget
   reste celui des crédits.
 - Stockage local du navigateur : langue, thème, date de la dernière visite par document CIBLE
   (historique), identifiant tiré au hasard pour ce navigateur (renvois). Aucune donnée du document.

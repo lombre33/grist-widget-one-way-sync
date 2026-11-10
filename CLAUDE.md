@@ -352,7 +352,31 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.15.1 (10 novembre 2026)
+## État : V0.15.2 (10 novembre 2026)
+
+V0.15.2 (Antoine, 10 novembre : « l'url du document source/cible ne fonctionne pas car le nom du document est dans l'URL. Est-ce que tu peux
+récupérer l'url de la page via le navigateur par ex ? »). Moteur **2.5.0** (mineure, dit dans `GFS-ETAT.md`).
+- **Récupérer l'adresse de la page est impossible** : le widget est une iframe d'une autre origine, il ne lit ni `window.top.location`
+  ni `document.referrer` autrement que par l'origine (voir 0.13.5). Il ne connaît de son document que l'identifiant et l'équipe
+  (`getAccessToken().baseUrl`) ; de l'autre, ce que la fiche de partage (`shareInfo`) ou l'invitation (`from`) disent.
+- **Vérifié dans un Grist 1.7 réel** (sondes en Playwright, document connecté en propriétaire) : `/o/<équipe>/doc/<id>`, `/o/<équipe>/<id>`,
+  `/o/<équipe>/<id12>/<nom>`, avec un mauvais nom ou « document » : **toutes ouvrent le document**, et Grist remplace le nom par le sien
+  (le nom n'est donc pas indispensable ici). **Mais sans la bonne équipe** (aucune, `/o/docs/` pour un document d'équipe, équipe
+  inconnue) : « Page non trouvée ». L'équipe est la pièce qui compte. Cause exacte de l'échec sur DINUM **non reproduite** (DINUM n'est pas
+  joignable depuis la session) : l'adresse est donc refaite comme Grist l'écrit lui-même, et le retour du porteur dira si cela suffit.
+- `docUrl(origin, team, docId, name)` (`logic/codes.js`) : `<instance>[/o/<équipe>]/<id>/<nom>` (`docSlug` : lettres et chiffres sans
+  accent séparés par des tirets, 80 caractères au plus ; « document » sans nom ; identifiant de moins de 12 caractères : `/doc/<id>`). Un
+  espace personnel `docs-<numéro>` (domaine que la fiche d'un document donne pour l'espace personnel de son propriétaire) s'écrit
+  `docs`, comme Grist l'écrit (`normalizeOrgDomain`, grist-core) : `/o/docs-5/…` ne s'ouvre que pour le numéro 5, `/o/docs/…` pour toute
+  personne qui a accès au document. Les appelants donnent le nom connu : `from.docName` (CIBLE), `share.name` (fiche de réponse),
+  nom du mémo ou lu au contrôle horaire (`hookDoc`).
+- Testé : unit (`docUrl`, `docSlug`, `hookDoc`) ; e2e `ONLY_DOCLINK=1` : les liens ont la nouvelle forme et **le clic ouvre vraiment le
+  document** (le titre de l'onglet est le nom du document ; avant, seul le début du chemin était contrôlé, et Grist rétablissait tout
+  seul une forme cassée).
+- Dit à Antoine : si le lien ne marche toujours pas sur DINUM, il faut l'adresse qui marche (copiée dans la barre) et celle du lien
+  (survol), masquées, pour voir ce qui diffère (équipe ?).
+
+## État précédent : V0.15.1 (10 novembre 2026)
 
 V0.15.1 (Antoine, 10 novembre, côté CIBLE : « si l'user fait "nouvelle table" le widget ne sera pas dans cette table là : pas de
 sync s'il n'ouvre pas la table/vue où il l'a mis ? » ; « hyper important de l'indiquer en pop-up » ; « la table journal en dessous
@@ -474,7 +498,7 @@ document de l'autre côté, des deux côtés.
   champ « Nom de ce document » (`showOptions`), vide la première fois, **retenu** dans la note SOURCE (`nomDoc`, `docNameOf`,
   `setDocName`, `rememberDocName`, `sourceDocName`) puis proposé de nouveau, corrigeable. Il part dans l'invitation et la
   réponse publique (`from.docName`, `from.team`, `sourceFrom`).
-- **Liens** : `docUrl(origin, team, docId)` (`logic/codes.js`) refait `<instance>[/o/<équipe>]/doc/<id>` de l'instance de CE
+- **Liens** : `docUrl(origin, team, docId)` (`logic/codes.js`) refait `<instance>[/o/<équipe>]/doc/<id>` (forme changée en 0.15.2, voir plus haut) de l'instance de CE
   document (https, ou http sur localhost), équipe et identifiant en `[A-Za-z0-9_-]` : jamais une adresse tirée d'un code.
   `docLink` (`js/ui.js`) : `target="_blank" rel="noopener noreferrer"`, icône, texte réservé aux lecteurs d'écran, infobulle (« Nom
   indiqué par la SOURCE, non vérifié » côté CIBLE sauf en Échange, où le nom vient de Grist). Montré sur la carte de réception

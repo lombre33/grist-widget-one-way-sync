@@ -229,11 +229,22 @@ export function loopingTables(tables, recipientDocId, received) {
 // message d'erreur de Grist.
 export const maskKey = text => String(text || '').replace(/\/(api\/s|forms)\/([A-Za-z0-9]{4})[A-Za-z0-9]*/g, '/$1/$2…');
 
-// Adresse d'ouverture d'un document dans Grist, `<instance>[/o/<équipe>]/doc/<identifiant>` (Grist la redirige vers
-// l'adresse avec le nom du document ; sans l'équipe d'un site qui l'a dans son chemin, elle ne mène nulle part :
-// `team` doit être connue). `origin` est celle de CE document, jamais celle d'un code : un lien ne quitte donc
-// pas l'instance. https seulement (http pour un Grist local d'essai). '' si l'adresse n'est pas sûre.
-export function docUrl(origin, team, docId) {
+// Le nom d'un document tel que Grist l'écrit dans son adresse (« slug ») : lettres et chiffres sans accent, séparés par
+// des tirets. Grist n'en tient pas compte pour trouver le document (il ne sert qu'à lire l'adresse) : un nom un peu
+// différent ouvre le même document.
+export function docSlug(name) {
+  return String(name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 80).replace(/^-+|-+$/g, '');
+}
+
+// Adresse d'ouverture d'un document dans Grist, sous la forme que Grist écrit lui-même :
+// `<instance>[/o/<équipe>]/<identifiant>/<nom>` (identifiant de 12 caractères au moins ; plus court, Grist écrit
+// `/doc/<identifiant>`). Le nom est celui qu'on connaît (`name`, voir docSlug), « document » à défaut : Grist ne s'en
+// sert pas pour trouver le document, et rétablit le sien. L'équipe, elle, est indispensable sur un site qui l'a dans
+// son chemin : sans la bonne, Grist répond « Page non trouvée » (vérifié). Un espace personnel (`docs-<numéro>` dans la
+// fiche d'un document) s'écrit `docs` dans les adresses de Grist (`normalizeOrgDomain`) : `docs-<numéro>` ne s'ouvre
+// que pour son propriétaire. `origin` est celle de CE document, jamais celle d'un code : un lien ne quitte donc pas
+// l'instance. https seulement (http pour un Grist local d'essai). '' si l'adresse n'est pas sûre.
+export function docUrl(origin, team, docId, name = '') {
   let base;
   try {
     base = new URL(String(origin || ''));
@@ -242,7 +253,9 @@ export function docUrl(origin, team, docId) {
   }
   const secure = base.protocol === 'https:' || (base.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(base.hostname));
   if (!secure || base.origin !== origin || !TEAM_ID.test(String(docId || '')) || (team && !TEAM_ID.test(String(team)))) return '';
-  return `${origin}${team ? `/o/${team}` : ''}/doc/${docId}`;
+  const site = /^docs-\d+$/.test(team || '') ? 'docs' : team;
+  const where = `${origin}${site ? `/o/${site}` : ''}`;
+  return docId.length >= 12 ? `${where}/${docId}/${docSlug(name) || 'document'}` : `${where}/doc/${docId}`;
 }
 
 // `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>

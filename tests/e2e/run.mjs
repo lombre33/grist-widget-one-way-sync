@@ -1199,9 +1199,12 @@ try {
     const dst = await newDocWithWidget('Lien CIBLE');
     const shortId = doc => doc.slice(0, 12);
     // Un clic sur le lien ouvre le document voulu dans un nouvel onglet (les liens du widget ne quittent pas Grist).
-    const opensDoc = async (link, doc) => {
+    // Le document doit s'ouvrir vraiment (son titre dans l'onglet) : une mauvaise équipe ou un mauvais identifiant donne
+    // « Page non trouvée ».
+    const opensDoc = async (link, doc, title) => {
       const [tab] = await Promise.all([page.waitForEvent('popup'), link.click()]);
       await tab.waitForURL(url => url.pathname.startsWith(`/o/${env.team}/${shortId(doc)}`), { timeout: 60000 });
+      await tab.waitForFunction(name => document.title.startsWith(name), title, { timeout: 60000 });
       await tab.close();
     };
     // CIBLE : coller le code de l'invitation dans l'assistant de réception.
@@ -1241,7 +1244,8 @@ try {
     await dialog().getByText('« Annuaire » : table Fiches.').waitFor();
     const wizardLink = dialog().locator('a.doc-link');
     assert.equal(await wizardLink.count(), 1);
-    assert.ok((await wizardLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(src.doc)}`), 'adresse refaite : instance et équipe de ce document, identifiant de la SOURCE');
+    const wizardHref = await wizardLink.getAttribute('href');
+    assert.ok(wizardHref.startsWith(`${TEAM}/${shortId(src.doc)}`) && wizardHref.endsWith('/Lien-SOURCE-i-saisi-i-co'), `adresse refaite comme Grist l'écrit : instance et équipe de ce document, identifiant de la SOURCE, nom (${wizardHref})`);
     assert.deepEqual([await wizardLink.getAttribute('target'), await wizardLink.getAttribute('rel')], ['_blank', 'noopener noreferrer']);
     assert.equal(await wizardLink.evaluate(a => a.firstChild.textContent), 'Lien SOURCE <i>saisi</i> & co', 'le nom est du texte, jamais du HTML');
     assert.equal(await wizardLink.locator('i').count(), 0);
@@ -1257,12 +1261,12 @@ try {
     const cardLink = widget().locator('.card a.doc-link');
     await cardLink.waitFor();
     assert.equal(await cardLink.evaluate(a => a.firstChild.textContent), 'Lien SOURCE <i>saisi</i> & co');
-    assert.ok((await cardLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(src.doc)}`));
+    assert.ok((await cardLink.getAttribute('href')).startsWith(`${TEAM}/${shortId(src.doc)}`) && (await cardLink.getAttribute('href')).endsWith('/Lien-SOURCE-i-saisi-i-co'));
     assert.match(await cardLink.getAttribute('title'), /Ouvrir le document dans un nouvel onglet — Nom indiqué par la SOURCE, non vérifié/);
     assert.equal(await cardLink.locator('.sr-only').textContent(), ' (s’ouvre dans un nouvel onglet)');
     await widget().getByText(`Données de ${env.email}`).waitFor();
     await keep('30-cible-carte-document', widget().locator('.card').first());
-    await opensDoc(cardLink, src.doc);
+    await opensDoc(cardLink, src.doc, 'Lien SOURCE');
     assert.ok(await widget().locator('.card').isVisible(), 'l\'onglet du widget est resté en place');
 
     // SOURCE : la ligne du destinataire, avec le nom du document vu chez Grist.
@@ -1271,11 +1275,11 @@ try {
     const personLink = widget().locator('.person .person-who a.doc-link');
     await personLink.waitFor();
     assert.equal(await personLink.evaluate(a => a.firstChild.textContent), `${env.team}/Lien CIBLE`, 'équipe/nom du document, comme la fiche');
-    assert.ok((await personLink.getAttribute('href')).startsWith(`${TEAM}/doc/${shortId(dst.doc)}`));
+    assert.ok((await personLink.getAttribute('href')).startsWith(`${TEAM}/${shortId(dst.doc)}`) && (await personLink.getAttribute('href')).endsWith('/Lien-CIBLE'));
     assert.deepEqual([await personLink.getAttribute('target'), await personLink.getAttribute('rel')], ['_blank', 'noopener noreferrer']);
     assert.ok(!(await widget().locator('.person .person-who').innerText()).includes(shortId(dst.doc)), 'l\'identifiant brut reste dans l\'infobulle');
     await keep('31-source-document-destinataire', widget().locator('.card').first());
-    await opensDoc(personLink, dst.doc);
+    await opensDoc(personLink, dst.doc, 'Lien CIBLE');
     step('Document de l\'autre côté : nom saisi côté SOURCE (retenu, corrigeable), lien dans un nouvel onglet des deux côtés, jamais de HTML');
   }
 

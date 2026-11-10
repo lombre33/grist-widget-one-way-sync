@@ -15,6 +15,7 @@ export function hookShown(memo, docName = '') {
 // vu chez Grist au dernier contrôle, qui l'emporte sur celui du mémo.
 export function hookDoc(memo, docName = '', origin = '') {
   const doc = memoDoc(memo);
-  const place = [doc.team, String(docName || '').trim() || doc.name].filter(Boolean).join('/') || doc.docId;
-  return { who: doc.email, place, url: docUrl(origin, doc.team, doc.docId) };
+  const name = String(docName || '').trim() || doc.name;
+  const place = [doc.team, name].filter(Boolean).join('/') || doc.docId;
+  return { who: doc.email, place, url: docUrl(origin, doc.team, doc.docId, name) };
 }

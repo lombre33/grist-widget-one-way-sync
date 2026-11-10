@@ -1,7 +1,7 @@
 // Codes d'invitation et de réponse, adresses : aller-retour, puis codes abîmés ou forgés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
+import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docSlug, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
 import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
@@ -238,15 +238,29 @@ test('cleanLabel : contrôles et sens d\'écriture ôtés, espaces ramenées à 
   assert.equal(cleanLabel('x'.repeat(300)).length, 200);
 });
 
-test('docUrl : adresse du document dans Grist, refaite d\'après l\'instance de ce document', () => {
-  assert.equal(docUrl('https://g.fr', 'dinum', 'Abc123xyz789'), 'https://g.fr/o/dinum/doc/Abc123xyz789');
-  assert.equal(docUrl('https://g.fr', '', 'Abc123xyz789'), 'https://g.fr/doc/Abc123xyz789', 'sans équipe');
-  assert.equal(docUrl('http://localhost:8484', 'synctest', 'Abc123xyz789'), 'http://localhost:8484/o/synctest/doc/Abc123xyz789', 'Grist local d\'essai');
-  assert.equal(docUrl('http://127.0.0.1:8484', 'e', 'd'), 'http://127.0.0.1:8484/o/e/doc/d');
+test('docUrl : adresse du document dans Grist, refaite d\'après l\'instance de ce document, sous la forme que Grist écrit', () => {
+  assert.equal(docUrl('https://g.fr', 'dinum', 'Abc123xyz789', 'Suivi RH 2027'), 'https://g.fr/o/dinum/Abc123xyz789/Suivi-RH-2027', 'identifiant puis nom');
+  assert.equal(docUrl('https://g.fr', 'dinum', 'Abc123xyz789'), 'https://g.fr/o/dinum/Abc123xyz789/document', 'nom inconnu : un nom neutre, Grist rétablit le sien');
+  assert.equal(docUrl('https://g.fr', '', 'Abc123xyz789', 'Suivi'), 'https://g.fr/Abc123xyz789/Suivi', 'sans équipe');
+  assert.equal(docUrl('https://g.fr', 'docs-12', 'Abc123xyz789', 'Perso'), 'https://g.fr/o/docs/Abc123xyz789/Perso', 'espace personnel : « docs », comme Grist l\'écrit');
+  assert.equal(docUrl('https://g.fr', 'docsx-12', 'Abc123xyz789'), 'https://g.fr/o/docsx-12/Abc123xyz789/document', 'seul docs-<numéro> est un espace personnel');
+  assert.equal(docUrl('http://localhost:8484', 'synctest', 'Abc123xyz789', 'Lien'), 'http://localhost:8484/o/synctest/Abc123xyz789/Lien', 'Grist local d\'essai');
+  assert.equal(docUrl('http://127.0.0.1:8484', 'e', 'd'), 'http://127.0.0.1:8484/o/e/doc/d', 'identifiant de moins de 12 caractères : forme /doc/ de Grist');
+  assert.equal(docUrl('https://g.fr', 'e', 'Abc123xyz789', '<i>x</i>/../?#'), 'https://g.fr/o/e/Abc123xyz789/i-x-i', 'le nom ne peut rien ajouter à l\'adresse');
   for (const origin of ['', undefined, 'g.fr', 'http://g.fr', 'ftp://g.fr', 'javascript:alert(1)', 'https://g.fr/o/x', 'https://g.fr/', 'https://u:p@g.fr', 'https://g.fr?x=1', 'data:text/html,x']) {
     assert.equal(docUrl(origin, 'e', 'doc123456789'), '', `instance refusée : ${origin}`);
   }
   for (const [team, docId] of [['e/x', 'd'], ['e', 'd/..'], ['e', 'd?x=1'], ['e', 'd#x'], ['e', ''], ['e', undefined], ['e x', 'd'], ['e', 'd'.repeat(121)], ['e\n', 'd'], ['e', 'd\n']]) {
     assert.equal(docUrl('https://g.fr', team, docId), '', `refusé : ${team} ${docId}`);
   }
+});
+
+test('docSlug : le nom d\'un document comme Grist l\'écrit dans une adresse', () => {
+  assert.equal(docSlug('Lien SOURCE'), 'Lien-SOURCE');
+  assert.equal(docSlug('Éléphant à l\'été 2027'), 'Elephant-a-l-ete-2027');
+  assert.equal(docSlug('  --a  b--  '), 'a-b');
+  assert.equal(docSlug('日本'), '', 'rien de lisible : vide');
+  assert.equal(docSlug(null), '');
+  assert.equal(docSlug('x'.repeat(200)).length, 80);
+  assert.ok(!docSlug('a'.repeat(79) + ' b').endsWith('-'), 'coupé sans tiret final');
 });

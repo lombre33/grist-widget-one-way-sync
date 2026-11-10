@@ -28,7 +28,11 @@
 //         `description` du partage du formulaire (`receptionMark`) ; `markReceptions`, `readLost` et `dismissLost` (`target/lost.js`)
 //         disent qu'une réception a existé quand son journal est supprimé. Sans `arrange`, rien ne change : ni port, ni nom de table,
 //         ni format de code.
-export const ENGINE_VERSION = '2.4.0';
+// 2.5.0 (10 novembre 2026) : `docUrl(origin, team, docId, name)` (`logic/codes.js`) écrit l'adresse d'un document comme Grist
+//         l'écrit, `<instance>[/o/<équipe>]/<identifiant>/<nom>` (nom facultatif, `docSlug`), au lieu de `/doc/<identifiant>` que
+//         l'instance DINUM n'ouvrait pas ; un espace personnel `docs-<numéro>` s'écrit `docs`. Seule l'adresse rendue change : ni port,
+//         ni nom de table, ni format de code. Un hôte qui montrait l'adresse de `docUrl` l'obtient sous la nouvelle forme.
+export const ENGINE_VERSION = '2.5.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

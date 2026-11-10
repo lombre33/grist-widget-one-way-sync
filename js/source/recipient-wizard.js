@@ -235,7 +235,7 @@ function replyFiche(reply, { docId, origin }) {
   const { share } = reply;
   // Le document en lien (nouvel onglet) : son adresse est refaite d'après l'équipe et l'identifiant que dit Grist.
   const place = ` (${share.folder || '—'}${share.personal ? '' : ` · ${share.teamName || share.team}`})`;
-  const doc = [docLink(share.name, docUrl(origin, share.team, share.docId), t('common.docChecked')), place];
+  const doc = [docLink(share.name, docUrl(origin, share.team, share.docId, share.name), t('common.docChecked')), place];
   const fiche = [[t('send.reply.tables'), reply.tables], [t('send.reply.doc'), r.docId === docId ? [...doc, ` · ${t('send.reply.sameDoc')}`] : doc],
     [t('send.reply.team'), share.personal ? t('send.reply.personalSpace') : share.teamName || share.team], [t('send.reply.email'), r.email], [t('send.reply.at'), replyDate(r.at)]];
   return [el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),

@@ -349,11 +349,12 @@ test('memoDoc : le document d\'un destinataire d\'après son mémo, toutes les f
 
 test('hookDoc : la fiche en morceaux, le document en lien tant que l\'instance est connue', () => {
   const memo = 'a@b.fr · docA12345678 · equipe/Suivi 2027';
-  assert.deepEqual(hookDoc(memo, '', 'https://g.fr'), { who: 'a@b.fr', place: 'equipe/Suivi 2027', url: 'https://g.fr/o/equipe/doc/docA12345678' });
+  assert.deepEqual(hookDoc(memo, '', 'https://g.fr'), { who: 'a@b.fr', place: 'equipe/Suivi 2027', url: 'https://g.fr/o/equipe/docA12345678/Suivi-2027' });
   assert.equal([hookDoc(memo).who, hookDoc(memo).place].join(' · '), hookShown(memo), 'le même texte que hookShown');
   assert.equal(hookDoc(memo, 'Suivi RH').place, 'equipe/Suivi RH', 'nom lu au contrôle horaire');
+  assert.equal(hookDoc(memo, 'Suivi RH', 'https://g.fr').url, 'https://g.fr/o/equipe/docA12345678/Suivi-RH', 'le nom du contrôle horaire est celui de l\'adresse');
   assert.equal(hookDoc(memo).url, '', 'sans instance : pas de lien');
-  assert.deepEqual(hookDoc('a@b.fr · docA12345678', '', 'https://g.fr'), { who: 'a@b.fr', place: 'docA12345678', url: 'https://g.fr/doc/docA12345678' }, 'ni équipe ni nom : l\'identifiant, lien sans équipe');
+  assert.deepEqual(hookDoc('a@b.fr · docA12345678', '', 'https://g.fr'), { who: 'a@b.fr', place: 'docA12345678', url: 'https://g.fr/docA12345678/document' }, 'ni équipe ni nom : l\'identifiant, lien sans équipe');
   assert.deepEqual(hookDoc('', '', 'https://g.fr'), { who: '', place: '', url: '' });
   assert.equal(hookDoc('a@b.fr · docA12345678 · eq uipe/x', '', 'https://g.fr').url, '', 'équipe qui n\'a pas la forme d\'un identifiant : pas de lien');
 });
