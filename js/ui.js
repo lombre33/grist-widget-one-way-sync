@@ -199,15 +199,15 @@ export const backButton = onClick => ({ label: t('common.back'), back: true, onC
 export const closeButtons = () => [{ label: t('common.close'), kind: 'btn-primary' }];
 
 // Confirmation d'une action destructrice : promesse d'un booléen, focus sur Annuler.
-export function confirmDialog({ title, body, confirmLabel }) {
+export function confirmDialog({ title, body, confirmLabel, kind = 'btn-danger' }) {
   return new Promise((resolve) => {
     let answered = false;
     const modal = openModal({
-      title, body: el('p', {}, body), width: 400,
+      title, body: typeof body === 'string' ? el('p', {}, body) : el('div', {}, body), width: 400,
       onClose: () => { if (!answered) resolve(false); },
       buttons: [
         { label: t('common.cancel'), onClick: m => { answered = true; resolve(false); m.close(); } },
-        { label: confirmLabel, kind: 'btn-danger', onClick: m => { answered = true; resolve(true); m.close(); } },
+        { label: confirmLabel, kind, onClick: m => { answered = true; resolve(true); m.close(); } },
       ],
     });
     modal.footer.querySelector('button').focus();

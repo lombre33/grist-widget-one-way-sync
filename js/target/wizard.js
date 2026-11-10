@@ -5,7 +5,7 @@ import { VERSION } from '../config.js';
 import { formWhere, linkFigures } from '../form-link.js';
 import { canRelink, checkDestinations, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
 import { sourceLine } from './source-line.js';
-import { confirmOutgoing, destField, mappingBlock } from './dest.js';
+import { confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,
 } from '../ui.js';
@@ -99,6 +99,8 @@ async function showDest(ctx, invitation) {
     ctx.options = options ? options.read() : {};
     const plans = rows.map(({ tb, pick }) => ({ tb, dest: pick.dest() }));
     const { schema: current, existing } = await checkDestinations(invitation, plans, { compared: ctx.compared });
+    const fresh = plans.map(p => p.dest).filter(dest => !current.has(dest));
+    if (fresh.length && !(await confirmNewTables(fresh))) return null;
     if (existing.length) return showColumns(ctx, invitation, plans, current);
     return create(ctx, invitation, plans);
   };
@@ -135,7 +137,7 @@ function showColumns(ctx, invitation, plans, schema) {
 // l'envoi de retour est branché aussitôt ; en lien public, il n'y a pas de formulaire.
 async function create(ctx, invitation, plans) {
   const { mode } = invitation;
-  const { journal, note, created } = await createReception(invitation, plans, { reserve: ctx.reserve, options: ctx.options, compared: ctx.compared });
+  const { journal, note, created } = await createReception(invitation, plans, { reserve: ctx.reserve, options: ctx.options, compared: ctx.compared, arrange: true });
   ctx.made = mode === 'reponse' || !mode ? { invitation, journal, created } : null;
   if (mode !== 'public') return showLink(ctx, { journal, note });
   ctx.wizard.setSteps(ctx.steps.slice(0, 2));

@@ -135,9 +135,12 @@ function receptionNote(invitation, plans, keys, before, { reserve, options }) {
 // Un journal pour l'export, nommé d'après lui, et une destination par table. `plans` : [{ tb, dest, map?,
 // match? }]. Échange : l'envoi de retour est branché aussitôt ; l'adresse de retour, un droit d'écriture,
 // n'est notée nulle part. Hors lien public, le formulaire du journal est publié (ensureForm) ; en lien
-// public, il n'y a pas de formulaire et la recopie commence. Rend `{ journal, note, created }` :
-// `created` = les destinations que cette réception a créées (pour undoReception).
-export async function createReception(invitation, plans, { reserve = true, options = {}, compared = false } = {}) {
+// public, il n'y a pas de formulaire et la recopie commence. `arrange` (faux par défaut : l'hôte décide de
+// la mise en page de son document) : la page du formulaire se range sous celle de la destination
+// (`ensureForm`, `below`) et le partage du formulaire garde de quoi reconnaître la réception si son
+// journal est supprimé (`note`, voir markReceptions). Rend `{ journal, note, created }` : `created` = les
+// destinations que cette réception a créées (pour undoReception).
+export async function createReception(invitation, plans, { reserve = true, options = {}, compared = false, arrange = false } = {}) {
   mustHaveCompared(invitation, compared);
   const journal = journalId(invitation.name, (await readSchema()).tableIds);
   const { mode } = invitation;
@@ -149,7 +152,7 @@ export async function createReception(invitation, plans, { reserve = true, optio
   await createJournal(journal, note);
   if (mode === 'echange') await wireExchange(note, invitation.retour, keys.up);
   const created = plans.map(p => p.dest).filter(d => !before.has(d));
-  if (mode !== 'public') await ensureForm(journal);
+  if (mode !== 'public') await ensureForm(journal, arrange ? { below: plans.map(p => p.dest), note } : {});
   else consolidateAll();
   return { journal, note, created };
 }

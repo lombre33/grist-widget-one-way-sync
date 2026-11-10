@@ -322,6 +322,11 @@ async function openWidget(url) {
 try {
   const dialog = () => widget().getByRole('dialog');
   const dialogButton = name => dialog().getByRole('button', { name, exact: true });
+  // Une table neuve : le widget demande de confirmer (le widget ne sera pas sur sa page, voir confirmNewTables).
+  const confirmNewTable = async () => {
+    await dialog().getByText('Nouvelle table : le widget n’y sera pas').waitFor({ timeout: 30000 });
+    await dialogButton('Continuer avec une nouvelle table').click();
+  };
   const pick = async (field, option) => {
     // Nom accessible du bouton : « Champ : choix en cours ».
     await dialog().getByRole('button', { name: `${field} : ` }).click();
@@ -418,6 +423,7 @@ try {
     if (checks.length) await dialog().getByText('Options avancées').click();
     for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
     await dialogButton('Continuer').click();
+    await confirmNewTable();
     const forms = await waitFor(async () => { const f = await publishedForms(doc); return f.length === 1 && f; }, 'formulaire publié');
     await openWidget(url); // l'assistant se rouvre seul à l'étape Lien
     const code2 = await testLink('Lien du formulaire', await formLink(doc, forms[0]), 'Le lien fonctionne');
@@ -1344,6 +1350,8 @@ try {
     await B.dialog.getByText('« Annuaire » : table Fiches.').waitFor({ timeout: 30000 });
     assert.equal(await B.frame.locator('[data-offer]').count(), 0, 'l\'avis disparaît quand l\'assistant s\'ouvre');
     await dlgButton(B, 'Continuer').click();
+    await B.dialog.getByText('Nouvelle table : le widget n’y sera pas').waitFor({ timeout: 30000 });
+    await dlgButton(B, 'Continuer avec une nouvelle table').click();
     const forms = await waitFor(async () => { const f = await publishedForms(dst.doc); return f.length === 1 && f; }, 'formulaire publié');
     await B.dialog.getByLabel('Lien du formulaire').fill(await formLink(dst.doc, forms[0]));
     await dlgButton(B, 'Tester le lien').click();
@@ -1495,8 +1503,22 @@ try {
   const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
   await widgetFrame.evaluate(() => { window.sameFrame = true; });
   await dialogButton('Continuer').click();
+  // Nouvelle table : l'avertissement dit que le widget n'y sera pas et ce qu'il faut faire ; « Annuler » ne crée rien.
+  const warning = dialog().last(); // la fenêtre d'avertissement est posée sur l'assistant
+  await warning.getByText('Nouvelle table : le widget n’y sera pas').waitFor();
+  await warning.getByText(/ne recopie les données reçues que lorsque sa page est ouverte/).waitFor();
+  await warning.getByText(/Pour sécuriser la réception\s:\scréez d’abord la table vous-même, ajoutez-y le widget/).waitFor();
+  await warning.getByRole('button', { name: 'Annuler', exact: true }).click();
+  assert.ok(!(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'rien de créé tant que la personne ne confirme pas');
+  await dialogButton('Continuer').click();
+  await confirmNewTable();
   await dialog().getByLabel('Lien du formulaire').waitFor();
   assert.ok(await widgetFrame.evaluate(() => window.sameFrame), 'formulaire publié sans recharger le widget');
+  const markPages = (await pagesOf(target.doc)).map(p => p.name);
+  assert.equal(markPages[markPages.indexOf('Contacts') + 1], 'Journal_Annuaire', 'la page du journal est juste sous celle de la table reçue');
+  const [formShare] = await records(target.doc, '_grist_Shares');
+  assert.equal(JSON.parse(formShare.options).publish, true, 'le partage reste publié');
+  assert.equal(JSON.parse(formShare.description).syncPlus.journal, 'Journal_Annuaire', 'le partage garde de quoi reconnaître la réception');
   const formSections = await publishedForms(target.doc);
   assert.equal(formSections.length, 1, 'un formulaire publié');
   const widgetSection = (await records(target.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
@@ -2064,6 +2086,7 @@ try {
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Grande').waitFor({ timeout: 60000 });
   await dialogButton('Recevoir').click();
+  await confirmNewTable();
   await dialog().waitFor({ state: 'detached', timeout: 120000 });
   const grande = async () => (await records(target.doc, 'Grande')).length;
   await waitFor(async () => await grande() === N, 'grande table reçue en entier', 300000);
@@ -2310,6 +2333,7 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill('Annuaire');
   await dialogButton('Continuer').click();
+  await confirmNewTable();
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Fermer').click();
   const live = (await records(source.doc, 'Contacts')).filter(r => !r.Supprime).length;

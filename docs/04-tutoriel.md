@@ -171,7 +171,24 @@ quelle colonne rattacher les lignes déjà là (voir [Une table ajoutée à l'ex
 ![Destinations](images/08-cible-destinations.png)
 
 Le widget crée un journal pour l'export, `Journal_<export>` (dans « Données source »), et publie
-son formulaire de réception sur sa propre page, `Journal_<export>`, en bas de la liste des pages.
+son formulaire de réception sur sa propre page, `Journal_<export>`, rangée juste sous la page de la
+table qui reçoit (une page que vous rangez ensuite à la main n'est jamais déplacée).
+
+**Nouvelle table.** Le widget la crée avec sa propre page, **sans lui dessus** : il ne recopie les
+données reçues que page du widget ouverte, donc qui n'ouvre que cette table ne reçoit rien de
+nouveau. Une fenêtre le dit avant de créer quoi que ce soit. Pour sécuriser la réception, créer
+d'abord la table soi-même, y ajouter le widget (Ajouter un widget à la page, Personnalisée, accès
+complet), puis refaire la procédure depuis cette page en choisissant la table existante ; ou
+continuer, puis ajouter le widget à la page de la table créée : il y retrouve toutes les réceptions
+du document (leur état est dans le document, pas dans une copie du widget).
+
+**Réception supprimée.** Si le journal est supprimé (avec ou sans la table qui reçoit), l'onglet
+Recevoir le dit : « Réception supprimée : <export> », ce qui reste des tables, ce que fait la SOURCE
+(son prochain envoi échoue, elle met la personne en pause d'office) et comment s'en sortir
+(Ctrl+Z ou « Historique du document », sinon nouvelle invitation). Le widget s'en souvient par une
+note dans le partage du formulaire, que Grist garde quand la page disparaît ; « Retirer cet avis »
+l'efface, avec l'ancienne clé d'écriture. Pas de note pour une réception par lien public (pas de
+formulaire).
 La case **Journal réservé aux éditeurs** (cochée) cache le journal aux lecteurs du document : il
 garde les versions reçues et ce qu'elles ont remplacé.
 

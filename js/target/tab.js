@@ -10,6 +10,7 @@ import { syncRules } from '../engine/acl.js';
 import { dropPages, ensureForm, formPages, removeTechnicalTables, renewFormLink } from '../engine/pages.js';
 import { closeExport } from '../engine/exchange.js';
 import { updateJournalNote } from '../engine/target/journals.js';
+import { dismissLost, markReceptions, readLost } from '../engine/target/lost.js';
 import { receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from '../engine/target/loop.js';
 import { SHOWN } from '../engine/logic/report.js';
@@ -32,6 +33,7 @@ let flash = null; // { node, until }
 const NOTICE_MS = 60000;
 const lastNotice = () => (flash && Date.now() < flash.until ? flash.node : null);
 const offered = new Set(); // tables déjà proposées en fenêtre pendant ce chargement
+let lostList = []; // réceptions dont le journal a été supprimé, relues à chaque ouverture de l'onglet (voir readLost)
 // Historiques et lignes d'historique ouverts : repliés par défaut, ils le restent d'un dessin à
 // l'autre de l'onglet (un passage qui change quelque chose le redessine).
 const opened = new Set();
@@ -95,7 +97,10 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   // effacé, pas à chaque redessin périodique).
   const out = el('div', { class: 'out' }, lastNotice());
   try {
-    for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal);
+    for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal, { below: group.note.tables.map(tb => tb.dest), note: group.note });
+    // Chaque réception garde, dans le partage de son formulaire, de quoi dire qu'elle a existé si son journal est supprimé.
+    if (!periodic && owner) await markReceptions(groups.filter(g => !g.waiting)).catch(e => console.warn(e)); // un détail : jamais une raison de passer en lecture seule
+    if (!periodic) lostList = await readLost();
   } catch (e) {
     if (isAccessError(e)) state.readOnly = true; // un lecteur ne peut pas publier le formulaire
     else out.append(message('err', errorText(e)));
@@ -108,6 +113,7 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   redraw(container, [toolbar,
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
+    lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
     roleGuide({ you: 'target' })].filter(Boolean));
   if (!state.readOnly) await openPending(groups, periodic);
@@ -253,6 +259,29 @@ function cardOrigin({ note, public: isPublic }) {
 // « Coller le lien » de la réception, ou « Continuer » tant qu'il manque.
 const linkButton = group => button(t(group.waiting ? 'recv.action.continue' : 'recv.action.link'), 'link',
   () => receiveWizard(group, renderTarget), group.waiting ? 'btn-primary' : '');
+
+// Réception dont le journal a été supprimé (voir lost.js) : le widget n'a plus de note, mais le partage du
+// formulaire dit encore ce qui existait. Seul un propriétaire retire l'avis (et avec lui l'ancienne clé
+// d'écriture).
+function lostCard(lost, owner) {
+  const list = there => lost.dests.filter(d => d.there === there).map(d => d.dest);
+  const [gone, kept] = [list(false), list(true)];
+  const clean = async () => {
+    await dismissLost(lost);
+    lostList = lostList.filter(l => l !== lost);
+    await renderTarget();
+  };
+  return el('article', { class: 'card', 'data-lost-reception': lost.journal },
+    el('div', { class: 'card-head' }, el('strong', {}, t('recv.lost.title', { name: lost.name || lost.journal })), pill(t('recv.status.error'), 'err')),
+    el('p', { class: 'small' }, t('recv.lost.body', { journal: lost.journal })),
+    gone.length ? el('p', { class: 'small' }, t('recv.lost.gone', { list: gone.join(', '), n: gone.length })) : null,
+    kept.length ? el('p', { class: 'small' }, t('recv.lost.kept', { list: kept.join(', '), n: kept.length })) : null,
+    el('p', { class: 'small' }, t('recv.lost.effect')),
+    el('p', { class: 'small' }, t('recv.lost.how')),
+    el('div', { class: 'card-actions' }, owner
+      ? button(t('recv.lost.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), clean), 'btn-danger-text')
+      : el('span', { class: 'muted small' }, t('recv.lost.owner'))));
+}
 
 // Une carte qui ne peut pas se dessiner (journal abîmé) n'empêche pas les autres de l'être : elle
 // garde son nom, l'erreur, et de quoi couper le lien ou arrêter la réception.

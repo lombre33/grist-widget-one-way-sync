@@ -2,6 +2,8 @@
 // pages que laissent les tables techniques.
 import { apply, fetchRows, readSchema } from './port.js';
 import { parseJson, randomHex } from './logic/common.js';
+import { receptionMark } from './logic/lost.js';
+import { destPageViews, placeBelow } from './logic/page-order.js';
 
 const published = section => (parseJson(section.shareOptions) || {}).publish === true;
 
@@ -15,21 +17,40 @@ const published = section => (parseJson(section.shareOptions) || {}).publish ===
 // serveur crée alors la clé, que le widget ne peut pas lire : la personne copie le lien depuis la
 // carte du formulaire. Idempotent. La page, nommée comme le journal, reste à la racine de la liste
 // des pages, là où Grist la crée (en fin de liste) : on la trouve sans déplier la page du widget.
-export async function ensureForm(tableId) {
+// Options : `below`, les tables qui reçoivent : la page se range, quand elle vient d'être créée (jamais
+// après : une page rangée à la main n'est pas déplacée), juste sous la plus basse de leurs pages (voir
+// placeBelow) ; `note`, la note de la réception : le partage, quand il vient d'être créé, garde de quoi
+// reconnaître la réception si son journal est supprimé (voir lost.js et markReceptions).
+export async function ensureForm(tableId, { below = [], note = null } = {}) {
   const table = (await readSchema()).table(tableId);
   let section = (await fetchRows('_grist_Views_section')).find(s => s.parentKey === 'form' && s.tableRef === table.id);
   if (!section) {
     const created = (await apply([['CreateViewSection', table.id, 0, 'form', null, null]])).retValues[0];
     section = { id: created.sectionRef, parentId: created.viewRef, shareOptions: '' };
     await apply([['UpdateRecord', '_grist_Views', created.viewRef, { name: tableId }]]);
+    if (below.length) await placeForm(created.viewRef, below);
   }
   const page = (await fetchRows('_grist_Pages')).find(p => p.viewRef === section.parentId);
   if (!page.shareRef) {
-    const shareRef = (await apply([['AddRecord', '_grist_Shares', null, { linkId: randomHex(12), options: JSON.stringify({ publish: true }) }]])).retValues[0];
+    const description = note ? { description: receptionMark(tableId, note) } : {};
+    const shareRef = (await apply([['AddRecord', '_grist_Shares', null, { linkId: randomHex(12), options: JSON.stringify({ publish: true }), ...description }]])).retValues[0];
     await apply([['UpdateRecord', '_grist_Pages', page.id, { shareRef }]]);
   }
   if (!published(section)) {
     await apply([['UpdateRecord', '_grist_Views_section', section.id, { shareOptions: JSON.stringify({ form: true, publish: true }) }]]);
+  }
+}
+
+// Page du formulaire (sa vue) rangée sous la page des tables `dests`. Un détail de présentation : une
+// erreur ne doit pas empêcher la réception.
+async function placeForm(viewRef, dests) {
+  try {
+    const [tables, sections, pages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Pages')]);
+    const spot = placeBelow(pages, destPageViews(dests, tables, sections, pages), viewRef);
+    const mine = pages.find(p => p.viewRef === viewRef);
+    if (spot && mine) await apply([['UpdateRecord', '_grist_Pages', mine.id, spot]]);
+  } catch (e) {
+    console.warn(e);
   }
 }
 

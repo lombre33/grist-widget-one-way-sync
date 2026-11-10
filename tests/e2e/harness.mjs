@@ -211,6 +211,8 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     await view.dialogButton('Continuer').click();
     await view.dialog().getByText(`« ${exportName} » : table ${table}.`).waitFor({ timeout: 60000 });
     await view.dialogButton('Continuer').click();
+    await view.dialog().getByText('Nouvelle table : le widget n’y sera pas').waitFor({ timeout: 30000 });
+    await view.dialogButton('Continuer avec une nouvelle table').click();
     const forms = await waitFor(async () => { const f = await publishedForms(target.doc); return f.length === 1 && f; }, 'formulaire publié', 60000);
     await view.open(target.url); // l'assistant se rouvre seul à l'étape Lien
     await view.dialog().getByLabel('Lien du formulaire').fill(await formLink(target.doc, forms[0]));

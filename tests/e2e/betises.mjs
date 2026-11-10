@@ -127,7 +127,18 @@ const cases = {
   regleSynchroEcriture: { note: 'règle d\'accès : table Synchro en écriture interdite pour tous', act: p => deny(p.src.doc, { tableId: 'Synchro' }, 'True', '-U-C-D') },
   journalColonneSupprimee: { note: 'CIBLE : colonne Sync_Recu supprimée du journal', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['RemoveColumn', p.journal, 'Sync_Recu']]); } },
   journalColonneDonnee: { note: 'CIBLE : colonne de données (Ville) supprimée du journal', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['RemoveColumn', p.journal, 'Ville']]); } },
-  journalSupprime: { note: 'CIBLE : table journal supprimée', side: 'dst', act: p => applyActions(p.dst.doc, [['RemoveTable', p.journal]]) },
+  journalSupprime: { note: 'CIBLE : table journal supprimée', side: 'dst', act: p => applyActions(p.dst.doc, [['RemoveTable', p.journal]]), expectDst: /Réception supprimée : Annuaire.*encore là/s },
+  // La personne efface le journal et la table reçue pour tout recommencer : le widget le dit, puis elle retire l'avis.
+  journalEtTableSupprimes: {
+    note: 'CIBLE : table journal et table reçue supprimées', side: 'dst', probe: false,
+    act: p => applyActions(p.dst.doc, [['RemoveTable', p.journal], ['RemoveTable', p.dest]]),
+    expectDst: /Réception supprimée : Annuaire.*a été supprimée aussi.*La SOURCE ne le sait pas/s,
+    after: async (p) => {
+      await p.dv.button('Retirer cet avis').click();
+      await waitFor(async () => (await records(p.dst.doc, '_grist_Shares')).length === 0, 'avis retiré', 30000, 1000);
+      return `avis retiré : partages restants ${(await records(p.dst.doc, '_grist_Shares')).length}`;
+    },
+  },
   journalVide: { note: 'CIBLE : toutes les lignes du journal supprimées', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['BulkRemoveRecord', p.journal, (await records(p.dst.doc, p.journal)).map(r => r.id)]]); } },
   destinationLignesSupprimees: { note: 'CIBLE : toutes les lignes de la table reçue supprimées', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['BulkRemoveRecord', p.dest, (await records(p.dst.doc, p.dest)).map(r => r.id)]]); } },
   destinationColonneSupprimee: { note: 'CIBLE : colonne Ville de la table reçue supprimée', side: 'dst', act: p => applyActions(p.dst.doc, [['RemoveColumn', p.dest, 'Ville']]) },
@@ -196,6 +207,7 @@ async function runCase(name, spec) {
   log(`[${name}] carte SOURCE : ${src}`);
   if (spec.expect) log(`[${name}] ATTENDU dans la carte SOURCE (${spec.expect}) : ${spec.expect.test(src) ? 'OUI' : 'NON'}`);
   log(`[${name}] carte CIBLE : ${dst}`);
+  if (spec.expectDst) log(`[${name}] ATTENDU dans la carte CIBLE (${spec.expectDst}) : ${spec.expectDst.test(dst) ? 'OUI' : 'NON'}`);
   if (spec.after) log(`[${name}] ${await spec.after(p).catch(e => `la suite échoue : ${e.message.split('\n')[0]}`)}`);
   const errs = h.problems.slice(problems0);
   log(`[${name}] erreurs du widget en console : ${errs.length ? errs.slice(0, 3).join(' | ').slice(0, 400) : 'aucune'}`);

@@ -352,7 +352,51 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.15.0 (10 novembre 2026)
+## État : V0.15.1 (10 novembre 2026)
+
+V0.15.1 (Antoine, 10 novembre, côté CIBLE : « si l'user fait "nouvelle table" le widget ne sera pas dans cette table là : pas de
+sync s'il n'ouvre pas la table/vue où il l'a mis ? » ; « hyper important de l'indiquer en pop-up » ; « la table journal en dessous
+de la table dans le menu de gauche » ; « si on supprime la table de réception et la table journal le widget est réinitialisé sans
+message »). Moteur **2.4.0** (mineure, dit dans `GFS-ETAT.md`).
+- **Fait établi (code, étude `docs/01`, `GristDoc.ts:860-883`)** : le webhook dépose chaque envoi dans le journal de la CIBLE sans
+  le widget, page fermée ; seule la recopie dans les tables de destination demande la page du widget ouverte et visible par un
+  éditeur (toutes les 10 s, `startAutoConsolidation`). Grist **détruit l'iframe du widget quand on change de page** : le choix
+  « Nouvelle table » ne change rien en soi (le widget écrit à distance par `grist.docApi`), mais la table créée a sa propre page
+  (`AddTable`), sans le widget : qui reste dessus ne recopie rien. L'état du widget est **dans le document** (tables, notes de
+  colonnes) : une seconde instance du widget, posée sur la page d'une autre table, montre et recopie toutes les réceptions ; rien
+  à « copier d'un widget à l'autre ».
+- **Avertissement « Nouvelle table »** (`confirmNewTables`, `js/target/dest.js`) : à l'étape Destinations, avant toute écriture,
+  et dans la fenêtre d'une table ajoutée par la SOURCE (`offerDialog`) : titre, pourquoi (le widget n'y sera pas, il ne recopie que
+  page ouverte), le conseil sûr (créer la table d'abord, y poser le widget, refaire la procédure depuis cette page) et l'autre voie
+  (continuer puis poser le widget sur la page de la table). `confirmDialog` accepte un corps en plusieurs blocs et un bouton
+  neutre (`kind`). Textes `recv.new.*`. L'e2e confirme à chaque table neuve (`confirmNewTable` de `run.mjs`, aussi dans
+  `harness.mjs`).
+- **Page du journal sous la table** (`placeBelow`, `destPageViews` de `logic/page-order.js`, `placeForm` de `pages.js`) : à la
+  création du formulaire seulement, `ensureForm(journal, { below })` met sa page juste sous la plus basse des pages des tables qui
+  reçoivent, après leurs sous-pages, au même niveau (`pagePos` intermédiaire et `indentation`, vérifié dans Grist 1.7 : `UpdateRecord`
+  sur `_grist_Pages`). Une page que la personne a rangée n'est jamais déplacée. Avec une table neuve, la page est déjà dessous (créée
+  juste après) : le gain est pour une table existante. **Le menu « Données source »** (page des tables brutes) est **alphabétique**
+  (vérifié) : le journal y reste entre les J, `Journal_<export>` ne s'y range pas sous une table.
+- **Réception supprimée** (`logic/lost.js`, `target/lost.js`, `lostCard` de `target/tab.js`, textes `recv.lost.*`) : le journal
+  porte tout ce que le widget sait ; effacé (avec ou sans la table reçue), le widget repartait de zéro sans rien dire. **Vérifié dans
+  Grist 1.7** : la ligne de `_grist_Shares` du formulaire survit à `RemoveTable` (la page part, le partage reste) et sa colonne
+  `description` est libre. Le widget y note `{"syncPlus": {journal, name, dests}}` (`receptionMark`, jamais un secret ni une clé) à la
+  création du formulaire (`ensureForm(…, { note })`) et, pour les réceptions d'avant, au passage d'un propriétaire sur l'onglet
+  (`markReceptions`, aussi quand une table est rangée plus tard). `lostReceptions` : une marque dont le journal n'existe plus ;
+  la carte « Réception supprimée : <export> » dit ce qui reste des tables, que la SOURCE ne le sait pas (envoi en échec, pause
+  d'office), Ctrl+Z / « Historique du document », sinon révoquer et réinviter. « Retirer cet avis » (propriétaire) efface le
+  partage, donc l'ancienne clé d'écriture. Un document sans autre réception ouvre sur Recevoir (`openFirstScreen`). **Limites** :
+  pas de marque pour un lien public (pas de formulaire) ni pour le journal de retour d'un Échange ; seuls les partages lisibles par
+  la personne comptent (un non-propriétaire peut ne rien voir).
+- **Option `arrange` de `createReception`** : faux par défaut dans le moteur (GFS garde sa mise en page) ; l'écran de Sync+ le pose.
+- Testé : unit `page-order` (placement, sous-pages, déjà dessous), `engine-lost` (arrange, marque sans secret, journal puis table
+  supprimés, avis retiré, journal recréé, `markReceptions`) ; e2e : avertissement (texte, « Annuler » ne crée rien, confirmation),
+  page du journal juste sous `Contacts`, partage marqué et toujours publié ; `betises.mjs` : `journalSupprime` et
+  `journalEtTableSupprimes` (carte, bouton « Retirer cet avis »).
+- **Pas fait, proposé à Antoine** : un bouton « Ajouter le widget à la page de <table reçue> » sur la carte (le widget créerait
+  lui-même la section ; l'accès complet de cette nouvelle instance resterait à accepter dans le panneau de droite).
+
+## État précédent : V0.15.0 (10 novembre 2026)
 
 V0.15.0 (Antoine, 10 novembre, après l'étude de GFS sur le canal entre deux onglets : « c'est un cas d'usage courant que pour
 le setup la personne ait accès aux deux, du coup oui, prévoir un bouton/procédure dédié simplifié serait chouette »).

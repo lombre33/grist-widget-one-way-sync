@@ -63,6 +63,18 @@ export function mappingBlock(schema, table, dest, columns) {
   return { node, read };
 }
 
+// Table qui n'existe pas encore (`dests`) : le widget la crée, avec sa propre page, et n'y est pas. Il ne
+// recopie que page ouverte : qui n'ouvre que cette table ne reçoit rien de nouveau. La personne peut
+// créer la table d'abord et y poser le widget, ou continuer et poser le widget ensuite sur sa page.
+// Rend vrai si elle continue.
+export function confirmNewTables(dests) {
+  return confirmDialog({
+    title: t('recv.new.title'),
+    body: [el('p', {}, t('recv.new.body', { tables: dests.join(', '), n: dests.length })), el('p', {}, t('recv.new.safe')), el('p', {}, t('recv.new.after'))],
+    confirmLabel: t('recv.new.ok'), kind: 'btn-primary',
+  });
+}
+
 // Échange rangé dans des tables existantes (`dests`) : toutes leurs colonnes partiront vers l'autre
 // document (voir wireExchange), y compris celles que l'export ne reçoit pas. La personne le
 // confirme, colonnes nommées ; `where` : le document qui les recevra.
@@ -112,7 +124,7 @@ export async function offerDialog(group, offer, onDone) {
     // La note du journal (lisible avec la clé du formulaire tant qu'il n'est pas réservé) ne garde
     // ni les listes de choix ni les liens des colonnes : ils restent dans les lots reçus.
     const entry = { table: offer.table, dest, columns: exportSchema(offer.columns) };
-    if (!schema.has(dest)) return accept(entry, m);
+    if (!schema.has(dest)) return (await confirmNewTables([dest])) ? accept(entry, m) : null;
     const from = group.note.from || {};
     if (exchange && !(await confirmOutgoing(schema, [dest], from.docName || from.docId || group.note.name))) return null;
     const mapping = mappingBlock(schema, offer.table, dest, offer.columns);

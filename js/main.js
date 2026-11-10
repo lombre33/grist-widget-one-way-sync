@@ -8,6 +8,7 @@ import { ownsSync } from './engine/logic/strays.js';
 import { readSchema } from './grist.js';
 import { readSourceNote } from './engine/source/synchro.js';
 import { receivedJournals } from './engine/logic/received.js';
+import { readLost } from './engine/target/lost.js';
 import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
 import { startOfferNotice } from './tab-link-ui.js';
 import { diagnostic } from './diagnostic.js';
@@ -199,6 +200,7 @@ async function openFirstScreen() {
   if (picked) await select(picked);
   else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
   else if (ownsSync(schema) || await lostSynchro(schema)) await select('send');
+  else if ((await readLost()).length) await select('receive');
   else showHome(await isOwnerHere() === false);
   if (journals.length) consolidateAll();
 }
