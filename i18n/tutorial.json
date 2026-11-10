@@ -119,10 +119,12 @@
     },
     "text": {
       "fr": [
-        "Copier le code, ou « Copier avec les consignes » pour un message prêt à envoyer par courriel à la personne de la CIBLE. « Plus tard » ferme l’assistant : l’invitation attend sur la carte de l’export."
+        "Copier le code, ou « Copier avec les consignes » pour un message prêt à envoyer par courriel à la personne de la CIBLE. « Plus tard » ferme l’assistant : l’invitation attend sur la carte de l’export.",
+        "Vous avez aussi la main sur le document CIBLE, ouvert dans un autre onglet de ce navigateur ? « Envoyer à un document ouvert dans ce navigateur » l’y envoie sans copier le code : un avis y propose de la recevoir, et la réponse revient ici toute seule."
       ],
       "en": [
-        "Copy the code, or “Copy with instructions” for a message ready to email to the TARGET person. “Later” closes the wizard: the invitation waits on the export card."
+        "Copy the code, or “Copy with instructions” for a message ready to email to the TARGET person. “Later” closes the wizard: the invitation waits on the export card.",
+        "Do you also manage the TARGET document, open in another tab of this browser? “Send to a document open in this browser” sends it there without copying the code: a notice offers to receive it, and the reply comes back here by itself."
       ]
     },
     "images": ["05-source-invitation", "06-source-attente"]
@@ -193,10 +195,12 @@
     },
     "text": {
       "fr": [
-        "Copier le code de réponse, ou « Copier avec les consignes », et l’envoyer à la SOURCE. Il contient l’adresse d’écriture et votre fiche (courriel, document, équipe), pas de données."
+        "Copier le code de réponse, ou « Copier avec les consignes », et l’envoyer à la SOURCE. Il contient l’adresse d’écriture et votre fiche (courriel, document, équipe), pas de données.",
+        "Le document d’origine est ouvert dans un autre onglet de ce navigateur ? « Renvoyer au document d’origine » y envoie la réponse (d’office quand l’invitation est venue de là) : elle y arrive remplie et contrôlée, et la personne l’approuve après avoir comparé les codes de contrôle."
       ],
       "en": [
-        "Copy the reply code, or “Copy with instructions”, and send it to the SOURCE. It holds the write address and your card (email, document, team), no data."
+        "Copy the reply code, or “Copy with instructions”, and send it to the SOURCE. It holds the write address and your card (email, document, team), no data.",
+        "Is the originating document open in another tab of this browser? “Send back to the originating document” sends the reply there (by itself when the invitation came from there): it arrives filled in and checked, and the person approves it after comparing the control codes."
       ]
     },
     "images": ["10-cible-reponse"]

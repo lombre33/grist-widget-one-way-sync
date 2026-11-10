@@ -29,7 +29,13 @@ l'écran de la version du dépôt. Le même tutoriel, avec les captures, est dan
 **Tutoriel**) ; chaque étape des assistants en montre le morceau utile (**Aide en images**) et
 **Qui fait quoi ?** dit ce que fait chaque document. Aux étapes où un code change de main,
 **Copier avec les consignes** copie le code et les étapes de l'autre document, prêts pour un
-courriel.
+courriel. Si vous gérez aussi l'autre document et l'avez ouvert dans un autre onglet du même
+navigateur, **Envoyer à un document ouvert dans ce navigateur** (à l'étape Invitation) l'y envoie sans
+copier le code : un avis y propose de la **recevoir**, et la réponse (**Renvoyer au document
+d'origine**, d'office dans ce cas) revient toute seule dans l'assistant de la SOURCE, déjà contrôlée.
+Il reste à coller le lien du formulaire (Grist ne le donne pas à un widget) et à approuver après avoir
+comparé les codes de contrôle. Autre navigateur, autre profil ou onglet fermé : le copier-coller sert
+comme avant.
 
 ## 0. Installer le widget (dans chaque document)
 

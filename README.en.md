@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.14.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.15.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -53,7 +53,7 @@ editor opens its page. Details (in French): [`docs/06-architecture.md`](docs/06-
 
 ## Connect a sync in three steps
 
-Two codes to copy and paste between the two people. They carry no data.
+Two codes to copy and paste between the two people. They carry no data. If you manage both documents and have them open in two tabs of the same browser, the codes pass from one tab to the other in one click (the form link still has to be pasted).
 
 <table>
 <tr>

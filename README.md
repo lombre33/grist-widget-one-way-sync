@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.14.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.15.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -56,7 +56,7 @@ qu'un éditeur ouvre sa page. Le détail est dans [`docs/06-architecture.md`](do
 
 ## Brancher une synchro en trois étapes
 
-Deux codes à copier-coller entre les deux personnes. Ils ne contiennent aucune donnée.
+Deux codes à copier-coller entre les deux personnes. Ils ne contiennent aucune donnée. Si vous gérez les deux documents et les avez ouverts dans deux onglets du même navigateur, ils passent d'un onglet à l'autre d'un clic (le lien du formulaire reste à coller).
 
 <table>
 <tr>

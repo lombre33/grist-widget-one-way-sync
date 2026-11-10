@@ -12,6 +12,8 @@ import {
 import { handoffButton, roleGuide } from '../guide.js';
 import { receptionOptions } from './options.js';
 import { stepHelp } from '../tutorial.js';
+import { tabLink } from '../tab-link.js';
+import { tabSendBlock } from '../tab-link-ui.js';
 import { t } from '../i18n.js';
 
 const STEP = { code: 0, dest: 1, link: 2, reply: 3 };
@@ -19,10 +21,12 @@ const cancel = cancelButton();
 const back = backButton;
 const flowOf = note => (note.mode === 'echange' ? 'echange' : 'reponse');
 
-// `onClose` : appelé à la fermeture (l'onglet se redessine).
-export function receiveWizard(group, onClose) {
+// `onClose` : appelé à la fermeture (l'onglet se redessine). `offered` : le code d'une invitation arrivée d'un autre
+// onglet (tab-link.js) : il remplit l'étape Code et passe aussitôt au contrôle, comme s'il avait été collé, et la réponse
+// repart par le même chemin (étape Réponse).
+export function receiveWizard(group, onClose, offered = '') {
   const steps = ['recv.step.code', 'recv.step.dest', 'recv.step.link', 'recv.step.reply'].map(k => t(k));
-  const ctx = { steps, onClose, wizard: openWizard({ title: t('recv.new'), steps, onClose }) };
+  const ctx = { steps, onClose, offered, viaTab: Boolean(offered), wizard: openWizard({ title: t('recv.new'), steps, onClose }) };
   return ctx.wizard.start(() => (group ? showLink(ctx, group) : showCode(ctx)));
 }
 
@@ -30,6 +34,7 @@ export function receiveWizard(group, onClose) {
 function showCode(ctx) {
   const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false', 'aria-label': t('recv.invite.title') });
   const report = el('div', { class: 'report' });
+  area.value = ctx.offered;
   const next = async () => {
     const invitation = await readInvitation(area.value);
     ctx.origin = (await docIdentity()).origin; // pour le lien vers le document de la SOURCE (voir sourceLine)
@@ -38,6 +43,10 @@ function showCode(ctx) {
   };
   ctx.wizard.show(STEP.code, [el('p', {}, t('recv.invite.help')), area, report, stepHelp(['t-code']), roleGuide({ you: 'target', current: 1 })],
     [cancel, { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
+  if (ctx.offered && !ctx.offeredRead) { // une seule fois : « Retour » depuis l'étape suivante laisse le code, sans le relire
+    ctx.offeredRead = true;
+    run(null, report, next);
+  }
 }
 
 // Document vérifié chez Grist : nom (dossier · équipe), ou espace personnel.
@@ -160,8 +169,15 @@ async function undoCreate(ctx, made) {
 async function showReply(ctx, { journal, note }, link) {
   const { code, control } = await receptionReply({ journal, note }, link);
   const flow = flowOf(note);
+  // Renvoyer la réponse au document d'origine quand il est ouvert dans un autre onglet : d'elle-même quand l'invitation
+  // est venue de là, sur un clic sinon ; le code reste à copier.
+  const onTab = tabSendBlock({
+    texts: { button: t('tab.back.button'), help: t('tab.back.help'), sent: t('tab.back.sent'), done: t('tab.back.got'), silent: t('tab.back.silent') },
+    start: (alive, ack) => tabLink().sendReply(code, { alive, onGot: ack }),
+    auto: ctx.viaTab,
+  });
   ctx.wizard.show(STEP.reply, [message('ok', t('recv.link.ok')), el('p', {}, t('recv.reply.help')), codeField(code),
-    controlLine(t('recv.reply.code'), control),
+    controlLine(t('recv.reply.code'), control), onTab,
     handoffButton('source', flow, 3, code),
     stepHelp(['t-reply', 's-reply', 's-load', 't-daily']), roleGuide({ you: 'target', mode: flow, current: 3 })],
   [back(() => showLink(ctx, { journal, note })), ...closeButtons()]);

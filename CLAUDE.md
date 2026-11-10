@@ -352,7 +352,39 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.14.0 (9 novembre 2026)
+## État : V0.15.0 (10 novembre 2026)
+
+V0.15.0 (Antoine, 10 novembre, après l'étude de GFS sur le canal entre deux onglets : « c'est un cas d'usage courant que pour
+le setup la personne ait accès aux deux, du coup oui, prévoir un bouton/procédure dédié simplifié serait chouette »).
+**Aucun changement du moteur** (2.3.0) : le canal est du transport de texte, côté écran (`js/tab-link.js`, `js/tab-link-ui.js`), et
+le moteur juge ce qui arrive comme un code collé (document de la clé chez Grist, code de contrôle, péremption, Renforcé).
+- **Mesure de GFS** (faits vérifiés 47, 06/11, vrai Grist sous Chromium) : deux documents d'une même instance, ouverts dans le
+  même navigateur et le même profil, se parlent par `BroadcastChannel` entre leurs widgets, même en arrière-plan ; autre profil :
+  rien. Refait ici (e2e `ONLY_TABS=1`, vrai Grist, widget servi de `localhost:8585` aux deux onglets) : ça passe.
+- **Parcours** (le lien du formulaire reste à coller : Grist ne le donne pas à un widget) : SOURCE, étape Invitation, bouton
+  « Envoyer à un document ouvert dans ce navigateur » (`offerInvitation`, le code reste à copier) ; CIBLE, un avis en haut de
+  l'écran (`#offer`, `startOfferNotice`) : « Recevoir » ouvre l'assistant habituel sur ce code, déjà lu (`receiveWizard(…, offered)`),
+  « Ignorer » ; pas d'avis dans un document en lecture seule ni pour une invitation de son propre document (autre onglet du même
+  document) ; après le lien du formulaire, la réponse repart d'elle-même (`sendReply`, bouton « Renvoyer au document d'origine » si
+  l'invitation n'est pas venue du canal) ; l'assistant de la SOURCE passe à l'étape Réponse, remplie et contrôlée
+  (`checkReply`), et la personne approuve après comparaison des codes de contrôle (case obligatoire en Renforcé : le moteur refuse
+  sans elle). Sans réponse au bout de 3 s, la SOURCE ou la CIBLE dit pourquoi (autre onglet, profil, navigateur, lecture seule,
+  même adresse de widget) et que le copier-coller reste là.
+- **Protocole** (`tab-link.js`, six messages : `offer`, `want`, `seen`, `reply`, `wantReply`, `got`) : chaque côté écoute tant que
+  son écran est affiché (`alive`) ; un onglet ouvert après coup demande (`want`, `wantReply`) ce qui a été dit avant lui ;
+  `parseMessage` n'accepte que ces genres, un identifiant de la forme voulue et un code du bon genre ; noms montrés nettoyés par
+  `cleanLabel`. Essais : `tests/unit/tab-link.test.mjs` (8, deux « onglets » dans un processus), e2e `tabSteps` (`TAB_SHOTS=<dossier>`
+  pour des captures).
+- **Sécurité** (SECURITY.md, « Canal entre onglets » et « Risques acceptés ») : le canal est audible de toute page de la même
+  origine que le widget dans ce navigateur (un GitHub Pages est commun à tous les dépôts d'un compte), secret d'invitation et
+  adresse d'écriture de réponse compris : même exposition qu'un courriel, devant plus de monde. Il n'identifie personne : seul
+  Grist le fait (`shareInfo`). Rien ne part ni ne s'écrit sans geste, sauf le renvoi de la réponse quand l'invitation est venue
+  du canal.
+- **Vu en lisant le code, non mesuré** : les verrous `navigator.locks` (`gristsync-resend`, `gristsync-consolidation`…) valent
+  « toutes pages du navigateur » : deux documents ouverts ensemble se font la queue (un long renvoi de la SOURCE retient le
+  rattrapage de l'autre). Ancien, sans danger, mais à noter pour ce scénario.
+
+V0.14.0 (état précédent, 9 novembre 2026) :
 
 V0.14.0 (Antoine, 9 novembre : « prévoir une sync dans les deux sens pour les pj également » ; proposition
 `/mnt/project-files/notes/pieces-jointes-deux-sens.md`, carte de décision : « Complet, dans la Bêta »). Moteur **2.3.0**

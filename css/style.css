@@ -70,6 +70,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .icon-button:hover { background: var(--surface-sunken); color: var(--text); }
 
 main { padding: 12px; max-width: 760px; margin: 0 auto; }
+/* Avis d'une invitation arrivée d'un autre onglet (tab-link-ui.js) : au-dessus de l'écran, à sa largeur. */
+#offer { max-width: 760px; margin: 0 auto; padding: 12px 12px 0; }
+#offer:empty { display: none; }
+.tab-link { display: grid; gap: 4px; }
+.tab-link > p { margin: 0; }
 
 /* Accueil */
 .home-title { font-size: 16px; margin: 8px 0 12px; }

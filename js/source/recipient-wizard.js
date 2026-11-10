@@ -26,6 +26,8 @@ import {
 } from '../ui.js';
 import { handoffButton, roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
+import { tabLink } from '../tab-link.js';
+import { tabSendBlock } from '../tab-link-ui.js';
 import { dateText, t } from '../i18n.js';
 
 const STEP = { options: 0, invitation: 1, reply: 2, load: 3 };
@@ -106,9 +108,16 @@ async function invite(ctx, mode, renforce) {
 async function invitePublic({ exp, wizard, steps }) {
   const code = await enablePublicLink(exp);
   wizard.setSteps(steps.slice(0, 2));
-  wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoffButton('target', 'public', 1, code),
+  wizard.show(STEP.invitation, [el('p', {}, t('send.public.help')), copyField(code), handoffButton('target', 'public', 1, code), inviteOnTab(code),
     message('warn', t('send.public.turnOn')), stepHelp(['public']), roleGuide({ you: 'source', mode: 'public', current: 1 })], closeButtons());
 }
+
+// Le même code, envoyé d'un clic à l'autre document quand il est ouvert dans un autre onglet de ce navigateur (voir
+// tab-link.js) : un raccourci à côté du copier-coller, qui reste ; le code est jugé de la même façon à l'arrivée.
+const inviteOnTab = code => tabSendBlock({
+  texts: { button: t('tab.out.button'), help: t('tab.out.help'), sent: t('tab.out.sent'), done: t('tab.out.seen'), silent: t('tab.out.silent') },
+  start: (alive, ack) => tabLink().offerInvitation(code, { alive, onSeen: ack }),
+});
 
 async function showInvitation(ctx, entry, secret, retour = '') {
   const mode = retour ? 'echange' : 'reponse';
@@ -117,10 +126,13 @@ async function showInvitation(ctx, entry, secret, retour = '') {
   const report = el('div', { class: 'report' });
   // Échange : le code de contrôle de l'envoi de retour, que la CIBLE voit en lisant l'invitation.
   const backCode = control ? controlLine(t('send.invite.backCode'), control) : null;
+  const onTab = inviteOnTab(code);
   ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), codeField(code),
-    el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expire * 1000) })), backCode, handoffButton('target', mode, 1, code), report,
+    el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expire * 1000) })), backCode, handoffButton('target', mode, 1, code), onTab, report,
     stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply']), roleGuide({ you: 'source', mode, current: 1 })],
   [back(() => run(null, report, () => backToOptions(ctx, entry))), later, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(ctx, entry) }]);
+  // La réponse de l'autre onglet fait passer à l'étape Réponse, déjà remplie et contrôlée.
+  if (onTab) tabLink().awaitReply(entry.id, reply => showReply(ctx, entry, reply), { alive: () => report.isConnected });
 }
 
 // Retour aux options : l'invitation est annulée (son code ne sert plus), avec le journal de retour
@@ -175,11 +187,14 @@ async function showBack(ctx, inv) {
 // 3. Réponse : vérifier, montrer la fiche, approuver. La réponse doit désigner cette invitation,
 // encore valable, et porter le même secret (comparé par empreinte). En sécurité renforcée, le code
 // de contrôle doit avoir été comparé avec la personne.
-function showReply(ctx, inv) {
+// `arrived` : le code de la réponse, quand elle vient d'un autre onglet (tab-link.js) ; il est contrôlé aussitôt, comme
+// s'il venait d'être collé, et la personne approuve ou non sur la fiche.
+function showReply(ctx, inv, arrived = '') {
   const area = el('textarea', { class: 'code', rows: 4, spellcheck: 'false', 'aria-label': t('send.reply.title') });
   const fiche = el('div');
   const report = el('div', { class: 'report' });
-  const body = [el('p', {}, t('send.reply.help')), area, fiche, report, stepHelp(['s-reply', 's-load']), roleGuide({ you: 'source', current: 3 })];
+  const tabLine = tabLink().supported() ? el('p', { class: 'muted small', role: 'status' }, t('tab.reply.wait')) : null;
+  const body = [el('p', {}, t('send.reply.help')), area, tabLine, fiche, report, stepHelp(['s-reply', 's-load']), roleGuide({ you: 'source', current: 3 })];
   const check = async () => {
     const reply = await checkReply(ctx.exp, inv, area.value);
     const compared = el('input', { type: 'checkbox' });
@@ -192,6 +207,19 @@ function showReply(ctx, inv) {
   const toInvitation = back(() => run(null, report, () => backToInvitation(ctx, inv)));
   if (invitationState(inv) === 'expired') report.replaceChildren(message('warn', t('send.invite.expired')));
   ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
+  // La première réponse arrivée de l'autre onglet reste : une autre, différente, ne la remplace pas sous les yeux de la
+  // personne (rien n'identifie l'expéditeur d'un message du canal) ; elle peut la recoller elle-même si c'est celle-là.
+  let taken = '';
+  const take = (code) => {
+    if (area.value === code) return; // la même réponse redite par l'autre onglet
+    if (taken) { tabLine.replaceChildren(t('tab.reply.other')); return; }
+    taken = code;
+    area.value = code;
+    tabLine.replaceChildren(t('tab.reply.got'));
+    run(null, report, check);
+  };
+  if (tabLine) tabLink().awaitReply(inv.id, take, { alive: () => area.isConnected });
+  if (arrived) take(arrived);
 }
 
 // Date de la réponse : écrite en UTC par la CIBLE (« AAAA-MM-JJ HH:MM »), montrée à l'heure d'ici.

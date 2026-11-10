@@ -228,6 +228,40 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   la réception qu'après confirmation, fiche affichée, et seulement si elle vient du même document
   dans le même mode.
 
+### Canal entre onglets du même navigateur (0.15)
+
+Quand une même personne a les deux documents ouverts dans deux onglets du même navigateur, l'invitation
+et la réponse peuvent passer d'un widget à l'autre par un `BroadcastChannel` (`js/tab-link.js`),
+sans copier-coller. Ce n'est qu'un transport de texte, côté écran (jamais dans le moteur) : ce qui
+arrive est un code comme un code collé, jugé par le moteur de la même façon (document de la clé chez
+Grist, code de contrôle, péremption, comparaison obligatoire en sécurité renforcée). Le lien du
+formulaire reste à coller (Grist ne le donne pas à un widget). Vérifié dans un vrai Grist, deux
+onglets du même navigateur (`ONLY_TABS=1`).
+
+- **Qui l'entend** : les pages de la même origine que le widget, dans le même navigateur et le même
+  profil (autre profil, autre navigateur, autre poste : rien, mesuré par GFS). Un GitHub Pages est une
+  origine commune à tous les dépôts d'un compte : tout code de cette origine, ouvert là, peut entendre
+  ce que le canal porte, dont le secret d'une invitation et l'adresse d'écriture d'une réponse. Même
+  exposition qu'un code envoyé par courriel, sans copie dans une boîte aux lettres, mais devant plus
+  de monde dans le navigateur. Un widget d'une autre origine n'entend rien.
+- **Rien ne part ni ne s'écrit sans un geste** : l'invitation ne part que sur le bouton de la SOURCE ;
+  la CIBLE ne montre qu'un avis (« Recevoir », « Ignorer ») et n'écrit rien avant. Un document en
+  lecture seule, ou un autre onglet du document qui invite, n'en montre pas. La réponse repart d'elle-même
+  seulement quand l'invitation est venue du canal ; la SOURCE la contrôle aussitôt, mais l'approbation
+  reste un clic (et, en sécurité renforcée, la case « J'ai comparé »).
+- **Le canal n'identifie personne** : le nom de l'export et du document annoncés ne servent qu'à
+  l'affichage ; l'identité du document est celle que Grist dit de la clé (`shareInfo`), à la lecture
+  de l'invitation puis à celle de la réponse. Un message forgé par une page de la même origine n'a pas
+  plus de poids qu'un code collé : une réponse sans le secret de l'invitation ou qui désigne un autre
+  document est refusée, et une clé publique remplacée change le code de contrôle, que la personne compare.
+- **Messages bornés** : `parseMessage` ne laisse passer que six genres exacts, un identifiant de la
+  forme voulue et un code du bon genre (invitation ou réponse) de 400 000 caractères au plus ; le reste
+  est ignoré. Les noms montrés sont nettoyés (`cleanLabel`) et posés par `textContent`. Rien n'est gardé :
+  ni stockage, ni écriture dans le document.
+- **Sans canal** (pas de `BroadcastChannel`, autre profil, onglet fermé) : le copier-coller est
+  inchangé et reste le repli. La SOURCE dit au bout de trois secondes que personne n'a répondu, et à quoi
+  cela peut tenir.
+
 ## La clé du formulaire de réception
 
 - **Une clé par réception** : Grist donne une clé par page partagée, et cette clé lit aussi les
@@ -457,3 +491,7 @@ Pour un usage en production :
   par ces colonnes est débloqué ensuite (file vidée, exports renvoyés). La table Synchro n'est pas
   effacée avec le dernier export quand une page la montre (`isOnPage` : le widget posé sur elle).
 - Le paramètre `?flat=1` n'est pas documenté par Grist (couvert par ses tests depuis 2023).
+- Le canal entre onglets (0.15) est audible de toute page de l'origine du widget ouverte dans le même
+  navigateur, secret d'invitation et adresse d'écriture de réponse compris (voir « Canal entre onglets du
+  même navigateur ») : même exposition qu'un code envoyé par courriel, devant plus de monde ; le contrôle
+  du document par Grist et la comparaison du code de contrôle restent ce qui prouve à qui l'on parle.

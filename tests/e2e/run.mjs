@@ -9,6 +9,7 @@
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname, dirname } from 'node:path';
@@ -1271,8 +1272,130 @@ try {
     await opensDoc(personLink, dst.doc);
     step('Document de l\'autre côté : nom saisi côté SOURCE (retenu, corrigeable), lien dans un nouvel onglet des deux côtés, jamais de HTML');
   }
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+
+  // --- Deux documents ouverts dans deux onglets du même navigateur : l'invitation et la réponse passent d'un
+  // widget à l'autre sans copier-coller (js/tab-link.js). Le lien du formulaire, lui, reste à coller (Grist ne le
+  // donne pas à un widget). Rien n'est écrit chez la CIBLE avant « Recevoir », le moteur juge le code comme s'il
+  // était collé, et la personne approuve sur la fiche de la réponse.
+  async function tabSteps() {
+    // Les pages de tous les onglets du navigateur écoutent le canal : celle des étapes d'avant, restée sur un document
+    // avec le widget, répondrait à la place du silence qu'on veut voir.
+    await page.goto('about:blank');
+    const src = await fichesDoc('Onglets SOURCE');
+    const dst = await newDocWithWidget('Onglets CIBLE');
+    const openTab = async (url) => {
+      const tab = await context.newPage();
+      const watch = (m) => { if (m.type() === 'error' && (m.location().url || '').startsWith(widgetCode)) errors.push(`${m.text()} (${m.location().url})`); };
+      tab.on('console', watch);
+      tab.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) errors.push(`${e.message} (pageerror)`); });
+      await tab.goto(url);
+      const frame = tab.frameLocator('iframe').first();
+      await frame.locator('.topbar').waitFor({ timeout: 30000 });
+      return { tab, frame, dialog: frame.getByRole('dialog'), button: name => frame.getByRole('button', { name, exact: true }) };
+    };
+    const dlgButton = (x, name) => x.dialog.getByRole('button', { name, exact: true });
+    // TAB_SHOTS=<dossier> : une capture de chaque écran du parcours, pour le relire à l'œil.
+    const snap = async (x, name) => { if (process.env.TAB_SHOTS) await x.tab.screenshot({ path: join(process.env.TAB_SHOTS, `${name}.png`) }); };
+    const A = await openTab(src.url);
+    const sameDocTab = await openTab(src.url); // un autre onglet du même document que la SOURCE
+    await A.frame.locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await A.button('Nouvel export').click();
+    await A.dialog.getByRole('checkbox', { name: 'Fiches' }).check();
+    await dlgButton(A, 'Continuer').click();
+    await dlgButton(A, 'Continuer').click();
+    await A.dialog.getByLabel('Nom de l’export').fill('Annuaire');
+    await dlgButton(A, 'Créer l’export').click();
+    await A.dialog.getByText('Export « Annuaire » créé.').waitFor();
+    await dlgButton(A, 'Ajouter un destinataire').click();
+    await dlgButton(A, 'Créer l’invitation').click();
+    await A.dialog.getByText('Transmettez ce code').waitFor();
+    const invitationCode = await A.dialog.locator('textarea.code').first().inputValue();
+    const tabButton = A.dialog.getByRole('button', { name: 'Envoyer à un document ouvert dans ce navigateur', exact: true });
+    await tabButton.waitFor();
+    assert.ok(await A.dialog.locator('textarea.code').first().isVisible(), 'le code reste à copier : le canal n\'est qu\'un raccourci');
+
+    // Aucun document ne l'écoute encore : la SOURCE le dit, au lieu d'attendre sans fin.
+    await tabButton.click();
+    await A.dialog.getByText('Aucun document n’a répondu.').waitFor({ timeout: 10000 });
+    await snap(A, '1-source-silence');
+    step('Onglets : sans autre document à l\'écoute, la SOURCE dit pourquoi rien n\'arrive (et le code reste à copier)');
+
+    // La CIBLE s'ouvre après coup : elle demande ce qui attend, et la SOURCE le redit.
+    const B = await openTab(dst.url);
+    await B.frame.locator('.tile', { hasText: 'Recevoir des tables' }).click();
+    const notice = B.frame.locator('[data-offer]');
+    await notice.waitFor({ timeout: 15000 });
+    const noticeText = await notice.innerText();
+    assert.match(noticeText, /«\s+Annuaire\s+»/);
+    assert.match(noticeText, /Rien n’est écrit tant que vous n’avez pas accepté/);
+    assert.match(noticeText, /ne dit pas de quel document vient l’invitation/);
+    await A.dialog.getByText('L’autre document l’a reçue').waitFor({ timeout: 10000 });
+    await snap(A, '2-source-invitation-vue');
+    await snap(B, '3-cible-avis');
+    assert.deepEqual((await records(dst.doc, '_grist_Tables')).map(tb => tb.tableId).filter(id => /^Journal_|^Fiches$/.test(id)), [],
+      'rien n\'est écrit chez la CIBLE avant « Recevoir »');
+    // Un autre onglet du document qui invite n'est pas une CIBLE : pas d'avis.
+    assert.equal(await sameDocTab.frame.locator('[data-offer]').count(), 0, 'pas d\'avis dans un autre onglet du document qui invite');
+    await sameDocTab.tab.close();
+    step('Onglets : l\'invitation arrive dans l\'autre document (avis, rien d\'écrit), la SOURCE sait qu\'elle est vue, pas d\'avis dans un autre onglet du même document');
+
+    // « Recevoir » ouvre l'assistant habituel sur ce code, déjà contrôlé : on arrive aux destinations.
+    await B.frame.locator('[data-offer]').getByRole('button', { name: 'Recevoir', exact: true }).click();
+    await B.dialog.getByText('« Annuaire » : table Fiches.').waitFor({ timeout: 30000 });
+    assert.equal(await B.frame.locator('[data-offer]').count(), 0, 'l\'avis disparaît quand l\'assistant s\'ouvre');
+    await dlgButton(B, 'Continuer').click();
+    const forms = await waitFor(async () => { const f = await publishedForms(dst.doc); return f.length === 1 && f; }, 'formulaire publié');
+    await B.dialog.getByLabel('Lien du formulaire').fill(await formLink(dst.doc, forms[0]));
+    await dlgButton(B, 'Tester le lien').click();
+    await B.dialog.getByText('Le lien fonctionne').waitFor();
+    const controlB = await B.dialog.locator('.control-code strong').first().textContent();
+    step('Onglets : « Recevoir » ouvre l\'assistant sur le code (destinations, lien du formulaire à coller, comme avant)');
+
+    // La réponse repart d'elle-même vers le document d'origine : l'assistant de la SOURCE passe à la réponse, contrôlée.
+    await B.dialog.getByText('Le document d’origine l’a reçue').waitFor({ timeout: 15000 });
+    await snap(B, '4-cible-reponse');
+    await A.dialog.getByText('Réponse reçue d’un autre onglet de ce navigateur').waitFor({ timeout: 15000 });
+    await A.dialog.getByText('Document, dossier et équipe sont donnés par Grist').waitFor({ timeout: 30000 });
+    await A.dialog.getByText(env.email).waitFor();
+    assert.equal(await A.dialog.locator('.control-code strong').first().textContent(), controlB, 'même code de contrôle des deux côtés');
+    assert.equal(await A.dialog.locator('textarea.code').first().inputValue(), await B.dialog.locator('textarea.code').first().inputValue(), 'la réponse arrivée est celle de la CIBLE');
+    assert.ok(invitationCode.startsWith('GRISTSYNC2.'));
+    await snap(A, '5-source-reponse-arrivee');
+    step('Onglets : la réponse revient seule, contrôlée chez Grist, même code de contrôle des deux côtés');
+
+    // Une autre réponse pour la même invitation, forgée par une page de la même origine (un message posé à la main sur le
+    // canal), ne remplace pas celle que la personne a sous les yeux : la première arrivée reste, et l'avis le dit.
+    const genuine = await A.dialog.locator('textarea.code').first().inputValue();
+    const forged = decodeCode(genuine, 'reponse');
+    const forgedCode = `GRISTSYNC2.${Buffer.from(JSON.stringify({ ...forged, recipient: { ...forged.recipient, email: 'pirate@exemple.fr' } })).toString('base64url')}`;
+    await B.frame.locator('body').evaluate((_, code) => {
+      const channel = new BroadcastChannel('gristsync-link');
+      channel.postMessage({ app: 'gristsync', k: 'reply', code });
+      setTimeout(() => channel.close(), 500);
+    }, forgedCode);
+    await A.dialog.getByText('Une autre réponse est arrivée d’un autre onglet').waitFor({ timeout: 10000 });
+    assert.equal(await A.dialog.locator('textarea.code').first().inputValue(), genuine, 'la réponse forgée n\'a pas remplacé la vraie');
+    assert.ok(!(await A.dialog.innerText()).includes('pirate@exemple.fr'), 'la fiche montre toujours la vraie réponse');
+    step('Onglets : une réponse forgée, arrivée après la vraie par le canal, ne la remplace pas');
+
+    // L'approbation reste un geste de la personne.
+    await dlgButton(A, 'Approuver et brancher').click();
+    await A.dialog.getByText('Branché').waitFor();
+    await A.dialog.getByText(/lignes? à envoyer/).waitFor();
+    await dlgButton(A, 'Envoyer').click();
+    await A.dialog.getByText(/Lignes existantes envoyées\s:\s[\d\s]+\./).waitFor();
+    await dlgButton(A, 'Fermer').click();
+    await dlgButton(B, 'Fermer').click();
+    await B.button('Synchroniser').click();
+    const got = await waitFor(async () => { const rows = await records(dst.doc, 'Fiches'); return rows.length === 3 && rows; }, 'les trois fiches reçues', 60000);
+    assert.deepEqual(got.map(r => r.Nom).sort(), ['Anna', 'Basile', 'Céline']);
+    step('Onglets : approuvé, envoyé, reçu — trois fiches chez la CIBLE, sans un code copié');
+    await A.tab.close();
+    await B.tab.close();
+  }
+
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2214,6 +2337,7 @@ try {
   await linksSteps();
   await straySteps();
   await docLinkSteps();
+  await tabSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

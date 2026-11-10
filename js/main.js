@@ -9,12 +9,13 @@ import { readSchema } from './grist.js';
 import { readSourceNote } from './engine/source/synchro.js';
 import { receivedJournals } from './engine/logic/received.js';
 import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
+import { startOfferNotice } from './tab-link-ui.js';
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
 import { accessHelp, tutorialView } from './tutorial.js';
 import { isOwnerHere, lostSynchro, refreshSource, renderSource } from './source/tab.js';
 import { startAutoCatchUp } from './engine/source/resend.js';
-import { refreshTarget, renderTarget } from './target/tab.js';
+import { receiveOffered, refreshTarget, renderTarget } from './target/tab.js';
 import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
 import { startEngine } from './engine/index.js';
 import { syncPort } from './sync-port.js';
@@ -162,6 +163,7 @@ async function start() {
 
   startAutoConsolidation(refreshTarget);
   startAutoCatchUp(refreshSource);
+  startOfferNotice($('offer'), useOffer);
   try {
     await openFirstScreen();
   } catch (e) {
@@ -170,6 +172,15 @@ async function start() {
     console.warn(e);
     showStartProblem(t('start.failed', { detail: errorText(e) }), { reload: true });
   }
+}
+
+// Une invitation arrivée d'un autre onglet du navigateur (tab-link.js) : l'onglet Recevoir, puis l'assistant sur son
+// code. Rend faux, sans rien ouvrir, quand un assistant l'est déjà (l'avis reste affiché).
+async function useOffer(code) {
+  await select('receive');
+  if (document.querySelector('.scrim')) return false;
+  receiveOffered(code);
+  return true;
 }
 
 // Onglet choisi pendant le démarrage : il est ouvert à la place du premier écran (vu au test : le

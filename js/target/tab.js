@@ -74,6 +74,9 @@ const button = (label, iconName, onclick, kind = '') => smallButton(label, iconN
 let here = '';
 const knowHere = async () => { here ||= await docIdentity().then(d => d.origin, () => ''); };
 
+// Une invitation arrivée d'un autre onglet (tab-link.js) : l'onglet Recevoir s'affiche, puis l'assistant s'ouvre sur son code.
+export const receiveOffered = code => receiveWizard(null, renderTarget, code);
+
 export async function renderTarget(root = container, { periodic = false } = {}) {
   if (!container) state.viewer = isReadOnly();
   await knowHere();
