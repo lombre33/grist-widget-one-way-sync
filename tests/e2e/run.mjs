@@ -16,7 +16,7 @@ import { partRow } from '../../js/engine/logic/files.js';
 import { decodeCode } from '../../js/engine/logic/codes.js';
 import { linkKeys, newKeyPair, readKeys, signText } from '../../js/engine/logic/trust.js';
 import { PUBLIC_KEY, bucketOf } from '../../js/engine/logic/common.js';
-import { ROOT, docTools, serveWidget } from './shared.mjs';
+import { ROOT, docTools, pickTab, serveWidget } from './shared.mjs';
 
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
 const WIDGET_PORT = 8585;
@@ -289,6 +289,11 @@ const button = name => widget().getByRole('button', { name, exact: true });
 async function openWidget(url) {
   await page.goto(url);
   await widget().locator('.topbar').waitFor({ timeout: 30000 });
+}
+// Ouvre la page du widget, puis son onglet `name` (voir pickTab : un clic donné trop tôt serait perdu).
+async function openWidgetTab(url, name) {
+  await openWidget(url);
+  await pickTab(widget(), name);
 }
 
 try {
@@ -569,12 +574,10 @@ try {
     await dialog().getByText('Enregistré.').waitFor();
     await dialogButton('Fermer').click();
     await widget().getByText(/Changements des participants\s:\sLigne ajoutée \(Refuser\), Ligne modifiée \(À valider\)/).waitFor();
-    const receive = async () => widget().getByRole('tab', { name: 'Recevoir' }).click();
     const review = name => widget().locator('.review-item', { hasText: name });
 
     await applyActions(b.doc, [['UpdateRecord', 'Fiches', bNow.Basile.id, { Ville: 'Quimper' }]]);
-    await openWidget(a.url);
-    await receive();
+    await openWidgetTab(a.url, 'Recevoir');
     await review('Basile').waitFor({ timeout: 30000 });
     await widget().getByText(/Fiches\s:\s1 changement à valider/).waitFor();
     assert.equal((await fiches(a.doc)).Basile.Ville, 'Vannes', 'rien n\'est écrit chez A avant la décision');
@@ -610,8 +613,7 @@ try {
     const lockRules = async () => (await records(dst.doc, '_grist_ACLRules')).filter(r => r.memo === 'Synchro : table reçue en lecture seule');
     await waitFor(async () => (await lockRules()).length === 1, 'règle de lecture seule posée par un propriétaire', 60000);
     assert.deepEqual(lockRules && (await lockRules()).map(r => [r.aclFormula, r.permissionsText]), [['user.Access != OWNER', '-CUD']]);
-    await openWidget(dst.url);
-    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    await openWidgetTab(dst.url, 'Recevoir');
     // Archive : Basile disparaît de la SOURCE, il reste ici, coché ; ni retouche ni suppression.
     await applyActions(src.doc, [['RemoveRecord', 'Fiches', 2]]);
     await waitFor(async () => (await fiches()).Basile?.Supprimee_a_la_source === true, 'ligne effacée à la SOURCE gardée ici, cochée', 90000);
@@ -967,8 +969,7 @@ try {
     const extraId = await upload(b.doc, 'de-b.txt', extra);
     const bUn = (await dossiers(b.doc)).Un;
     await applyActions(b.doc, [['UpdateRecord', 'Dossiers', bUn.id, { Statut: 'à revoir', Piece: [...bUn.Piece, extraId] }]]);
-    await openWidget(a.url);
-    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    await openWidgetTab(a.url, 'Recevoir');
     await widget().getByText(/1 ligne attend son fichier avant d.être recopiée dans Dossiers/).waitFor({ timeout: 60000 });
     await widget().getByText('Incomplet', { exact: true }).waitFor();
     assert.equal((await dossiers(a.doc)).Un.Statut, 'ouvert', 'la ligne attend son fichier : rien n\'est recopié');
@@ -1137,8 +1138,7 @@ try {
     // pas effacer la table, donc la page du widget.
     const section = (await records(mine.doc, '_grist_Views_section')).find(sc => sc.parentKey === 'custom');
     await applyActions(mine.doc, [['UpdateRecord', '_grist_Views_section', section.id, { tableRef: await tableRef(mine.doc, 'Synchro') }]]);
-    await openWidget(mine.url);
-    await widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await openWidgetTab(mine.url, 'Envoyer');
     await button('Supprimer').click();
     await dialogButton('Supprimer').click();
     await widget().getByText(/^Aucun export\./).waitFor({ timeout: 30000 });
@@ -1205,8 +1205,7 @@ try {
     await approve(answer, { url: src.url });
 
     // CIBLE : la carte de réception.
-    await openWidget(dst.url);
-    await widget().getByRole('tab', { name: 'Recevoir' }).click();
+    await openWidgetTab(dst.url, 'Recevoir');
     const cardLink = widget().locator('.card a.doc-link');
     await cardLink.waitFor();
     assert.equal(await cardLink.evaluate(a => a.firstChild.textContent), 'Lien SOURCE <i>saisi</i> & co');
@@ -1219,8 +1218,7 @@ try {
     assert.ok(await widget().locator('.card').isVisible(), 'l\'onglet du widget est resté en place');
 
     // SOURCE : la ligne du destinataire, avec le nom du document vu chez Grist.
-    await openWidget(src.url);
-    await widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await openWidgetTab(src.url, 'Envoyer');
     const personLink = widget().locator('.person .person-who a.doc-link');
     await personLink.waitFor();
     assert.equal(await personLink.evaluate(a => a.firstChild.textContent), `${env.team}/Lien CIBLE`, 'équipe/nom du document, comme la fiche');
@@ -2178,8 +2176,7 @@ try {
   await dialog().getByText('Transmettez ce code').waitFor();
   const invitation3 = await dialog().locator('textarea.code').first().inputValue();
   await dialogButton('Plus tard').click();
-  await openWidget(target.url);
-  await widget().getByRole('tab', { name: 'Recevoir' }).click();
+  await openWidgetTab(target.url, 'Recevoir');
   await button('Accepter une invitation').click();
   await dialog().locator('textarea.code').first().fill(invitation3);
   await dialogButton('Continuer').click();

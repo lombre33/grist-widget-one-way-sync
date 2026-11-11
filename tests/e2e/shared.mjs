@@ -30,6 +30,21 @@ export async function serveWidget({ env, port, adjust = (path, body) => body }) 
   return server;
 }
 
+// Choisit un onglet du widget (`frame` : le cadre du widget). Juste après l'ouverture de la page, la barre d'onglets
+// est déjà là (elle est dans index.html) alors que les modules du widget se chargent encore : un clic donné à ce
+// moment n'est entendu par personne, et le premier écran du widget reste affiché (vu le 11 novembre : l'essai
+// attendait un texte de Recevoir devant l'onglet Envoyer). L'onglet est donc cliqué jusqu'à ce qu'il soit choisi.
+export async function pickTab(frame, name, timeout = 30000) {
+  const tab = frame.getByRole('tab', { name });
+  const chosen = async () => await tab.getAttribute('aria-selected', { timeout }).catch(() => null) === 'true';
+  const end = Date.now() + timeout;
+  while (!(await chosen())) {
+    if (Date.now() > end) throw new Error(`Onglet « ${name} » jamais choisi`);
+    await tab.click({ timeout });
+    for (let i = 0; i < 20 && !(await chosen()); i++) await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
 // Documents et formulaires, au-dessus de l'API de Grist de l'essai : `api`, `applyActions`, `records` et `waitFor`
 // viennent de l'essai ; `widgetUrl` est l'adresse du widget servi par `serveWidget`.
 export function docTools({ env, api, applyActions, records, waitFor, widgetUrl }) {

@@ -20,8 +20,8 @@ const rowsOf = 30;
 // SHOTS=<dossier> : une capture de la page (le widget dans Grist) pour chaque carte relevée, nommée `<shot>.png`.
 async function read(view, url, tab, shot = '') {
   try {
-    await view.open(url);
-    if (tab) await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 });
+    if (tab) await view.openTab(url, tab, 10000);
+    else await view.open(url);
     await sleep(tab ? 6000 : 12000);
     if (shot) await shootPage(view, shot);
     return flat(await view.text()).replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 1100);

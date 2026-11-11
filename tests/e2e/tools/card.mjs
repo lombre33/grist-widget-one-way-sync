@@ -2,7 +2,7 @@
 // l'onglet demandé. Usage : node tests/e2e/tools/card.mjs "Valeurs étranges CIBLE" Recevoir
 import { chromium } from 'playwright';
 import { readFile } from 'node:fs/promises';
-import { ROOT, serveWidget } from '../shared.mjs';
+import { ROOT, pickTab, serveWidget } from '../shared.mjs';
 const env = JSON.parse(await readFile(`${ROOT}/tests/e2e/.env.json`,'utf8'));
 const TEAM = `${env.grist}/o/${env.team}`;
 const [,, name, tab] = process.argv;
@@ -22,7 +22,7 @@ const server = await serveWidget({ env, port });
 await page.goto(`${TEAM}/doc/${d.id}/p/${view.id}`);
 const w = page.frameLocator('iframe').first();
 await w.locator('.topbar').waitFor({timeout:60000});
-if (tab) await w.getByRole('tab', {name: tab}).click().catch(()=>{});
+if (tab) await pickTab(w, tab).catch(() => {});
 await page.waitForTimeout(Number(process.env.WAIT||12000));
 console.log((await w.locator('body').innerText()).replace(/\n+/g,' | '));
 if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/card-${name.replace(/\W+/g, '_')}.png` });

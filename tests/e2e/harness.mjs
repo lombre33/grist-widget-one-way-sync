@@ -5,7 +5,7 @@
 import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ROOT, docTools, serveWidget } from './shared.mjs';
+import { ROOT, docTools, pickTab, serveWidget } from './shared.mjs';
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 const started = Date.now();
@@ -110,9 +110,10 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
       await this.widget().locator('.topbar').waitFor({ timeout: 60000 });
     }
     // Ouvre la page du widget puis son onglet (`Envoyer`, `Recevoir`…).
-    async openTab(url, tab) {
+    // Un clic d'onglet donné avant que le widget écoute serait perdu : voir pickTab.
+    async openTab(url, tab, timeout = 30000) {
       await this.open(url);
-      await this.widget().getByRole('tab', { name: tab }).click();
+      await pickTab(this.widget(), tab, timeout);
     }
     // Texte de la carte affichée par le widget (pour les messages d'erreur à lire).
     async text() {
