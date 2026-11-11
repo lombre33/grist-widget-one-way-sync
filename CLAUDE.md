@@ -404,8 +404,9 @@ pièces dans `/mnt/project-files/notes/audit-v2/` (captures, rapports gwaudit av
   C-GRIST-04, C-EXFIL-02, C-STOCK-01, B-VERB-01 (plus de 8 000 lignes), et trois blocs A-DUP-01 (dont la liste d'exports de
   `js/engine/port.js`, faux positif de l'outil).
 - **Lancer l'e2e sans geler le dépôt** : `git worktree add /tmp/e2e-tree <commit>`, y copier `tests/e2e/.env.json` et y lier
-  `node_modules/playwright` ; le parcours complet (environ 55 minutes) tourne là pendant qu'on travaille ici.
-- Testé : unit (340), e2e complet, `charge.mjs` (`smoke`, `doublons`, `destinataireMort`), un scénario de `betises.mjs`.
+  `node_modules/playwright` ; le parcours complet (55 étapes, une vingtaine de minutes) tourne là pendant qu'on travaille ici.
+- Testé : unit (340), e2e complet (55 étapes, vert sur la version finale), `charge.mjs` (`smoke`, `doublons`, `destinataireMort`), un
+  scénario de `betises.mjs`.
 
 ## État précédent : V0.15.2 (10 novembre 2026)
 
