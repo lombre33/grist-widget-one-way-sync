@@ -365,7 +365,43 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.15.2 (10 novembre 2026)
+## État : V0.15.3 (11 novembre 2026)
+
+V0.15.3 (Antoine, 11 novembre : « avant la sortie de la v2 peux tu si c'est pertinent faire audit et correction en ui/ux, sécurité, et
+qualité du code/refacto ? […] + Gw audit »). Rapport : Claude Doc « Audit avant la Bêta (V0.15.3) : sécurité, code, UI/UX, gwaudit » ;
+pièces dans `/mnt/project-files/notes/audit-v2/` (captures, rapports gwaudit avant et après, `ux-audit.mjs`). Moteur **2.6.1**
+(correctif : rien d'ajouté ni de retiré au port, aux tables, aux codes ; texte des formules inchangé ; dit dans `GFS-ETAT.md`).
+- **Sécurité** : rien de nouveau sur le fil. Recontrôlé sur le code final : ni `innerHTML` ni `eval` dans `js/`, un seul `fetch`
+  (`gristFetch`, `credentials: 'omit'`), `localStorage` dans `js/prefs.js` seul, aucune dépendance. Essai de robustesse
+  (`tests/unit/robustness.test.mjs`, graine fixe) : des versions abîmées de lots, listes, notes, codes et messages d'un autre onglet
+  passent dans les fonctions de lecture ; seule `addEvent` levait (historique de note qui n'est pas une liste), corrigée.
+  `SECURITY.md` (« Ce que le widget écrit et garde ») liste les **actions de structure** ; hors de ses tables et colonnes, le widget ne
+  renomme et ne supprime que sur un clic, après une fenêtre (table `Synchro` faite à la main, colonnes en trop dans `Synchro`).
+- **Code** : fonctions d'écran découpées sous les seuils de gwaudit (80 lignes, complexité 15), sans rien changer à l'affichage :
+  `parseMessage`, `createLink` (`js/tab-link.js`), `sourceView`, `tickFlows` (`js/source/tab.js`), `receivedGroups`, `renderTarget`,
+  `cardNotes` (`js/target/tab.js`). Variables d'une lettre ou `data` renommées (moteur compris). Mesure sur tout `js/`
+  (`GWAUDIT_DIR=<dépôt de l'outil> node tests/tools/mesure-moteur.mjs js`) : 78 fichiers, 2 486 fonctions, plus grande 79 lignes,
+  complexité 15 au plus.
+- **Essais, un seul texte par outil** : `tests/e2e/shared.mjs` (`serveWidget({ env, port, adjust })` : le widget servi en local, un
+  essai y change une constante par `adjust` ; `docTools` : document avec le widget posé, formulaires publiés, clé et lien du
+  formulaire), employé par `run.mjs`, `harness.mjs` et `tools/` ; `tools/probe.mjs` (`startProbe`) pour les sondes ; dans le
+  harnais : `shootPage`, `openTab`, `editExport` ; dans `charge.mjs` : `settledPair`, `twoRecipients`, `changeFive`, `sourceCard` ;
+  dans `run.mjs` : `returnInvitation`, `pasteInvitation`, `attachmentTools` ; `fakePair(tag)` de `tests/unit/engine-fake.mjs`.
+- **UI/UX** (0 violation axe sur les écrans parcourus par `ux-audit.mjs`) : barre du haut qui débordait à 380 px en français
+  (resserrée sous 420 px), boutons `.btn-small` de 24 px de haut, phrase « Mise à jour automatique » courte (le rythme en
+  infobulle). Constats 11 et 12 de l'audit 0.13.1 clos ici, 13 et 14 l'étaient (carte « incomplet » depuis la 0.12.4, « Réception
+  supprimée » depuis la 0.15.1). **Reste le 15, nom du produit** (« Synchro », « Sync », « Synchro Grist », « syncPlus ») : carte de
+  décision posée à Antoine le 11 novembre, à appliquer selon sa réponse (titre fr et en, README, tutoriel, diagnostic ; revoir la
+  barre du haut à 380 px).
+- **gwaudit : 87 puis 89/100** (A 97, B 97, C 61, D, E, F 100). Le 93 de la V0.12.1 ne se compare pas : l'outil a depuis une règle
+  majeure de plus, **C-GRIST-04** (toute écriture de structure), que la documentation ne lève pas. Restent, structurels : C-GRIST-03,
+  C-GRIST-04, C-EXFIL-02, C-STOCK-01, B-VERB-01 (plus de 8 000 lignes), et trois blocs A-DUP-01 (dont la liste d'exports de
+  `js/engine/port.js`, faux positif de l'outil).
+- **Lancer l'e2e sans geler le dépôt** : `git worktree add /tmp/e2e-tree <commit>`, y copier `tests/e2e/.env.json` et y lier
+  `node_modules/playwright` ; le parcours complet (environ 55 minutes) tourne là pendant qu'on travaille ici.
+- Testé : unit (340), e2e complet, `charge.mjs` (`smoke`, `doublons`, `destinataireMort`), un scénario de `betises.mjs`.
+
+## État précédent : V0.15.2 (10 novembre 2026)
 
 V0.15.2 (Antoine, 10 novembre : « l'url du document source/cible ne fonctionne pas car le nom du document est dans l'URL. Est-ce que tu peux
 récupérer l'url de la page via le navigateur par ex ? »). Moteur **2.5.0** (mineure, dit dans `GFS-ETAT.md`).
