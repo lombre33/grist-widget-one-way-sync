@@ -199,8 +199,8 @@ publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_UR
 - Les codes ne contiennent que des noms de tables et de colonnes, une fiche, une adresse
   d'écriture, un secret et une clé publique : ils se transmettent à la seule personne
   concernée, comme un mot de passe, et une invitation vaut 7 jours.
-- Une case **Sécurité renforcée**, à l'invitation, rend la comparaison du code obligatoire, fait
-  valider toute suppression reçue et interdit le lien public pour cet export.
+- Une case **Sécurité renforcée**, à l'invitation, rend la comparaison du code obligatoire et
+  interdit le lien public pour cet export.
 
 L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
 

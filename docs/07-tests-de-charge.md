@@ -90,11 +90,11 @@ Quatre relevés qui se lisent bien en quelques mots :
 - `pleinEnvoi` : 6 000 lignes en cours d'envoi, pendant lesquelles on modifie 301 lignes, en supprime 201 et en ajoute
   150 : 20 s après la fin de l'envoi, la SOURCE (5 949 lignes) et la CIBLE sont identiques ligne à ligne.
 - `toutSupprimer` : toute la table exportée est supprimée dans la SOURCE : la CIBLE ne l'efface pas, la carte dit
-  « À valider » avec Appliquer ou Ignorer (vague de suppressions).
+  « À valider » avec Appliquer ou Ignorer (vague de suppressions ; retirée en 0.13.4 : la CIBLE applique tout, la SOURCE est avertie).
 - `lignesEnDouble` : dix lignes dupliquées avec leur clé : la carte SOURCE le dit et propose « Réparer les clés ».
 - `cleSupprimee` : colonne `id_sync` supprimée : la carte SOURCE le dit, « Réparer les clés » remet la colonne et
-  renvoie tout en 23 s. Les lignes ont des clés neuves, donc la CIBLE retient les 30 anciennes dans une vague de
-  suppressions « À valider » (choix de la personne), et elle signale une « arrivée suspecte » (le lot sans clé,
+  renvoie tout en 23 s. Les lignes ont des clés neuves, donc la CIBLE retenait alors les 30 anciennes dans une vague de
+  suppressions « À valider » (retenue retirée en 0.13.4 : elles sont aujourd'hui supprimées), et elle signale une « arrivée suspecte » (le lot sans clé,
   rejeté) dont le texte donne l'explication innocente.
 
 ## Ce que Grist fait vraiment (mesuré, Grist 1.7.22)

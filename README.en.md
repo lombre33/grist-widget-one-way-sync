@@ -191,8 +191,8 @@ the widget's instructions give.
 - The codes only hold table and column names, the recipient's details, a write address, a secret
   and a public key: send them only to the person concerned, like a password; an invitation is
   valid for 7 days.
-- An **Enhanced security** box, when inviting, makes comparing the code mandatory, has every
-  received deletion validated and forbids the public link for that export.
+- An **Enhanced security** box, when inviting, makes comparing the code mandatory and
+  forbids the public link for that export.
 
 Full analysis (in French): [`SECURITY.md`](SECURITY.md).
 

@@ -129,8 +129,9 @@ Les destinataires voient ce nom. **Créer l'export**, puis **Ajouter un destinat
 
 Choisir le mode. L'invitation porte toujours un secret, qui garantit que la réponse vient de
 quelqu'un qui l'a reçue, et vaut 7 jours. La case **Sécurité renforcée** rend obligatoire la
-comparaison du code de contrôle (étape 10), fait valider toute suppression reçue par la CIBLE et
-interdit le lien public pour cet export : à cocher pour des données sensibles.
+comparaison du code de contrôle (étape 10) et interdit le lien public pour cet export : à cocher pour
+des données sensibles. La CIBLE applique les suppressions de la SOURCE telles quelles (elle peut
+garder ses lignes avec l'option Archive) ; c'est la SOURCE qui est avertie quand beaucoup de lignes disparaissent.
 
 Le champ **Nom de ce document** (facultatif) est montré à la CIBLE, avec un lien vers ce document
 qui s'ouvre dans un nouvel onglet (le lien suffit à ceux qui ont accès au document ; les autres

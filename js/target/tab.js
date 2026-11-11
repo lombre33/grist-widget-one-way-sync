@@ -128,7 +128,7 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
     lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
-    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small' }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
+    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small', title: t('recv.auto.detail') }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
     roleGuide({ you: 'target' })].filter(Boolean));
   if (!state.readOnly) await openPending(groups, periodic);
 }

@@ -3,7 +3,7 @@
 Ce dossier crée, lit, écrit et décide ; il ne dessine rien. Les écrans (`js/source/`, `js/target/`, `js/ui.js`…)
 appellent le moteur, jamais l'inverse. Modules ES, sans bibliothèque ni étape de build.
 
-**Version du moteur : `ENGINE_VERSION` dans `version.js`** (2.2.0). Elle ne suit pas la version de Sync+ : elle
+**Version du moteur : `ENGINE_VERSION` dans `version.js`** (l'historique des versions y est aussi). Elle ne suit pas la version de Sync+ : elle
 change quand le moteur change ce qu'il attend du port, ce qu'il écrit dans les documents ou le sens d'un champ des
 codes (`CODE_FORMAT`). Majeure : un port, un nom de table ou un format qui ne se lisent plus comme avant.
 
