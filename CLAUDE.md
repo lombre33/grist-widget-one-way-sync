@@ -387,6 +387,12 @@ pièces dans `/mnt/project-files/notes/audit-v2/` (captures, rapports gwaudit av
   formulaire), employé par `run.mjs`, `harness.mjs` et `tools/` ; `tools/probe.mjs` (`startProbe`) pour les sondes ; dans le
   harnais : `shootPage`, `openTab`, `editExport` ; dans `charge.mjs` : `settledPair`, `twoRecipients`, `changeFive`, `sourceCard` ;
   dans `run.mjs` : `returnInvitation`, `pasteInvitation`, `attachmentTools` ; `fakePair(tag)` de `tests/unit/engine-fake.mjs`.
+- **Piège vu à l'e2e** : la barre d'onglets est dans `index.html`, elle paraît avant que les modules du widget soient chargés ; un
+  clic d'onglet donné à ce moment n'est entendu par personne (les écoutes sont posées par `start()`), et le premier écran reste
+  affiché. Un essai qui ouvre la page puis un onglet passe par `pickTab` (`shared.mjs` : l'onglet est recliqué tant qu'il n'est pas
+  choisi ; `openWidgetTab` dans `run.mjs`, `openTab` du harnais). Côté widget, rien de changé : une personne qui clique un onglet
+  dans la demi-seconde du chargement doit recliquer (correction possible : onglets grisés tant que le widget n'écoute pas ; non
+  faite, changement visible).
 - **UI/UX** (0 violation axe sur les écrans parcourus par `ux-audit.mjs`) : barre du haut qui débordait à 380 px en français
   (resserrée sous 420 px), boutons `.btn-small` de 24 px de haut, phrase « Mise à jour automatique » courte (le rythme en
   infobulle). Constats 11 et 12 de l'audit 0.13.1 clos ici, 13 et 14 l'étaient (carte « incomplet » depuis la 0.12.4, « Réception
