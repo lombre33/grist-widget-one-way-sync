@@ -387,6 +387,28 @@ onglets du même navigateur (`ONLY_TABS=1`).
   colonnes, tables refusées, fichiers attendus, secret, clés
   publiques des deux côtés) dans la
   description de `Synchro_Ids`, le formulaire de réception sur sa page, et la règle des journaux.
+- **Actions de structure** (création, renommage, suppression de tables ou de colonnes ; toutes passent par
+  `grist.docApi.applyUserActions`, donc avec les droits de la personne, et s'annulent par Ctrl+Z ou l'historique
+  du document) :
+  - *créer* : la table `Synchro` et ses colonnes (premier export), `id_sync`, `MajLe`, `RecalculLe` dans une table
+    envoyée (à l'enregistrement d'un export), un journal et son formulaire (réception acceptée, retour d'un
+    Échange), une table de destination ou des colonnes de destination (choisies à l'étape Destinations, avec un
+    avertissement pour une table neuve ; « Corriger » recrée une colonne reçue effacée) ;
+  - *modifier* : la formule ou le déclenchement des colonnes que le widget a créées (`MajLe`, `RecalculLe`, colonnes
+    de `Synchro`), et, à la CIBLE, le type d'une colonne qu'il a créée et qui est encore vide (Référence conservée) ;
+  - *renommer* : seulement une table nommée `Synchro` qui n'est pas la sienne, sur le bouton de la carte, nom proposé
+    modifiable ;
+  - *supprimer* : ses tables techniques (`Synchro` quand le dernier export est supprimé, un journal quand la
+    réception est arrêtée ou l'invitation retirée), toujours après une confirmation ; une table de destination
+    seulement si cette réception vient de la créer, qu'elle est encore vide et que la personne revient en arrière
+    dans l'assistant ; dans `Synchro`, la colonne `manualSort` et, après une fenêtre qui les liste (case « J'ai
+    sauvegardé » s'il y a des valeurs), les colonnes en trop.
+  - *métadonnées* (tables `_grist_*`) : la description des colonnes qui portent ses notes, les options des colonnes
+    qu'il a créées, le nom et la place de la page d'un formulaire, la description du partage de ce formulaire, et ses
+    règles d'accès, reconnues à leur mémo.
+  Hors de ses propres tables et colonnes, le widget ne renomme et ne supprime rien de lui-même : les deux seuls cas
+  qui touchent ce qu'une personne a fait (une table `Synchro` créée à la main, des colonnes ajoutées à la table
+  `Synchro`) se font sur son clic, après une fenêtre qui dit ce qui va changer.
 - Un renvoi ne modifie jamais les tables de la personne : il n'écrit que dans `Synchro`.
 - Depuis la 0.12 : SOURCE, la note garde aussi l'historique des envois que le widget a conduits
   (30 événements au plus par export : date, genre, nom ou courriel du destinataire coupé à 80

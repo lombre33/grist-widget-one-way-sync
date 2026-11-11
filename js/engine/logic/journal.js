@@ -69,8 +69,8 @@ export function parseLot(text) {
   const lines = lot.lignes.filter(validLine).map(([key, order, deleted, data]) => ({ key: String(key), order: order ?? null, deleted: isTrue(deleted), data }));
   const big = keyStrings(lot.tropGros).slice(0, MAX_BIG);
   const rest = Number.isInteger(lot.restant) && lot.restant >= 0 ? Math.min(lot.restant, MAX_REST) : null;
-  const a = lot.bilan;
-  const tally = a && Number.isInteger(a.n) && a.n >= 0 && Number.isFinite(a.t) ? { n: a.n, t: a.t } : null;
+  const announced = lot.bilan;
+  const tally = announced && Number.isInteger(announced.n) && announced.n >= 0 && Number.isFinite(announced.t) ? { n: announced.n, t: announced.t } : null;
   return { lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(tally ? { tally } : {}), ...(lot.trop === true ? { tooBig: true } : {}) };
 }
 

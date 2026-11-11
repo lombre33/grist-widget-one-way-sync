@@ -7,8 +7,7 @@
 //         ONLY=volume,budget node tests/e2e/charge.mjs   (certains)
 //         ROWS=30000 COLS=20 pour le scénario « volume » (défaut : 30000 lignes, 20 colonnes)
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
-import { createHarness, log, sleep } from './harness.mjs';
+import { createHarness, log, shootPage, sleep } from './harness.mjs';
 import { startChaosProxy } from './chaos-proxy.mjs';
 
 // CHAOS=1 : le second Grist (start-grist.sh, voir chaos-proxy.mjs), dont les envois de webhooks passent par un
@@ -22,14 +21,6 @@ const patches = process.env.FAST_BUDGET
 const h = await createHarness({ port: Number(process.env.PORT || 8586), envFile: chaosMode ? '.env-chaos.json' : '.env.json', patches });
 const proxy = chaosMode ? await startChaosProxy({ port: Number(new URL(h.env.grist).port), target: Number(process.env.INTERNAL_PORT || 8493) }) : null;
 const { env, api, records, sql, count, waitFor, webhooks, applyActions } = h;
-// SHOTS=<dossier> : capture de la page (le widget dans Grist) à quelques moments clés.
-const shot = async (view, name) => {
-  if (!process.env.SHOTS) return;
-  await mkdir(process.env.SHOTS, { recursive: true });
-  await view.page.setViewportSize({ width: 1100, height: 900 });
-  await sleep(500);
-  await view.page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
-};
 
 import { columnsOf, makeRow } from './data.mjs';
 
@@ -55,11 +46,39 @@ async function follow(p, what, done, { timeout, every = 15000, dest = p.dest } =
   }
 }
 
+// Une paire SOURCE / CIBLE de `rows` lignes de Contacts (`cols` colonnes), l'existant envoyé et attendu côté CIBLE.
+async function settledPair(name, { rows, cols = 6, label = 'départ', timeout = 120000, every = 3000 }) {
+  const p = await h.pair({ name, table: 'Contacts', columns: columnsOf(cols), rows, makeRow, send: 'wait' });
+  await follow(p, label, n => n === rows, { timeout, every });
+  return p;
+}
+
+// A (branché, ses `rows` lignes arrivées) et B (second destinataire de la même SOURCE) : les deux ont tout reçu.
+async function twoRecipients(label, rows) {
+  const a = await settledPair(`${label} A`, { rows, label: 'A reçoit' });
+  const b = await h.addRecipient(a, { name: `${label} B`, send: 'wait' });
+  await waitFor(async () => (await count(b.dst.doc, 'Contacts')) === rows, 'B reçoit', 120000, 2000);
+  return { a, b };
+}
+// Cinq lignes de la SOURCE de `a` passent à la ville `city` ; `bGot()` dit si la CIBLE de `b` les a reçues.
+async function changeFive(a, b, city) {
+  const ids = (await records(a.src.doc, 'Contacts')).slice(0, 5).map(r => r.id);
+  await applyActions(a.src.doc, [['BulkUpdateRecord', 'Contacts', ids, { Ville: ids.map(() => city) }]]);
+  return { t0: Date.now(), bGot: async () => (await count(b.dst.doc, 'Contacts', `where "Ville" = '${city}'`)) === 5 };
+}
+// Onglet Envoyer de la SOURCE de `p`, lu après `wait` ms et écrit au journal sous `label` ; rend son texte.
+async function sourceCard(p, label, { wait = 4000, size = 1200 } = {}) {
+  await p.sv.openTab(p.src.url, 'Envoyer');
+  await sleep(wait);
+  const card = await p.sv.text();
+  log(`${label} : ${card.slice(0, size)}`);
+  return card;
+}
+
 const scenarios = {
   // Contrôle du banc : une petite table passe du premier coup.
   async smoke() {
-    const p = await h.pair({ name: 'Smoke', table: 'Contacts', columns: columnsOf(6), rows: 300, makeRow, send: 'wait' });
-    await follow(p, 'smoke', n => n === 300, { timeout: 120000, every: 3000 });
+    const p = await settledPair('Smoke', { rows: 300, label: 'smoke' });
     assert.equal(await count(p.dst.doc, p.dest), 300);
   },
 
@@ -131,8 +150,7 @@ const scenarios = {
   // widget en dit aux deux personnes doit se lire.
   async doublons() {
     const rows = 2000;
-    const p = await h.pair({ name: 'Doublons', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
-    await follow(p, 'doublons', n => n === rows, { timeout: 300000, every: 3000 });
+    const p = await settledPair('Doublons', { rows, label: 'doublons', timeout: 300000 });
     const ids = (await records(p.src.doc, 'Contacts')).map(r => ({ id: r.id, key: r.id_sync }));
     const dup = ids.slice(10, 20); const blank = ids.slice(20, 30);
     await applyActions(p.src.doc, [
@@ -144,8 +162,7 @@ const scenarios = {
     await sleep(40000);
     const [src, dst] = [await count(p.src.doc, 'Contacts'), await count(p.dst.doc, p.dest)];
     log(`SOURCE ${src} lignes, CIBLE ${dst} lignes (écart ${src - dst})`);
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await p.sv.openTab(p.src.url, 'Envoyer');
     const notice = p.sv.widget().locator('[data-keys]');
     await notice.waitFor({ timeout: 30000 });
     log(`carte SOURCE : ${(await notice.innerText()).replace(/\s+/g, ' ')}`);
@@ -155,8 +172,7 @@ const scenarios = {
     assert.ok(await notice.getByText(/10 lignes sans clé/).count(), 'la SOURCE dit combien de lignes sont sans clé');
     assert.ok(await notice.getByText(/10 lignes qui partagent/).count(), 'la SOURCE dit combien de lignes partagent une clé');
     // Réparation : clés neuves, les lignes repartent, la CIBLE rattrape la SOURCE.
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await p.sv.openTab(p.src.url, 'Envoyer');
     await p.sv.button('Réparer les clés').click();
     await p.sv.dialogButton('Réparer les clés').click();
     await notice.waitFor({ state: 'detached', timeout: 60000 });
@@ -196,26 +212,17 @@ const scenarios = {
   async destinataireMort() {
     const fix = process.env.FIX || 'none';
     const rows = 600;
-    const a = await h.pair({ name: 'Mort A', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
-    await follow(a, 'A reçoit', n => n === rows, { timeout: 120000, every: 3000 });
-    const b = await h.addRecipient(a, { name: 'Mort B', send: 'wait' });
-    await waitFor(async () => (await count(b.dst.doc, 'Contacts')) === rows, 'B reçoit', 120000, 2000);
+    const { a, b } = await twoRecipients('Mort', rows);
     log(`A et B ont les ${rows} lignes ; suppression du document de A (réaction : ${fix})`);
     await h.request('DELETE', `/docs/${a.dst.doc}`);
-    const ids = (await records(a.src.doc, 'Contacts')).slice(0, 5).map(r => r.id);
-    await applyActions(a.src.doc, [['BulkUpdateRecord', 'Contacts', ids, { Ville: ids.map(() => 'Mort1') }]]);
-    const t0 = Date.now();
-    const bGot = async () => (await count(b.dst.doc, 'Contacts', `where "Ville" = 'Mort1'`)) === 5;
+    const { t0, bGot } = await changeFive(a, b, 'Mort1');
     const queues = async () => JSON.stringify((await webhooks(a.src.doc)).map(w => [w.usage.status, w.usage.numWaiting, w.usage.lastHttpStatus]));
     // Blocage constaté : B n'a rien au bout de 45 s alors que A échoue.
     await sleep(45000);
     assert.ok(!(await bGot()), 'B est bloqué derrière l\'envoi mort (comportement de Grist)');
     log(`B bloqué depuis ${Math.round((Date.now() - t0) / 1000)} s ; files : ${await queues()}`);
-    await a.sv.open(a.src.url);
-    await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-    await sleep(4000);
-    log(`carte SOURCE : ${(await a.sv.text()).slice(0, 1800)}`);
-    await shot(a.sv, 'mort-erreur');
+    await sourceCard(a, 'carte SOURCE', { size: 1800 });
+    await shootPage(a.sv, 'mort-erreur');
     const rowA = a.sv.widget().locator('li.person').filter({ has: a.sv.widget().locator('.person-who', { hasText: 'Mort A' }) });
     const t1 = Date.now();
     if (fix === 'auto') log('rien n\'est fait à la main : le widget doit mettre le destinataire mort en pause tout seul (page SOURCE ouverte)');
@@ -232,12 +239,8 @@ const scenarios = {
     log(seen ? `B reçoit la modification ${seen} s après la réaction (${fix})` : `B ne reçoit pas la modification en ${patience} s (${fix})`);
     if (fix !== 'none') assert.ok(seen, `le destinataire en bonne santé reçoit après « ${fix} » du destinataire mort`);
     if (fix === 'auto') {
-      await a.sv.open(a.src.url);
-      await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-      await sleep(4000);
-      const card = await a.sv.text();
-      log(`carte SOURCE après la pause automatique : ${card.slice(0, 1200)}`);
-      await shot(a.sv, 'mort-pause-auto');
+      const card = await sourceCard(a, 'carte SOURCE après la pause automatique');
+      await shootPage(a.sv, 'mort-pause-auto');
       assert.match(card, /Mise en pause par le widget/, 'la carte dit que le widget a mis ce destinataire en pause');
     }
   },
@@ -249,20 +252,13 @@ const scenarios = {
   async destinataireMuet() {
     assert.ok(proxy, 'scénario réservé à CHAOS=1');
     const rows = 100;
-    const a = await h.pair({ name: 'Muet A', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
-    await follow(a, 'A reçoit', n => n === rows, { timeout: 120000, every: 3000 });
-    const b = await h.addRecipient(a, { name: 'Muet B', send: 'wait' });
-    await waitFor(async () => (await count(b.dst.doc, 'Contacts')) === rows, 'B reçoit', 120000, 2000);
+    const { a, b } = await twoRecipients('Muet', rows);
     const [hookA] = await webhooks(a.src.doc);
     const keyA = /\/api\/s\/([^/]+)\//.exec(hookA.fields.url)[1];
     proxy.set('hang', { only: keyA });
     log('le serveur de A ne répond plus (la connexion reste ouverte)');
-    await a.sv.open(a.src.url);
-    await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-    const ids = (await records(a.src.doc, 'Contacts')).slice(0, 5).map(r => r.id);
-    await applyActions(a.src.doc, [['BulkUpdateRecord', 'Contacts', ids, { Ville: ids.map(() => 'Muet1') }]]);
-    const t0 = Date.now();
-    const bGot = async () => (await count(b.dst.doc, 'Contacts', `where "Ville" = 'Muet1'`)) === 5;
+    await a.sv.openTab(a.src.url, 'Envoyer');
+    const { t0, bGot } = await changeFive(a, b, 'Muet1');
     let said = 0;
     let got = 0;
     for (let i = 0; i < 90 && !got; i++) {
@@ -273,11 +269,7 @@ const scenarios = {
     }
     log(got ? `B reçoit la modification ${got} s après la panne de A` : 'B ne reçoit pas la modification en 7 minutes');
     proxy.set('pass');
-    await a.sv.open(a.src.url);
-    await a.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-    await sleep(4000);
-    const card = await a.sv.text();
-    log(`carte SOURCE : ${card.slice(0, 1200)}`);
+    const card = await sourceCard(a, 'carte SOURCE');
     assert.ok(said, 'la carte dit que le destinataire ne répond pas');
     assert.ok(got, 'B reçoit sans rien faire à la main');
     assert.match(card, /Mise en pause par le widget : un envoi vers cette personne attendait/, 'la carte dit pourquoi le destinataire est en pause');
@@ -290,8 +282,7 @@ const scenarios = {
     assert.ok(proxy, 'scénario réservé à CHAOS=1');
     const rows = 300;
     const modes = (process.env.MODES || 'status:429,status:500,status:503,reset,hang,slow').split(',');
-    const p = await h.pair({ name: 'Webhooks en échec', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
-    await follow(p, 'départ', n => n === rows, { timeout: 120000, every: 3000 });
+    const p = await settledPair('Webhooks en échec', { rows });
     const ids = (await records(p.src.doc, 'Contacts')).slice(0, 3).map(r => r.id);
     const usageOf = async () => { const w = (await webhooks(p.src.doc))[0]; return { ...w.usage, lastBatch: undefined, lastEventBatch: undefined }; };
     for (const spec of modes) {
@@ -303,8 +294,7 @@ const scenarios = {
       await sleep(30000);
       const during = await usageOf();
       const stuck = await count(p.dst.doc, p.dest, `where "Ville" = '${mark}'`);
-      await p.sv.open(p.src.url);
-      await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+      await p.sv.openTab(p.src.url, 'Envoyer');
       await sleep(3000);
       const card = (await p.sv.text()).replace(/^.*Nouvel export/, '').slice(0, 700);
       log(`[${spec}] pendant la panne (30 s) : arrivées ${stuck}/3 ; Grist : ${JSON.stringify(during)}`);
@@ -385,8 +375,7 @@ const scenarios = {
         await applyActions(src.doc, [['UpdateRecord', 'Contacts', last.id, { Commentaire: 'y'.repeat(900000) }]]);
       },
     });
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await p.sv.openTab(p.src.url, 'Envoyer');
     await p.sv.button('Tout renvoyer').click();
     await p.sv.widget().getByText(/Renvoi terminé|Un autre renvoi est en cours/).waitFor({ timeout: 300000 }).catch(() => {});
     await sleep(20000);
@@ -395,7 +384,7 @@ const scenarios = {
     const n = await count(p.dst.doc, p.dest);
     log(`CIBLE ${n} lignes sur ${rows + 1}`);
     log(`carte CIBLE : ${(await p.dv.text()).slice(0, 900)}`);
-    log(`carte SOURCE : ${(await (async () => { await p.sv.open(p.src.url); await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click(); await sleep(3000); return p.sv.text(); })()).slice(0, 900)}`);
+    await sourceCard(p, 'carte SOURCE', { wait: 3000, size: 900 });
     const hook = (await webhooks(p.src.doc))[0].usage;
     log(`file SOURCE : ${hook.status} ${hook.numWaiting} http ${hook.lastHttpStatus}`);
     assert.ok(n >= rows, 'les autres lignes arrivent');
@@ -447,8 +436,7 @@ const scenarios = {
   async beaucoupDestinataires() {
     const total = Number(process.env.RECIPIENTS || 256);
     const rows = 10;
-    const p = await h.pair({ name: 'Beaucoup de destinataires', table: 'Contacts', columns: columnsOf(6), rows, makeRow, send: 'wait' });
-    await follow(p, 'départ', n => n === rows, { timeout: 120000, every: 3000 });
+    const p = await settledPair('Beaucoup de destinataires', { rows });
     const [first] = await webhooks(p.src.doc);
     const trigger = (await records(p.src.doc, '_grist_Triggers'))[0];
     const condition = JSON.parse(trigger.condition || '{}').text;
@@ -464,8 +452,7 @@ const scenarios = {
     const gets = [];
     p.sv.page.on('request', r => { if (/\/api\/s\/[^/]+$/.test(new URL(r.url()).pathname)) gets.push(r.url()); });
     const t1 = Date.now();
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await p.sv.openTab(p.src.url, 'Envoyer');
     await p.sv.widget().locator('li.person').nth(total - 1).waitFor({ timeout: 120000 });
     log(`onglet Envoyer : ${total} destinataires affichés en ${Math.round((Date.now() - t1) / 1000)} s ; ${gets.length} contrôles de lien envoyés`);
     await sleep(15000);
@@ -500,11 +487,7 @@ const scenarios = {
     const c0 = await burst('M');
     await sleep(60000);
     log(`avec un destinataire mort : après 60 s, file ${await queue()} ; CIBLE ${await count(p.dst.doc, p.dest, `where "Ville" like 'M%'`)}/${rows} lignes à jour`);
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-    await sleep(5000);
-    const card = await p.sv.text();
-    log(`carte SOURCE (début) : ${card.slice(0, 700)}`);
+    const card = await sourceCard(p, 'carte SOURCE (début)', { wait: 5000, size: 700 });
     log(`erreurs affichées : ${(card.match(/Erreur/g) || []).length} ; « attend derrière » : ${(card.match(/attend derrière/g) || []).length}`);
     void c0;
   },
@@ -514,8 +497,7 @@ const scenarios = {
   // perdre ni doubler.
   async modifMasse() {
     const rows = Number(process.env.ROWS || 6000);
-    const p = await h.pair({ name: 'Modification de masse', table: 'Contacts', columns: columnsOf(20), rows, makeRow, send: 'wait' });
-    await follow(p, 'départ', n => n === rows, { timeout: 900000, every: 5000 });
+    const p = await settledPair('Modification de masse', { rows, cols: 20, timeout: 900000, every: 5000 });
     const inCible = (col, value) => count(p.dst.doc, p.dest, `where "${col}" = '${value}'`);
     const ids = (await records(p.src.doc, 'Contacts')).map(r => r.id);
     const t0 = Date.now();
@@ -550,14 +532,11 @@ const scenarios = {
   // ne reste en file.
   async renvoisRepetes() {
     const rows = Number(process.env.ROWS || 4000);
-    const p = await h.pair({ name: 'Renvois répétés', table: 'Contacts', columns: columnsOf(12), rows, makeRow, send: 'wait' });
-    await follow(p, 'départ', n => n === rows, { timeout: 600000, every: 5000 });
+    const p = await settledPair('Renvois répétés', { rows, cols: 12, timeout: 600000, every: 5000 });
     const other = await h.newView('source2');
     await h.login(other);
-    await other.open(p.src.url);
-    await other.widget().getByRole('tab', { name: 'Envoyer' }).click();
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await other.openTab(p.src.url, 'Envoyer');
+    await p.sv.openTab(p.src.url, 'Envoyer');
     // Depuis la 0.12.3, « Tout renvoyer » part sans fenêtre (sauf un envoi long, qui se confirme) et se suit sur la carte :
     // « Renvoi terminé » quand cette page a envoyé, « Un autre renvoi est en cours » quand une autre page a la main
     // (le lot est alors noté et partira seul). Les deux réponses sont bonnes, le test relève laquelle vient.

@@ -40,7 +40,12 @@
 //         comparaison avant/après sur des milliers de cas pour le reste). La forme du port que rend `createRestPort` (ses vingt noms,
 //         dans le même ordre) ne change pas. Aucune formule à réécrire dans les documents déjà partagés. Mineure par convention :
 //         rien n'est ajouté ni retiré au port, aux tables ou aux codes.
-export const ENGINE_VERSION = '2.6.0';
+// 2.6.1 (11 novembre 2026, audit avant la Bêta) : correctif, sans ajout ni retrait. `addEvent` (`logic/notes.js`) ne lève plus
+//         d'erreur quand l'historique d'une note SOURCE retouchée à la main n'est pas une liste (il repart d'une liste vide) ; cinq
+//         variables locales renommées (`logic/journal.js`, `logic/lost.js`, `logic/notes.js`, `source/estimate.js`,
+//         `source/resend.js`). Port, tables, codes et texte des formules inchangés ; essai `tests/unit/robustness.test.mjs`
+//         (lectures de données abîmées : aucune exception imprévue).
+export const ENGINE_VERSION = '2.6.1';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

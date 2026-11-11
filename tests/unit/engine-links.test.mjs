@@ -11,18 +11,12 @@ import { readSchema } from '../../js/engine/port.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { approveReply, checkReply, enablePublicLink, invitationCode, invitationState, linkReturn, startInvitation, startReturn } from '../../js/engine/source/invite.js';
 import { checkDestinations, createReception, mustCompare, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
-import { fakeDoc, fakePort, fakeWorld } from './engine-fake.mjs';
-
-let serial = 0;
+import { fakeDoc, fakePair, fakePort, fakeWorld } from './engine-fake.mjs';
 
 // Une SOURCE avec un export et une invitation, une CIBLE qui l'a lue, a créé sa réception et répondu.
 async function handshake({ renforce = false } = {}) {
-  const world = fakeWorld();
-  const n = String(++serial).padStart(2, '0');
-  const source = fakeDoc({ docId: `sourcedoc00${n}x`, name: 'Annuaire', email: 'source@fake.local' });
-  const target = fakeDoc({ docId: `targetdoc00${n}x`, name: 'Réception', email: 'cible@fake.local' });
+  const { world, source, target, n } = fakePair('00');
   const other = fakeDoc({ docId: `otherdoc000${n}x`, name: 'Ailleurs', email: 'autre@fake.local' });
-  source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }], [{ Nom: 'Alice' }]);
   const as = (doc, over = {}) => startEngine({ port: { ...world.port(doc), ...over }, version: '9.9.9' });
   as(source);
   const { created: exp } = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom'], filter: null }] });

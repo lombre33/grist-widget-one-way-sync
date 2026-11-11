@@ -1,11 +1,9 @@
 // Diagnostic : que reste-t-il dans la SOURCE quand la table Synchro est supprimée, ou cachée à tous ?
 // (webhooks, déclencheurs, règles d'accès, lignes de métadonnées) : de quoi reconnaître « le widget était là ».
-import { createHarness, log, sleep } from '../harness.mjs';
-import { columnsOf, makeRow } from '../data.mjs';
-const h = await createHarness({ port: Number(process.env.PORT || 8752) });
-const { records, count, applyActions, webhooks, waitFor } = h;
-const p = await h.pair({ name: 'Sonde Synchro', table: 'Contacts', columns: columnsOf(8), rows: 30, makeRow, send: 'wait' });
-await waitFor(async () => (await count(p.dst.doc, p.dest)) === 30, 'départ', 90000, 2000);
+import { log, sleep } from '../harness.mjs';
+import { startProbe } from './probe.mjs';
+const { h, p } = await startProbe({ port: Number(process.env.PORT || 8752), name: 'Sonde Synchro' });
+const { records, applyActions, webhooks } = h;
 const dump = async (what) => {
   const hooks = await webhooks(p.src.doc);
   const trig = await records(p.src.doc, '_grist_Triggers');

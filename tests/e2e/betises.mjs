@@ -7,8 +7,7 @@
 // test d'unité ou d'intégration à part.
 // Usage : PORT=8700 node tests/e2e/betises.mjs                (tout)
 //         PORT=8701 ONLY=colonneSupprimee,tableRenommee node tests/e2e/betises.mjs
-import { mkdir } from 'node:fs/promises';
-import { createHarness, log, sleep } from './harness.mjs';
+import { createHarness, log, shootPage, sleep } from './harness.mjs';
 import { columnsOf, makeRow } from './data.mjs';
 
 const h = await createHarness({ port: Number(process.env.PORT || 8700) });
@@ -24,12 +23,7 @@ async function read(view, url, tab, shot = '') {
     await view.open(url);
     if (tab) await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 });
     await sleep(tab ? 6000 : 12000);
-    if (process.env.SHOTS && shot) {
-      await mkdir(process.env.SHOTS, { recursive: true });
-      await view.page.setViewportSize({ width: 1100, height: 900 });
-      await sleep(500);
-      await view.page.screenshot({ path: `${process.env.SHOTS}/${shot}.png` });
-    }
+    if (shot) await shootPage(view, shot);
     return flat(await view.text()).replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 1100);
   } catch (e) {
     const body = flat(await view.page.locator('body').innerText().catch(() => ''));
@@ -57,8 +51,7 @@ const tableIdOf = async (doc, prefix) => (await records(doc, '_grist_Tables')).m
 
 // La personne suit le conseil de la carte : « Réparer les clés », puis elle modifie une ligne.
 async function repairKeys(p) {
-  await p.sv.open(p.src.url);
-  await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+  await p.sv.openTab(p.src.url, 'Envoyer');
   await p.sv.button('Réparer les clés').click();
   await p.sv.dialogButton('Réparer les clés').click();
   await p.sv.dialog().waitFor({ state: 'detached', timeout: 120000 }).catch(() => {});
@@ -89,12 +82,8 @@ const cases = {
     act: async p => { await applyActions(p.src.doc, [['BulkRemoveRecord', 'Synchro', (await records(p.src.doc, 'Synchro')).map(r => r.id)]]); },
     // La personne suit le conseil de la carte : « Modifier », elle recoche la table et enregistre.
     after: async (p) => {
-      await p.sv.open(p.src.url);
-      await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
-      await p.sv.button('Modifier').click();
-      await p.sv.dialog().getByRole('checkbox', { name: 'Contacts' }).check();
-      await p.sv.dialogButton('Continuer').click();
-      await p.sv.dialogButton('Continuer').click();
+      await p.sv.openTab(p.src.url, 'Envoyer');
+      await h.editExport(p.sv, 'Contacts');
       await p.sv.dialogButton('Enregistrer').click();
       await p.sv.dialog().getByText(/Enregistré/).waitFor({ timeout: 120000 });
       await p.sv.dialogButton('Fermer').click();
@@ -163,8 +152,7 @@ const people = {
 
 // « Retirer les anciens webhooks » (Synchro supprimée) : la carte propose le bouton, la confirmation, et plus rien ne reste.
 async function removeOldHooks(p) {
-  await p.sv.open(p.src.url);
-  await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+  await p.sv.openTab(p.src.url, 'Envoyer');
   await p.sv.button('Retirer les anciens webhooks').click();
   await p.sv.dialogButton('Retirer les anciens webhooks').click();
   await p.sv.widget().getByText(/ancien webhook retiré/).waitFor({ timeout: 30000 });
@@ -235,11 +223,7 @@ async function runPerson(name, spec) {
       await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 }).catch(() => {});
       await sleep(7000);
       log(`[${name}] onglet ${tab} : ${flat(await view.text()).replace(/^Synchro Envoyer Recevoir Tutoriel/, '').trim().slice(0, 900)}`);
-      if (process.env.SHOTS) {
-        await mkdir(process.env.SHOTS, { recursive: true });
-        await view.page.setViewportSize({ width: 1100, height: 900 });
-        await view.page.screenshot({ path: `${process.env.SHOTS}/${name}-${tab}.png` });
-      }
+      await shootPage(view, `${name}-${tab}`);
     }
   } catch (e) {
     log(`[${name}] le widget ne s'affiche pas : ${e.message.split('\n')[0]} ; page : ${flat(await view.page.locator('body').innerText().catch(() => '')).slice(0, 300)}`);

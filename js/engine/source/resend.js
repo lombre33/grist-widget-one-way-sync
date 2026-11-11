@@ -119,13 +119,13 @@ async function markLots(exportId, tables, since) {
     if (!schema.has(lot[TABLE_COL])) continue;
     const start = startOf(lot, since);
     await writeSync([lot.id], { [MISSING_COL]: start });
-    const data = await fetchRows(lot[TABLE_COL]);
-    const rows = rowsSince(data, start);
+    const tableRows = await fetchRows(lot[TABLE_COL]);
+    const rows = rowsSince(tableRows, start);
     // Lignes qui peuvent partir : celles du suivi (clé présente, filtre appliqué) pour toute la table.
     const allEligible = eligibleRows(await syncRows(), exportId, lot[TABLE_COL]);
     const eligible = start <= RESEND_ALL ? allEligible : null;
     // Part des lignes de la table qui partent vraiment (voir announceRest) ; 1 si le suivi ne le dit pas.
-    const ratio = allEligible !== null && data.length ? allEligible / data.length : 1;
+    const ratio = allEligible !== null && tableRows.length ? allEligible / tableRows.length : 1;
     plans.push({ table: lot[TABLE_COL], lot: lot.id, start, rows, total: eligible ?? rows.length, ratio });
   }
   return plans;

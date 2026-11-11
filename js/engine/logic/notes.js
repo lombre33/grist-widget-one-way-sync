@@ -121,7 +121,7 @@ export function observeRows(note, exportId, counts, now, warn = true) {
   const changed = !before || tables.some(table => before.n[table] !== counts[table]) || Object.keys(before.n).some(table => !(table in counts));
   if (!drops.length && !(changed && (!before || now - before.at >= ROWS_REFRESH_S))) return null;
   let next = { ...note, lignes: { ...(note.lignes || {}), [exportId]: { at: now, n: counts } } };
-  for (const d of drops) next = addEvent(next, exportId, { at: now, kind: 'shrink', who: d.table, n: d.n });
+  for (const drop of drops) next = addEvent(next, exportId, { at: now, kind: 'shrink', who: drop.table, n: drop.n });
   return next;
 }
 

@@ -1,21 +1,25 @@
 // Outillage commun des tests de charge (tests/e2e/charge.mjs) : un Grist jetable (start-grist.sh), le
 // widget servi en local, un navigateur, et de quoi monter une paire SOURCE / CIBLE branchée par le
-// parcours d'un humain (export, invitation, réception, approbation). Le parcours complet
-// (tests/e2e/run.mjs) garde ses propres copies de ces fonctions.
+// parcours d'un humain (export, invitation, réception, approbation). Le widget servi et la préparation des
+// documents sont dans shared.mjs, que le parcours complet (tests/e2e/run.mjs) emploie aussi.
 import { chromium } from 'playwright';
-import { execFileSync } from 'node:child_process';
-import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { join, extname, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
+import { mkdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { ROOT, docTools, serveWidget } from './shared.mjs';
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 const started = Date.now();
 export const clock = () => `${String(Math.floor((Date.now() - started) / 60000)).padStart(3)}:${String(Math.floor((Date.now() - started) / 1000) % 60).padStart(2, '0')}`;
 export const log = text => console.log(`[${clock()}] ${text}`);
+
+// SHOTS=<dossier> : une capture de la page (le widget dans Grist) à un moment clé, nommée `<name>.png`.
+export async function shootPage(view, name) {
+  if (!process.env.SHOTS) return;
+  await mkdir(process.env.SHOTS, { recursive: true });
+  await view.page.setViewportSize({ width: 1100, height: 900 });
+  await sleep(500);
+  await view.page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
+}
 
 export async function createHarness({ port = 8586, patches = {}, envFile = '.env.json' } = {}) {
   const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e', envFile), 'utf8'));
@@ -24,20 +28,7 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
 
   // Widget servi en local ; `patches` : { '/js/chemin.js': texte => texte } pour changer une constante
   // (par exemple le budget des renvois) quand un scénario l'exige. Toujours dit à l'écran.
-  const server = createServer(async (req, res) => {
-    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    try {
-      let body = await readFile(join(ROOT, path));
-      if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
-      if (path === '/js/config.js') body = String(body).replace('GRIST_ORIGINS = [', `GRIST_ORIGINS = ['${env.grist}', `);
-      if (patches[path]) body = patches[path](String(body));
-      res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
-      res.end(body);
-    } catch (e) {
-      res.writeHead(404); res.end();
-    }
-  });
-  await new Promise(resolve => server.listen(port, resolve));
+  const server = await serveWidget({ env, port, adjust: (path, body) => (patches[path] ? patches[path](String(body)) : body) });
 
   // --- API REST de Grist (préparation et mesures)
   async function request(method, path, body, { raw = false } = {}) {
@@ -62,7 +53,6 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
       throw e;
     }
   };
-  const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
   const webhooks = async doc => (await api('GET', `/docs/${doc}/webhooks`)).webhooks;
   const journalOf = async doc => (await records(doc, '_grist_Tables')).map(tb => tb.tableId).find(id => id.startsWith('Journal_'));
 
@@ -76,20 +66,7 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     }
   }
 
-  // Document avec le widget posé sur sa table Table1 (page « Synchro »).
-  async function newDocWithWidget(name, setup, access = 'full') {
-    const workspace = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
-    const doc = await api('POST', `/workspaces/${workspace}/docs`, { name });
-    if (setup) await applyActions(doc, setup);
-    const view = (await applyActions(doc, [['CreateViewSection', await tableRef(doc, 'Table1'), 0, 'record', null, null]])).retValues[0];
-    await applyActions(doc, [
-      ['UpdateRecord', '_grist_Views', view.viewRef, { name: 'Synchro' }],
-      ['UpdateRecord', '_grist_Views_section', view.sectionRef, {
-        parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: WIDGET_URL, access, renderAfterReady: false }) }),
-      }],
-    ]);
-    return { doc, url: `${TEAM}/doc/${doc}/p/${view.viewRef}` };
-  }
+  const { tableRef, newDocWithWidget, publishedForms, formKey, formLink } = docTools({ env, api, applyActions, records, waitFor, widgetUrl: WIDGET_URL });
 
   // Table de `rows` lignes remplie par paquets (le corps d'une requête reste petit).
   async function fillTable(doc, tableId, columns, rows, makeRow, { prefix = 0 } = {}) {
@@ -132,6 +109,11 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
       await this.page.goto(url);
       await this.widget().locator('.topbar').waitFor({ timeout: 60000 });
     }
+    // Ouvre la page du widget puis son onglet (`Envoyer`, `Recevoir`…).
+    async openTab(url, tab) {
+      await this.open(url);
+      await this.widget().getByRole('tab', { name: tab }).click();
+    }
     // Texte de la carte affichée par le widget (pour les messages d'erreur à lire).
     async text() {
       return (await this.widget().locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
@@ -165,23 +147,6 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
   const shareDoc = (doc, email, access) => api('PATCH', `/docs/${doc}/access`, { delta: { users: { [email]: access } } });
 
   // --- Parcours d'un humain : export, invitation, réception, approbation
-  const pageOf = async (doc, viewRef) => (await records(doc, '_grist_Pages')).find(p => p.viewRef === viewRef);
-  const publishedForms = async doc => (await records(doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
-  // Clé de la page d'un formulaire, lue dans la base du serveur de test (Grist l'enregistre juste après le partage).
-  async function formKey(doc, form) {
-    const { shareRef } = await pageOf(doc, form.parentId);
-    const share = (await records(doc, '_grist_Shares')).find(sh => sh.id === shareRef);
-    return waitFor(() => {
-      try {
-        return execFileSync('docker', ['exec', env.container, 'python3', '-c',
-          `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
-      } catch (e) {
-        return null;
-      }
-    }, 'clé du formulaire enregistrée', 10000);
-  }
-  const formLink = async (doc, form) => `${TEAM}/forms/${await formKey(doc, form)}/${form.id}`;
-
   // SOURCE : crée un export de `table` (toutes les colonnes), nommé `name`.
   async function createExport(view, table, name) {
     await view.widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
@@ -272,8 +237,7 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
   // Destinataire de plus pour l'export d'une paire : nouvelle CIBLE, invitation par la carte de l'export, approbation.
   async function addRecipient(p, { name, send = 'skip' }) {
     const dst = await newDocWithWidget(`${name} CIBLE`);
-    await p.sv.open(p.src.url);
-    await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+    await p.sv.openTab(p.src.url, 'Envoyer');
     await p.sv.button('Ajouter un destinataire').click();
     await p.sv.dialogButton('Créer l’invitation').click();
     await p.sv.dialog().getByText('Transmettez ce code').waitFor({ timeout: 60000 });
@@ -286,6 +250,15 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     return { dst, dv, journal: await journalOf(dst.doc), dest: p.table };
   }
 
+  // SOURCE : « Modifier » rouvre l'assistant de l'export (onglet Envoyer ouvert), recoche `table` et passe les étapes
+  // jusqu'à « Enregistrer », que l'essai clique à son tour.
+  async function editExport(view, table) {
+    await view.button('Modifier').click();
+    await view.dialog().getByRole('checkbox', { name: table }).check();
+    await view.dialogButton('Continuer').click();
+    await view.dialogButton('Continuer').click();
+  }
+
   async function close() {
     await browser.close();
     server.close();
@@ -293,6 +266,6 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
 
   return {
     env, TEAM, WIDGET_URL, api, request, applyActions, records, sql, count, tableRef, webhooks, journalOf, waitFor, newDocWithWidget, fillTable,
-    newView, userView, shareDoc, login, createExport, invite, accept, approve, pair, addRecipient, close, problems, formKey, formLink, publishedForms,
+    newView, userView, shareDoc, login, createExport, editExport, invite, accept, approve, pair, addRecipient, close, problems, formKey, formLink, publishedForms,
   };
 }

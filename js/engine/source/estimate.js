@@ -14,10 +14,10 @@ export async function exportEstimate(exp) {
   const recipients = (await readHooks()).of(exp.id).filter(h => h.fields.enabled).length;
   const tables = [];
   for (const tb of exp.tables) {
-    const data = await fetchRows(tb.table);
+    const tableRows = await fetchRows(tb.table);
     const ids = tb.columns.map(c => c.id);
-    const sample = data.slice(0, 50).map(r => Object.fromEntries(ids.map(id => [id, r[id]])));
-    tables.push({ rows: eligibleRows(sync, exp.id, tb.table) ?? data.length, bytesPerLine: lineBytes(sample), all: data.length });
+    const sample = tableRows.slice(0, 50).map(r => Object.fromEntries(ids.map(id => [id, r[id]])));
+    tables.push({ rows: eligibleRows(sync, exp.id, tb.table) ?? tableRows.length, bytesPerLine: lineBytes(sample), all: tableRows.length });
   }
   return { ...estimateSend({ tables, recipients: Math.max(1, recipients) }), all: tables.reduce((n, tb) => n + tb.all, 0) };
 }

@@ -173,6 +173,10 @@ publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_UR
   propriétaires, journaux aux éditeurs, lien public). Un accès en lecture ne
   permettrait aucune de ces écritures, dont la liste complète est dans
   [`docs/06-architecture.md`](docs/06-architecture.md#ce-que-le-widget-écrit-dans-les-documents).
+  Il modifie donc la structure du document, pas seulement ses données : ce qu'il crée, modifie,
+  renomme ou supprime, et le geste de la personne qui le déclenche (toujours confirmé pour une
+  suppression), est détaillé dans [`SECURITY.md`](SECURITY.md#ce-que-le-widget-écrit-et-garde). Hors de
+  ses propres tables et colonnes, il ne renomme et ne supprime rien de lui-même.
 - **Réseau** : en dehors de l'API des widgets, le widget ne parle qu'à l'instance Grist, par une
   seule fonction (`gristFetch`, `js/grist.js`) qui refuse toute autre origine et n'envoie aucun
   cookie. La CSP de `index.html` reprend la même liste.

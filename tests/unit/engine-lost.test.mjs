@@ -11,17 +11,11 @@ import { createReception, readInvitation } from '../../js/engine/target/receive.
 import { dismissLost, markReceptions, readLost } from '../../js/engine/target/lost.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { readMark } from '../../js/engine/logic/lost.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
-
-let serial = 0;
+import { fakePair } from './engine-fake.mjs';
 
 // Une CIBLE qui a une table `Annuaire_recu` sur sa page, puis une autre page, et qui reçoit un export.
 async function reception({ arrange }) {
-  const world = fakeWorld();
-  const n = String(++serial).padStart(2, '0');
-  const source = fakeDoc({ docId: `sourcedoc10${n}x`, name: 'Annuaire', email: 'source@fake.local' });
-  const target = fakeDoc({ docId: `targetdoc10${n}x`, name: 'Réception', email: 'cible@fake.local' });
-  source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }], [{ Nom: 'Alice' }]);
+  const { world, source, target } = fakePair('10');
   target.addTable('Annuaire_recu', [{ id: 'Nom', type: 'Text' }]);
   const tableRef = target.fetchRows('_grist_Tables').find(tb => tb.tableId === 'Annuaire_recu').id;
   const view = target.apply([['AddRecord', '_grist_Views', null, { name: 'Annuaire_recu' }]]).retValues[0];

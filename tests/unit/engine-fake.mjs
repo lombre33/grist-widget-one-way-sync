@@ -210,6 +210,18 @@ export function fakePort(doc, { owner = true, world = null } = {}) {
   };
 }
 
+// Une SOURCE (table Contacts d'une ligne) et une CIBLE neuves sur le même monde. `tag` (deux caractères) range les
+// identifiants de document d'un fichier d'essai : deux essais ne partagent jamais le même (`n` : le rang de la paire).
+let pairs = 0;
+export function fakePair(tag) {
+  const world = fakeWorld();
+  const n = String(++pairs).padStart(2, '0');
+  const source = fakeDoc({ docId: `sourcedoc${tag}${n}x`, name: 'Annuaire', email: 'source@fake.local' });
+  const target = fakeDoc({ docId: `targetdoc${tag}${n}x`, name: 'Réception', email: 'cible@fake.local' });
+  source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }], [{ Nom: 'Alice' }]);
+  return { world, source, target, n };
+}
+
 // Plusieurs documents sur la même instance : de quoi jouer une SOURCE puis une CIBLE. La personne
 // « publie » le formulaire d'un journal et en copie le lien (`formLink`) ; l'écriture par ce lien
 // (`postRows`) n'arrive que dans ce journal, comme chez Grist, et une colonne inconnue est refusée. Les

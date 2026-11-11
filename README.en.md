@@ -168,6 +168,10 @@ the widget's instructions give.
   webhooks and the access rules it sets (technical table reserved to owners, journals to
   editors, public link). Read access would allow none of these writes,
   listed in full in [`docs/06-architecture.md`](docs/06-architecture.md#ce-que-le-widget-écrit-dans-les-documents).
+  It therefore changes the structure of the document, not only its data: what it creates, modifies,
+  renames or deletes, and the user action that triggers it (a deletion is always confirmed), is
+  detailed (in French) in [`SECURITY.md`](SECURITY.md#ce-que-le-widget-écrit-et-garde). Outside
+  its own tables and columns, it renames and deletes nothing on its own.
 - **Network**: apart from the widget API, the widget only talks to the Grist instance, through a
   single function (`gristFetch`, `js/grist.js`) that refuses any other origin and sends no
   cookies. The CSP in `index.html` repeats the same list.

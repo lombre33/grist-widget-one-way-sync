@@ -19,6 +19,19 @@ const EXPORT = 'fedcba9876543210';
 const COLUMNS = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville' }];
 const PREFIX = 'Gfs_';
 
+// CIBLE : le journal `journal` de l'export nommé `name`, et sa table de destination `dest` prête à recevoir.
+async function receive(journal, name, dest) {
+  const entry = { table: 'Contacts', dest, columns: COLUMNS, own: ['Nom', 'Ville'] };
+  await createJournal(journal, {
+    id: '0123456789abcdef', export: EXPORT, name, secret: '', from: { email: 'source@fake.local', docId: 'zyxwvutsrqpo', docName: 'Source' }, tables: [entry], refused: [], missing: {},
+  });
+  await prepareDest({ dest, columns: COLUMNS });
+}
+// Ce que le webhook dépose dans le journal : une ligne brute 'lot', comme la formule de la SOURCE la fabrique.
+const dropLot = (doc, journal, lines, total = lines.length) => doc.addRow(journal, {
+  [EXPORT_COL]: EXPORT, [TABLE_COL]: 'Contacts', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: JSON.stringify(COLUMNS), [LOT_COL]: JSON.stringify({ lignes: lines, total }), Sync_Recu: doc.now(),
+});
+
 test('SOURCE : un export crée la table technique préfixée, ses lignes et ses formules', async () => {
   const doc = fakeDoc();
   startEngine({ port: fakePort(doc), prefix: PREFIX });
@@ -52,17 +65,10 @@ test('CIBLE : un lot déposé dans le journal est recopié dans la destination',
   startEngine({ port: fakePort(doc), prefix: PREFIX });
   const journal = journalId('Annuaire', (await readSchema()).tableIds);
   assert.equal(journal, 'Gfs_Journal_Annuaire');
-  const entry = { table: 'Contacts', dest: 'Gfs_Contacts', columns: COLUMNS, own: ['Nom', 'Ville'] };
-  await createJournal(journal, {
-    id: '0123456789abcdef', export: EXPORT, name: 'Annuaire', secret: '', from: { email: 'source@fake.local', docId: 'zyxwvutsrqpo', docName: 'Source' }, tables: [entry], refused: [], missing: {},
-  });
-  await prepareDest({ dest: entry.dest, columns: COLUMNS });
+  await receive(journal, 'Annuaire', 'Gfs_Contacts');
   assert.deepEqual(receivedJournals(await readSchema()).map(r => r.journal), [journal]);
 
-  // Ce que le webhook dépose : une ligne brute 'lot', comme la formule de la SOURCE la fabrique.
-  const lot = (lines, total = lines.length) => doc.addRow(journal, {
-    [EXPORT_COL]: EXPORT, [TABLE_COL]: 'Contacts', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: JSON.stringify(COLUMNS), [LOT_COL]: JSON.stringify({ lignes: lines, total }), Sync_Recu: doc.now(),
-  });
+  const lot = lines => dropLot(doc, journal, lines);
   lot([['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }], ['k2', 100, false, { Nom: 'Bob', Ville: 'Nice' }]]);
   await consolidateAll();
   const names = () => doc.rows('Gfs_Contacts').filter(r => r.Supprime !== true).map(r => `${r[KEY_COL]}:${r.Nom}:${r.Ville}`).sort();
@@ -89,18 +95,11 @@ test('CIBLE : une destination donnée par l\'hôte reste intacte, sans y remettr
   assert.equal(journal, 'GFS_Journal_Dossiers');
   // L'hôte (un écran de GFS) a choisi l'identifiant exact de la destination : `dest` n'est pas préfixé,
   // le moteur ne le préfixe pas (seul le nom que l'écran de Sync+ propose passe par destTableId).
-  const entry = { table: 'Contacts', dest: 'Dossiers_recus', columns: COLUMNS, own: ['Nom', 'Ville'] };
-  await createJournal(journal, {
-    id: '0123456789abcdef', export: EXPORT, name: 'Dossiers', secret: '', from: { email: 'source@fake.local', docId: 'zyxwvutsrqpo', docName: 'Source' }, tables: [entry], refused: [], missing: {},
-  });
-  await prepareDest({ dest: entry.dest, columns: COLUMNS });
+  await receive(journal, 'Dossiers', 'Dossiers_recus');
   assert.ok(doc.has('Dossiers_recus'), 'la destination porte exactement l\'identifiant donné');
   assert.ok(!doc.has('GFS_Dossiers_recus'));
 
-  doc.addRow(journal, {
-    [EXPORT_COL]: EXPORT, [TABLE_COL]: 'Contacts', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: JSON.stringify(COLUMNS),
-    [LOT_COL]: JSON.stringify({ lignes: [['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }]], total: 1 }), Sync_Recu: doc.now(),
-  });
+  dropLot(doc, journal, [['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }]]);
   await consolidateAll();
   assert.deepEqual(doc.rows('Dossiers_recus').map(r => `${r[KEY_COL]}:${r.Nom}`), ['k1:Alice']);
   assert.ok(!doc.has('GFS_Dossiers_recus'));

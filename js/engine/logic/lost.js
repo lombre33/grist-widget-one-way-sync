@@ -23,9 +23,9 @@ export function receptionMark(journal, note) {
 // Ce que dit la description d'un partage : `{ journal, name, dests }`, ou null (pas de marque, texte
 // d'une autre personne ou abîmé).
 export function readMark(description) {
-  let data;
-  try { data = JSON.parse(String(description || '')); } catch { return null; }
-  const mark = data && typeof data === 'object' ? data[MARK_KEY] : null;
+  let parsed;
+  try { parsed = JSON.parse(String(description || '')); } catch { return null; }
+  const mark = parsed && typeof parsed === 'object' ? parsed[MARK_KEY] : null;
   if (!mark || typeof mark !== 'object' || !TABLE_ID.test(String(mark.journal))) return null;
   const dests = Array.isArray(mark.dests) ? mark.dests.filter(d => typeof d === 'string' && TABLE_ID.test(d)).slice(0, DESTS_MAX) : [];
   return { journal: mark.journal, name: cleanLabel(mark.name), dests };

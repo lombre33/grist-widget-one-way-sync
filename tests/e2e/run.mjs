@@ -7,47 +7,33 @@
 // Seul écart avec un humain : le lien du formulaire est lu dans la base du serveur de test au lieu
 // d'être copié depuis le bouton « Partager » de Grist (hors du widget).
 import { chromium } from 'playwright';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { join, extname, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { partRow } from '../../js/engine/logic/files.js';
 import { decodeCode } from '../../js/engine/logic/codes.js';
 import { linkKeys, newKeyPair, readKeys, signText } from '../../js/engine/logic/trust.js';
 import { PUBLIC_KEY, bucketOf } from '../../js/engine/logic/common.js';
+import { ROOT, docTools, serveWidget } from './shared.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
 const WIDGET_PORT = 8585;
 const WIDGET_URL = `http://localhost:${WIDGET_PORT}/index.html`;
 const TEAM = `${env.grist}/o/${env.team}`;
 
-// --- Widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées
-// (config.js) et à la politique de sécurité (index.html), comme le ferait une instance qui
-// héberge sa propre copie.
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg' };
-const server = createServer(async (req, res) => {
-  const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  try {
-    let body = await readFile(join(ROOT, path));
-    if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
-    if (path === '/js/config.js') body = String(body).replace("GRIST_ORIGINS = [", `GRIST_ORIGINS = ['${env.grist}', `);
-    // Bilan des lignes (tally.js) : le délai de 10 minutes est ramené à 20 secondes pour le test.
-    if (path === '/js/engine/logic/tally.js') {
-      body = String(body).replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
-      if (!String(body).includes('TALLY_GRACE_S = 20')) throw new Error('délai du bilan introuvable dans tally.js');
-    }
-    res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream' });
-    res.end(body);
-  } catch (e) {
-    res.writeHead(404); res.end();
-  }
+// --- Widget servi en local (shared.mjs). Le bilan des lignes (tally.js) : le délai de 10 minutes est ramené à
+// 20 secondes pour le test.
+const server = await serveWidget({
+  env, port: WIDGET_PORT,
+  adjust(path, body) {
+    if (path !== '/js/engine/logic/tally.js') return body;
+    const patched = String(body).replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
+    if (!patched.includes('TALLY_GRACE_S = 20')) throw new Error('délai du bilan introuvable dans tally.js');
+    return patched;
+  },
 });
-await new Promise(resolve => server.listen(WIDGET_PORT, resolve));
 
 // --- API REST de Grist (préparation et vérifications seulement)
 async function api(method, path, body) {
@@ -69,7 +55,6 @@ async function hideColumn(doc, tableId, colIds) {
   return () => applyActions(doc, [['RemoveRecord', '_grist_ACLRules', rule], ['RemoveRecord', '_grist_ACLResources', resource]]);
 }
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
-const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
 // Clé de signature reçue par une destination (description de sa colonne id_sync, voir storeKey).
 const receivedKeyOf = async (doc, table, slot) => {
   const ref = await tableRef(doc, table);
@@ -84,21 +69,6 @@ async function pageColumns(doc, tableId) {
   return [...new Set((await records(doc, '_grist_Views_section_field')).filter(f => sections.has(f.parentId)).map(f => cols.get(f.colRef)))];
 }
 
-// `access` : niveau déjà accordé au widget ('none' : Grist demande l'accès complet, que le widget réclame).
-async function newDocWithWidget(name, setup, access = 'full') {
-  const workspace = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
-  const doc = await api('POST', `/workspaces/${workspace}/docs`, { name });
-  if (setup) await applyActions(doc, setup);
-  const view = (await applyActions(doc, [['CreateViewSection', await tableRef(doc, 'Table1'), 0, 'record', null, null]])).retValues[0];
-  await applyActions(doc, [
-    ['UpdateRecord', '_grist_Views', view.viewRef, { name: 'Synchro' }],
-    ['UpdateRecord', '_grist_Views_section', view.sectionRef, {
-      parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: WIDGET_URL, access, renderAfterReady: false }) }),
-    }],
-  ]);
-  return { doc, url: `${TEAM}/doc/${doc}/p/${view.viewRef}` };
-}
-
 async function waitFor(check, what, timeout = 30000) {
   const end = Date.now() + timeout;
   for (;;) {
@@ -108,6 +78,8 @@ async function waitFor(check, what, timeout = 30000) {
     await new Promise(r => setTimeout(r, 500));
   }
 }
+
+const { tableRef, newDocWithWidget, pageOf, publishedForms, formKey, formLink } = docTools({ env, api, applyActions, records, waitFor, widgetUrl: WIDGET_URL });
 
 const step = text => console.log(`· ${text}`);
 // Images d'aide montrées par l'assistant à l'étape Lien (img/) : la carte du formulaire publié
@@ -332,23 +304,6 @@ try {
     await dialog().getByRole('button', { name: `${field} : ` }).click();
     await dialog().getByRole('option', { name: option, exact: true }).click();
   };
-  const pageOf = async (doc, viewRef) => (await records(doc, '_grist_Pages')).find(p => p.viewRef === viewRef);
-  // Clé de la page d'un formulaire (une par page partagée), lue dans la base du serveur de test ;
-  // Grist l'enregistre juste après le partage.
-  const formKey = async (doc, form) => {
-    const { shareRef } = await pageOf(doc, form.parentId);
-    const share = (await records(doc, '_grist_Shares')).find(sh => sh.id === shareRef);
-    return waitFor(() => {
-      try {
-        return execFileSync('docker', ['exec', env.container, 'python3', '-c',
-          `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
-      } catch (e) {
-        return null;
-      }
-    }, 'clé du formulaire enregistrée', 10000);
-  };
-  const formLink = async (doc, form) => `${TEAM}/forms/${await formKey(doc, form)}/${form.id}`;
-  const publishedForms = async doc => (await records(doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
   // Formulaire publié sur sa page, dans `doc`, pour une table créée pour l'occasion.
   async function strayForm(doc, tableId, columns) {
     await applyActions(doc, [['AddTable', tableId, columns]]);
@@ -411,14 +366,28 @@ try {
     return (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', names.map(() => null), { Nom: names }]])).retValues[0];
   }
 
-  // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
-  // publié, rendre la réponse.
-  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = []) {
+  // SOURCE d'un Échange, « Créer l'invitation » cliqué : attend le formulaire de retour publié en plus de ceux de `known`,
+  // rouvre l'assistant à l'étape du lien de retour, et rend ce formulaire avec le code à transmettre.
+  async function returnInvitation(a, known = []) {
+    const forms = await waitFor(async () => { const f = (await publishedForms(a.doc)).filter(x => !known.some(k => k.id === x.id)); return f.length === 1 && f; },
+      known.length ? 'second formulaire de retour publié' : 'formulaire de retour publié');
+    await openWidget(a.url);
+    const code = await testLink('Lien du formulaire de retour', await formLink(a.doc, forms[0]), 'Transmettez ce code');
+    await dialogButton('Plus tard').click();
+    return { form: forms[0], code };
+  }
+  // CIBLE : coller le code de l'invitation dans l'assistant de réception.
+  async function pasteInvitation(url, code) {
     await openWidget(url);
     await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
     await button('Accepter une invitation').click();
     await dialog().locator('textarea.code').first().fill(code);
     await dialogButton('Continuer').click();
+  }
+  // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
+  // publié, rendre la réponse.
+  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = []) {
+    await pasteInvitation(url, code);
     await dialog().getByText(tables).waitFor();
     if (checks.length) await dialog().getByText('Options avancées').click();
     for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
@@ -473,10 +442,7 @@ try {
     await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
     await shot('20-echange-mode', 'modal');
     await dialogButton('Créer l’invitation').click();
-    const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
-    await openWidget(a.url); // l'assistant reprend à l'étape du lien de retour
-    const code = await testLink('Lien du formulaire de retour', await formLink(a.doc, back[0]), 'Transmettez ce code');
-    await dialogButton('Plus tard').click();
+    const { form: back, code } = await returnInvitation(a);
     assert.ok(!JSON.stringify(await api('POST', `/docs/${a.doc}/sql`, { sql: 'select description from _grist_Tables_column' })).includes('/api/s/'),
       'adresse de retour notée nulle part chez A');
     const answer = await accept(b.doc, b.url, code, '« Partage » : table Fiches.');
@@ -552,10 +518,7 @@ try {
     assert.ok(await dialog().getByRole('radio', { name: /Un participant de plus/ }).isChecked(), 'l\'Échange est proposé d\'office');
     assert.ok(await dialog().getByRole('radio', { name: /Dans un seul sens/ }).isDisabled(), 'un export en Échange n\'a que des participants');
     await dialogButton('Créer l’invitation').click();
-    const backC = await waitFor(async () => { const f = (await publishedForms(a.doc)).filter(x => x.id !== back[0].id); return f.length === 1 && f; }, 'second formulaire de retour publié');
-    await openWidget(a.url);
-    const codeC = await testLink('Lien du formulaire de retour', await formLink(a.doc, backC[0]), 'Transmettez ce code');
-    await dialogButton('Plus tard').click();
+    const { code: codeC } = await returnInvitation(a, [back]);
     const answerC = await accept(c.doc, c.url, codeC, '« Partage » : table Fiches.');
     await approve(answerC, { url: a.url });
     const swapRow = async () => (await records(a.doc, 'Synchro')).find(r => r.Synchro_Type === 'echange');
@@ -580,7 +543,7 @@ try {
     await openWidget(a.url);
     await revoke(widget().locator(`.person[data-memo*="${c.doc.slice(0, 10)}"]`));
     await waitFor(async () => (await api('GET', `/docs/${a.doc}/webhooks`)).webhooks.length === 1, 'un participant de moins');
-    assert.deepEqual((await publishedForms(a.doc)).map(f => f.id), [back[0].id], 'son journal de retour et sa clé sont effacés, pas ceux de B');
+    assert.deepEqual((await publishedForms(a.doc)).map(f => f.id), [back.id], 'son journal de retour et sa clé sont effacés, pas ceux de B');
     assert.equal((await swapRow()).Synchro_Colonnes, '', 'retour à l\'Échange à deux');
     await openWidget(c.url);
     await widget().getByText('Coupé par la SOURCE').waitFor({ timeout: 30000 });
@@ -828,10 +791,8 @@ try {
     assert.deepEqual([now.Anna.Lieu, now.Basile.Lieu, now.Céline.Lieu], ['Villeurbanne', 'Villeurbanne', 'Paris']);
     step('Références conservées : case décochée, les colonnes redeviennent du texte');
   }
-  // --- Pièces jointes : la liste des fichiers part avec les lignes, leur contenu quand la page
-  // SOURCE est ouverte, une fois par destinataire, en morceaux ; la CIBLE dépose chaque fichier une
-  // seule fois et remplit les cellules dès son arrivée.
-  async function filesSteps() {
+  // Pièces jointes d'un document par l'API REST : dépôt, lecture, et empreinte courte d'un contenu.
+  function attachmentTools() {
     const auth = { Authorization: `Bearer ${env.apiKey}` };
     const upload = async (doc, name, bytes) => {
       const form = new FormData();
@@ -840,6 +801,13 @@ try {
     };
     const download = async (doc, id) => new Uint8Array(await (await fetch(`${TEAM}/api/docs/${doc}/attachments/${id}/download`, { headers: auth })).arrayBuffer());
     const sha = bytes => createHash('sha1').update(bytes).digest('hex').slice(0, 16);
+    return { upload, download, sha };
+  }
+  // --- Pièces jointes : la liste des fichiers part avec les lignes, leur contenu quand la page
+  // SOURCE est ouverte, une fois par destinataire, en morceaux ; la CIBLE dépose chaque fichier une
+  // seule fois et remplit les cellules dès son arrivée.
+  async function filesSteps() {
+    const { upload, download, sha } = attachmentTools();
     const small = new TextEncoder().encode('bonjour');
     const big = Uint8Array.from({ length: 1300000 }, (_, i) => (i * 31 + (i >> 8)) % 251); // trois morceaux
     // Etat : liste de choix, que la CIBLE reprend (choix ajoutés plus tard compris).
@@ -923,14 +891,7 @@ try {
   // d'être recopiée (sinon une cellule incomplète repartirait vers les autres) ; à plusieurs, un fichier de B
   // va chez C par A, sans copie pour B.
   async function exchangeFilesSteps() {
-    const auth = { Authorization: `Bearer ${env.apiKey}` };
-    const upload = async (doc, name, bytes) => {
-      const form = new FormData();
-      form.append('upload', new Blob([bytes]), name);
-      return (await (await fetch(`${TEAM}/api/docs/${doc}/attachments`, { method: 'POST', headers: auth, body: form })).json())[0];
-    };
-    const download = async (doc, id) => new Uint8Array(await (await fetch(`${TEAM}/api/docs/${doc}/attachments/${id}/download`, { headers: auth })).arrayBuffer());
-    const sha = bytes => createHash('sha1').update(bytes).digest('hex').slice(0, 16);
+    const { upload, download, sha } = attachmentTools();
     const text = value => new TextEncoder().encode(value);
     const medium = Uint8Array.from({ length: 600000 }, (_, i) => (i * 37 + (i >> 8)) % 253); // deux morceaux
     const a = await newDocWithWidget('Échange fichiers A', [
@@ -949,10 +910,7 @@ try {
     await dialogButton('Ajouter un destinataire').click();
     await dialog().getByRole('radio', { name: /Échange/ }).check();
     await dialogButton('Créer l’invitation').click();
-    const back = await waitFor(async () => { const f = await publishedForms(a.doc); return f.length === 1 && f; }, 'formulaire de retour publié');
-    await openWidget(a.url);
-    const code = await testLink('Lien du formulaire de retour', await formLink(a.doc, back[0]), 'Transmettez ce code');
-    await dialogButton('Plus tard').click();
+    const { form: back, code } = await returnInvitation(a);
     const exportId = (await records(a.doc, 'Synchro'))[0].Synchro_Export;
     const answer = await accept(b.doc, b.url, code, '« Partage » : table Dossiers.');
     await approve(answer, { url: a.url });
@@ -977,6 +935,12 @@ try {
       return (note.fichiers || {})[exportId] || { f: '', h: [], o: {} };
     };
     const dossiers = async doc => Object.fromEntries((await records(doc, 'Dossiers')).map(r => [r.Nom, r]));
+    // Ajoute un fichier à la cellule Piece du dossier `nom` de `doc`.
+    const addPiece = async (doc, nom, fileName, content) => {
+      const id = await upload(doc, fileName, content);
+      const row = (await dossiers(doc))[nom];
+      await applyActions(doc, [['UpdateRecord', 'Dossiers', row.id, { Piece: [...row.Piece, id] }]]);
+    };
     const pieces = async (doc, nom) => ((await dossiers(doc))[nom] || {}).Piece;
     // Ouvre le widget du document `w` et attend que `ok()` soit vrai.
     const seenIn = async (w, ok, what) => { await openWidget(w.url); return waitFor(ok, what, 60000); };
@@ -1031,9 +995,7 @@ try {
 
     // A ajoute un fichier : B le reçoit, ne le renvoie pas.
     const later = text('envoi de A');
-    const laterId = await upload(a.doc, 'de-a.txt', later);
-    const aDeux = (await dossiers(a.doc)).Deux;
-    await applyActions(a.doc, [['UpdateRecord', 'Dossiers', aDeux.id, { Piece: [...aDeux.Piece, laterId] }]]);
+    await addPiece(a.doc, 'Deux', 'de-a.txt', later);
     const toA2 = spy(a.doc, aJournal);
     await openWidget(a.url);
     await waitFor(async () => (await noted(a.doc)).f.includes(sha(later)), 'A envoie son nouveau fichier', 60000);
@@ -1049,10 +1011,7 @@ try {
     await openWidget(a.url);
     await button('Ajouter un participant').click();
     await dialogButton('Créer l’invitation').click();
-    const backC = await waitFor(async () => { const f = (await publishedForms(a.doc)).filter(x => x.id !== back[0].id); return f.length === 1 && f; }, 'second formulaire de retour publié');
-    await openWidget(a.url);
-    const codeC = await testLink('Lien du formulaire de retour', await formLink(a.doc, backC[0]), 'Transmettez ce code');
-    await dialogButton('Plus tard').click();
+    const { code: codeC } = await returnInvitation(a, [back]);
     const answerC = await accept(c.doc, c.url, codeC, '« Partage » : table Dossiers.');
     await approve(answerC, { url: a.url });
     // La page de A, ouverte, envoie à C tous les fichiers (B les a, il n'en reçoit pas) ; puis C les dépose.
@@ -1060,9 +1019,7 @@ try {
     await openWidget(c.url);
     await waitFor(async () => (await filesOf(c.doc, 'Un')).length === 1 && (await filesOf(c.doc, 'Deux')).length === 2, 'C reçoit tous les fichiers de A', 120000);
     const viaA = text('pièce de B pour C');
-    const viaAId = await upload(b.doc, 'pour-c.txt', viaA);
-    const bUn2 = (await dossiers(b.doc)).Un;
-    await applyActions(b.doc, [['UpdateRecord', 'Dossiers', bUn2.id, { Piece: [...bUn2.Piece, viaAId] }]]);
+    await addPiece(b.doc, 'Un', 'pour-c.txt', viaA);
     const intoB = spy(b.doc, bJournal);
     await openWidget(b.url);
     await waitFor(async () => (await noted(b.doc)).f.includes(sha(viaA)), 'B envoie son fichier à A', 60000);
@@ -1206,14 +1163,6 @@ try {
       await tab.waitForURL(url => url.pathname.startsWith(`/o/${env.team}/${shortId(doc)}`), { timeout: 60000 });
       await tab.waitForFunction(name => document.title.startsWith(name), title, { timeout: 60000 });
       await tab.close();
-    };
-    // CIBLE : coller le code de l'invitation dans l'assistant de réception.
-    const pasteInvitation = async (url, code) => {
-      await openWidget(url);
-      await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
-      await button('Accepter une invitation').click();
-      await dialog().locator('textarea.code').first().fill(code);
-      await dialogButton('Continuer').click();
     };
     // SHOTS=<dossier> : captures de contrôle (pas celles du README).
     // Une carte redessinée pendant la prise de vue (toutes les 10 s) : la capture se refait, sans faire échouer le test.

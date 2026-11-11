@@ -1,10 +1,8 @@
 // Diagnostic : lignes de Synchro supprimées, puis « Modifier » : que contient Synchro, que dit le webhook ?
-import { createHarness, log, sleep } from '../harness.mjs';
-import { columnsOf, makeRow } from '../data.mjs';
-const h = await createHarness({ port: Number(process.env.PORT || 8751) });
+import { log, sleep } from '../harness.mjs';
+import { startProbe } from './probe.mjs';
+const { h, p } = await startProbe({ port: Number(process.env.PORT || 8751), name: 'Réparation Synchro' });
 const { records, count, applyActions, webhooks, waitFor } = h;
-const p = await h.pair({ name: 'Réparation Synchro', table: 'Contacts', columns: columnsOf(8), rows: 30, makeRow, send: 'wait' });
-await waitFor(async () => (await count(p.dst.doc, p.dest)) === 30, 'départ', 90000, 2000);
 const dump = async (what) => {
   const rows = await records(p.src.doc, 'Synchro');
   log(`${what}: Synchro ${rows.length} lignes : ${rows.map(r => `${r.Synchro_Type}/${r.Synchro_Table}/${r.Synchro_Export.slice(0, 4)}`).join(' ')}`);
@@ -14,13 +12,9 @@ await dump('avant');
 await applyActions(p.src.doc, [['BulkRemoveRecord', 'Synchro', (await records(p.src.doc, 'Synchro')).map(r => r.id)]]);
 await sleep(3000);
 await dump('après suppression');
-await p.sv.open(p.src.url);
-await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+await p.sv.openTab(p.src.url, 'Envoyer');
 await sleep(3000);
-await p.sv.button('Modifier').click();
-await p.sv.dialog().getByRole('checkbox', { name: 'Contacts' }).check();
-await p.sv.dialogButton('Continuer').click();
-await p.sv.dialogButton('Continuer').click();
+await h.editExport(p.sv, 'Contacts');
 log(`étape : ${(await p.sv.dialog().innerText()).replace(/\s+/g, ' ').slice(0, 400)}`);
 await p.sv.dialogButton('Enregistrer').click();
 await p.sv.dialog().getByText(/Enregistré/).waitFor({ timeout: 120000 });
@@ -32,8 +26,7 @@ const [first] = await records(p.src.doc, 'Contacts');
 await applyActions(p.src.doc, [['UpdateRecord', 'Contacts', first.id, { Email: 'reparee@x.fr' }]]);
 for (let i = 0; i < 3; i++) { await sleep(10000); log(`arrivée: ${await count(p.dst.doc, p.dest, `where "Email" = 'reparee@x.fr'`)} ; CIBLE ${await count(p.dst.doc, p.dest)} lignes`); }
 await dump('fin');
-await p.sv.open(p.src.url);
-await p.sv.widget().getByRole('tab', { name: 'Envoyer' }).click();
+await p.sv.openTab(p.src.url, 'Envoyer');
 await sleep(4000);
 log(`carte SOURCE : ${(await p.sv.text()).replace(/\s+/g, ' ').slice(0, 1200)}`);
 await p.dv.open(p.dst.url);

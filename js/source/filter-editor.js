@@ -45,35 +45,35 @@ const freshCond = col => ({ id: col.id, source: col.source, visible: col.visible
 // Ce que l'éditeur lit dans la table : ses lignes (`rows`), et le texte affiché des fiches citées par
 // une colonne Référence (`labels`, lu une fois par table visée).
 function filterData(table) {
-  const data = { rows: null, labels: {}, loading: null, failed: false };
+  const tableData = { rows: null, labels: {}, loading: null, failed: false };
   const cache = new Map();
-  data.labelsFor = async (cond) => {
+  tableData.labelsFor = async (cond) => {
     const kind = filterKind(cond.source);
     if (kind !== 'ref' && kind !== 'refs') return;
     const target = cond.source.split(':')[1];
     const key = `${target}.${cond.visible}`;
     if (!cache.has(key)) cache.set(key, fetchRows(target).then(rows => new Map(rows.map(r => [r.id, cond.visible ? r[cond.visible] : r.id]))));
-    data.labels[cond.id] = await cache.get(key);
+    tableData.labels[cond.id] = await cache.get(key);
   };
   // Lignes de la table et textes des Références des conditions `conds`.
-  data.read = async (conds) => {
+  tableData.read = async (conds) => {
     try {
-      data.rows = await fetchRows(table);
-      await Promise.all(conds.map(data.labelsFor));
+      tableData.rows = await fetchRows(table);
+      await Promise.all(conds.map(tableData.labelsFor));
     } catch (e) {
-      data.rows = null;
-      data.failed = true;
+      tableData.rows = null;
+      tableData.failed = true;
     }
   };
-  return data;
+  return tableData;
 }
 
 // Valeurs cochées d'une condition « est l'une de » : celles de la colonne, avec leur nombre de lignes
-// (`data.rows`, lues à l'ouverture). Une valeur cochée qui n'est plus dans la colonne reste
+// (`tableData.rows`, lues à l'ouverture). Une valeur cochée qui n'est plus dans la colonne reste
 // proposée, cochée.
-function pickEditor(cond, data, name, changed) {
-  if (!data.rows) return el('p', { class: 'muted small' }, t(data.failed ? 'send.filter.unreadable' : 'send.filter.reading'));
-  const found = columnValues(cond, data.rows, data.labels[cond.id]);
+function pickEditor(cond, tableData, name, changed) {
+  if (!tableData.rows) return el('p', { class: 'muted small' }, t(tableData.failed ? 'send.filter.unreadable' : 'send.filter.reading'));
+  const found = columnValues(cond, tableData.rows, tableData.labels[cond.id]);
   const labels = new Map(found.map(v => [v.value, v.label]));
   (cond.values || []).forEach((v, i) => { if (!labels.has(v)) { labels.set(v, String((cond.labels || [])[i] ?? v)); found.push({ value: v, label: labels.get(v), n: 0 }); } });
   return checkList({
@@ -85,26 +85,26 @@ function pickEditor(cond, data, name, changed) {
 
 // Une zone de saisie (une valeur) ou deux (« de … à … »), du type de la colonne ; pour un texte, les
 // valeurs de la colonne sont proposées.
-function typedEditor(cond, kind, data, { table, index, name }, changed) {
+function typedEditor(cond, kind, tableData, { table, index, name }, changed) {
   const need = operandOf(cond.op);
   const type = kind === 'number' ? 'number' : kind === 'date' ? 'date' : 'text';
   const listId = `gristsync-filter-values-${table}-${index}`;
   const input = i => el('input', {
-    class: 'input', type, step: type === 'number' ? 'any' : null, value: cond.values[i] ?? '', list: type === 'text' && data.rows ? listId : null,
+    class: 'input', type, step: type === 'number' ? 'any' : null, value: cond.values[i] ?? '', list: type === 'text' && tableData.rows ? listId : null,
     'aria-label': need === 'two' ? t(i ? 'send.filter.to' : 'send.filter.from', { n: index + 1 }) : name,
     oninput: (e) => { cond.values[i] = e.target.value; changed(); },
   });
-  const suggestions = type === 'text' && data.rows
-    ? el('datalist', { id: listId }, columnValues(cond, data.rows, data.labels[cond.id]).slice(0, 200).map(v => el('option', { value: v.label }))) : null;
+  const suggestions = type === 'text' && tableData.rows
+    ? el('datalist', { id: listId }, columnValues(cond, tableData.rows, tableData.labels[cond.id]).slice(0, 200).map(v => el('option', { value: v.label }))) : null;
   return el('div', { class: 'filter-values' }, input(0), need === 'two' ? [el('span', { class: 'muted' }, t('send.filter.betweenAnd')), input(1)] : null, suggestions);
 }
 
 // Ce que le filtre dit sous les conditions : combien de lignes partiront, combien de conditions
 // sont ignorées (incomplètes), et une alerte si rien ne part.
-function countView(data, state) {
-  const total = data.rows.length;
+function countView(tableData, state) {
+  const total = tableData.rows.length;
   const spec = rowFilter({ mode: state.mode, conds: state.conds });
-  const n = spec ? data.rows.filter(filterTester(spec, data.labels)).length : total;
+  const n = spec ? tableData.rows.filter(filterTester(spec, tableData.labels)).length : total;
   const ignored = state.conds.length - (spec ? spec.conds.length : 0);
   return [
     el('p', {}, spec ? t('send.filter.count', { n, total }) : t('send.filter.countAll', { total })),
@@ -140,7 +140,7 @@ export function filterEditor({ table, columns, current, labelOf, onChange }) {
   const usable = columns.filter(c => filterKind(c.source));
   const start = rowFilter(current);
   const state = { mode: start ? start.mode : 'all', conds: start ? start.conds.map(c => ({ ...c })) : [] };
-  const data = filterData(table);
+  const tableData = filterData(table);
   const conds = el('div', { class: 'filter-conds' });
   const mode = el('div', { class: 'filter-mode', role: 'radiogroup', 'aria-label': t('send.filter.mode') });
   const count = el('div', { class: 'small', 'aria-live': 'polite' });
@@ -153,24 +153,24 @@ export function filterEditor({ table, columns, current, labelOf, onChange }) {
 
   // Lignes de la table et textes des Références des conditions, puis tout est redessiné.
   function load() {
-    data.loading ||= (async () => {
+    tableData.loading ||= (async () => {
       count.replaceChildren(el('p', { class: 'muted' }, t('send.filter.reading')));
-      await data.read(state.conds);
+      await tableData.read(state.conds);
       render();
-      if (data.failed) count.replaceChildren(message('warn', t('send.filter.unreadable')));
+      if (tableData.failed) count.replaceChildren(message('warn', t('send.filter.unreadable')));
     })();
-    return data.loading;
+    return tableData.loading;
   }
 
   function showCount() {
-    if (data.rows) count.replaceChildren(...countView(data, state));
+    if (tableData.rows) count.replaceChildren(...countView(tableData, state));
   }
 
   async function addCond() {
     if (!usable.length) return;
     const cond = freshCond(usable[0]);
     state.conds.push(cond);
-    if (data.rows) await data.labelsFor(cond).catch(() => null);
+    if (tableData.rows) await tableData.labelsFor(cond).catch(() => null);
     render();
     changed();
     load();
@@ -181,14 +181,14 @@ export function filterEditor({ table, columns, current, labelOf, onChange }) {
     const need = operandOf(cond.op);
     const name = t('send.filter.value', { n: index + 1 });
     if (need === 'none') return null;
-    return need === 'pick' ? pickEditor(cond, data, name, changed) : typedEditor(cond, kind, data, { table, index, name }, changed);
+    return need === 'pick' ? pickEditor(cond, tableData, name, changed) : typedEditor(cond, kind, tableData, { table, index, name }, changed);
   }
 
   function condBlock(cond, index) {
     const kind = filterKind(cond.source);
     const column = columnPicker(usable, labelOf, cond, index, async (fresh) => {
       state.conds[index] = fresh;
-      await data.labelsFor(fresh).catch(() => null);
+      await tableData.labelsFor(fresh).catch(() => null);
       render();
       changed();
     });
