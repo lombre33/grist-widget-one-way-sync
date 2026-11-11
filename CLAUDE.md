@@ -365,7 +365,56 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.15.3 (11 novembre 2026)
+## État : V0.16.0 (11 novembre 2026)
+
+V0.16.0 (retour d'un utilisateur, relayé par Antoine, 11 novembre : « une page de budget à dupliquer, le style est américain (USD par
+défaut) et, quand je passe en Euro, le style d'écriture reste américain » ; Antoine : « il faudrait rajouter une option pour que ça
+push aussi tous les paramètres de colonnes (mise en forme, mise en forme conditionnelle etc.) »). Moteur **2.7.0** (mineure, dite dans
+`GFS-ETAT.md`). Trois cartes de décision posées à Antoine (sens de la reprise, langue du document, règles conditionnelles) : voir plus
+bas ce qui a été codé en attendant, et la mémoire du projet pour les réponses.
+- **Cause (vérifiée dans un Grist 1.7 réel)** : l'écriture des nombres et la devise par défaut viennent des **réglages du document**
+  (`_grist_DocInfo.documentSettings` : `locale`, `currency`, `engine`), pas des options de la colonne. `getCurrency(options, docSettings) =
+  options.currency || docSettings.currency || localeCurrency(docSettings.locale)` : une colonne « Monnaie » sans `currency` prend celle
+  du document. Les `widgetOptions` copiés par le widget (0.12) ne portaient donc pas la devise d'une colonne qui n'en avait pas, et un
+  document créé en en-US reste en USD. Choisir l'euro dans la colonne fixe la devise, **pas** la langue (séparateurs).
+- **SOURCE** : case « Envoyer la mise en forme des colonnes » (étape Colonnes, `styleBlock`, cochée d'emblée pour un nouvel export, telle
+  que l'export l'est pour un export modifié, absente en Échange). Chaque colonne porte `fmt: true` dans la description signée des
+  colonnes (`Synchro_Colonnes`) ; la première porte `doc` (`{ locale, currency? }`, validé par `docFormat`). Les options envoyées en plus :
+  en-têtes (`headerFillColor`, `headerTextColor`, `headerFontBold`…), alignement, couleurs, **monnaie résolue** (la devise de la langue du
+  document quand la colonne n'en a pas : `currencyOf`) et `rules`. `fmt` et `doc` sont retirés de `withoutOpts`, donc cocher ou décocher
+  ne renvoie aucune ligne. Un export sans `fmt` envoie exactement la description d'avant (essai `engine-format`, garde de formules
+  `formulas-golden` inchangée).
+- **Règles de mise en forme conditionnelle** (`js/engine/logic/rules.js`) : sécurité d'abord, une règle est une formule Python. Elle n'est
+  **jamais copiée** : `parseRule` la lit par une grammaire fermée (et/ou/non, comparaisons, `in` avec liste littérale, `is None`,
+  `+ - * /`, `TODAY()`, `$Col`/`rec.Col`, nombres, textes courts propres ; 300 caractères, 60 nœuds, profondeur 12), `printRule` la
+  réécrit avec les noms de colonnes de la CIBLE (précédence respectée, parenthèses seulement où il faut), tout le reste est abandonné ;
+  une colonne qui n'existe pas ici fait tomber la règle. Dix règles par colonne au plus. Côté SOURCE, les règles sont lues dans les colonnes
+  cachées `gristHelper_ConditionalRule…` de la colonne (`rules` : RefList) et dans `rulesOptions` ; les règles « par vue » ne sont pas reprises.
+- **CIBLE** (`js/engine/target/style.js`, `logic/received.js`) : pour les colonnes **que le widget a créées** (`entry.own`), l'en-tête, la
+  devise et les couleurs viennent avec les options de la colonne (`addDestColumnsActions`, extras) ; les règles sont posées en deux temps
+  (`AddEmptyRule` rend le nom de la colonne cachée, puis `ModifyColumn` écrit la formule et `UpdateRecord` les styles dans `rulesOptions`),
+  avec retrait des colonnes cachées déjà créées si le second temps échoue. Décidé **une fois** par colonne (`entry.styled`) : une retouche
+  d'ici, une règle effacée ici ne sont pas refaites. Bouton « Reprendre la mise en forme » (carte, hors Échange et attente) : `restyle(journal)`
+  remplace options et règles par celles de la SOURCE, après confirmation. L'entrée garde aussi `sourceDoc` (langue et devise de la SOURCE).
+- **Langue du document** (`logic/docformat.js`, `formatNotes` de `js/target/tab.js`) : un avis d'information quand la langue ou la devise de
+  la SOURCE diffère de celles d'ici (`formatGap`) ; un **propriétaire** peut cliquer « Régler le document comme la SOURCE », après une
+  confirmation qui dit que tout le document change d'écriture (`alignDocFormat` : `locale` et `currency` seulement, `engine` gardé ; une
+  devise explicite d'ici est retirée si la SOURCE n'en a pas). **Aucun passage ne règle le document tout seul.** Ctrl+Z défait.
+- **Piège vu en préparant** : la clé `rules` d'une colonne est une RefList (`['L', ref…]`) vers des colonnes cachées ; `RemoveColumn` d'une
+  colonne cachée la retire de la liste (vérifié) ; `AddColumn` d'une règle par l'API serait plus fragile qu'`AddEmptyRule`. Une règle
+  par vue (champ) n'est pas dans la colonne : non reprise, dit dans l'aide de la case.
+- Testé : unit 354 (`rules`, `engine-format` : SOURCE fr-FR vers CIBLE en-US sur deux Grist en mémoire, règle piégée écartée, retouche
+  gardée, reprise, langue réglée sur geste ; `robustness` : tirage de règles et de réglages abîmés, point fixe de la réécriture) ; e2e
+  `ONLY_FORMAT=1` (`formatSteps`, vrai Grist 1.7) : réception de `1 234,50 €` avec en-tête, devise euro et règle rouge sur la ligne
+  négative, avis de langue, « Annuler » ne règle rien, clic confirmé règle `fr-FR` sans toucher `engine`, retouche (USD, règle retirée)
+  gardée, « Reprendre la mise en forme » sans doubler la règle, case décochée dans « Modifier ».
+- Les cartes de décision (sens de la reprise : complète seulement / suivre en continu ; langue : sur clic / à l'acceptation ; règles
+  conditionnelles : oui / non) n'avaient pas de réponse à la fin de cette session : le codage suit les recommandations (complète seulement,
+  sur clic d'un propriétaire, règles réécrites). Si Antoine choisit autrement : « suivre en continu » = une option de la CIBLE qui lève
+  `styled` à chaque changement de la description ; « à l'acceptation » = une case dans l'assistant CIBLE qui appelle `alignDocFormat` ;
+  « pas de règles » = vider `sentRules` côté SOURCE.
+
+## État précédent : V0.15.3 (11 novembre 2026)
 
 V0.15.3 (Antoine, 11 novembre : « avant la sortie de la v2 peux tu si c'est pertinent faire audit et correction en ui/ux, sécurité, et
 qualité du code/refacto ? […] + Gw audit »). Rapport : Claude Doc « Audit avant la Bêta (V0.15.3) : sécurité, code, UI/UX, gwaudit » ;

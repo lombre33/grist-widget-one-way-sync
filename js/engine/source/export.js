@@ -3,7 +3,8 @@
 // son écran. Ce fichier écrit dans le document (colonnes du widget dans les tables envoyées, table
 // Synchro, note) et rend des données, jamais un nœud ni un texte d'écran.
 import { nowS, randomHex } from '../logic/common.js';
-import { exportEmail, exportableColumns, hookName, readTables } from '../logic/exports.js';
+import { exportEmail, exportableColumns, hookName, pruneRules, readTables, withDoc } from '../logic/exports.js';
+import { docFormatOf } from '../logic/docformat.js';
 import { linkTables } from '../logic/links.js';
 import { hiddenTables } from '../logic/acl.js';
 import { putExport } from '../logic/notes.js';
@@ -21,15 +22,17 @@ import { resendTables } from './resend.js';
 // locale (avec une clé, la prochaine liste de l'origine, qui ne la connaît pas, l'effacerait).
 // Un seul instantané suffit : chaque étape ne touche que sa table, et les colonnes que le widget
 // ajoute ne sont pas envoyables. `selection` : [{ table, columns: [identifiants cochés], filter }].
-async function prepareTables(selection, links) {
+async function prepareTables(selection, links, style) {
   const schema = await readSchema();
+  // Avec « la mise en forme des colonnes » : langue et monnaie du document, dites à la CIBLE (voir docformat.js).
+  const doc = style ? docFormatOf(await fetchRows('_grist_DocInfo')) : null;
   const relays = receivedDests(schema).map(d => d.dest);
   const tables = [];
   for (const { table, columns: picked, filter } of selection) {
     await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
     if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
-    const columns = exportableColumns(schema.columns(table)).filter(c => picked.includes(c.id));
-    tables.push({ table, columns, filter: filter || null });
+    const columns = exportableColumns(schema.columns(table), { extras: Boolean(style), doc }).filter(c => picked.includes(c.id));
+    tables.push({ table, columns: style ? withDoc(pruneRules(columns), doc) : columns, filter: filter || null });
   }
   return linkTables(tables, Boolean(links));
 }
@@ -53,12 +56,14 @@ async function noteExport(rules, id, name) {
 }
 
 // Crée l'export (`exp` absent) ou enregistre la modification de `exp`. `selection` : voir
-// prepareTables ; `links` : garder les liens entre les tables (case de l'étape Colonnes) ; `rules` :
-// règles d'un Échange administré ici ({ ajout, modif, suppression, refus }), ou rien. Rend
+// prepareTables ; `links` : garder les liens entre les tables (case de l'étape Colonnes) ; `style` : envoyer la
+// mise en forme des colonnes (en-têtes, règles conditionnelles, monnaie, langue du document ; case de
+// l'étape Colonnes, jamais en Échange) ; `rules` : règles d'un Échange administré ici ({ ajout, modif,
+// suppression, refus }), ou rien. Rend
 // `{ id, name, tables, changed, created }` : `changed` = les tables qu'il faut renvoyer (modification),
 // `created` = l'export tel que l'écran de ses destinataires l'attend (création).
-export async function saveChosenExport({ exp = null, name, selection, links = false, rules = null }) {
-  const tables = await prepareTables(selection, links);
+export async function saveChosenExport({ exp = null, name, selection, links = false, style = false, rules = null }) {
+  const tables = await prepareTables(selection, links, style && !exp?.echange);
   if (exp?.public) await refuseHidden(tables);
   const id = exp ? exp.id : randomHex(8);
   const changed = await saveExport(id, tables, { isPublic: Boolean(exp?.public), swap: Boolean(exp?.echange) });

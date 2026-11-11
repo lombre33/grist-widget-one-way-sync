@@ -3,7 +3,9 @@
 // règles d'accès du lien public sont dans acl.js.
 import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
 import { rowFilter } from './filters.js';
-import { columnOptions } from './options.js';
+import { columnOptions, ruleStyle, ruleStyles } from './options.js';
+import { currencyOf } from './docformat.js';
+import { parseRule, ruleRefs } from './rules.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -14,15 +16,64 @@ export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND
 // colonnes de la synchro et colonnes internes de Grist. Une Référence part comme le texte qu'elle
 // affiche (et, avec `link`, la clé de la ligne visée, voir links.js) ; une colonne Pièces jointes,
 // comme la liste de ses fichiers (voir files.js). `opts` : liste de choix et format de la colonne
-// (voir options.js), s'il y en a.
-export function exportableColumns(cols) {
+// (voir options.js), s'il y en a. Avec `extras` (l'export envoie « la mise en forme des colonnes »), `opts`
+// porte aussi le style de l'en-tête, la monnaie résolue d'après `doc` (langue et monnaie du document, voir
+// docformat.js) et les règles de mise en forme conditionnelle ; chaque colonne est alors marquée `fmt`.
+export function exportableColumns(cols, { extras = false, doc = null } = {}) {
   const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
   return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map((c) => {
     const type = /^Ref(List)?:/.test(c.type) ? 'Text' : c.type;
-    const opts = columnOptions(type, c.widgetOptions);
-    return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}) };
+    const opts = sourceOptions(c, type, cols, { extras, doc });
+    return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}), ...(extras ? { fmt: true } : {}) };
   });
 }
+
+// Options à envoyer pour la colonne `c` du schéma (`cols` : toutes les colonnes de sa table, les colonnes
+// cachées des règles comprises), pour le type envoyé `type`.
+export function sourceOptions(c, type, cols, { extras, doc }) {
+  const base = columnOptions(type, c.widgetOptions, { extras });
+  if (!extras) return base;
+  const opts = { ...(base || {}) };
+  const rules = sourceRules(c, cols);
+  if (rules.length) opts.rules = rules;
+  // Une colonne en monnaie sans monnaie propre prend celle du document : on la dit, la CIBLE n'a pas la même.
+  if (opts.numMode === 'currency' && !opts.currency && doc && currencyOf(doc)) opts.currency = currencyOf(doc);
+  return Object.keys(opts).length ? columnOptions(type, opts, { extras: true }) : null;
+}
+
+// Types dont une règle ne peut pas lire la valeur chez la CIBLE : elle n'y reçoit qu'un texte.
+const CONVERTED = /^(Ref(List)?:|Attachments$)/;
+
+// Règles de mise en forme conditionnelle d'une colonne (au niveau de la colonne : celles d'une seule vue
+// ne sont pas envoyées), au format envoyé [{ when, <style> }]. Une règle qui lit une Référence ou une
+// colonne de pièces jointes, une autre table ou une fonction n'est pas lue (voir rules.js).
+function sourceRules(c, cols) {
+  const refs = Array.isArray(c.rules) ? c.rules.slice(1) : [];
+  const styles = ruleStyles(c.widgetOptions);
+  const byRow = new Map(cols.map(x => [x.id, x]));
+  const byName = new Map(cols.map(x => [x.colId, x]));
+  return refs.map((ref, i) => {
+    const tree = parseRule((byRow.get(ref) || {}).formula);
+    const plain = tree && ruleRefs(tree).every(id => byName.has(id) && !CONVERTED.test(byName.get(id).type));
+    return plain ? { when: byRow.get(ref).formula, ...ruleStyle(styles[i]) } : null;
+  }).filter(Boolean);
+}
+
+// Règles de la colonne qui lisent une colonne absente de l'export : laissées (la CIBLE ne l'a pas).
+export function pruneRules(columns) {
+  const ids = new Set(columns.map(c => c.id));
+  return columns.map(({ opts, ...c }) => {
+    if (!opts || !opts.rules) return opts ? { ...c, opts } : c;
+    const { rules, ...rest } = opts;
+    const kept = rules.filter(r => ruleRefs(parseRule(r.when)).every(id => ids.has(id)));
+    const next = kept.length ? { ...rest, rules: kept } : rest;
+    return Object.keys(next).length ? { ...c, opts: next } : c;
+  });
+}
+
+// La langue et la monnaie du document, portées par la première colonne d'un export qui envoie sa mise en
+// forme (la description des colonnes est signée : rien à ajouter au lot). Ancien : un `doc` déjà là est remplacé.
+export const withDoc = (columns, doc) => columns.map(({ doc: old, ...c }, i) => (i === 0 && doc && c.fmt ? { ...c, doc } : c));
 
 // Tables que lisent les formules de Synchro pour les tables d'un export (`tables`, voir
 // exportTables) : les siennes, et celles d'où vient le texte affiché de ses colonnes Référence.
@@ -54,8 +105,9 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link }) => ({
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
+  ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
 })));
 // Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
 // valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des
@@ -125,19 +177,19 @@ export function exportTables(rows, exportId) {
 // description des colonnes de ses lignes Synchro est réécrite, sans renvoi de lignes (la CIBLE la
 // lit à la prochaine ligne reçue). Les options se lisent pour le type envoyé (voir options.js).
 const SCHEMA_KINDS = [KIND.keys, KIND.lot, KIND.track, KIND.full, KIND.mark, KIND.files];
-export function optionsActions(rows, schema) {
+export function optionsActions(rows, schema, doc = null) {
   const ids = [];
   const values = [];
   for (const exportId of new Set(rows.map(r => r[EXPORT_COL]))) {
     for (const { table, columns, filter } of exportTables(rows, exportId).filter(tb => schema.has(tb.table))) {
-      const here = new Map(schema.columns(table).map(c => [c.colId, c.widgetOptions]));
-      const value = schemaText(filteredColumns({
-        columns: columns.map(({ opts, ...c }) => {
-          const next = here.has(c.id) ? columnOptions(c.type, here.get(c.id)) : opts;
-          return next ? { ...c, opts: next } : c;
-        }),
-        filter,
-      }));
+      const live = schema.columns(table);
+      const here = new Map(live.map(c => [c.colId, c]));
+      const extras = columns.some(c => c.fmt);
+      const fresh = columns.map(({ opts, ...c }) => {
+        const next = here.has(c.id) ? sourceOptions(here.get(c.id), c.type, live, { extras, doc }) : opts;
+        return next ? { ...c, opts: next } : c;
+      });
+      const value = schemaText(filteredColumns({ columns: extras ? withDoc(pruneRules(fresh), doc) : fresh, filter }));
       for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
         ids.push(r.id);
         values.push(value);

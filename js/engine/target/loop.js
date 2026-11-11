@@ -20,10 +20,11 @@ import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRow
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
-import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, valueChoiceActions } from '../logic/received.js';
+import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, restyleOptionActions, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
 import { noteHeldFiles } from '../source/files.js';
 import { attachments, receiveFiles } from './files.js';
+import { styleColumns } from './style.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
 import { errorText, failure, noteError } from '../errors.js';
@@ -254,8 +255,9 @@ async function prepareColumns(ctx, noted, tableRows) {
     await apply(added);
     ctx.schema = await readSchema();
   }
-  // Choix ajoutés à la SOURCE, format d'une colonne créée avant l'arrivée de sa description.
-  const options = optionActions(ctx.schema, { ...received.entry, own }, kept);
+  // Choix ajoutés à la SOURCE, format d'une colonne créée avant l'arrivée de sa description ; ou, sur
+  // demande (« Reprendre la mise en forme »), le style de chaque colonne reçue remis sur celui de la SOURCE.
+  const options = (ctx.restyle ? restyleOptionActions : optionActions)(ctx.schema, { ...received.entry, own }, kept);
   if (options.length) {
     await apply(options);
     ctx.schema = await readSchema();
@@ -267,7 +269,9 @@ async function prepareColumns(ctx, noted, tableRows) {
     ctx.schema = await readSchema();
   }
   const linked = await linkColumns(ctx, { ...received.entry, own }, kept, tableRows);
-  const entry = { ...linked.entry, refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
+  // Règles de mise en forme conditionnelle de la SOURCE (reconstruites, jamais copiées), et sa langue.
+  const styled = await styleColumns(ctx, linked.entry, kept, { replace: Boolean(ctx.restyle) });
+  const entry = { ...styled, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
   const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
   const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
   return { entry, dropped, copyCols, types, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs };
@@ -431,7 +435,7 @@ async function copyContext(schema, journal, note, groups) {
 // pendant le passage (fenêtres de l'onglet) reste.
 async function saveEntries(journal, updates) {
   if (!updates.size) return;
-  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked }) => JSON.parse(JSON.stringify({ dest, map, match, refs, dropped, addedCols, waiting, own, linked }));
+  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc }) => JSON.parse(JSON.stringify({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc }));
   const merged = n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, dropped: undefined, waiting: undefined, ...noted(updates.get(tb.table)) } : tb)) });
   await followExchange(await updateJournalNote(journal, merged));
 }
@@ -536,7 +540,7 @@ async function consolidate(schema, { journal, note: noteBefore }, owner) {
   const groups = rowsByTable(expandRows(rows));
   const { pending, offers } = offersOf(groups, note);
   state.offers.set(journal, offers);
-  const ctx = { ...await copyContext(schema, journal, note, groups), files };
+  const ctx = { ...await copyContext(schema, journal, note, groups), files, restyle: restyles.has(journal) };
   if (ctx.exchange && !ctx.review) await followExchange(note, ctx.rows);
   const tables = await copyTables(ctx, note, owner);
   await saveEntries(journal, new Map(tables.filter(tb => tb.changed).map(tb => [tb.entry.table, tb.entry])));
@@ -610,6 +614,19 @@ async function passAll() {
 // Décision prise sur la carte pour des changements à valider (versions du journal `journal`) :
 // appliquée par un passage lancé aussitôt, ou par le suivant si un passage est déjà en cours.
 export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${journal}|${id}`), choice);
+
+// « Reprendre la mise en forme de la SOURCE » : la prochaine recopie de ce journal remet le style des colonnes
+// reçues sur celui de la SOURCE et remplace leurs règles conditionnelles (voir replaceOptions, planRules).
+// Un passage est lancé aussitôt ; le journal n'est refait qu'une fois.
+const restyles = new Set();
+export async function restyle(journal) {
+  restyles.add(journal);
+  try {
+    while ((await consolidateAll({ reread: true })) === null) await sleep(DECIDE_RETRY_MS);
+  } finally {
+    restyles.delete(journal);
+  }
+}
 
 // Décisions notées, puis un passage, dès que celui en cours est fini.
 async function applyDecisions(keys, choice) {

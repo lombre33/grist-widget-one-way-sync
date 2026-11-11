@@ -6,7 +6,7 @@
 import { schemaFrom } from '../../js/engine/logic/schema.js';
 import { parseWebhookUrl } from '../../js/engine/logic/codes.js';
 
-export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', name = 'Document d\'essai' } = {}) {
+export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', name = 'Document d\'essai', locale = 'en-US', currency = '' } = {}) {
   const tables = new Map(); // tableId -> { id, columns: [{ id, colId, ... }], rows: [{ id, ... }], next }
   let nextTable = 1;
   let nextColumn = 1;
@@ -22,7 +22,7 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
     if (table.columns.some(c => c.colId === colId)) throw new Error(`Column already exists "${colId}"`);
     table.columns.push({
       id: nextColumn++, parentId: table.id, parentPos: table.columns.length + 1, colId, type: 'Text', isFormula: false, formula: '', label: colId, description: '',
-      displayCol: 0, recalcWhen: 0, recalcDeps: null, widgetOptions: '', visibleCol: 0, ...info,
+      displayCol: 0, recalcWhen: 0, recalcDeps: null, widgetOptions: '', visibleCol: 0, rules: null, ...info,
     });
     for (const row of table.rows) row[colId] = null;
   };
@@ -52,6 +52,9 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
     if (!meta.has(id)) meta.set(id, { rows: [], next: 1 });
     return meta.get(id);
   };
+  // Les réglages du document (langue, monnaie), comme `_grist_DocInfo` les range.
+  metaTable('_grist_DocInfo').rows.push({ id: 1, documentSettings: JSON.stringify({ locale, ...(currency ? { currency } : {}), engine: 'python3' }) });
+  metaTable('_grist_DocInfo').next = 2;
   const runMeta = (name, tableId, args) => {
     const table = metaTable(tableId);
     const find = id => table.rows.find(r => r.id === id);
@@ -103,9 +106,29 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
       }
       case 'RemoveColumn': {
         const table = need(tableId);
+        const gone = table.columns.find(c => c.colId === args[0]);
         table.columns = table.columns.filter(c => c.colId !== args[0]);
+        // Une colonne cachée de règle qui part sort aussi de la liste des règles de sa colonne (RefList).
+        for (const c of table.columns) {
+          if (gone && c.rules && c.rules.includes(gone.id)) {
+            const left = c.rules.slice(1).filter(r => r !== gone.id);
+            c.rules = left.length ? ['L', ...left] : null;
+          }
+        }
         for (const row of table.rows) delete row[args[0]];
         return null;
+      }
+      // Règle de mise en forme conditionnelle d'une colonne (au niveau de la colonne) : sa colonne cachée, sans formule.
+      case 'AddEmptyRule': {
+        const table = need(tableId);
+        const column = table.columns.find(c => c.id === args[1]);
+        if (!column) throw new Error(`Column not found "${args[1]}"`);
+        let colId = 'gristHelper_ConditionalRule';
+        for (let n = 2; table.columns.some(c => c.colId === colId); n++) colId = `gristHelper_ConditionalRule${n}`;
+        addColumn(table, colId, { type: 'Any', isFormula: true });
+        const helper = table.columns.find(c => c.colId === colId);
+        column.rules = column.rules ? [...column.rules, helper.id] : ['L', helper.id];
+        return { colRef: helper.id, colId };
       }
       case 'RenameTable': tables.set(args[0], need(tableId)); tables.delete(tableId); return null;
       case 'RemoveTable': need(tableId); tables.delete(tableId); return null;

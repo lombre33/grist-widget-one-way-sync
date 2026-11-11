@@ -775,5 +775,18 @@
   "tab.back.silent": "No document answered. The originating document must be open in another tab of this browser, at the “Invitation” or “Reply” step. Otherwise, copy the code below.",
   "tab.reply.wait": "Is the TARGET document open in this browser? Its reply arrives here by itself.",
   "tab.reply.got": "Reply received from another tab of this browser: check the card, then compare the control code with the other document.",
-  "tab.reply.other": "Another reply arrived from another tab: it did not replace this one. If it is the one you expected, paste it above."
+  "tab.reply.other": "Another reply arrived from another tab: it did not replace this one. If it is the one you expected, paste it above.",
+  "send.style": "Send the column formatting",
+  "send.style.help": "Colors, number and date formats, currency, header style, simple conditional formatting rules (comparisons on the columns sent) and the document language. A more complex rule is not sent, nor is a rule specific to one view; no formula is ever copied as it is. On the receiving side, what has been retouched there is not overwritten.",
+  "recv.format.title": "Document language and currency differ from the SOURCE",
+  "recv.format.body": "The SOURCE writes its numbers as “{source}”, this document as “{here}”. Number separators and the default currency come from the document setting, not from the column: choosing the euro in a column does not change the American style.",
+  "recv.format.owner": "Only a document owner can change this setting.",
+  "recv.format.action": "Set the document like the SOURCE",
+  "recv.format.confirmTitle": "Set the language and currency of this document?",
+  "recv.format.confirmBody": "The language and currency of the whole document become “{source}”: the numbers of all its tables are written differently. Ctrl+Z or the document history undoes it.",
+  "recv.format.done": "Language and currency set to “{source}”.",
+  "recv.action.restyle": "Take the formatting again",
+  "recv.restyle.title": "Take the formatting of “{name}” again?",
+  "recv.restyle.body": "The received columns take the SOURCE formatting again: formats, colors, header style and conditional formatting rules. What you changed by hand in these columns is replaced. The document history can undo it.",
+  "recv.restyle.done": "Formatting taken again from the SOURCE."
 }

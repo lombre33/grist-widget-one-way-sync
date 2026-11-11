@@ -5,13 +5,16 @@
 // extrêmes, `__proto__`), tirées avec un générateur à graine fixe : le test est reproductible.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeCode, docUrl, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl, validColumns } from '../../js/engine/logic/codes.js';
+import { decodeCode, docUrl, exportSchema, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl, validColumns } from '../../js/engine/logic/codes.js';
 import { columnNote } from '../../js/engine/logic/common.js';
 import { planConsolidation } from '../../js/engine/logic/consolidation.js';
 import { expandRows, parseList, parseLot, planPurge, planUnpack, recentChanges, sentColumns } from '../../js/engine/logic/journal.js';
 import { readMark } from '../../js/engine/logic/lost.js';
 import { addEvent, eventsOf, observeRows, rowsOf } from '../../js/engine/logic/notes.js';
 import { liveKeys, tallyGap } from '../../js/engine/logic/tally.js';
+import { docFormat, docFormatOf, formatAction, formatGap } from '../../js/engine/logic/docformat.js';
+import { columnOptions, ruleStyles, sentRules } from '../../js/engine/logic/options.js';
+import { normalizeRule, parseRule, printRule } from '../../js/engine/logic/rules.js';
 import { readKeys } from '../../js/engine/logic/trust.js';
 import { parseMessage } from '../../js/tab-link.js';
 import { COLUMNS, EXPORT, ID, PUB, forge, invitation, j } from './fixtures.mjs';
@@ -112,4 +115,61 @@ test('codes et messages d\'un autre onglet : seules les erreurs prévues sortent
     mustNotThrow('docUrl', () => docUrl(pick(ODD), pick(ODD), pick(ODD), pick(ODD)));
   }
   assert.throws(() => parseDocBaseUrl('pas une adresse'), 'l\'adresse du jeton vient de Grist : une valeur illisible est une erreur, pas un cas à traiter');
+});
+
+// Mise en forme reçue : les règles de mise en forme conditionnelle et les réglages de langue viennent d'un autre
+// document. Une règle n'est jamais copiée : elle est lue par une grammaire stricte, puis réécrite avec les noms d'ici.
+// Quoi qu'on lui donne, le lecteur ne lève rien, et ce qu'il réécrit se relit à l'identique (point fixe).
+test('mise en forme reçue : règles et réglages abîmés, aucune exception, et ce qui est réécrit se relit à l\'identique', () => {
+  const RULES = ['$Montant < 0', 'rec.Reel > $Montant * 0.9', '$A == "x" and ($B != 3 or not $C)', '$A in ["a", "b"] and $B not in [1, 2]', '$D is None or $D is not None',
+    '-$A + 2 * ($B - 1) / 4 >= TODAY()', '$A == True or $A == False', '$Date < TODAY()'];
+  const RISKY = ['(', ')', '"', '\'', '\\', '.', '_', '[', ']', ',', '`', '\n', '‮', '\u0000', 'lambda ', '__import__', 'import ', ' if ', ' else ', '**', '//', '%', '@', ':', ';', '{', '}', '$', 'rec.', 'TODAY(', 'None'];
+  const mutate = (rule) => {
+    let out = rule;
+    for (let n = 1 + Math.floor(random() * 2); n > 0; n--) {
+      const at = Math.floor(random() * (out.length + 1));
+      const kind = random();
+      if (kind < 0.4) out = out.slice(0, at) + pick(RISKY) + out.slice(at);
+      else if (kind < 0.7) out = out.slice(0, at) + out.slice(at + 1 + Math.floor(random() * 4));
+      else if (kind < 0.85) out = out.slice(0, at) + out.slice(Math.floor(random() * out.length));
+      else out += pick(RULES);
+    }
+    return out;
+  };
+  const rename = id => (random() < 0.9 ? `${id}_2` : null);
+  const sample = Array.from({ length: 600 }, () => (random() < 0.1 ? text(pick(ODD)) : random() < 0.3 ? pick(RULES) : mutate(pick(RULES))));
+  let kept = 0;
+  for (const rule of sample) {
+    mustNotThrow('parseRule', () => parseRule(rule));
+    mustNotThrow('normalizeRule', () => normalizeRule(rule));
+    const tree = parseRule(rule);
+    if (!tree) continue;
+    kept++;
+    const printed = printRule(tree);
+    assert.ok(printed && !/__|import|lambda|[;`\\{}@%]|\*\*|\/\//.test(printed.replace(/"[^"]*"/g, '""').replace(/\$[A-Za-z][A-Za-z0-9_]*/g, '$X')), `une règle gardée n'a que des signes permis : ${printed}`);
+    assert.equal(printRule(parseRule(printed)), printed, `la règle réécrite se relit à l'identique : ${rule}`);
+    const renamed = printRule(tree, rename);
+    if (renamed) assert.ok(parseRule(renamed), `la règle aux noms d'ici est une règle : ${renamed}`);
+  }
+  assert.ok(kept > 100 && kept < sample.length, `le tirage garde des règles et en écarte (${kept} sur ${sample.length})`);
+  const OPTS = { numMode: 'currency', decimals: 2, currency: 'EUR', alignment: 'right', headerFillColor: '#336699', headerFontBold: true,
+    rules: [{ when: '$Montant < 0', fillColor: '#FF0000', textColor: '#FFFFFF', fontBold: true }, { when: '$Reel > 3', fillColor: '#FFCC00' }] };
+  const SETTINGS = { locale: 'fr-FR', currency: 'EUR', engine: 'python3' };
+  for (let i = 0; i < 400; i++) {
+    const opts = spoilObject(OPTS);
+    mustNotThrow('columnOptions', () => columnOptions('Numeric', text(opts), { extras: true }));
+    mustNotThrow('columnOptions (sans extras)', () => columnOptions('Numeric', text(opts)));
+    mustNotThrow('sentRules', () => sentRules(opts));
+    mustNotThrow('ruleStyles', () => ruleStyles(text(spoilObject({ rulesOptions: opts.rules }))));
+    mustNotThrow('exportSchema', () => exportSchema([{ id: 'Montant', type: 'Numeric', label: 'Montant', opts, fmt: pick([true, false, 1, 'oui']), doc: spoilObject(SETTINGS) }]));
+    const settings = text(spoilObject(SETTINGS));
+    mustNotThrow('docFormat', () => docFormat(settings));
+    mustNotThrow('docFormatOf', () => docFormatOf([{ documentSettings: settings }]));
+    mustNotThrow('docFormatOf (lignes abîmées)', () => docFormatOf(spoil([{ documentSettings: settings }])));
+    mustNotThrow('formatGap', () => formatGap(docFormat(settings), docFormat(text(spoilObject(SETTINGS)))));
+    mustNotThrow('formatAction', () => formatAction([{ id: 1, documentSettings: text(spoilObject(SETTINGS)) }], docFormat(settings)));
+  }
+  // Une langue ou une devise qui n'a pas la forme d'un code est écartée, jamais écrite dans le document.
+  assert.equal(docFormat(JSON.stringify({ locale: '<script>', currency: 'euro!' })), null);
+  assert.deepEqual(docFormat(JSON.stringify({ locale: 'fr-FR', currency: 'EUR', engine: 'x', autre: 1 })), { locale: 'fr-FR', currency: 'EUR' });
 });

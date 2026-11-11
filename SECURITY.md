@@ -417,6 +417,12 @@ onglets du même navigateur (`ONLY_TABS=1`).
   mémo), et dans les colonnes que le widget a créées, le type Référence et les listes de choix et
   formats reçus (`widgetOptions`, clés connues aux valeurs contrôlées). Le diagnostic à copier ne
   s'écrit nulle part : il est construit à l'affichage et copié par la personne.
+- Depuis la 0.16 : si l'export envoie la mise en forme, la CIBLE écrit dans les colonnes qu'elle a créées les
+  options d'en-tête et de couleur (clés connues, couleurs `#RRGGBB` ou `#RRGGBBAA`), et des **règles de mise en forme
+  conditionnelle** : une colonne cachée `gristHelper_ConditionalRule…` par règle (formule réécrite, voir
+  « Risques acceptés ») et les styles dans les options de la colonne. Le réglage de langue et de devise du
+  document (`_grist_DocInfo`) n'est écrit que sur le clic confirmé d'un propriétaire. Les règles et styles
+  posés sont suivis par colonne dans la note du journal (`styled`).
 
 ## Chaîne d'approvisionnement
 
@@ -487,6 +493,23 @@ Pour un usage en production :
   descriptions de colonnes ni ne leur retire le droit de structure par défaut : aucune règle du
   widget n'arrête un éditeur malveillant. Les options d'une réception ne sont proposées ni en
   Échange ni en lien public.
+- **Règles de mise en forme conditionnelle (0.16)** : une règle est une formule Python évaluée par Grist, donc
+  l'injection de formule est le risque. Elle ne passe jamais telle quelle : `js/engine/logic/rules.js` la lit
+  par une grammaire fermée (comparaisons, `et`/`ou`/`non`, `in` avec une liste littérale, `is None`, `+ - * /`,
+  `TODAY()`, références de colonne `$Col` ou `rec.Col`, nombres et textes courts sans guillemet, barre oblique,
+  caractère de contrôle ni de sens d'écriture ; 300 caractères, 60 nœuds, profondeur 12) et la CIBLE écrit
+  une **formule neuve**, reconstruite à partir de l'arbre avec les noms de ses propres colonnes. Tout ce qui sort
+  de la grammaire (appel de fonction, attribut, `import`, `lambda`, indice, `**`, `//`, `%`…) fait tomber la
+  règle ; une colonne absente d'ici aussi. Au plus 10 règles par colonne. La grammaire ne contient ni appel de
+  fonction (hors `TODAY()`) ni accès à un attribut (hors `rec.Col`, réécrit en `$Col`) : une règle ne lit donc que des
+  colonnes de la même ligne et ne peut ni écrire, ni lire un autre document, ni boucler. Le tirage de règles
+  abîmées de `tests/unit/robustness.test.mjs` vérifie le point fixe (ce qui est réécrit se relit à l'identique).
+  Reste, comme pour toute mise en forme reçue, qu'une SOURCE peut colorer à sa guise les colonnes qu'elle a
+  fait créer, et qu'un lot signé par la clé d'une réception est la seule voie d'arrivée de ces règles.
+- **Langue du document (0.16)** : la SOURCE dit la langue et la devise de son document ; la CIBLE ne les valide
+  que par forme (`fr-FR`, `EUR`) et ne les écrit jamais d'elle-même. Le bouton « Régler le document comme la SOURCE »
+  est réservé aux propriétaires, passe par une confirmation qui dit que tout le document change d'écriture
+  des nombres, et s'annule par Ctrl+Z.
 - **Listes de choix (0.12)** : sans filtre de lignes, la liste complète des choix d'une colonne Choix
   ou Liste de choix envoyée (500 choix au plus) part avec la description des colonnes, y compris les
   choix dont aucune ligne n'est envoyée ; elle reste dans les lots du journal (réservé aux

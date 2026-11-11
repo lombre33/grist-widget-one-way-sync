@@ -415,6 +415,21 @@ Une colonne déjà remplie chez le destinataire reste du texte ; décocher la ca
 **Modifier**, rend le texte. Une Liste de références reste du texte. Une ligne qui arrive avant la
 ligne qu'elle vise est complétée à l'arrivée de celle-ci.
 
+**Mise en forme des colonnes.** La case **Envoyer la mise en forme des colonnes** (étape Colonnes,
+cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise
+et les règles de mise en forme conditionnelle simples (comparaisons sur les colonnes envoyées). Une
+règle n'est jamais copiée telle quelle : elle est relue, puis réécrite avec les colonnes du
+destinataire ; une règle plus complexe n'est pas envoyée. Seules les colonnes créées par le widget
+la prennent, une fois : ce qui est retouché chez le destinataire reste, et le bouton **Reprendre la
+mise en forme** de la carte remet tout d'accord avec la SOURCE.
+
+**Langue du document.** Grist écrit les séparateurs des nombres et la devise par défaut d'après la
+langue du document, pas d'après la colonne : un budget copié d'un document français dans un document
+américain reste en dollars et en écriture américaine même si on choisit l'euro dans la colonne. Quand
+la langue de la SOURCE diffère, la carte de réception le dit ; un **propriétaire** du document peut le
+régler comme la SOURCE d'un clic confirmé (Ctrl+Z le défait). Le widget ne change jamais ce réglage de
+lui-même.
+
 **Listes de choix et formats** (Choix, dates, nombres) : la colonne reçue les reprend ; un choix
 ajouté dans la SOURCE s'ajoute ici, et une mise en forme retouchée ici reste.
 

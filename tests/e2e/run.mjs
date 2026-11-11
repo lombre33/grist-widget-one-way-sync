@@ -793,6 +793,135 @@ try {
     assert.deepEqual([now.Anna.Lieu, now.Basile.Lieu, now.Céline.Lieu], ['Villeurbanne', 'Villeurbanne', 'Paris']);
     step('Références conservées : case décochée, les colonnes redeviennent du texte');
   }
+  // --- Mise en forme des colonnes : une SOURCE en français (fr-FR) avec une colonne Montant (monnaie sans devise
+  // propre, en-tête coloré, règle « négatif en rouge » et une règle qui sort de la grammaire) envoie sa mise en forme
+  // à une CIBLE par défaut (en-US). La CIBLE reprend format, devise et en-tête dans les colonnes qu'elle crée, y
+  // reconstruit la règle (jamais la formule d'origine, jamais la règle piégée), dit l'écart de langue et ne règle le
+  // document que sur un clic confirmé d'un propriétaire ; une retouche d'ici reste, « Reprendre la mise en forme »
+  // remet tout d'accord.
+  async function formatSteps() {
+    const src = await newDocWithWidget('Format SOURCE', [
+      ['AddTable', 'Budget', [{ id: 'Libelle', type: 'Text' }, { id: 'Montant', type: 'Numeric' }]],
+      ['BulkAddRecord', 'Budget', [null, null], { Libelle: ['Loyer', 'Remboursement'], Montant: [1234.5, -20] }],
+    ]);
+    const docSettings = async doc => JSON.parse((await records(doc, '_grist_DocInfo'))[0].documentSettings || '{}');
+    const column = async (doc, table, colId) => {
+      const parentId = await tableRef(doc, table);
+      return (await records(doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === parentId);
+    };
+    const optionsOf = col => JSON.parse(col.widgetOptions || '{}');
+    // Règles d'une colonne : [{ formula, style }] dans l'ordre de ses règles (RefList : ['L', ref, ...]).
+    const rulesOf = async (doc, table, colId) => {
+      const col = await column(doc, table, colId);
+      const all = await records(doc, '_grist_Tables_column');
+      return (Array.isArray(col.rules) ? col.rules.slice(1) : []).map((ref, i) => ({ formula: all.find(c => c.id === ref).formula, style: (optionsOf(col).rulesOptions || [])[i] }));
+    };
+    const addRule = async (table, colId, formula, style) => {
+      const col = await column(src.doc, table, colId);
+      const helper = (await applyActions(src.doc, [['AddEmptyRule', table, 0, col.id]])).retValues[0];
+      await applyActions(src.doc, [['ModifyColumn', table, helper.colId, { formula }]]);
+      const list = optionsOf(await column(src.doc, table, colId)).rulesOptions || [];
+      await applyActions(src.doc, [['UpdateRecord', '_grist_Tables_column', col.id, { widgetOptions: JSON.stringify({ ...optionsOf(await column(src.doc, table, colId)), rulesOptions: [...list, style] }) }]]);
+    };
+    await applyActions(src.doc, [['UpdateRecord', '_grist_DocInfo', 1, { documentSettings: JSON.stringify({ ...(await docSettings(src.doc)), locale: 'fr-FR' }) }],
+      ['UpdateRecord', '_grist_Tables_column', (await column(src.doc, 'Budget', 'Montant')).id,
+        { widgetOptions: JSON.stringify({ numMode: 'currency', decimals: 2, headerFillColor: '#336699', headerFontBold: true, alignment: 'right' }) }]]);
+    await addRule('Budget', 'Montant', '$Montant < 0', { fillColor: '#FF0000', textColor: '#FFFFFF', fontBold: true });
+    await addRule('Budget', 'Libelle', 'len($Libelle) > 3', { fillColor: '#00FF00' }); // hors de la grammaire : ne part jamais
+
+    const dst = await newDocWithWidget('Format CIBLE');
+    assert.equal((await docSettings(dst.doc)).locale, 'en-US', 'la CIBLE est un document par défaut');
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Budget' }).check();
+    await dialogButton('Continuer').click();
+    const send = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
+    assert.ok(await send.isChecked(), 'cochée d\'emblée pour un nouvel export');
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Budget');
+    await dialogButton('Créer l’export').click();
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, /Budget\s»\s:\stable/);
+    await approve(answer, { url: src.url });
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 2, 'lignes reçues', 90000);
+
+    // Format, devise résolue (fr-FR : l'euro), en-tête : repris dans la colonne créée ; la règle est refaite.
+    const montant = async () => optionsOf(await column(dst.doc, 'Budget', 'Montant'));
+    await waitFor(async () => (await rulesOf(dst.doc, 'Budget', 'Montant')).length === 1, 'règle reconstruite', 90000);
+    const { rulesOptions, ...base } = await montant();
+    assert.deepEqual(base, { numMode: 'currency', decimals: 2, currency: 'EUR', alignment: 'right', headerFillColor: '#336699', headerFontBold: true });
+    assert.deepEqual(rulesOptions, [{ fillColor: '#FF0000', textColor: '#FFFFFF', fontBold: true }]);
+    assert.deepEqual(await rulesOf(dst.doc, 'Budget', 'Montant'), [{ formula: '$Montant < 0', style: { fillColor: '#FF0000', textColor: '#FFFFFF', fontBold: true } }]);
+    assert.deepEqual(await rulesOf(dst.doc, 'Budget', 'Libelle'), [], 'la règle hors grammaire n\'est jamais posée');
+    assert.ok(!JSON.stringify(await records(dst.doc, '_grist_Tables_column')).includes('len('), 'aucune formule de la SOURCE telle quelle');
+    const helpers = async () => (await records(dst.doc, '_grist_Tables_column')).filter(c => c.colId.startsWith('gristHelper_')).length;
+    assert.equal(await helpers(), 1, 'une seule colonne cachée de règle');
+
+    // L'écart de langue est dit ; le document n'est réglé que par un clic confirmé d'un propriétaire.
+    const notice = widget().locator('.notice.format');
+    await notice.waitFor({ timeout: 60000 });
+    assert.match(await notice.innerText(), /fr-FR/);
+    assert.equal((await docSettings(dst.doc)).locale, 'en-US', 'aucun passage n\'a touché au réglage du document');
+    await notice.getByRole('button', { name: 'Régler le document comme la SOURCE' }).click();
+    await dialogButton('Annuler').click();
+    assert.equal((await docSettings(dst.doc)).locale, 'en-US', '« Annuler » ne règle rien');
+    await notice.getByRole('button', { name: 'Régler le document comme la SOURCE' }).click();
+    await dialogButton('Régler le document comme la SOURCE').click();
+    await waitFor(async () => (await docSettings(dst.doc)).locale === 'fr-FR', 'document réglé en fr-FR', 30000);
+    assert.equal((await docSettings(dst.doc)).engine, (await docSettings(src.doc)).engine, 'le reste du réglage est gardé');
+    await notice.waitFor({ state: 'detached', timeout: 30000 });
+    step('Mise en forme : format, devise (euro), en-tête et règle refaite chez la CIBLE (formule jamais copiée, règle piégée écartée), écart de langue dit puis réglé sur un clic confirmé');
+
+    // Ce que Grist affiche : nombre écrit à la française, règle appliquée à la ligne négative.
+    await page.goto(dst.url.replace(/\/p\/\d+$/, ''));
+    await page.getByText('Budget', { exact: true }).first().click();
+    await page.locator('.field_clip').first().waitFor({ timeout: 30000 });
+    const cells = async () => page.locator('.gridview_row .field').evaluateAll(nodes => nodes.map(node => {
+      const clip = node.querySelector('.field_clip') || node; // le fond est sur la case, la couleur du texte sur son contenu
+      return { text: node.textContent.replace(/\s/g, ' ').trim(), fill: getComputedStyle(node).backgroundColor, color: getComputedStyle(clip).color };
+    }));
+    const shown = await waitFor(async () => { const now = (await cells()).filter(c => /€/.test(c.text)); return now.length === 2 && now; }, 'montants affichés en euros', 30000);
+    assert.deepEqual(shown.map(c => c.text).sort(), ['-20,00 €', '1 234,50 €'], 'écriture française, euro');
+    const negative = shown.find(c => c.text.startsWith('-'));
+    assert.equal(negative.fill, 'rgb(255, 0, 0)', 'la règle colore la ligne négative');
+    assert.equal(negative.color, 'rgb(255, 255, 255)');
+    assert.notEqual(shown.find(c => !c.text.startsWith('-')).fill, 'rgb(255, 0, 0)');
+    step('Mise en forme : la CIBLE affiche 1 234,50 € et la ligne négative est en rouge');
+
+    // Une retouche d'ici (devise, règle retirée) reste après un nouveau passage ; « Reprendre la mise en forme » la défait.
+    const col = await column(dst.doc, 'Budget', 'Montant');
+    await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', col.id, { widgetOptions: JSON.stringify({ ...await montant(), currency: 'USD', rulesOptions: [] }) }],
+      ['RemoveColumn', 'Budget', (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId.startsWith('gristHelper_')).colId]]);
+    await applyActions(src.doc, [['AddRecord', 'Budget', null, { Libelle: 'Assurance', Montant: 80 }]]);
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 3, 'ligne de plus reçue (un passage a eu lieu)', 90000);
+    assert.equal((await montant()).currency, 'USD', 'la devise choisie ici reste');
+    assert.deepEqual(await rulesOf(dst.doc, 'Budget', 'Montant'), [], 'la règle retirée ici n\'est pas refaite');
+    await button('Reprendre la mise en forme').click();
+    await dialogButton('Reprendre la mise en forme').click();
+    await waitFor(async () => (await montant()).currency === 'EUR' && (await rulesOf(dst.doc, 'Budget', 'Montant')).length === 1, 'mise en forme reprise', 90000);
+    assert.deepEqual((await rulesOf(dst.doc, 'Budget', 'Montant')).map(r => r.formula), ['$Montant < 0']);
+    assert.equal(await helpers(), 1, 'la règle est remplacée, pas doublée');
+    step('Mise en forme : une retouche d\'ici est gardée, « Reprendre la mise en forme » remet la SOURCE sans doubler la règle');
+
+    // Case décochée : ce que la SOURCE envoie redevient le format de base (rien ne part de plus que les listes de choix d'avant).
+    await openWidget(src.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    const again = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
+    assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
+    await again.uncheck();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
+    await dialogButton('Fermer').click();
+    const lot = JSON.parse((await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot' && r.Synchro_Table === 'Budget').Synchro_Colonnes);
+    assert.ok(lot.every(c => !c.fmt && !c.doc), 'plus de marque de mise en forme dans la description des colonnes');
+    assert.ok(!JSON.stringify(lot).includes('rules') && !JSON.stringify(lot).includes('headerFill'), 'ni règle ni en-tête');
+    step('Mise en forme : case décochée, la SOURCE n\'envoie plus ni règle, ni en-tête, ni langue');
+  }
   // Pièces jointes d'un document par l'API REST : dépôt, lecture, et empreinte courte d'un contenu.
   function attachmentTools() {
     const auth = { Authorization: `Bearer ${env.apiKey}` };
@@ -1353,8 +1482,8 @@ try {
     await B.tab.close();
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2309,6 +2438,7 @@ try {
   await optionsSteps();
   await choicesSteps();
   await linksSteps();
+  await formatSteps();
   await straySteps();
   await docLinkSteps();
   await tabSteps();

@@ -3,6 +3,9 @@
 // n'est changé dans une colonne que la CIBLE a choisie : seules ses colonnes à elle sont complétées,
 // et seulement de ce qui leur manque (un choix ajouté à la SOURCE s'ajoute à la liste ; un format
 // retouché ici reste). Dans les deux sens, seules des clés connues aux valeurs contrôlées passent.
+// Avec `extras` (l'export envoie « la mise en forme des colonnes ») passent aussi le style de l'en-tête et les
+// règles de mise en forme conditionnelle, réécrites d'après une grammaire stricte (voir rules.js).
+import { normalizeRule } from './rules.js';
 const COLOR = /^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/;
 const FORMAT = /^[A-Za-z0-9 .,:;/_'()[\]-]{1,40}$/; // format de date ou d'heure (moment.js)
 const bool = v => typeof v === 'boolean';
@@ -12,6 +15,11 @@ const STYLE = {
   fillColor: v => COLOR.test(v), textColor: v => COLOR.test(v),
   fontBold: bool, fontItalic: bool, fontUnderline: bool, fontStrikethrough: bool,
 };
+const HEADER = {
+  headerTextColor: v => COLOR.test(v), headerFillColor: v => COLOR.test(v),
+  headerFontBold: bool, headerFontItalic: bool, headerFontUnderline: bool, headerFontStrikethrough: bool,
+};
+const RULES_MAX = 10;
 const COMMON = { alignment: oneOf(['left', 'center', 'right']), wrap: bool, ...STYLE };
 const NUMBER = {
   numMode: oneOf(['currency', 'decimal', 'percent', 'scientific']), currency: v => /^[A-Z]{3}$/.test(v), numSign: oneOf(['parens']),
@@ -51,19 +59,32 @@ function choicesOf(raw) {
   return { ...(choices.length ? { choices } : {}), ...(Object.keys(choiceOptions).length ? { choiceOptions } : {}) };
 }
 
+// Règles de mise en forme conditionnelle, telles qu'elles sont envoyées : [{ when, <style> }], la condition
+// réécrite (rules.js), le style limité aux clés connues. Une règle sans condition lisible ou sans style est laissée.
+function rulesOf(list) {
+  const rules = (Array.isArray(list) ? list.slice(0, RULES_MAX) : []).map((rule) => {
+    const when = normalizeRule(rule && rule.when);
+    const style = pick(rule, STYLE);
+    return when && Object.keys(style).length ? { when, ...style } : null;
+  }).filter(Boolean);
+  return rules.length ? { rules } : {};
+}
+
 function pick(raw, keys) {
   const source = raw && typeof raw === 'object' ? raw : {};
   return Object.fromEntries(Object.entries(keys).filter(([k, ok]) => Object.hasOwn(source, k) && ok(source[k])).map(([k]) => [k, source[k]]));
 }
 
 // Options d'une colonne de type `type` (celui qu'elle a dans l'autre document : une Référence part
-// en texte), contrôlées ; null s'il n'y en a pas.
-export function columnOptions(type, widgetOptions) {
+// en texte), contrôlées ; null s'il n'y en a pas. `extras` : style d'en-tête et règles conditionnelles
+// (`rules`, déjà au format envoyé) passent aussi.
+export function columnOptions(type, widgetOptions, { extras = false } = {}) {
   const base = String(type || '').split(':')[0];
   if (!KEYS[base]) return null;
   const raw = parse(widgetOptions);
-  let opts = { ...pick(raw, { ...COMMON, ...KEYS[base] }), ...(isChoice(base) ? choicesOf(raw) : {}) };
+  let opts = { ...pick(raw, { ...COMMON, ...KEYS[base], ...(extras ? HEADER : {}) }), ...(isChoice(base) ? choicesOf(raw) : {}), ...(extras ? rulesOf(raw.rules) : {}) };
   if (JSON.stringify(opts).length > OPTS_MAX) delete opts.choiceOptions;
+  if (JSON.stringify(opts).length > OPTS_MAX) delete opts.rules;
   if (JSON.stringify(opts).length > OPTS_MAX) opts = {};
   return Object.keys(opts).length ? opts : null;
 }
@@ -73,10 +94,10 @@ export function columnOptions(type, widgetOptions) {
 // à écrire, ou null si rien ne manque.
 export function fillOptions(type, current, sent) {
   const here = parse(current);
-  const wanted = columnOptions(type, sent);
+  const wanted = columnOptions(type, sent, { extras: true });
   if (!wanted) return null;
   const next = { ...here };
-  for (const [k, v] of Object.entries(wanted)) if (!['choices', 'choiceOptions'].includes(k) && !Object.hasOwn(here, k)) next[k] = v;
+  for (const [k, v] of Object.entries(wanted)) if (!['choices', 'choiceOptions', 'rules'].includes(k) && !Object.hasOwn(here, k)) next[k] = v;
   if (wanted.choices) {
     const had = Array.isArray(here.choices) ? here.choices : [];
     const added = wanted.choices.filter(c => !had.includes(c)).slice(0, Math.max(0, CHOICES_MAX - had.length)); // la liste d'ici reste bornée
@@ -112,3 +133,40 @@ export function receivedChoices(current, values) {
 // aucun choix (le widget les créait ainsi).
 export const ownsColumn = (own, sentId, column) => (own ? own.includes(sentId)
   : isChoice(column.type) && !(parse(column.widgetOptions).choices || []).length);
+
+// Reprise voulue de la mise en forme (bouton « Reprendre la mise en forme de la SOURCE ») : chaque clé de
+// style que la SOURCE peut envoyer pour ce type prend la valeur de la SOURCE, ou disparaît si la SOURCE n'en
+// a pas ; le reste (liste de choix d'ici, règles) est laissé, et les choix nouveaux s'ajoutent comme
+// ailleurs. Rend le texte à écrire, ou null s'il n'y a rien à changer.
+export function replaceOptions(type, current, sent) {
+  const here = parse(current);
+  const base = String(type || '').split(':')[0];
+  if (!KEYS[base]) return null;
+  const wanted = columnOptions(type, sent, { extras: true }) || {};
+  const next = { ...here };
+  for (const key of Object.keys({ ...COMMON, ...KEYS[base], ...HEADER })) {
+    if (Object.hasOwn(wanted, key)) next[key] = wanted[key];
+    else delete next[key];
+  }
+  const text = JSON.stringify(next);
+  const filled = fillOptions(type, text, sent) || text;
+  return filled === JSON.stringify(here) ? null : filled;
+}
+
+// Règles de mise en forme conditionnelle envoyées pour une colonne (`opts.rules`), contrôlées.
+export const sentRules = opts => (opts && Array.isArray(opts.rules) ? rulesOf(opts.rules).rules || [] : []);
+
+// Styles des règles déjà posées sur une colonne d'ici (`rulesOptions` de ses options), dans l'ordre de ses règles.
+export const ruleStyles = widgetOptions => (Array.isArray(parse(widgetOptions).rulesOptions) ? parse(widgetOptions).rulesOptions : []);
+
+// Options d'une colonne d'ici avec les styles de ses règles remplacés (liste vide : plus de règle), les autres
+// clés laissées telles quelles.
+export function withRuleStyles(widgetOptions, styles) {
+  const next = { ...parse(widgetOptions) };
+  if (styles.length) next.rulesOptions = styles;
+  else delete next.rulesOptions;
+  return JSON.stringify(next);
+}
+
+// Style d'une règle envoyée, tel que Grist le range dans `rulesOptions`.
+export const ruleStyle = rule => pick(rule, STYLE);

@@ -489,6 +489,7 @@ function planRemovals({ plan, dest, destRows, archived }) {
 // est notée pour l'historique (`addedCols`, à l'heure `now`, en secondes).
 export function receivedColumns(entry, tableRows, schema, allowed, now) {
   let sent = sentColumns(tableRows, entry.columns || []);
+  const doc = (sent.find(c => c.doc) || {}).doc; // langue et monnaie du document de la SOURCE, si elle les envoie
   let next = entry;
   if (allowed) {
     const kept = exchangeColumns(sent, allowed, entry.map);
@@ -496,5 +497,5 @@ export function receivedColumns(entry, tableRows, schema, allowed, now) {
     next = { ...entry, map: kept.map };
   }
   const map = newColumnsMap(next, destColumns(sent), schema.columns(next.dest).map(c => c.colId));
-  return { sent, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
+  return { sent, doc, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
 }

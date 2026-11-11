@@ -3,7 +3,8 @@
 // target/journals.js.
 import { JOURNAL_PREFIX, KEY_COL, LIST_COL, SIG_KEY, columnNote, noteAction } from './common.js';
 import { destColumns } from './journal.js';
-import { columnOptions, fillOptions, isChoice, ownsColumn, receivedChoices } from './options.js';
+import { columnOptions, fillOptions, isChoice, ownsColumn, receivedChoices, replaceOptions, ruleStyle, ruleStyles, sentRules, withRuleStyles } from './options.js';
+import { parseRule, printRule } from './rules.js';
 
 // Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
@@ -49,9 +50,12 @@ export const receivedDests = schema => receivedJournals(schema)
 export function addDestColumnsActions(schema, dest, columns, map = {}) {
   const have = new Set((schema.columns(dest) || []).map(c => c.colId));
   return [...destColumns(columns), { id: KEY_COL, type: 'Text', label: KEY_COL }]
-    .map(({ id, type, label, opts }) => ({ id: map[id] || id, type, label: map[id] ? map[id] : label, key: id === KEY_COL, opts: columnOptions(type, opts) }))
+    .map(({ id, type, label, opts }) => ({ id: map[id] || id, type, label: map[id] ? map[id] : label, key: id === KEY_COL, opts: columnOptions(type, opts, { extras: true }) }))
     .filter(c => !have.has(c.id))
-    .map(({ id, key, opts, ...info }) => [key ? 'AddColumn' : 'AddVisibleColumn', dest, id, { ...info, isFormula: false, ...(opts ? { widgetOptions: JSON.stringify(opts) } : {}) }]);
+    .map(({ id, key, opts, ...info }) => {
+      const { rules, ...format } = opts || {}; // les règles conditionnelles se posent après (voir planRules)
+      return [key ? 'AddColumn' : 'AddVisibleColumn', dest, id, { ...info, isFormula: false, ...(Object.keys(format).length ? { widgetOptions: JSON.stringify(format) } : {}) }];
+    });
 }
 
 // Colonnes envoyées (leur nom dans l'export) que addDestColumnsActions créerait : la CIBLE les note
@@ -72,6 +76,72 @@ export function optionActions(schema, entry, columns) {
     return text ? [['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: text }]] : [];
   });
 }
+
+// « Reprendre la mise en forme » : le style de chaque colonne reçue prend celui de la SOURCE (voir
+// replaceOptions), colonnes créées ici ou non. `columns` : colonnes envoyées, avec `opts`.
+export function restyleOptionActions(schema, entry, columns) {
+  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  return destColumns(columns).flatMap((c) => {
+    const column = here.get((entry.map || {})[c.id] || c.id);
+    const text = column ? replaceOptions(column.type, column.widgetOptions, c.opts || {}) : null;
+    return text ? [['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: text }]] : [];
+  });
+}
+
+// Règles de mise en forme conditionnelle à poser sur les colonnes reçues. Chaque règle envoyée est relue par
+// la grammaire de rules.js et sa formule réécrite d'ici, avec les noms des colonnes d'ici ; une règle qui lit
+// une colonne absente d'ici est laissée. Hors `replace`, seules les colonnes créées par le widget (`own`) dont
+// le sort n'est pas encore décidé (`entry.styled`) en reçoivent, et seulement si elles n'en ont pas déjà :
+// ce qui est décidé, retouché ou supprimé ici n'est plus refait. Avec `replace` (la personne l'a demandé),
+// les règles d'ici sont retirées et remplacées par celles de la SOURCE. Rend `todo` (colonne, règles,
+// colonnes cachées à retirer) et `settled` (colonnes décidées sans rien poser : elles ont déjà leurs règles).
+export function planRules(schema, entry, columns, { replace = false } = {}) {
+  const cols = schema.columns(entry.dest) || [];
+  const here = new Map(cols.map(c => [c.colId, c]));
+  const byRow = new Map(cols.map(c => [c.id, c]));
+  const map = entry.map || {};
+  const rename = id => (here.has(map[id] || id) ? map[id] || id : null);
+  const decided = new Set(entry.styled || []);
+  const own = new Set(Array.isArray(entry.own) ? entry.own : []);
+  const todo = [];
+  const settled = [];
+  for (const c of destColumns(columns)) {
+    const rules = sentRules(c.opts).map(r => ({ formula: printRule(parseRule(r.when), rename), style: ruleStyle(r) })).filter(r => r.formula);
+    const column = here.get(map[c.id] || c.id);
+    if (!rules.length || !column || (!replace && (decided.has(c.id) || !own.has(c.id)))) continue;
+    const old = (Array.isArray(column.rules) ? column.rules.slice(1) : []).map(ref => (byRow.get(ref) || {}).colId).filter(Boolean);
+    if (!replace && (old.length || ruleStyles(column.widgetOptions).length)) settled.push(c.id);
+    else todo.push({ id: c.id, column, rules, old: replace ? old : [] });
+  }
+  return { todo, settled };
+}
+
+// Première étape de la pose des règles : les colonnes cachées d'ici à retirer, puis une règle vide par règle
+// à poser. Grist ne dit le nom de la colonne cachée d'une règle qu'une fois celle-ci ajoutée (`owners` : pour
+// chaque action, le numéro de l'élément de `todo` à qui elle revient, -1 pour un retrait).
+export function startRules(dest, todo) {
+  const actions = [];
+  const owners = [];
+  todo.forEach((item, i) => {
+    for (const helper of item.old) { actions.push(['RemoveColumn', dest, helper]); owners.push(-1); }
+    for (let n = 0; n < item.rules.length; n++) { actions.push(['AddEmptyRule', dest, 0, item.column.id]); owners.push(i); }
+  });
+  return { actions, owners };
+}
+
+// Seconde étape : la formule de chaque règle (écrite par rules.js) et les styles dans les options de la
+// colonne. `retValues` : ce que Grist a rendu à la première étape.
+export function finishRules(dest, todo, owners, retValues) {
+  const made = todo.map(() => []);
+  owners.forEach((owner, k) => { if (owner >= 0 && retValues[k] && retValues[k].colId) made[owner].push(retValues[k].colId); });
+  return todo.flatMap((item, i) => (made[i].length !== item.rules.length ? [] : [
+    ...made[i].map((helper, n) => ['ModifyColumn', dest, helper, { formula: item.rules[n].formula }]),
+    ['UpdateRecord', '_grist_Tables_column', item.column.id, { widgetOptions: withRuleStyles(item.column.widgetOptions, item.rules.map(r => r.style)) }],
+  ]));
+}
+
+// Colonnes cachées créées à la première étape (à retirer si la seconde échoue).
+export const madeHelpers = (owners, retValues) => owners.map((owner, k) => (owner >= 0 && retValues[k] ? retValues[k].colId : '')).filter(Boolean);
 
 // Colonnes de choix d'ici créées par le widget, dont la SOURCE n'envoie pas de liste (export filtré,
 // ou colonne sans liste) : la liste se complète des valeurs reçues (voir receivedChoices).

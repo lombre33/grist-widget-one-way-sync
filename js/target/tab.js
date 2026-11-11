@@ -12,7 +12,9 @@ import { closeExport } from '../engine/exchange.js';
 import { updateJournalNote } from '../engine/target/journals.js';
 import { dismissLost, markReceptions, readLost } from '../engine/target/lost.js';
 import { receivedJournals, receivedKey } from '../engine/logic/received.js';
-import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, state, tableKey } from '../engine/target/loop.js';
+import { currencyOf, formatGap } from '../engine/logic/docformat.js';
+import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, restyle, state, tableKey } from '../engine/target/loop.js';
+import { alignDocFormat, readDocFormat } from '../engine/target/style.js';
 import { SHOWN } from '../engine/logic/report.js';
 import { TALLY_GRACE_S } from '../engine/logic/tally.js';
 import { uploadErrors } from '../engine/target/files.js';
@@ -52,6 +54,7 @@ export async function refreshTarget() {
 // réservé aux éditeurs ne l'est qu'une fois qu'un propriétaire a ouvert la page (`reserved`).
 async function receivedGroups(schema, owner) {
   const forms = await formPages();
+  const docHere = await readDocFormat().catch(() => null); // langue et monnaie de ce document (voir formatNotes)
   const groups = [];
   for (const { journal, note } of receivedJournals(schema).filter(r => !awaitingPartner(r.note))) {
     const known = state.results.get(journal);
@@ -59,7 +62,7 @@ async function receivedGroups(schema, owner) {
     const rows = known && Number.isFinite(known.rows) ? known.rows : (await fetchRows(journal)).length;
     const waiting = note.mode !== 'public' && !note.retour && !rows;
     const stats = waiting ? null : await journalStats(journal, RECEIVED_COL, TYPE_COL);
-    groups.push({ journal, note, public: note.mode === 'public', waiting, ...receptionFlags({ schema, journal, note, waiting, owner, forms }), owner, stats, shared: (forms.get(journal) || {}).shared || 0 });
+    groups.push({ journal, note, public: note.mode === 'public', waiting, ...receptionFlags({ schema, journal, note, waiting, owner, forms }), owner, docHere, stats, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
 }
@@ -193,7 +196,7 @@ function tableLine(group, entry) {
 
 // Avis d'une réception : envoi coupé par la SOURCE, lignes manquantes, trop grosses, instantané
 // trop gros, lien partagé, arrivées suspectes, tables proposées ou refusées.
-const cardNotes = group => [arrivalNotes(group), ...stateNotes(group), ...gapNotes(group), ...linkNotes(group)];
+const cardNotes = group => [arrivalNotes(group), ...stateNotes(group), ...gapNotes(group), ...formatNotes(group), ...linkNotes(group)];
 
 // L'état de la réception : envoi coupé, formulaire disparu, clé de signature, droits.
 function stateNotes(group) {
@@ -206,6 +209,37 @@ function stateNotes(group) {
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
     locked ? message('info', t('recv.lock.waiting')) : null,
   ];
+}
+
+// Langue et monnaie du document de la SOURCE (elle les envoie avec sa mise en forme) différentes de celles de ce
+// document : Grist écrit les séparateurs des nombres et la monnaie par défaut d'après le réglage du document,
+// pas d'après la colonne. Seul un propriétaire peut régler le document, sur un clic confirmé : le réglage change
+// l'écriture de toutes ses tables.
+function formatNotes(group) {
+  const { note } = group;
+  const source = (note.tables.find(entry => entry.sourceDoc) || {}).sourceDoc;
+  const gap = source && group.docHere && note.mode !== 'echange' ? formatGap(source, group.docHere) : null;
+  if (!gap) return [];
+  const label = format => [format.locale || 'en-US', currencyOf(format)].filter(Boolean).join(' · ');
+  const align = async () => {
+    if (!(await confirmDialog({ title: t('recv.format.confirmTitle'), body: t('recv.format.confirmBody', { source: label(source) }), confirmLabel: t('recv.format.action'), kind: 'btn-primary' }))) return;
+    await alignDocFormat(source);
+    flash = { node: message('ok', t('recv.format.done', { source: label(source) })), until: Date.now() + NOTICE_MS };
+    await renderTarget();
+  };
+  return [notice({
+    tone: 'info', className: 'format', title: t('recv.format.title'),
+    lines: [t('recv.format.body', { source: label(source), here: label(group.docHere) }), group.owner ? null : t('recv.format.owner')],
+    actions: group.owner ? [button(t('recv.format.action'), 'settings', e => run(e.currentTarget, container.querySelector('.out'), align))] : [],
+  })];
+}
+
+// « Reprendre la mise en forme » : les colonnes reçues reprennent le style et les règles de la SOURCE, après confirmation.
+async function restyleReception(group) {
+  if (!(await confirmDialog({ title: t('recv.restyle.title', { name: group.note.name }), body: t('recv.restyle.body'), confirmLabel: t('recv.action.restyle'), kind: 'btn-primary' }))) return;
+  await restyle(group.journal);
+  flash = { node: message('ok', t('recv.restyle.done')), until: Date.now() + NOTICE_MS };
+  await renderTarget();
 }
 
 // Les lignes qui n'arrivent pas : manquantes (envoi en morceaux), annoncées mais pas reçues, trop grosses, instantané trop gros.
@@ -274,6 +308,7 @@ function syncCard(group) {
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : linkButton(group),
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
+      group.waiting || note.mode === 'echange' ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
       group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }

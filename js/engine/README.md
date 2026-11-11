@@ -113,7 +113,7 @@ SOURCE (`source/export.js`, `source/invite.js`, plus `source/actions.js` pour r�
 
 | Fonction | Prend | Rend |
 |---|---|---|
-| `saveChosenExport({ exp?, name, selection, links?, rules? })` | `selection` : `[{ table, columns: [identifiants cochés], filter }]` | `{ id, name, tables, changed, created }` (`created` : l'export tel que l'écran des destinataires l'attend) |
+| `saveChosenExport({ exp?, name, selection, links?, style?, rules? })` (`style` : envoyer aussi la mise en forme des colonnes, voir « Mise en forme ») | `selection` : `[{ table, columns: [identifiants cochés], filter }]` | `{ id, name, tables, changed, created }` (`created` : l'export tel que l'écran des destinataires l'attend) |
 | `finishEdit(exp, { name, changed }, progress?)` | l'export modifié | lignes renvoyées (ou `null` si le renvoi attend son tour) |
 | `startInvitation(exp, { renforce? })` | l'export | `{ exp, entry, secret }` : `secret` n'est gardé nulle part |
 | `invitationCode(exp, entry, secret, retour?)` | | `{ code, expire, backCode }` (le code à transmettre ; `from` porte l'équipe du document et le nom retenu par `rememberDocName`) |
@@ -139,6 +139,8 @@ CIBLE (`target/receive.js`) :
 | `sourceOf(invitation)` | l'invitation lue | le document de la SOURCE tel que la note du journal le garde (`email`, `docId`, `team`, `docName`) ; en Échange, nom et équipe lus chez Grist l'emportent. L'hôte en fait un lien avec `docUrl(origin, team, docId)` (`logic/codes.js`, `origin` : l'instance de **son** document, jamais celle d'un code) |
 | `receptionReply({ journal, note }, lien)` | le lien du formulaire collé | `{ code, control }` : le code de réponse et le code de contrôle |
 | `myEmail(journal)` | | l'e-mail de la personne connectée, calculé par Grist |
+| `restyle(journal)` (`target/loop.js`) | | la CIBLE reprend la mise en forme de la SOURCE dans les colonnes reçues (formats, en-têtes, règles), en remplaçant ce qui a été retouché ici |
+| `readDocFormat()`, `alignDocFormat(wanted)` (`target/style.js`) | `wanted` : `{ locale?, currency? }` (`formatGap(source, ici)` dit l'écart) | la langue et la monnaie de ce document ; `alignDocFormat` les écrit dans `_grist_DocInfo` (à ne faire que sur un geste d'un propriétaire, c'est un réglage du document entier) |
 
 Ce que ces fonctions supposent du port : `shareInfo` (document de la clé du formulaire), `createWebhook` (condition
 relue), `isOwner`, `docIdentity`, `apply`, `fetchRows`, `readSchema` et `withLock` pour les notes ; **aucun accès à
@@ -163,6 +165,23 @@ vérification par heure et par destinataire, rend vrai si une fiche a changé ; 
 diagnostic à copier (`diagnostic.js` : `diagnostic({ version, served, readOnly, agent })` rend le texte, rien d'autre que
 ce que l'hôte dit lui-même n'est supposé : le moteur lit le document par le port).
 
+## Mise en forme des colonnes (2.7.0)
+
+Un export dont `style` est vrai envoie, avec la description signée des colonnes, ce que Grist range dans les options d'une
+colonne en plus du format : couleurs et gras des en-têtes, alignement, monnaie résolue, règles de mise en forme conditionnelle
+(`rules` : `[{ when, fillColor, textColor, fontBold… }]`), et la langue et la monnaie du document (`doc`, sur la première
+colonne). Rien n'est envoyé sans `style` : la description est celle d'avant, octet pour octet.
+- **Une règle n'est jamais une formule copiée.** Une règle est une formule Python dans une colonne cachée de la SOURCE ;
+  `logic/rules.js` ne la reprend que si elle entre dans une grammaire courte (`parseRule` : `et`/`ou`/`non`, comparaisons,
+  `in` avec une liste littérale, `is None`, `+ - * /`, `TODAY()`, `$Col` ou `rec.Col`, nombres, textes sans guillemet ni
+  barre oblique ni caractère de contrôle ou de sens d'écriture ; 300 caractères, 60 nœuds, profondeur 12). La CIBLE
+  **réécrit** la formule (`printRule`) avec les noms de colonnes d'ici ; une colonne absente d'ici, ou un mot hors grammaire,
+  fait tomber la règle. Essais : `tests/unit/rules.test.mjs`, `robustness.test.mjs` (tirage de règles abîmées).
+- **CIBLE** : seules les colonnes que le moteur a créées prennent la mise en forme, une fois (`styled` dans la note) ; une
+  retouche d'ici reste ; `restyle` remplace sur demande. La langue du document n'est jamais changée par un passage : l'écart
+  est une information (`formatGap`), le réglage est `alignDocFormat`. En Échange, la mise en forme ne part pas.
+- Essais : `tests/unit/engine-format.test.mjs` (SOURCE fr-FR vers CIBLE en-US sur deux Grist en mémoire), e2e `ONLY_FORMAT=1`.
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de
@@ -171,7 +190,7 @@ ce que l'hôte dit lui-même n'est supposé : le moteur lit le document par le p
   (colonne `id_sync`), des règles d'accès, des pièces jointes.
 - Tables internes lues ou écrites : `_grist_Tables`, `_grist_Tables_column`, `_grist_Views`, `_grist_Views_section`,
   `_grist_Views_section_field`, `_grist_Pages`, `_grist_Shares`, `_grist_ACLResources`, `_grist_ACLRules`,
-  `_grist_Attachments`.
+  `_grist_Attachments`, `_grist_DocInfo` (lue ; écrite seulement par `alignDocFormat`, sur un geste d'un propriétaire).
 
 ## Textes
 

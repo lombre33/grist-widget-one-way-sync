@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.15.3 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.16.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -103,6 +103,11 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 - **Links between tables**: a Reference column that points at another table of the export
   becomes, on the receiving side, a real Reference to the received table (“Keep the links between
   tables” box, ticked by default), showing the same column.
+- **Column formatting**: headers, colors, currency and simple conditional formatting rules can
+  travel with the export (“Send the column formatting” box, ticked by default). A rule is never
+  copied as it is: it is read, then rewritten with the receiver's columns. The card flags a
+  different document language (it decides how numbers are written) and an owner can set the
+  document with one click.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET

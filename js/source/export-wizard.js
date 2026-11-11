@@ -112,6 +112,20 @@ function linksBlock(ctx, schema) {
   return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t('send.links')), el('p', { class: 'muted small' }, t('send.links.help')));
 }
 
+// Case « Envoyer la mise en forme des colonnes » (voir options.js, rules.js, docformat.js) : en-têtes, règles
+// conditionnelles simples, monnaie résolue et langue du document, en plus des formats que la CIBLE reprend déjà.
+// Cochée d'emblée pour un nouvel export ; pour un export modifié, telle que l'export l'est déjà. Jamais en Échange
+// (les colonnes y vont dans les deux sens).
+function styleBlock(ctx) {
+  if (ctx.exp?.echange) {
+    ctx.style = false;
+    return null;
+  }
+  if (ctx.style === undefined) ctx.style = ctx.exp ? ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)) : true;
+  const box = el('input', { type: 'checkbox', checked: ctx.style, onchange: () => { ctx.style = box.checked; } });
+  return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t('send.style')), el('p', { class: 'muted small' }, t('send.style.help')));
+}
+
 // 2. Colonnes, par table, et ce que le widget ajoutera pour la synchro.
 async function showColumns(ctx) {
   const schema = await readSchema();
@@ -127,7 +141,7 @@ async function showColumns(ctx) {
   };
   ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
     removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
-    ...blocks, linksBlock(ctx, schema),
+    ...blocks, linksBlock(ctx, schema), styleBlock(ctx),
     adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
     backButton(() => showTables(ctx)),
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
@@ -171,7 +185,7 @@ const selectionOf = ctx => ctx.chosen.map(table => ({ table, columns: ctx.select
 
 async function save(ctx, name, report) {
   const { exp } = ctx;
-  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, rules: ctx.rules });
+  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, style: ctx.style, rules: ctx.rules });
   return exp ? showEdited(ctx, { name, changed: saved.changed, report }) : showCreated(ctx, { name, created: saved.created });
 }
 

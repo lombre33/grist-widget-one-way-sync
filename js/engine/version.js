@@ -45,7 +45,19 @@
 //         variables locales renommées (`logic/journal.js`, `logic/lost.js`, `logic/notes.js`, `source/estimate.js`,
 //         `source/resend.js`). Port, tables, codes et texte des formules inchangés ; essai `tests/unit/robustness.test.mjs`
 //         (lectures de données abîmées : aucune exception imprévue).
-export const ENGINE_VERSION = '2.6.1';
+// 2.7.0 (11 novembre 2026, retour du porteur : une page de budget dupliquée gardait l'écriture américaine et la devise USD) : la
+//         mise en forme des colonnes peut partir avec l'export (`saveChosenExport({ …, style: true })`, marque `fmt` par colonne et
+//         `doc` sur la première dans la description signée des colonnes) : en-têtes, couleurs, alignement, monnaie résolue (celle
+//         de la langue du document quand la colonne n'en a pas) et règles de mise en forme conditionnelle simples. Une règle n'est
+//         **jamais copiée** : `logic/rules.js` la lit par une grammaire stricte (comparaisons, et/ou/non, listes littérales,
+//         arithmétique, `$Col`), la CIBLE la réécrit avec ses propres noms de colonnes (`printRule`), ce qui sort de la grammaire
+//         est abandonné. CIBLE : `target/style.js` (`styleColumns`, `readDocFormat`, `alignDocFormat`), `restyle(journal)`
+//         (`target/loop.js`) pour reprendre la mise en forme sur demande ; langue et devise du document (`logic/docformat.js`) :
+//         l'écart est dit, le réglage du document n'est écrit que par `alignDocFormat`, sur un geste d'un propriétaire. Lit
+//         `_grist_DocInfo` (SOURCE et CIBLE). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte des formules ne changent : un
+//         export sans `style` envoie exactement la description d'avant (essai `engine-format`, `formulas-golden`), une version
+//         d'avant ignore les champs en plus.
+export const ENGINE_VERSION = '2.7.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

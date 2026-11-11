@@ -11,6 +11,7 @@ import { cleanLabel } from '../logic/codes.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } from '../logic/exports.js';
 import { filterColumns } from '../logic/filters.js';
+import { docFormatOf } from '../logic/docformat.js';
 import { keptKeys, readKeys, signText } from '../logic/trust.js';
 import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
 import { addEvent, docNameOf, observeRows, setDocName } from '../logic/notes.js';
@@ -156,7 +157,9 @@ export async function renameForeignSync(name) {
 // Listes de choix et formats changés dans les tables des exports (voir optionsActions). Rend vrai
 // si quelque chose a changé.
 export async function refreshOptions(schema, rows) {
-  const actions = optionsActions(rows, schema);
+  // Un export qui envoie sa mise en forme (colonnes `fmt`) dit aussi la langue et la monnaie du document.
+  const doc = rows.some(r => String(r[SCHEMA_COL] || '').includes('"fmt":true')) ? docFormatOf(await fetchRows('_grist_DocInfo')) : null;
+  const actions = optionsActions(rows, schema, doc);
   await apply(actions);
   return actions.length > 0;
 }

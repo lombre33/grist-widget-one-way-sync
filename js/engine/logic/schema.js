@@ -22,7 +22,7 @@ export function schemaFrom(tables, columns) {
       if (!table) return null;
       return columns.filter(c => c.parentId === table.id).sort((x, y) => x.parentPos - y.parentPos).map(c => ({
         id: c.id, colId: c.colId, type: c.type, isFormula: c.isFormula, formula: c.formula, label: c.label, description: c.description,
-        displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps, widgetOptions: c.widgetOptions,
+        displayCol: c.displayCol, recalcWhen: c.recalcWhen, recalcDeps: c.recalcDeps, widgetOptions: c.widgetOptions, rules: c.rules,
         visible: (colById.get(c.visibleCol) || {}).colId || '',
       }));
     },
