@@ -58,16 +58,23 @@ async function receivedGroups(schema, owner) {
     // Un premier passage en erreur (clé perdue, table effacée) n'a pas compté les lignes : le journal en a peut-être.
     const rows = known && Number.isFinite(known.rows) ? known.rows : (await fetchRows(journal)).length;
     const waiting = note.mode !== 'public' && !note.retour && !rows;
-    // Sans clé de signature jamais vue : réception d'avant la 0.8 (une clé perdue arrête la
-    // recopie, voir sealing dans loop.js).
-    const unsigned = note.mode !== 'public' && !note.sceau && !receivedKey(schema, journal, note);
-    const unreserved = Boolean(note.reserve) && !note.reserved && !owner;
-    // Réception déjà branchée dont le formulaire n'est plus publié (dépublié, page supprimée) : la SOURCE ne peut plus écrire.
-    const formGone = note.mode !== 'public' && !note.retour && !waiting && !forms.has(journal);
     const stats = waiting ? null : await journalStats(journal, RECEIVED_COL, TYPE_COL);
-    groups.push({ journal, note, public: note.mode === 'public', waiting, unsigned, unreserved, formGone, owner, stats, shared: (forms.get(journal) || {}).shared || 0 });
+    groups.push({ journal, note, public: note.mode === 'public', waiting, ...receptionFlags({ schema, journal, note, waiting, owner, forms }), owner, stats, shared: (forms.get(journal) || {}).shared || 0 });
   }
   return groups;
+}
+
+// Ce que l'état d'une réception déjà branchée demande de dire : `unsigned` (aucune clé de signature jamais vue :
+// réception d'avant la 0.8, qu'une clé perdue arrête, voir sealing dans loop.js), `unreserved` (journal réservé aux
+// éditeurs, pas encore posé par un propriétaire), `formGone` (formulaire dépublié ou page supprimée : la SOURCE ne
+// peut plus écrire).
+function receptionFlags({ schema, journal, note, waiting, owner, forms }) {
+  const linked = note.mode !== 'public';
+  return {
+    unsigned: linked && !note.sceau && !receivedKey(schema, journal, note),
+    unreserved: Boolean(note.reserve) && !note.reserved && !owner,
+    formGone: linked && !note.retour && !waiting && !forms.has(journal),
+  };
 }
 
 const button = (label, iconName, onclick, kind = '') => smallButton(label, iconName, onclick, { kind, disabled: state.readOnly });
@@ -78,6 +85,27 @@ const knowHere = async () => { here ||= await docIdentity().then(d => d.origin, 
 
 // Une invitation arrivée d'un autre onglet (tab-link.js) : l'onglet Recevoir s'affiche, puis l'assistant s'ouvre sur son code.
 export const receiveOffered = code => receiveWizard(null, renderTarget, code);
+
+// Formulaire des exports en attente, chacun sur sa page (l'assistant le crée ; remis s'il a été effacé, pas à chaque
+// redessin périodique), et la marque que chaque réception garde dans le partage de son formulaire pour dire qu'elle a
+// existé si son journal est supprimé. Un lecteur ne peut pas publier le formulaire : l'écran passe en lecture seule.
+async function prepareReceptions(groups, { owner, periodic }, out) {
+  try {
+    for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal, { below: group.note.tables.map(tb => tb.dest), note: group.note });
+    if (!periodic && owner) await markReceptions(groups.filter(g => !g.waiting)).catch(e => console.warn(e)); // un détail : jamais une raison de passer en lecture seule
+    if (!periodic) lostList = await readLost();
+  } catch (e) {
+    if (isAccessError(e)) state.readOnly = true;
+    else out.append(message('err', errorText(e)));
+  }
+}
+
+function targetToolbar(groups, out) {
+  const sync = async () => { if ((await consolidateAll({ reread: true })) === false) out.replaceChildren(message('ok', t('recv.sync.none'))); };
+  return el('div', { class: 'toolbar' },
+    el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
+    el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
+}
 
 export async function renderTarget(root = container, { periodic = false } = {}) {
   if (!container) state.viewer = isReadOnly();
@@ -93,24 +121,10 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   }
   const schema = await readSchema();
   const groups = await receivedGroups(schema, owner || state.viewer);
-  // Formulaire des exports en attente, chacun sur sa page (l'assistant le crée ; remis s'il a été
-  // effacé, pas à chaque redessin périodique).
   const out = el('div', { class: 'out' }, lastNotice());
-  try {
-    for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal, { below: group.note.tables.map(tb => tb.dest), note: group.note });
-    // Chaque réception garde, dans le partage de son formulaire, de quoi dire qu'elle a existé si son journal est supprimé.
-    if (!periodic && owner) await markReceptions(groups.filter(g => !g.waiting)).catch(e => console.warn(e)); // un détail : jamais une raison de passer en lecture seule
-    if (!periodic) lostList = await readLost();
-  } catch (e) {
-    if (isAccessError(e)) state.readOnly = true; // un lecteur ne peut pas publier le formulaire
-    else out.append(message('err', errorText(e)));
-  }
-  const sync = async () => { if ((await consolidateAll({ reread: true })) === false) out.replaceChildren(message('ok', t('recv.sync.none'))); };
-  const toolbar = el('div', { class: 'toolbar' },
-    el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
-    el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
+  await prepareReceptions(groups, { owner, periodic }, out);
   const cards = groups.map(safeCard);
-  redraw(container, [toolbar,
+  redraw(container, [targetToolbar(groups, out),
     state.readOnly ? message('warn', t('common.readonly')) : null,
     out,
     lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
@@ -179,19 +193,36 @@ function tableLine(group, entry) {
 
 // Avis d'une réception : envoi coupé par la SOURCE, lignes manquantes, trop grosses, instantané
 // trop gros, lien partagé, arrivées suspectes, tables proposées ou refusées.
-function cardNotes(group) {
+const cardNotes = group => [arrivalNotes(group), ...stateNotes(group), ...gapNotes(group), ...linkNotes(group)];
+
+// L'état de la réception : envoi coupé, formulaire disparu, clé de signature, droits.
+function stateNotes(group) {
   const { note } = group;
+  const locked = note.tables.some(entry => (state.results.get(tableKey(group.journal, entry.table)) || {}).locked);
   return [
-    arrivalNotes(group),
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
     group.formGone ? message('err', t('recv.formGone')) : null,
     group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
-    note.tables.some(entry => (state.results.get(tableKey(group.journal, entry.table)) || {}).locked) ? message('info', t('recv.lock.waiting')) : null,
+    locked ? message('info', t('recv.lock.waiting')) : null,
+  ];
+}
+
+// Les lignes qui n'arrivent pas : manquantes (envoi en morceaux), annoncées mais pas reçues, trop grosses, instantané trop gros.
+function gapNotes(group) {
+  const { note } = group;
+  return [
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
     Object.entries((state.results.get(group.journal) || {}).tally || {}).map(([table, g]) => message('warn', t('recv.tally', { table, ...g, min: TALLY_GRACE_S / 60 }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
+  ];
+}
+
+// Le lien et les tables : formulaire partagé, arrivées suspectes, tables proposées ou refusées.
+function linkNotes(group) {
+  const { note } = group;
+  return [
     group.shared && !group.public ? alertBlock(t('recv.shared.title'), [t('recv.shared.body', { n: group.shared })], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text')]) : null,
     note.suspect ? suspectBlock(group) : null,
     (state.offers.get(group.journal) || []).map(o => el('div', { class: 'offer' }, el('span', { class: 'small' }, t('recv.offer.line', { table: o.table, n: o.n })),

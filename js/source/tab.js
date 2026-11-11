@@ -160,25 +160,35 @@ async function upgradeSource(state) {
   return current;
 }
 
+// Cartes de l'onglet, les avertissements d'abord (table perdue, d'une autre personne, colonnes en trop, envois
+// douteux), puis un export par carte. Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée
+// (voir acl.js).
+function sourceCards(state, open, out) {
+  const cards = state.ownerOnly || state.foreign ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
+  if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
+  if (state.strays.length) cards.unshift(strayCard(state, out));
+  if (state.foreign) cards.unshift(foreignCard(state, out));
+  if (state.lost) cards.unshift(lostCard(state.lost, out));
+  return cards;
+}
+
+// « Nouvel export » : grisé quand rien ne peut s'écrire (table d'une autre personne, table perdue) ou pour qui n'est pas propriétaire.
+function newExportButton(state) {
+  const why = state.foreign ? t('send.foreign.blocked') : blocksNew(state.lost) ? t('send.lost.blocked') : null;
+  return el('button', {
+    class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || Boolean(why), title: why,
+    onclick: () => exportWizard(null, renderSource),
+  }, icon('plus'), t('send.new'));
+}
+
 // Contenu de l'onglet : « Nouvel export », avertissements, avis de la dernière action, cartes.
 function sourceView(state, access, open) {
   flowSlots.clear();
   personSlots.clear();
   const out = el('div', { class: 'out' }, notice);
   notice = null;
-  const toolbar = el('div', { class: 'toolbar' },
-    el('button', {
-      class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || state.foreign || blocksNew(state.lost),
-      title: state.foreign ? t('send.foreign.blocked') : blocksNew(state.lost) ? t('send.lost.blocked') : null,
-      onclick: () => exportWizard(null, renderSource),
-    }, icon('plus'), t('send.new')));
-  // Les exports ne se montrent qu'aux propriétaires : Synchro leur est réservée (voir acl.js).
-  const cards = state.ownerOnly || state.foreign ? [] : state.exports.map(exp => exportCard(exp, state, open, out));
-  if (state.unsafe.length) cards.unshift(unsafeCard(state.unsafe, state.ownerOnly, out));
-  if (state.strays.length) cards.unshift(strayCard(state, out));
-  if (state.foreign) cards.unshift(foreignCard(state, out));
-  if (state.lost) cards.unshift(lostCard(state.lost, out));
-  return [toolbar,
+  const cards = sourceCards(state, open, out);
+  return [el('div', { class: 'toolbar' }, newExportButton(state)),
     state.ownerOnly ? message('info', t('send.ownersOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
     out,
@@ -391,19 +401,8 @@ function watchFlows() {
   if (!flowTimer) flowTimer = setTimeout(tickFlows, FLOW_MS);
 }
 
-async function tickFlows() {
-  flowTimer = 0;
-  if (!container || !container.isConnected) return;
-  let charge;
-  let hooks;
-  let conditions;
-  try {
-    [charge, hooks, conditions] = await Promise.all([currentCharge(), listWebhooks(), webhookConditions()]);
-  } catch (e) {
-    if (loading) watchFlows();
-    return;
-  }
-  let moving = loading > 0;
+// Redessine l'avancement de chaque export affiché ; rend { moving (un envoi est en route), changed (un envoi vient de finir) }.
+function refreshFlows(charge, hooks, conditions, moving) {
   let changed = false;
   for (const [id, slot] of flowSlots) {
     if (!slot.node.isConnected) {
@@ -418,6 +417,12 @@ async function tickFlows() {
     slot.moving = flowMoves(flow);
     moving ||= slot.moving;
   }
+  return { moving, changed };
+}
+
+// Met à jour la pastille de chaque destinataire affiché ; même rendu que refreshFlows.
+function refreshPeople(hooks, state) {
+  let { moving, changed } = state;
   for (const h of hooks) {
     const slot = personSlots.get(h.id);
     if (!slot || !slot.pill.isConnected) continue;
@@ -425,6 +430,22 @@ async function tickFlows() {
     moving ||= hookBusy(h);
     fillPerson(slot, h);
   }
+  return { moving, changed };
+}
+
+async function tickFlows() {
+  flowTimer = 0;
+  if (!container || !container.isConnected) return;
+  let charge;
+  let hooks;
+  let conditions;
+  try {
+    [charge, hooks, conditions] = await Promise.all([currentCharge(), listWebhooks(), webhookConditions()]);
+  } catch (e) {
+    if (loading) watchFlows();
+    return;
+  }
+  const { moving, changed } = refreshPeople(hooks, refreshFlows(charge, hooks, conditions, loading > 0));
   if (changed && !document.querySelector('.scrim')) await refreshSource();
   else if (moving || changed) watchFlows();
 }

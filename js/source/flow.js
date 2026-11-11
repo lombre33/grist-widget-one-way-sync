@@ -6,14 +6,14 @@ import { BUDGET_WINDOW, RESEND_BUDGET } from '../engine/logic/resend.js';
 import { el, openModal } from '../ui.js';
 import { t, timeText } from '../i18n.js';
 
-export function durationText(seconds) {
+function durationText(seconds) {
   const { h, min } = durationParts(seconds);
   if (!h && !min) return t('common.dur.under');
   if (!h) return t('common.dur.min', { n: min });
   return min ? t('common.dur.hm', { h, m: min }) : t('common.dur.h', { h });
 }
 
-export function sizeText(bytes) {
+function sizeText(bytes) {
   const { n, unit } = sizeParts(bytes);
   return t(`common.size.${unit}`, { n });
 }

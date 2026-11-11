@@ -48,7 +48,8 @@ const WHO_MAX = 80;
 const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'];
 export function addEvent(note, exportId, { at, kind, who = '', n = 0 }) {
   const event = { at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(n ? { n } : {}) };
-  return { ...note, historique: { ...(note.historique || {}), [exportId]: [event, ...((note.historique || {})[exportId] || [])].slice(0, EVENTS_KEPT) } };
+  const before = (note.historique || {})[exportId];
+  return { ...note, historique: { ...(note.historique || {}), [exportId]: [event, ...(Array.isArray(before) ? before : [])].slice(0, EVENTS_KEPT) } };
 }
 // Événements lisibles d'un export. La note peut avoir été retouchée à la main ou écrite par une autre
 // version : un élément mal formé est écarté, jamais d'erreur à l'affichage.

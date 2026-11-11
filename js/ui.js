@@ -72,12 +72,12 @@ const stack = [];
 const FOCUS_KINDS = 'button, summary, a[href]';
 const focusName = node => node.getAttribute('aria-label') || node.textContent.trim();
 const sameKind = (root, tag, name) => [...root.querySelectorAll(tag)].filter(node => focusName(node) === name);
-export function focusSpot(root, node = document.activeElement) {
+function focusSpot(root, node = document.activeElement) {
   if (!node || node === root || !root.contains(node) || !node.matches(FOCUS_KINDS)) return null;
   const name = focusName(node);
   return { tag: node.tagName, name, index: sameKind(root, node.tagName, name).indexOf(node) };
 }
-export function restoreFocus(root, spot) {
+function restoreFocus(root, spot) {
   if (!spot) return false;
   const found = sameKind(root, spot.tag, spot.name);
   const target = found[spot.index] || found[0];
