@@ -192,6 +192,10 @@ export const HEX16 = /^[0-9a-f]{16}$/; // identifiant d'export ou d'invitation
 // Contrôle d'une valeur lue dans un code ou un journal : `RegExp.test` changerait un tableau ou
 // `undefined` en texte.
 export const is = (re, value) => typeof value === 'string' && re.test(value);
+
+// Types de colonnes qu'un export envoie (une Référence part en texte, une pièce jointe en liste de fichiers, voir
+// files.js ; un rang ou un identifiant de ligne en nombre, voir `sentType` de exports.js). Tout autre type (Blob) ne part pas.
+export const SENT_TYPE = /^(Any|Attachments|Bool|Choice|ChoiceList|Date|DateTime(:[A-Za-z0-9_/+-]+)?|Int|Numeric|Text)$/;
 // Identifiant reçu d'ailleurs (code, journal) : valide pour Grist, et pas un nom propre aux objets
 // JavaScript (`__proto__`, `constructor`…), qui servira de clé.
 export const isSafeId = value => is(COL_ID, value) && !(value in Object.prototype);

@@ -1,7 +1,7 @@
 // SOURCE : un export (des tables, leurs colonnes, un filtre de lignes facultatif) et ses lignes
 // dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; ce qu'un Échange renvoie. Les
 // règles d'accès du lien public sont dans acl.js.
-import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
+import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SENT_TYPE, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
 import { rowFilter } from './filters.js';
 import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
@@ -14,6 +14,24 @@ import { formulasOffered, sourceFormula, withFormulas } from './column-formulas.
 // lit pas la SOURCE, ne saurait jamais que plus rien n'arrivera.
 export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND.end }];
 
+// Colonnes de données et de formules d'une table SOURCE : hors colonnes de la synchro et colonnes internes de Grist.
+const INTERNAL = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
+const dataColumns = cols => cols.filter(c => !INTERNAL.has(c.colId) && !c.colId.startsWith('gristHelper_'));
+
+// Type sous lequel une colonne part, ou null si elle ne part pas. Une Référence part en texte, un rang
+// (PositionNumber) en nombre, un identifiant de ligne (Id) en entier. Un Blob ne part pas (décision d'Antoine,
+// 12 novembre) : Grist n'écrit des octets dans une colonne Blob par aucune de ses API (seule une formule Python en
+// fabrique), la CIBLE ne pourrait pas les recevoir fidèlement. Tout type que `SENT_TYPE` ne connaît pas est dans le même cas :
+// avant, une telle colonne cochée rendait l'invitation illisible chez la CIBLE (`codeInvalid`).
+const LIFTED = { PositionNumber: 'Numeric', Id: 'Int' };
+export function sentType(type) {
+  const sent = /^Ref(List)?:/.test(type) ? 'Text' : (Object.hasOwn(LIFTED, type) ? LIFTED[type] : type);
+  return is(SENT_TYPE, sent) ? sent : null;
+}
+
+// Colonnes d'une table SOURCE qui ne partent pas faute d'un type que la CIBLE sait recevoir : [{ id, label, type }].
+export const unsentColumns = cols => dataColumns(cols).filter(c => !sentType(c.type)).map(c => ({ id: c.colId, label: c.label || c.colId, type: c.type }));
+
 // Colonnes qu'une table SOURCE peut envoyer : toutes ses colonnes de données et formules, hors
 // colonnes de la synchro et colonnes internes de Grist. Une Référence part comme le texte qu'elle
 // affiche (et, avec `link`, la clé de la ligne visée, voir links.js) ; une colonne Pièces jointes,
@@ -23,9 +41,8 @@ export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND
 // docformat.js) et les règles de mise en forme conditionnelle ; chaque colonne est alors marquée `fmt`. Avec `notes`
 // (l'export envoie les descriptions des colonnes, voir descriptions.js), chaque colonne porte la sienne dans `desc`.
 export function exportableColumns(cols, { extras = false, doc = null, notes = false } = {}) {
-  const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
-  return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map((c) => {
-    const type = /^Ref(List)?:/.test(c.type) ? 'Text' : c.type;
+  return dataColumns(cols).filter(c => sentType(c.type)).map((c) => {
+    const type = sentType(c.type);
     const opts = sourceOptions(c, type, cols, { extras, doc });
     return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}), ...(extras ? { fmt: true } : {}), ...(notes ? { desc: cleanNote(c.description) } : {}) };
   });

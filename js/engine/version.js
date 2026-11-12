@@ -132,7 +132,17 @@
 //         `approveReply` remplace le webhook (`replaces`, sans avis de fin, événement `reinforce` au lieu de `join`). CIBLE : `relinkReception`
 //         démarre l'attente, `revertReinforcement` (« Revenir à l'ancien fonctionnement », retire clé publique, sceau et attente),
 //         `isUnsignedReception`. Délai passé : les envois sans signature sont refusés comme avant (la carte dit « Renforcement interrompu »).
-export const ENGINE_VERSION = '4.4.0';
+// 4.5.0 (12 novembre 2026, syncPlus 0.21.1, demande du porteur : « si le type Blob existe il faut qu'il transite sans souci », puis, sur la carte
+//         « Choisir comment une colonne Blob arrive dans la CIBLE » : « Ne pas envoyer les Blob ») : mineure, rien n'est ajouté au port ni aux
+//         tables, `CODE_FORMAT` inchangé, texte des formules de `Synchro` inchangé. **Constat** (Grist 1.7, vérifié) : aucune API n'écrit d'octets dans
+//         une colonne Blob (texte, liste ou `['B', …]` refusés ; seule une formule Python en fabrique), la CIBLE ne peut donc pas recevoir un Blob
+//         fidèlement. **Défaut corrigé** : un export qui portait une colonne d'un type que `SENT_TYPE` ne connaît pas (Blob, rang, identifiant
+//         de ligne), cochée d'emblée, rendait l'invitation illisible chez la CIBLE (`codeInvalid`, sans explication). Maintenant `sentType`
+//         (`logic/exports.js`) dit sous quel type une colonne part : Référence et liste de références en texte (comme avant), `PositionNumber`
+//         en `Numeric`, `Id` en `Int`, ou `null` (Blob et tout type inconnu : la colonne ne part pas et n'est pas proposée) ; `unsentColumns`
+//         les liste pour que l'hôte le dise (`send.columns.unsent`). `SENT_TYPE` passe de `codes.js` à `common.js`. Un export d'avant qui
+//         envoyait un Blob est signalé par l'écart habituel (`exportDrift`), « Modifier » le retire.
+export const ENGINE_VERSION = '4.5.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

@@ -1,7 +1,7 @@
 // Codes échangés entre SOURCE et CIBLE (préfixe + JSON en base64url, sur une ligne) et adresses
 // Grist qu'ils portent. Tout ce qui vient d'un code collé est contrôlé ici : identifiants, colonnes,
 // adresses réécrites à partir de leurs seuls éléments reconnus.
-import { HEX16, PUBLIC_KEY, SIG_KEY, is, isSafeId, parseJson } from './common.js';
+import { HEX16, PUBLIC_KEY, SENT_TYPE, SIG_KEY, is, isSafeId, parseJson } from './common.js';
 import { columnOptions } from './options.js';
 import { docFormat } from './docformat.js';
 import { TABLE_NOTE_MAX, cleanNote } from './descriptions.js';
@@ -9,9 +9,6 @@ import { cleanFormula } from './column-formulas.js';
 
 const CODE_PREFIX = 'GRISTSYNC2.';
 const SECRET = /^[0-9a-f]{32}$/;
-// Types de colonnes qu'un export envoie (une Référence part en texte, une pièce jointe en liste de
-// fichiers, voir files.js).
-const SENT_TYPE = /^(Any|Attachments|Bool|Choice|ChoiceList|Date|DateTime(:[A-Za-z0-9_/+-]+)?|Int|Numeric|Text)$/;
 const MAX_COLUMNS = 400; // colonnes par table, au plus
 const TEAM = '(?:/o/[A-Za-z0-9_-]+)?'; // équipe dans le chemin : /o/<équipe>
 

@@ -3,7 +3,7 @@
 // ses destinataires.
 import { isUserTable } from '../engine/logic/common.js';
 import { ownsSync } from '../engine/logic/strays.js';
-import { elementCounts, exportableColumns, isFileColumn } from '../engine/logic/exports.js';
+import { elementCounts, exportableColumns, isFileColumn, unsentColumns } from '../engine/logic/exports.js';
 import { noteSent } from '../engine/logic/descriptions.js';
 import { formulasOffered } from '../engine/logic/column-formulas.js';
 import { linkable } from '../engine/logic/links.js';
@@ -62,6 +62,7 @@ function columnsBlock(ctx, schema, table, relayed) {
   const usable = exportableColumns(schema.columns(table));
   if (!ctx.selected.has(table)) ctx.selected.set(table, usable.filter(c => !isFileColumn(c)).map(c => c.id));
   const files = usable.filter(isFileColumn).map(c => c.label);
+  const unsent = unsentColumns(schema.columns(table)).map(c => `${c.label} · ${typeName(c.type)}`);
   const summary = el('p', { class: 'small' });
   const describe = () => {
     const n = ctx.selected.get(table).length;
@@ -83,6 +84,7 @@ function columnsBlock(ctx, schema, table, relayed) {
   describe();
   return el('div', { class: 'form table-block' }, el('h3', {}, table),
     relayed ? message('info', t('send.columns.relay')) : null, summary,
+    unsent.length ? message('info', t('send.columns.unsent', { cols: unsent.join(', ') })) : null,
     el('div', { class: 'block-actions' },
       togglePart(columns, t('send.columns.pick'), ctx.selected.get(table).length !== usable.length),
       togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),

@@ -372,7 +372,29 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.21.0 (12 novembre 2026)
+## État : V0.21.1 (12 novembre 2026)
+
+V0.21.1 (Antoine, 12 novembre : « le type binaire est bien traité ici ou pas ? […] si le type blob existe il faut qu'il transite sans soucis donc à dev » ; carte
+de décision « Choisir comment une colonne Blob arrive dans la CIBLE » : **« Ne pas envoyer les Blob »**). Moteur **4.5.0** (mineure, dite dans `GFS-ETAT.md`).
+- **Constat vérifié dans un Grist 1.7 réel** : une colonne Blob ne reçoit d'octets par aucune API (texte, liste, `['B', …]` refusés), seule une formule Python en
+  fabrique (l'API les montre `["U","b'…'"]`). La CIBLE ne peut donc pas recevoir un Blob fidèle ; Antoine a choisi de **ne pas les envoyer**, avec un avis.
+- **Défaut corrigé** : une colonne Blob (ou `PositionNumber`, `Id`), cochée d'emblée à l'étape Colonnes, rendait l'invitation **illisible** chez la CIBLE
+  (`codeInvalid`, sans explication : `validColumns` refuse tout type hors `SENT_TYPE`). `sentType` (`logic/exports.js`) : Référence en texte (comme avant),
+  `PositionNumber` en `Numeric`, `Id` en `Int`, `null` pour un Blob et tout type inconnu ; `exportableColumns` n'offre que les colonnes qui partent, `unsentColumns` les
+  liste. L'étape Colonnes de l'assistant d'export dit, par table, « Ne part pas (Photo · Binaire (Blob)) : Grist ne permet pas à un autre document de recevoir
+  ce type […] » (`send.columns.unsent`, toujours visible, sans case). Un export d'avant qui envoyait un Blob est signalé par l'écart habituel (`exportDrift`),
+  « Modifier » le retire. `SENT_TYPE` est dans `logic/common.js`.
+- **Vérifié dans un vrai Grist** (`ONLY_TYPES=1`, `typesSteps`, dans le parcours complet après `choicesSteps`) : texte, nombre, entier, case, date, date et heure avec fuseau,
+  choix, choix multiple, rang, quelconque arrivent avec leur type et leur valeur ; cellules vides, négatifs, case décochée, date effacée, valeur d'un autre type dans une
+  colonne Quelconque, à l'ajout comme à la modification ; le Blob est dit « ne part pas ». **Piège vu** : Grist renumérote lui-même une colonne `PositionNumber` à l'ajout et à la
+  modification (la valeur écrite n'est pas gardée) : le test compare la CIBLE à la SOURCE, pas à une valeur écrite.
+- Testé : unit 4 de plus (`engine-types.test.mjs` : `sentType`, colonnes envoyables, écart d'un export d'avant, SOURCE puis CIBLE avec un Blob coché).
+- **Plan de la suite (cartes d'Antoine, 12 novembre)** : liens bidirectionnels **reportés en V1** ; droits d'accès **jamais avant la V1 et un audit de sécurité** (jamais acceptés par défaut,
+  toujours une fenêtre d'alerte, y compris quand la SOURCE les change) ; boîte des changements de structure côté CIBLE (réglage « appliquer automatiquement / me demander » à
+  l'installation, **désactivé par défaut**, bouton « traiter », « automatique à partir de maintenant »), adoption des colonnes déjà présentes (aperçu, contrôle de type,
+  alerte), colonnes non envoyées et renommages côté SOURCE, valeurs par défaut et formules de déclenchement (garde-fous des formules), option SOURCE pour l'ordre et les colonnes cachées.
+
+## État précédent : V0.21.0 (12 novembre 2026)
 
 V0.21.0 (Antoine, 12 novembre, « pour moi c'est good » sur la maquette de la fenêtre « Renforcer la sécurité » et des nouveautés, après la carte
 « Maquette puis code » ; décisions de fond du 6 novembre : mise à niveau **optionnelle** (option B), vocabulaire « Renforcer la sécurité » (jamais « renouveler »

@@ -1032,6 +1032,59 @@ try {
     await waitFor(async () => (await etatOf()).choices?.includes('Secret'), 'valeur d\'une ligne entrée dans le filtre reprise', 90000);
     step('Export filtré : la liste des choix ne part pas, la CIBLE reprend les valeurs reçues (une ligne entrée dans le filtre apporte la sienne)');
   }
+  // --- Types de colonnes : chaque type que Grist propose traverse l'export et arrive chez la CIBLE avec son type et sa valeur.
+  // Un Blob ne part pas (Grist n'écrit pas d'octets par ses API : seule une formule Python en fabrique) ; l'assistant le dit,
+  // sans case à cocher, et l'invitation reste lisible (avant, elle ne l'était plus).
+  async function typesSteps() {
+    const jour = Date.UTC(2026, 10, 12) / 1000;
+    const instant = Date.UTC(2026, 10, 12, 8, 30, 15) / 1000;
+    const src = await newDocWithWidget('Types SOURCE', [
+      ['AddTable', 'Villes', [{ id: 'Nom', type: 'Text' }]],
+      ['AddRecord', 'Villes', null, { Nom: 'Lyon' }],
+      ['AddTable', 'Fiches', [
+        { id: 'Nom', type: 'Text' }, { id: 'Montant', type: 'Numeric' }, { id: 'Entier', type: 'Int' }, { id: 'Actif', type: 'Bool' },
+        { id: 'Jour', type: 'Date' }, { id: 'Instant', type: 'DateTime:Europe/Paris' },
+        { id: 'Etat', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['A', 'B'] }) },
+        { id: 'Multi', type: 'ChoiceList', widgetOptions: JSON.stringify({ choices: ['A', 'B'] }) },
+        { id: 'Rang', type: 'PositionNumber' }, { id: 'Libre', type: 'Any' },
+        { id: 'Binaire', type: 'Blob', isFormula: true, formula: 'b"octets"' },
+      ]],
+      ['AddRecord', 'Fiches', null, { Nom: 'Alice', Montant: 12.5, Entier: 7, Actif: true, Jour: jour, Instant: instant, Etat: 'B', Multi: ['L', 'A', 'B'], Libre: 'texte libre' }],
+    ]);
+    const dst = await newDocWithWidget('Types CIBLE');
+    await startExport(src, 'Fiches', 'Types', async () => {
+      await dialog().getByText(/Ne part pas/).waitFor({ timeout: 30000 });
+      const text = await dialog().innerText();
+      assert.match(text, /Ne part pas \(Binaire\s·\sBinaire \(Blob\)\)/, 'le Blob est dit, avec son type');
+      assert.equal(await dialog().getByRole('checkbox', { name: 'Binaire' }).count(), 0, 'et n\'a pas de case');
+      await dialogButton('Choisir les colonnes').click();
+      assert.equal(await dialog().getByRole('checkbox', { name: 'Binaire' }).count(), 0, 'ni dans la liste des colonnes');
+      assert.ok(await dialog().getByRole('checkbox', { name: /^Rang/ }).isChecked(), 'un rang part comme un nombre');
+    });
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Types » : table Fiches.');
+    await approve(answer, { url: src.url });
+    await openWidget(dst.url);
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 1, 'ligne reçue', 90000);
+    const types = Object.fromEntries((await records(dst.doc, '_grist_Tables_column')).filter(c => c.colId && !c.colId.startsWith('gristHelper_') && c.type).map(c => [c.colId, c.type]));
+    const [row] = await records(dst.doc, 'Fiches');
+    const [origin] = await records(src.doc, 'Fiches');
+    assert.deepEqual(['Nom', 'Montant', 'Entier', 'Actif', 'Jour', 'Instant', 'Etat', 'Multi', 'Rang', 'Libre'].map(c => [c, types[c]]), [
+      ['Nom', 'Text'], ['Montant', 'Numeric'], ['Entier', 'Int'], ['Actif', 'Bool'], ['Jour', 'Date'], ['Instant', 'DateTime:Europe/Paris'],
+      ['Etat', 'Choice'], ['Multi', 'ChoiceList'], ['Rang', 'Numeric'], ['Libre', 'Any']]);
+    assert.equal(row.Binaire, undefined, 'pas de colonne Binaire chez la CIBLE');
+    assert.deepEqual([row.Nom, row.Montant, row.Entier, row.Actif, row.Jour, row.Instant, row.Etat, row.Multi, row.Rang, row.Libre],
+      ['Alice', 12.5, 7, true, jour, instant, 'B', ['L', 'A', 'B'], origin.Rang, 'texte libre'], 'Grist numérote lui-même un rang : la CIBLE reçoit celui de la SOURCE');
+    // Cellules vides, valeurs négatives, case décochée, date effacée, autre type de valeur dans une colonne Quelconque : la CIBLE
+    // reçoit chaque cellule telle que la SOURCE la montre, à l'ajout comme à la modification.
+    await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom: 'Bob' }],
+      ['UpdateRecord', 'Fiches', 1, { Montant: -0.5, Entier: -3, Actif: false, Jour: null, Instant: null, Etat: 'A', Multi: ['L', 'B'], Libre: 42 }]]);
+    const COLS = ['Nom', 'Montant', 'Entier', 'Actif', 'Jour', 'Instant', 'Etat', 'Multi', 'Libre'];
+    const shown = async doc => (await records(doc, 'Fiches')).sort((a, b) => a.Nom.localeCompare(b.Nom)).map(r => COLS.map(c => r[c]));
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 2 && JSON.stringify(await shown(dst.doc)) === JSON.stringify(await shown(src.doc)), 'ajout et modification reçus', 90000);
+    assert.deepEqual((await shown(dst.doc))[0], ['Alice', -0.5, -3, false, null, null, 'A', ['L', 'B'], 42]);
+    step('Types : chaque type traverse l\'export avec son type et sa valeur (dates, choix, rang) ; le Blob est dit « ne part pas », sans case, et l\'invitation reste lisible');
+  }
   // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
   // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
   // une ligne qui cite une ligne arrivée en même temps (la table vise elle-même) est complétée au
@@ -2028,8 +2081,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3039,6 +3092,7 @@ try {
   await exchangeFilesSteps();
   await optionsSteps();
   await choicesSteps();
+  await typesSteps();
   await linksSteps();
   await formatSteps();
   await formulasSteps();

@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.21.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.21.1 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -236,6 +236,8 @@ Full analysis (in French): [`SECURITY.md`](SECURITY.md).
 - A table or column renamed in the SOURCE is no longer sent correctly: the export card says so,
   and **Edit** lets you tick the columns again.
 - An export in Exchange only has Exchange participants. A row larger than 1 MB cannot be sent.
+- A **Binary (Blob)** column is not sent: Grist does not write bytes into a column through its APIs, so another
+  document could not receive them faithfully. The wizard says so at the Columns step.
 
 Full list (in French): [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 

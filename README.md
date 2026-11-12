@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.21.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.21.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -247,6 +247,8 @@ L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
   l'export le signale, et **Modifier** permet de cocher de nouveau les colonnes.
 - Un export en Échange n'a que des participants à l'Échange. Une ligne de plus de 1 Mo ne peut pas
   partir.
+- Une colonne **Binaire (Blob)** ne part pas : Grist n'écrit pas d'octets dans une colonne par ses API,
+  une autre colonne ne pourrait pas les recevoir fidèlement. L'assistant le dit à l'étape Colonnes.
 
 La liste complète est dans [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 
