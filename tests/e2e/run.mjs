@@ -2036,6 +2036,10 @@ try {
   await openWidget(target.url);
   await dialog().getByText('Table ajoutée à l’export : Villes').waitFor({ timeout: 30000 });
   await dialog().getByText(/envoie maintenant la table Villes \(2 lignes/).waitFor();
+  // La colonne ajoutée à l'export est déjà dans l'historique (sa note est dans le journal), derrière la fenêtre : on le lit avant que le
+  // document ne se recharge (la règle d'accès de la table qui reçoit sa clé, plus bas, remet l'historique de la page à zéro).
+  await waitFor(async () => (await widget().locator('.chg-row.chg-colonne').allTextContents()).some(x => /Colonne\s«\sInterne\s».*ajoutée par la SOURCE/.test(x)),
+    'historique : colonne Interne ajoutée par la SOURCE');
   // Une table qui reçoit déjà une synchro le dit dans la liste, et le refus dit pourquoi.
   await pick('Villes', 'Contacts (reçoit déjà Contacts)');
   await dialogButton('Recevoir').click();
@@ -2058,12 +2062,12 @@ try {
   await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue et remplie');
   const shown = await pageColumns(target.doc, 'Contacts');
   assert.ok(shown.includes('Interne') && !shown.includes('id_sync'), `colonne ajoutée visible sur la page, clé masquée : ${shown}`);
-  await waitFor(async () => (await widget().locator('.chg-row.chg-colonne').allTextContents()).some(x => /Colonne\s«\sInterne\s».*ajoutée par la SOURCE/.test(x)),
-    'historique : colonne Interne ajoutée par la SOURCE');
-  await historyHas('Paris', 'ajout');
-  assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Contacts', 'Communes'], 'historique groupé par table');
-  await applyActions(source.doc, [['RemoveRecord', 'Villes', 2]]);
+  // Le document s'est rechargé : l'historique repart de zéro. Un changement dans chaque table le remplit de nouveau, groupé par table.
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', byName('Bob').id, { Interne: 'i2b' }], ['RemoveRecord', 'Villes', 2]]);
   await waitFor(async () => (await records(target.doc, 'Communes')).map(r => r.Commune).join() === 'Lyon', 'vraie suppression dans la table ajoutée');
+  await historyHas('Bob', 'modif');
+  await historyHas('Paris', 'suppression');
+  assert.deepEqual(await widget().locator('.history-head strong').allTextContents(), ['Contacts', 'Communes'], 'historique groupé par table');
   step('SOURCE puis CIBLE : table et colonne ajoutées à l\'export, rangées par la CIBLE dans une table existante, colonne annoncée dans l\'historique');
 
   // --- Une ville renommée : le texte affiché par la Référence repart seul, sans toucher Contacts
