@@ -674,7 +674,9 @@ d'un document :
 - **Formules de colonne (0.17.0)** : une formule est du **Python que Grist exécute** sur les données du document :
   c'est le plus fort des éléments que la SOURCE peut faire reprendre, d'où une case à part, un message, et le clic d'un
   propriétaire. **Ce que fait le widget** (`js/engine/logic/column-formulas.js`) : la SOURCE n'envoie que le texte des
-  vraies colonnes de formule (ni formule de déclenchement, ni colonne Référence ou Pièces jointes), nettoyé (pas de
+  vraies colonnes de formule, et celui de la formule par défaut d'une colonne de données (0.25 : formule de déclenchement qui ne joue que
+  sur les nouvelles lignes, `fd` ; une formule qui se recalcule quand une colonne change ne part pas, elle réécrirait chez la CIBLE des valeurs
+  que la SOURCE envoie déjà), ni colonne Référence ou Pièces jointes, nettoyé (pas de
   caractère de contrôle ni de sens d'écriture, 1 500 caractères par formule, 20 000 par table : une formule trop
   longue ne part pas, jamais coupée) et signé avec les colonnes (hors de portée de la clé du formulaire). La CIBLE lit
   chaque formule avant toute écriture et **refuse d'office** : un mot qui n'a rien à faire dans une formule de colonne

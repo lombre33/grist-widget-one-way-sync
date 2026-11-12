@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.24.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.25.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -117,7 +117,9 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   formule est du Python que Grist exécute. Rien n'est posé tout seul chez le destinataire : un
   propriétaire les lit une à une dans « Reprendre depuis la SOURCE » (celles qui citent un module
   système ou une colonne ou une table absente sont refusées d'office), puis les pose sur les colonnes
-  créées par le widget. Voir `SECURITY.md` avant de proposer la case sur une instance sans bac à sable.
+  créées par le widget. Une colonne de données dont la formule de déclenchement ne joue que sur les
+  nouvelles lignes (sa valeur par défaut) part aussi, sans rien changer aux valeurs reçues. Voir
+  `SECURITY.md` avant de proposer la case sur une instance sans bac à sable.
 - **Notes à l'abri des lecteurs** (0.18) : un lecteur du document, lien public compris, voit les métadonnées
   des colonnes. Les notes du widget (courriel et documents des destinataires, clé privée d'une invitation en
   attente, secret des journaux, clé de signature) sont donc dans les options des colonnes cachées, que Grist

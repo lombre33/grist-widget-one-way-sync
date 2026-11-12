@@ -1575,6 +1575,12 @@ try {
         { id: 'TVA', type: 'Numeric', isFormula: true, formula: '$Montant * 0.2' },
         { id: 'Fuite', type: 'Text', isFormula: true, formula: 'import os\nreturn "ok"' }]],
       ['BulkAddRecord', 'Budget', [null, null], { Libelle: ['Loyer', 'Assurance'], Montant: [100, 80] }],
+      // Pays : formule par défaut (déclenchement sur les nouvelles lignes), envoyée avec les formules ; Suivi : formule qui se recalcule à toute
+      // modification, jamais envoyée (elle réécrirait ici des valeurs que la SOURCE envoie déjà).
+      ['AddColumn', 'Budget', 'Pays', { type: 'Text' }],
+      ['ModifyColumn', 'Budget', 'Pays', { isFormula: false, formula: '"France"', recalcWhen: 0 }],
+      ['AddColumn', 'Budget', 'Suivi', { type: 'Text' }],
+      ['ModifyColumn', 'Budget', 'Suivi', { isFormula: false, formula: '"suivi"', recalcWhen: 2 }],
     ]);
     const dst = await newDocWithWidget('Formules CIBLE');
     const column = async (doc, table, colId) => {
@@ -1592,7 +1598,7 @@ try {
     await box.waitFor({ timeout: 30000 });
     assert.ok(await box.isVisible(), 'visible sans ouvrir le repli');
     assert.ok(!(await box.isChecked()), 'décochée d\'emblée, même pour un nouvel export');
-    assert.match(await dialog().locator('.formulas-box').innerText(), /2\scolonnes de formule/);
+    assert.match(await dialog().locator('.formulas-box').innerText(), /3\sformules/, 'deux formules de colonne et une formule par défaut');
     const warning = widget().getByRole('dialog', { name: 'Envoyer aussi les formules ?' });
     await box.click();
     await warning.waitFor();
@@ -1608,7 +1614,8 @@ try {
     await dialog().getByLabel('Nom de l’export').fill('Budget');
     await dialogButton('Créer l’export').click();
     const code = await plainInvitation();
-    assert.deepEqual((await sentColumns()).map(c => [c.id, c.fx]), [['Libelle', ''], ['Montant', ''], ['TVA', '$Montant * 0.2'], ['Fuite', 'import os\nreturn "ok"']]);
+    assert.deepEqual((await sentColumns()).map(c => [c.id, c.fx]), [['Libelle', ''], ['Montant', ''], ['TVA', '$Montant * 0.2'], ['Fuite', 'import os\nreturn "ok"'], ['Pays', ''], ['Suivi', '']]);
+    assert.deepEqual((await sentColumns()).map(c => c.fd), [undefined, undefined, undefined, undefined, '"France"', undefined], 'la formule par défaut part à part ; celle qui se recalcule ne part pas');
     const answer = await accept(dst.doc, dst.url, code, /Budget\s»\s:\stable/);
     await approve(answer, { url: src.url });
     await openWidgetTab(dst.url, 'Recevoir');
@@ -1622,11 +1629,14 @@ try {
     await button('Reprendre depuis la SOURCE').click();
     const formulas = dialog().getByRole('checkbox', { name: /Formules : poser celles de la SOURCE/ });
     assert.ok(!(await formulas.isChecked()), 'décochée d\'emblée');
-    assert.match(await dialog().innerText(), /1\sformule à poser/, 'une seule est sans objection');
+    assert.match(await dialog().innerText(), /2\sformules à poser/, 'la formule de colonne et la formule par défaut ; celle qui cite os est refusée');
     await formulas.check();
     const panel = dialog().locator('.formulas-panel');
     assert.match(await panel.innerText(), /\$Montant \* 0\.2/);
     assert.match(await panel.innerText(), /import os/);
+    assert.match(await panel.innerText(), /"France"/);
+    assert.match(await panel.innerText(), /formule par défaut/);
+    assert.ok(!/suivi/.test(await panel.innerText()), 'la formule qui se recalcule n\'est pas proposée');
     assert.match(await panel.innerText(), /contient\s«\sos\s», refusé dans une formule reçue/);
     assert.match(await panel.innerText(), /ne sera pas posée/);
     assert.ok(await dialogButton('Reprendre').isDisabled(), 'grisé tant que « J\'ai lu » n\'est pas coché');
@@ -1637,6 +1647,10 @@ try {
     assert.equal((await column(dst.doc, 'Budget', 'TVA')).formula, '$Montant * 0.2');
     assert.equal((await column(dst.doc, 'Budget', 'TVA')).type, 'Numeric');
     assert.equal((await column(dst.doc, 'Budget', 'Fuite')).isFormula, false, 'la formule refusée d\'office n\'est jamais posée');
+    await waitFor(async () => (await column(dst.doc, 'Budget', 'Pays')).formula === '"France"', 'formule par défaut posée', 90000);
+    const pays = await column(dst.doc, 'Budget', 'Pays');
+    assert.deepEqual([pays.isFormula, pays.recalcWhen], [false, 0], 'la colonne reste de données, la formule ne joue que sur les nouvelles lignes');
+    assert.equal((await column(dst.doc, 'Budget', 'Suivi')).formula, '', 'la formule qui se recalcule n\'est pas posée');
     assert.deepEqual(await received(), [['Assurance', 80, 16, 'ok'], ['Loyer', 100, 20, 'ok']], 'Grist calcule la TVA ici ; l\'autre colonne garde ses valeurs');
     step('Formules : « Reprendre depuis la SOURCE » les liste (colonne, texte Python, objections), grise le bouton jusqu\'à « J\'ai lu », pose celle qui n\'a pas d\'objection et refuse celle qui cite os');
 
@@ -1651,7 +1665,14 @@ try {
     assert.match(await dialog().innerText(), /rien à poser pour le moment/);
     assert.ok(await dialog().getByRole('checkbox', { name: /Formules : poser celles de la SOURCE/ }).isDisabled());
     await dialogButton('Annuler').click();
-    step('Formules : une colonne devenue formule n\'est plus recopiée et ne casse rien, la reprise suivante n\'a plus rien à poser');
+    // La formule par défaut joue pour une ligne ajoutée ici à la main, pas pour les lignes reçues ; la ligne d'essai est retirée aussitôt.
+    const [local] = (await api('POST', `/docs/${dst.doc}/apply`, [['AddRecord', 'Budget', null, { Libelle: 'Local', Montant: 1 }]])).retValues;
+    const localRow = (await records(dst.doc, 'Budget')).find(r => r.id === local);
+    assert.equal(localRow && localRow.Pays, 'France', 'la formule par défaut remplit la ligne ajoutée ici');
+    await applyActions(dst.doc, [['RemoveRecord', 'Budget', local]]);
+    assert.deepEqual(Object.fromEntries((await records(dst.doc, 'Budget')).filter(r => r.Libelle !== 'Local').map(r => [r.Libelle, r.Pays || ''])), { Loyer: '', Assurance: '', Eau: 'France' },
+      'les lignes reçues gardent leur valeur : vide pour les deux d\'avant, celle que la formule de la SOURCE a remplie pour la nouvelle');
+    step('Formules : une colonne devenue formule n\'est plus recopiée et ne casse rien, la reprise suivante n\'a plus rien à poser ; la formule par défaut remplit une ligne ajoutée ici');
 
     // SOURCE : décocher la case retire les formules de la description des colonnes.
     await openWidget(src.url);
@@ -1664,7 +1685,7 @@ try {
     await dialogButton('Enregistrer').click();
     await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
     await dialogButton('Fermer').click();
-    assert.ok((await sentColumns()).every(c => c.fx === undefined), 'plus de formule dans la description des colonnes');
+    assert.ok((await sentColumns()).every(c => c.fx === undefined && c.fd === undefined), 'plus de formule dans la description des colonnes');
     step('Formules : case décochée dans « Modifier », la SOURCE n\'envoie plus aucune formule');
   }
   // Pièces jointes d'un document par l'API REST : dépôt, lecture, et empreinte courte d'un contenu.

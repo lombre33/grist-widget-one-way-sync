@@ -63,14 +63,14 @@ export function validColumns(cols) {
 
 // `withOpts` : avec leur liste de choix et leur format (voir options.js), contrôlés. Les codes ne
 // les portent pas (ils resteraient courts) : la CIBLE les lit dans la description reçue au journal.
-export const exportSchema = (columns, withOpts = false) => columns.map(({ id, type, label, as, opts, link, visible, doc, desc, tdesc, fmt, fx }) => {
+export const exportSchema = (columns, withOpts = false) => columns.map(({ id, type, label, as, opts, link, visible, doc, desc, tdesc, fmt, fx, fd }) => {
   const kept = withOpts && opts ? columnOptions(type, opts, { extras: true }) : null;
   const sourceDoc = withOpts ? docFormat(doc) : null; // langue et monnaie du document de la SOURCE (voir docformat.js)
   // Référence conservée (voir links.js) : table visée et colonne qu'elle affichait, dans la SOURCE.
   const aim = withOpts && isSafeId(link) ? { link, ...(isSafeId(visible) ? { visible } : {}) } : {};
   // Descriptions de la colonne et de la table (voir descriptions.js) : du texte, nettoyé et borné ; la clé dit que l'export les envoie.
   const notes = withOpts ? { ...(fmt === true ? { fmt } : {}), ...(typeof desc === 'string' ? { desc: cleanNote(desc) } : {}), ...(typeof tdesc === 'string' ? { tdesc: cleanNote(tdesc, TABLE_NOTE_MAX) } : {}),
-    ...(typeof fx === 'string' ? { fx: cleanFormula(fx) } : {}) } : {}; // formules : voir column-formulas.js
+    ...(typeof fx === 'string' ? { fx: cleanFormula(fx) } : {}), ...(typeof fd === 'string' && cleanFormula(fd) ? { fd: cleanFormula(fd) } : {}) } : {}; // formules : voir column-formulas.js
   return { id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}), ...aim, ...(kept ? { opts: kept } : {}), ...(sourceDoc ? { doc: sourceDoc } : {}), ...notes };
 });
 

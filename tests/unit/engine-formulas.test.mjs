@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
-import { FORMULAS_TOTAL_MAX, FORMULA_MAX, cleanFormula, formulaItems, formulaProblems, formulasOffered, formulasSent, planFormulas, sourceFormula, withFormulas } from '../../js/engine/logic/column-formulas.js';
+import { FORMULAS_TOTAL_MAX, FORMULA_MAX, cleanFormula, formulaItems, formulaProblems, formulasOffered, formulasSent, planFormulas, sourceDefault, sourceFormula, withFormulas } from '../../js/engine/logic/column-formulas.js';
 import { elementCounts } from '../../js/engine/logic/exports.js';
 import { sentElements } from '../../js/engine/logic/descriptions.js';
 import { exportSchema } from '../../js/engine/logic/codes.js';
@@ -57,6 +57,8 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     const columns = columnsOf(story.lot);
     assert.deepEqual(columns.map(c => c.fx), ['', '', '$Montant * 0.2', 'import os\nreturn os.getcwd()', ''],
       'la colonne à formule de déclenchement n\'est pas une formule ; une colonne de données dit « vide » : l\'export les envoie');
+    assert.deepEqual(columns.map(c => c.fd), [undefined, undefined, undefined, undefined, '"x" + $Libelle'],
+      'la formule de déclenchement « sur les nouvelles lignes » part à part, comme formule par défaut');
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
@@ -86,7 +88,8 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     assert.deepEqual(target.rows('Budget_recu').map(r => [r.Libelle, r.Montant, r.TVA, r.Fuite]), [['Loyer', 100, 20, '/']]);
     assert.ok(['TVA', 'Fuite'].every(id => !destColumn(target, 'Budget_recu', id).isFormula), 'rien n\'est posé par un passage ordinaire');
     const items = itemsOf();
-    assert.deepEqual(items.map(i => [i.id, i.state, i.ok]), [['TVA', 'data', true], ['Fuite', 'data', false]]);
+    assert.deepEqual(items.map(i => [i.id, i.state, i.ok]), [['TVA', 'data', true], ['Fuite', 'data', false], ['Declenchee', 'data', true]]);
+    assert.deepEqual(items.map(i => i.kind), ['column', 'column', 'default']);
     assert.deepEqual(items[1].problems.map(p => [p.code, p.name]), [['unsafe', 'os']], 'le module système est refusé d\'office');
     assert.equal(items[0].formula, '$Montant * 0.2');
     assert.deepEqual(sentElements(columnsOf(story.lot)), ['formulas']);
@@ -103,7 +106,10 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     const fuite = destColumn(target, 'Budget_recu', 'Fuite');
     assert.equal(fuite.isFormula, false, 'une formule qui a une objection reste une colonne de données');
     assert.equal(target.rows('Budget_recu')[0].Fuite, '/', 'ses données restent');
-    assert.deepEqual(itemsOf().map(i => [i.id, i.state]), [['TVA', 'same'], ['Fuite', 'data']]);
+    assert.deepEqual(itemsOf().map(i => [i.id, i.state]), [['TVA', 'same'], ['Fuite', 'data'], ['Declenchee', 'same']]);
+    const initial = destColumn(target, 'Budget_recu', 'Declenchee');
+    assert.deepEqual([initial.isFormula, initial.formula, initial.recalcWhen, initial.recalcDeps || null], [false, '"x" + $Libelle', 0, null], 'la formule par défaut reste une colonne de données');
+    assert.equal(target.rows('Budget_recu')[0].Declenchee, 'xLoyer', 'les valeurs reçues restent');
   });
 
   await t.test('CIBLE : une colonne devenue formule n\'est plus recopiée, les autres le restent', async () => {
@@ -190,20 +196,65 @@ test('formules : ce que la SOURCE envoie', () => {
   assert.deepEqual(sentElements([{ id: 'A', fx: '' }]), [], 'une export qui n\'a aucune formule n\'en propose pas la reprise');
 });
 
+test('formules par défaut : ce que la SOURCE envoie', () => {
+  const col = extra => ({ colId: 'A', isFormula: false, type: 'Text', formula: '"x"', recalcWhen: 0, recalcDeps: null, ...extra });
+  assert.equal(sourceDefault(col()), '"x"', 'sur les nouvelles lignes seulement');
+  assert.equal(sourceDefault(col({ recalcDeps: ['L'] })), '"x"', 'une liste de colonnes suivies vide est aucune');
+  assert.equal(sourceDefault(col({ recalcWhen: undefined })), '"x"');
+  assert.equal(sourceDefault(col({ recalcDeps: ['L', 7] })), '', 'recalculée quand une colonne change : ne part pas');
+  assert.equal(sourceDefault(col({ recalcWhen: 2 })), '', 'recalculée à toute modification : ne part pas');
+  assert.equal(sourceDefault(col({ recalcWhen: 1 })), '', 'jamais automatique : ne part pas');
+  assert.equal(sourceDefault(col({ formula: '' })), '', 'colonne de données sans formule');
+  assert.equal(sourceDefault(col({ isFormula: true })), '', 'une colonne de formule est une formule de colonne');
+  assert.equal(sourceDefault(col({ type: 'Ref:Villes' })), '');
+  assert.equal(sourceDefault(col({ type: 'Attachments' })), '');
+  assert.equal(sourceDefault(col({ formula: '\u0000"x"‮ ' })), '"x"', 'texte nettoyé');
+  assert.equal(sourceDefault(undefined), '');
+  // Le total de la table se partage entre formules de colonne et formules par défaut.
+  const live = [{ colId: 'A', isFormula: true, type: 'Text', formula: 'x'.repeat(900) }, col({ colId: 'B', formula: 'y'.repeat(900) }), col({ colId: 'C', formula: 'z'.repeat(900) })];
+  const made = withFormulas([{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D', fd: 'vieux' }], live);
+  assert.deepEqual(made.map(c => [c.fx.length, c.fd ? c.fd.length : 0]), [[900, 0], [0, 900], [0, 900], [0, 0]], 'l\'ancienne valeur ne reste pas');
+  assert.deepEqual(formulaItems([{ id: 'A', fx: '' }, { id: 'B', fx: '', fd: 'x' }, { id: 'C', fd: 4 }]).map(c => c.id), ['B']);
+  assert.deepEqual(sentElements([{ id: 'A', fx: '', fd: '"x"' }]), ['formulas'], 'une formule par défaut seule suffit à proposer la reprise');
+});
+
+test('formules par défaut : ce que la CIBLE pose', () => {
+  const dest = (id, extra = {}) => ({ colId: id, type: 'Text', isFormula: false, formula: '', recalcWhen: 0, recalcDeps: null, ...extra });
+  const schema = { columns: () => [dest('Nom'), dest('Ville', { formula: '"Paris"' }), dest('Pays', { formula: '"Belgique"' }), dest('Calc', { isFormula: true, formula: '1' }), dest('Suivi', { formula: '"x"', recalcWhen: 2 })] };
+  const columns = [{ id: 'Nom', fx: '', fd: '"inconnu"' }, { id: 'Ville', fx: '', fd: '"Paris"' }, { id: 'Pays', fx: '', fd: '"France"' }, { id: 'Calc', fx: '', fd: '"x"' }, { id: 'Suivi', fx: '', fd: '"x"' }, { id: 'Autre', fx: '', fd: '"y"' }];
+  const entry = { dest: 'T', own: ['Nom', 'Ville', 'Pays', 'Calc', 'Suivi'], map: {} };
+  const read = planFormulas(schema, entry, columns);
+  assert.deepEqual(read.actions, [], 'lire ne pose rien');
+  assert.deepEqual(read.items.map(i => [i.id, i.kind, i.state, i.ok]), [['Nom', 'default', 'data', true], ['Ville', 'default', 'same', true], ['Pays', 'default', 'other', true], ['Calc', 'default', 'data', false], ['Suivi', 'default', 'other', true]],
+    'une colonne absente d\'ici n\'est pas listée ; la formule par défaut d\'ici qui se recalcule autrement n\'est pas la même');
+  assert.deepEqual(read.items[3].problems.map(p => p.code), ['formulaHere'], 'une colonne de formule n\'est pas transformée en colonne de données');
+  const done = planFormulas(schema, entry, columns, { replace: true });
+  assert.deepEqual(done.actions, [['ModifyColumn', 'T', 'Nom', { isFormula: false, formula: '"inconnu"', recalcWhen: 0 }], ['ModifyColumn', 'T', 'Pays', { isFormula: false, formula: '"France"', recalcWhen: 0 }], ['ModifyColumn', 'T', 'Suivi', { isFormula: false, formula: '"x"', recalcWhen: 0 }]]);
+  // Mêmes garde-fous que les formules de colonne : mot refusé, colonne citée absente, colonne qui existait déjà.
+  const risky = planFormulas(schema, { dest: 'T', own: ['Nom'], map: {} }, [{ id: 'Nom', fx: '', fd: 'os.getcwd() + $Inconnue' }, { id: 'Ville', fx: '', fd: '"x"' }], { replace: true });
+  assert.deepEqual(risky.actions, []);
+  assert.deepEqual(risky.items.map(i => [i.id, i.ok, i.problems.map(p => p.code)]), [['Nom', false, ['unsafe', 'missingCol']], ['Ville', false, ['notOwn']]]);
+});
+
 test('formules : exportSchema ne garde que du texte nettoyé', () => {
   const [first, second, third] = exportSchema([{ id: 'A', type: 'Text', fx: '$B‮ + 1  ' }, { id: 'B', type: 'Text', fx: { evil: true } }, { id: 'C', type: 'Text', fx: 'x'.repeat(5000) }], true);
   assert.equal(first.fx, '$B + 1');
   assert.equal(Object.hasOwn(second, 'fx'), false);
   assert.equal(third.fx, '', 'trop longue : vide');
   assert.equal(Object.hasOwn(exportSchema([{ id: 'A', type: 'Text', fx: '1' }])[0], 'fx'), false, 'jamais dans un code ni dans la note du journal');
+  const [initial, empty, bad] = exportSchema([{ id: 'A', type: 'Text', fd: '"x"‮ ' }, { id: 'B', type: 'Text', fd: '' }, { id: 'C', type: 'Text', fd: { evil: true } }], true);
+  assert.equal(initial.fd, '"x"');
+  assert.deepEqual([Object.hasOwn(empty, 'fd'), Object.hasOwn(bad, 'fd')], [false, false], 'une formule par défaut vide ou qui n\'est pas du texte ne passe pas');
+  assert.equal(Object.hasOwn(exportSchema([{ id: 'A', type: 'Text', fd: '"x"' }])[0], 'fd'), false, 'jamais dans un code ni dans la note du journal');
 });
 
 test('formules : elementCounts compte les colonnes de formule', () => {
   const schema = {
-    columns: table => (table === 'T' ? [{ colId: 'A', isFormula: true, type: 'Text', formula: '1' }, { colId: 'B', isFormula: false, type: 'Text', formula: '"x"' }, { colId: 'C', isFormula: true, type: 'Ref:U', formula: 'U.all[0]' }] : []),
+    columns: table => (table === 'T' ? [{ colId: 'A', isFormula: true, type: 'Text', formula: '1' }, { colId: 'B', isFormula: false, type: 'Text', formula: '"x"' }, { colId: 'C', isFormula: true, type: 'Ref:U', formula: 'U.all[0]' },
+      { colId: 'D', isFormula: false, type: 'Text', formula: '"y"', recalcWhen: 0, recalcDeps: ['L', 3] }, { colId: 'E', isFormula: false, type: 'Text', formula: '"z"', recalcWhen: 2 }] : []),
     table: () => ({ rawViewSectionRef: 0 }),
   };
-  assert.equal(elementCounts(schema, ['T', 'U'], []).formulas, 1);
+  assert.equal(elementCounts(schema, ['T', 'U'], []).formulas, 2, 'la formule de colonne et la formule par défaut ; pas celles qui se recalculent quand une colonne change');
 });
 
 const here = new Map(['Montant', 'Libelle'].map(id => [id, {}]));

@@ -7,7 +7,7 @@ import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
 import { parseRule, ruleRefs } from './rules.js';
 import { cleanNote, noteSent, tableNoteOf, withTableNote } from './descriptions.js';
-import { formulasOffered, sourceFormula, withFormulas } from './column-formulas.js';
+import { formulasOffered, sourceDefault, sourceFormula, withFormulas } from './column-formulas.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -88,7 +88,7 @@ export function elementCounts(schema, tables, sections) {
     style: columns(true).filter(c => c.opts).length,
     notes: columns(false).filter(c => c.desc).length,
     tableNote: tables.filter(table => tableNoteOf(schema.table(table), sections)).length,
-    formulas: tables.reduce((sum, table) => sum + (schema.columns(table) || []).filter(c => sourceFormula(c)).length, 0),
+    formulas: tables.reduce((sum, table) => sum + (schema.columns(table) || []).filter(c => sourceFormula(c) || sourceDefault(c)).length, 0),
   };
 }
 
@@ -162,11 +162,12 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, fx }) => ({
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, fx, fd }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
   ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
   ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
   ...(typeof fx === 'string' && withOpts ? { fx } : {}),
+  ...(typeof fd === 'string' && fd && withOpts ? { fd } : {}),
 })));
 // Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
 // valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des

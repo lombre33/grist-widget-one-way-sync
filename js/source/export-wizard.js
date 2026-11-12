@@ -178,7 +178,7 @@ function formulasBox(ctx, count) {
 // avoir lues.
 const formulasWarning = () => confirmDialog({
   title: t('send.formulas.title'), confirmLabel: t('send.formulas.confirm'), kind: 'btn-primary',
-  body: [el('p', {}, t('send.formulas.intro')), el('ul', {}, ['own', 'run', 'refused', 'sandbox', 'slow'].map(k => el('li', {}, t(`send.formulas.${k}`))))],
+  body: [el('p', {}, t('send.formulas.intro')), el('ul', {}, ['own', 'run', 'refused', 'initial', 'sandbox', 'slow'].map(k => el('li', {}, t(`send.formulas.${k}`))))],
 });
 
 // 2. Colonnes, par table, et ce que le widget ajoutera pour la synchro.

@@ -169,7 +169,14 @@
 //         dernier choix) et `autoCols` ; une colonne ajoutée depuis, ni envoyée ni connue, est « nouvelle » (jamais pour un Échange). `saveChosenExport`
 //         accepte `autoCols` et écrit `known`. `logic/exports.js` : `driftDetails` dit chaque colonne changée (`gone` avec `to` quand un seul pendant du
 //         même type reste, `retyped` avec `was`/`now`, `shown`) ; `exportDrift` ne change pas.
-export const ENGINE_VERSION = '4.8.0';
+// 4.9.0 (12 novembre 2026, syncPlus 0.25.0, point 6 de la liste du porteur : « valeurs par défaut et formules de déclenchement, mêmes garde-fous que les
+//         formules ») : mineure, rien n'est ajouté au port ni aux tables, `CODE_FORMAT` et texte des formules de `Synchro` inchangés. Dans la description
+//         signée des colonnes, `fd` (formule par défaut d'une colonne de données : formule de déclenchement « sur les nouvelles lignes », `recalcWhen` 0
+//         sans colonne suivie, `sourceDefault` de `logic/column-formulas.js`) à côté de `fx`, sous la même case et le même plafond de longueur. Une formule qui se
+//         recalcule quand une colonne change, ou à toute modification, ne part pas. `planFormulas` rend `kind` ('column' ou 'default') sur chaque ligne et pose une
+//         formule par défaut par `ModifyColumn { isFormula: false, formula, recalcWhen: 0 }` (colonne créée par le widget seulement, jamais une colonne de formule
+//         ici : `formulaHere`), sous les mêmes garde-fous et le même clic de propriétaire (`restyle(journal, { formulas: true })`).
+export const ENGINE_VERSION = '4.9.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

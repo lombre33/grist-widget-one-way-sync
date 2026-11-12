@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.24.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.25.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -113,8 +113,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 - **Column formulas** (0.17): a separate box, unticked by default, after a message reminding that a
   formula is Python that Grist runs. Nothing is applied by itself on the receiving side: an owner reads
   them one by one in “Take again from the SOURCE” (those that name a system module or a missing column
-  or table are refused outright), then applies them to the columns created by the widget. See
-  `SECURITY.md` before offering the box on an instance without a sandbox.
+  or table are refused outright), then applies them to the columns created by the widget. A data column
+  whose trigger formula only applies to new rows (its default value) is sent too, without changing any
+  received value. See `SECURITY.md` before offering the box on an instance without a sandbox.
 - **Notes out of readers' sight** (0.18): a reader of the document, public link included, sees the columns'
   metadata. The widget's notes (recipients' e-mail and documents, private key of a pending invitation, journal
   secret, signing key) are therefore kept in the options of the hidden columns, which Grist blanks for anyone who

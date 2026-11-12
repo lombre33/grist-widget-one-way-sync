@@ -467,15 +467,17 @@ a pas), la table aussi si la sienne est vide ; ce qui est écrit ou effacé ici 
 **Reprendre depuis la SOURCE** (une case par élément) le remet d'accord.
 
 **Formules.** Une case à part, **Envoyer aussi les formules des colonnes (Python)**, décochée d'emblée,
-envoie le texte de chaque colonne de formule (pas celui d'une formule de déclenchement, ni d'une colonne
-Référence ou Pièces jointes). Quand vous la cochez, un message rappelle qu'une formule est du code Python
+envoie le texte de chaque colonne de formule, et celui de la **formule par défaut** d'une colonne de
+données (une formule de déclenchement qui ne joue que sur les nouvelles lignes ; pas celle qui se
+recalcule quand une colonne change, ni celle d'une colonne Référence ou Pièces jointes). Quand vous la cochez, un message rappelle qu'une formule est du code Python
 que Grist exécute et que le destinataire exécutera chez lui. Rien n'est posé tout seul : un
 **propriétaire** du document destinataire ouvre **Reprendre depuis la SOURCE**, coche **Formules**, lit
 chaque formule avec ce qui s'oppose éventuellement à la poser (un module système, une colonne ou une table
 qui n'est pas dans ce document, une colonne qui a changé de nom), coche **J'ai lu ces formules**, puis
 confirme. Seules les colonnes créées par le widget deviennent des colonnes de formule ; elles ne reçoivent
-alors plus de valeurs de la SOURCE (Grist les calcule). L'Historique du document permet de revenir en
-arrière. Sur une instance dont les formules tournent sans bac à sable, demandez d'abord à son administrateur
+alors plus de valeurs de la SOURCE (Grist les calcule). Une formule par défaut laisse la colonne de
+données : elle ne sert qu'aux lignes ajoutées ici à la main et ne change aucune valeur reçue. L'Historique
+du document permet de revenir en arrière. Sur une instance dont les formules tournent sans bac à sable, demandez d'abord à son administrateur
 (voir `SECURITY.md`).
 
 **Langue du document.** Grist écrit les séparateurs des nombres et la devise par défaut d'après la

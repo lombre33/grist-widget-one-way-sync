@@ -8,7 +8,8 @@
 //
 // Dans la description signée des colonnes (`Synchro_Colonnes`) : `fx` (texte de la formule, vide pour une colonne qui
 // n'est pas une formule) sur chaque colonne d'un export qui envoie les formules. La présence de la clé dit que l'export
-// les envoie, même vide.
+// les envoie, même vide. `fd` (seulement quand il y en a une) : la formule par défaut d'une colonne de données, c'est-à-dire
+// une formule de déclenchement « sur les nouvelles lignes » seulement (voir sourceDefault).
 import { KEY_COL } from './common.js';
 
 // Longueur maximale d'une formule, et de toutes celles d'une table de l'export (la description des colonnes part avec
@@ -39,22 +40,42 @@ export function sourceFormula(col) {
   return cleanFormula(col.formula);
 }
 
-// Les colonnes exportées `columns` avec leur formule (`fx`), d'après les colonnes du schéma `live`. Au-delà de
-// `FORMULAS_TOTAL_MAX` caractères pour la table, les formules suivantes ne partent pas.
+// Formule par défaut de la colonne de données `col` : sa formule de déclenchement quand elle ne joue que sur les **nouvelles
+// lignes** (`recalcWhen` 0, aucune colonne suivie), nettoyée ; '' sinon. Vérifié dans Grist 1.7 : une telle formule ne remplit
+// qu'une cellule que l'ajout ne donne pas (une valeur donnée, même vide, l'emporte), ne touche jamais aux lignes déjà là ; la
+// recopie de la CIBLE, qui écrit chaque colonne, ne la déclenche donc jamais. Une formule qui se recalcule quand une colonne
+// change (ou à toute modification) ne part pas : elle réécrirait ici des valeurs que la SOURCE envoie déjà, et la carte les
+// signalerait comme retouchées. Même exclusion que pour les formules de colonne : Référence et Pièces jointes.
+export function sourceDefault(col) {
+  if (!col || col.isFormula || CONVERTED.test(col.type || '')) return '';
+  if (col.recalcWhen && col.recalcWhen !== 0) return '';
+  if (Array.isArray(col.recalcDeps) && col.recalcDeps.length > 1) return '';
+  return cleanFormula(col.formula);
+}
+
+// Les colonnes exportées `columns` avec leur formule (`fx`), et leur formule par défaut (`fd`, seulement s'il y en a une),
+// d'après les colonnes du schéma `live`. Au-delà de `FORMULAS_TOTAL_MAX` caractères pour la table, les formules suivantes ne
+// partent pas.
 export function withFormulas(columns, live) {
   const here = new Map((live || []).map(c => [c.colId, c]));
   let total = 0;
-  return columns.map(({ fx, ...c }) => {
-    const formula = here.has(c.id) ? sourceFormula(here.get(c.id)) : '';
+  const fit = (formula) => {
     const sent = formula && total + formula.length <= FORMULAS_TOTAL_MAX ? formula : '';
     total += sent.length;
-    return { ...c, fx: sent };
+    return sent;
+  };
+  return columns.map(({ fx, fd, ...c }) => {
+    const col = here.get(c.id);
+    const formula = fit(col ? sourceFormula(col) : '');
+    const initial = fit(col ? sourceDefault(col) : '');
+    return { ...c, fx: formula, ...(initial ? { fd: initial } : {}) };
   });
 }
 
-// Colonnes qui portent une formule envoyée, et ce que dit la liste : l'export envoie les formules (`offered`, même
-// s'il n'y en a aucune), et il y en a au moins une (`sent`).
-export const formulaItems = columns => (Array.isArray(columns) ? columns : []).filter(c => c && typeof c.fx === 'string' && c.fx);
+// Colonnes qui portent une formule envoyée (de colonne ou par défaut), et ce que dit la liste : l'export envoie les formules
+// (`offered`, même s'il n'y en a aucune), et il y en a au moins une (`sent`).
+const hasText = value => typeof value === 'string' && value !== '';
+export const formulaItems = columns => (Array.isArray(columns) ? columns : []).filter(c => c && (hasText(c.fx) || hasText(c.fd)));
 export const formulasOffered = columns => (Array.isArray(columns) ? columns : []).some(c => c && typeof c.fx === 'string');
 export const formulasSent = columns => formulaItems(columns).length > 0;
 
@@ -152,12 +173,22 @@ function referenceProblems(code, { here, map, tables }) {
   return problems;
 }
 
+// Où en est la colonne d'ici : 'same' (la formule est déjà posée), 'other' (une autre formule est là), 'data' (aucune).
+function placed(column, kind, formula) {
+  if (kind === 'column') return !column.isFormula ? 'data' : column.formula === formula ? 'same' : 'other';
+  if (column.isFormula || !column.formula) return 'data';
+  return column.formula === formula && !column.recalcWhen && !(Array.isArray(column.recalcDeps) && column.recalcDeps.length > 1) ? 'same' : 'other';
+}
+
 // Les formules à poser dans la destination `entry.dest` (voir la note de l'entrée : `own`, `map`). Une formule ne remplace
 // jamais que ce que le widget a créé (`own`) : une colonne qui existait déjà ici garde ses données. `columns` : colonnes envoyées
 // (avec `fx`) ; `tables` : voir formulaProblems. Rend `items`, une ligne par formule envoyée dont la colonne existe ici :
 // `{ id, to, label, formula, state, problems, ok, applied }` où `state` vaut 'data' (colonne de données ici), 'other' (autre
 // formule ici) ou 'same' (déjà posée), et `ok` dit que rien ne s'y oppose. `actions` : les écritures, seulement avec `replace`
 // (le clic d'un propriétaire) : `ModifyColumn` en colonne de formule, pour les formules sans objection qui ne sont pas déjà là.
+// Une formule par défaut (`kind: 'default'`) ne remplace aucune valeur : la colonne reste de données, elle reçoit la formule de
+// déclenchement « sur les nouvelles lignes » (`state` : 'data' sans formule par défaut ici, 'other' une autre, 'same' déjà posée) ;
+// une colonne qui est de formule ici n'est pas transformée (`formulaHere`).
 export function planFormulas(schema, entry, columns, { tables = new Map(), replace = false } = {}) {
   const cols = schema.columns(entry.dest) || [];
   const here = new Map(cols.map(c => [c.colId, c]));
@@ -166,17 +197,19 @@ export function planFormulas(schema, entry, columns, { tables = new Map(), repla
   const items = [];
   const actions = [];
   for (const c of formulaItems(columns)) {
-    const formula = cleanFormula(c.fx);
+    const kind = hasText(c.fx) ? 'column' : 'default';
+    const formula = cleanFormula(kind === 'column' ? c.fx : c.fd);
     const to = map[c.id] || c.id;
     const column = here.get(to);
     if (!formula || !column || to === KEY_COL) continue;
     const problems = formulaProblems(formula, { here, map, tables });
     if (!own.has(c.id)) problems.unshift({ code: 'notOwn', name: to });
-    const state = !column.isFormula ? 'data' : column.formula === formula ? 'same' : 'other';
+    if (kind === 'default' && column.isFormula) problems.unshift({ code: 'formulaHere', name: to });
+    const state = placed(column, kind, formula);
     const ok = !problems.length;
     const applied = replace && ok && state !== 'same';
-    if (applied) actions.push(['ModifyColumn', entry.dest, to, { isFormula: true, formula }]);
-    items.push({ id: c.id, to, label: c.label || c.id, formula, state: applied ? 'same' : state, problems, ok, applied });
+    if (applied) actions.push(['ModifyColumn', entry.dest, to, kind === 'column' ? { isFormula: true, formula } : { isFormula: false, formula, recalcWhen: 0 }]);
+    items.push({ id: c.id, to, label: c.label || c.id, formula, kind, state: applied ? 'same' : state, problems, ok, applied });
   }
   return { items, actions };
 }

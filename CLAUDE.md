@@ -372,7 +372,30 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.24.0 (12 novembre 2026)
+## État : V0.25.0 (12 novembre 2026)
+
+V0.25.0 (Antoine, 12 novembre, point 6 de sa liste : « valeurs par défaut et formules de déclenchement (mêmes garde-fous que les formules) »). Moteur **4.9.0** (mineure, dite dans `GFS-ETAT.md`).
+Étape 6 de l'ordre convenu (voir la V0.22.0).
+- **Ce que Grist fait vraiment** (sonde dans un Grist 1.7, `ModifyColumn { isFormula: false, formula, recalcWhen }`) : il n'y a pas de « valeur par défaut » à part, c'est la **formule de
+  déclenchement** (`isFormula` faux, `formula` non vide). `recalcWhen` 0 sans colonne suivie (`recalcDeps` nul) ne remplit qu'une cellule que l'ajout ne donne pas : une valeur donnée, même
+  vide ou `null`, l'emporte ; les lignes déjà là ne bougent pas ; une écriture de la colonne dans la même action l'emporte aussi. Avec des colonnes suivies (ou `recalcWhen` 2, toute
+  modification) la formule **réécrit** la cellule quand la dépendance change.
+- **Ce qui part** (`sourceDefault`, `logic/column-formulas.js`) : seulement la forme « **sur les nouvelles lignes** » (`recalcWhen` 0, aucune colonne suivie), sous la **même case** « Envoyer aussi
+  les formules des colonnes (Python) » et le même message (un point de plus, `send.formulas.initial`), clé `fd` de la description signée des colonnes (à côté de `fx`, présente seulement quand il y
+  en a une, nettoyée et bornée de la même façon, les 20 000 caractères de la table partagés). Référence et Pièces jointes exclues. **Une formule qui se recalcule quand une colonne change ou à
+  toute modification ne part pas** : la CIBLE la réécrirait avec ses propres données (heure, utilisateur) et la carte signalerait des retouches que personne n'a faites. L'assistant le dit
+  dans l'aide de la case. La recopie écrit chaque colonne de la ligne : la formule par défaut ne se déclenche donc jamais pour une ligne reçue (vérifié à l'e2e).
+- **CIBLE** (`planFormulas`, `kind: 'default'`) : même fenêtre « Reprendre depuis la SOURCE », même case « Formules », même clic de propriétaire, même « J'ai lu » ; une ligne par formule avec
+  l'étiquette « formule par défaut » et trois états (`defData`, `defOther`, `defSame`). Seule une colonne **créée par le widget** reçoit la formule (`ModifyColumn { isFormula: false, formula,
+  recalcWhen: 0 }`, la colonne reste de données et se recopie comme avant) ; une colonne qui est de formule ici n'est pas transformée (`formulaHere`) ; mêmes objections que les formules de colonne
+  (`formulaProblems` : mots interdits, modules, colonne ou table citée absente ou renommée).
+- **Pas fait, dit** : formules de déclenchement avec colonnes suivies ou `recalcWhen` 2 ; la formule par défaut d'une colonne que la CIBLE avait déjà (`notOwn`) ; propager un changement de
+  formule par défaut après la pose (elle suit la reprise à la demande, comme les autres formules).
+- Testé : unit 480 (`engine-formulas.test.mjs` : `sourceDefault`, `withFormulas` avec `fd`, `planFormulas` par défaut dont `formulaHere`, `notOwn`, mots interdits, colonne citée absente ; test
+  existant de la colonne « Declenchee » mis à jour) ; e2e `ONLY_FORMULAS=1` (colonne par défaut envoyée, colonne « Suivi » à `recalcWhen` 2 non envoyée, liste « 2 formules à poser », formule posée,
+  colonne qui reste de données, ligne ajoutée ici remplie par la formule, lignes reçues intactes).
+
+## État précédent : V0.24.0 (12 novembre 2026)
 
 V0.24.0 (Antoine, 12 novembre, point 5 de sa liste : « SOURCE : colonnes non envoyées, renommages, type changé »). Moteur **4.8.0** (mineure, dite dans `GFS-ETAT.md`). Étape 5 de l'ordre
 convenu (voir la V0.22.0), partie « dire » ; le suivi d'un renommage jusqu'à la CIBLE (`was`, correspondance côté CIBLE) n'est **pas** codé.

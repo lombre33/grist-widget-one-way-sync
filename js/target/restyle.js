@@ -7,9 +7,11 @@ import { t } from '../i18n.js';
 
 // Texte de l'état d'une formule : posée d'office, déjà là, ou refusée (avec ses raisons).
 function itemView(item) {
-  const head = item.ok ? t(`recv.formulas.state.${item.state}`) : t('recv.formulas.refused');
+  const state = item.kind === 'default' ? { data: 'defData', other: 'defOther', same: 'defSame' }[item.state] : item.state;
+  const head = item.ok ? t(`recv.formulas.state.${state}`) : t('recv.formulas.refused');
+  const kind = item.kind === 'default' ? ` · ${t('recv.formulas.kind.default')}` : '';
   return el('li', { class: 'formula-item' },
-    el('div', {}, el('strong', {}, item.label === item.to ? item.to : `${item.label} (${item.to})`), el('span', { class: 'muted small' }, ` · ${head}`)),
+    el('div', {}, el('strong', {}, item.label === item.to ? item.to : `${item.label} (${item.to})`), el('span', { class: 'muted small' }, `${kind} · ${head}`)),
     el('pre', { class: 'code formula-code' }, item.formula),
     item.problems.length ? el('ul', { class: 'small' }, item.problems.map(p => el('li', {}, t(`recv.formulas.problem.${p.code}`, { name: p.name, to: p.to || '' })))) : null);
 }
