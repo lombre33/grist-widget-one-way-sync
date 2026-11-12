@@ -978,5 +978,18 @@
   "recv.fit.bad": "{col} → {to}: the SOURCE sends type {sent}, the column here is of type {here}, which cannot receive these values. Choose another column or a new one.",
   "recv.fit.title": "Some column types do not match",
   "recv.fit.body": "Nothing is changed in your columns, but these values may be invalid or unusable:",
-  "recv.fit.ok": "Continue anyway"
+  "recv.fit.ok": "Continue anyway",
+  "send.drift.title": "{n} {n|column has|columns have} changed since the export",
+  "send.drift.body": "These columns no longer go out correctly. “Edit” brings the export back in line with the table.",
+  "send.drift.gone": "{table}: column “{col}” no longer exists (deleted, or renamed).",
+  "send.drift.renamed": "{table}: column “{col}” no longer exists; “{to}” has the same type, it was probably renamed.",
+  "send.drift.retyped": "{table}: column “{col}” went from type {was} to type {now}. The TARGET keeps its type, values arrive as they are.",
+  "send.drift.shown": "{table}: the column shown by “{col}” changed, the values sent are no longer the same.",
+  "send.new.title": "{n} {n|column is|columns are} not sent",
+  "send.new.body": "Added since the export was saved, it is not sent until you decide. Once sent, it reaches the recipients like a column added to the export.",
+  "send.new.line": "{table}: {cols}",
+  "send.new.send": "Send these columns",
+  "send.new.dismiss": "Do not send them",
+  "send.autoCols": "Also send the columns I add to these tables",
+  "send.autoCols.help": "Unticked by default: a column added later is not sent, the export’s card flags it. Ticked, it goes out by itself when an owner opens this page, with whatever it holds: think of what one more column may contain."
 }

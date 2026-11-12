@@ -978,5 +978,18 @@
   "recv.fit.bad": "{col} → {to} : la SOURCE envoie le type {sent}, la colonne d’ici est de type {here}, qui ne peut pas recevoir ces valeurs. Choisissez une autre colonne ou une nouvelle.",
   "recv.fit.title": "Des types de colonnes ne correspondent pas",
   "recv.fit.body": "Rien n’est modifié dans vos colonnes, mais ces valeurs risquent d’être invalides ou inutilisables :",
-  "recv.fit.ok": "Continuer quand même"
+  "recv.fit.ok": "Continuer quand même",
+  "send.drift.title": "{n} {n|colonne a changé|colonnes ont changé} depuis l’export",
+  "send.drift.body": "Ces colonnes ne partent plus correctement. « Modifier » remet l’export d’accord avec la table.",
+  "send.drift.gone": "{table} : la colonne « {col} » n’existe plus (supprimée, ou renommée).",
+  "send.drift.renamed": "{table} : la colonne « {col} » n’existe plus ; « {to} » est du même type, elle a sans doute été renommée.",
+  "send.drift.retyped": "{table} : la colonne « {col} » est passée du type {was} au type {now}. La CIBLE garde son type, les valeurs arrivent telles quelles.",
+  "send.drift.shown": "{table} : la colonne affichée par « {col} » a changé, les valeurs envoyées ne sont plus les mêmes.",
+  "send.new.title": "{n} {n|colonne ne part|colonnes ne partent} pas",
+  "send.new.body": "Ajoutée depuis l’enregistrement de l’export, elle ne part pas tant que vous ne l’avez pas décidé. Envoyée, elle arrive chez les destinataires comme une colonne ajoutée à l’export.",
+  "send.new.line": "{table} : {cols}",
+  "send.new.send": "Envoyer ces colonnes",
+  "send.new.dismiss": "Ne pas les envoyer",
+  "send.autoCols": "Envoyer aussi les colonnes que j’ajouterai à ces tables",
+  "send.autoCols.help": "Décochée d’emblée : une colonne ajoutée plus tard ne part pas, la carte de l’export vous la signale. Cochée, elle part seule quand un propriétaire ouvre cette page, avec le contenu qu’elle aura : pensez à ce qu’une colonne de plus peut contenir."
 }

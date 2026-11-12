@@ -268,6 +268,15 @@ Pour l'export :
 
 ![Modifier l'export](images/18-source-modifier.png)
 
+**Colonnes ajoutées après coup** : une colonne que vous ajoutez à une table de l'export ne part pas
+toute seule. La carte de l'export le dit (« N colonnes ne partent pas ») avec deux boutons :
+**Envoyer ces colonnes** enregistre l'export avec elles et renvoie la table, **Ne pas les envoyer**
+les range (la carte n'en parle plus). Une colonne renommée ou d'un autre type est dite par son nom
+(« la colonne « Ville » n'existe plus ; « Commune » est du même type, elle a sans doute été
+renommée ») : **Modifier** remet l'export d'accord. À l'étape Colonnes, la case « Envoyer aussi les
+colonnes que j'ajouterai à ces tables » (décochée d'emblée) les envoie seules quand un propriétaire
+ouvre la page du widget.
+
 Pour une personne :
 
 - **Mettre en pause**, puis **Reprendre** : Grist n'envoie rien pendant une pause. À la reprise, le

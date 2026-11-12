@@ -116,6 +116,18 @@ function linksBlock(ctx, schema) {
   return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t('send.links')), el('p', { class: 'muted small' }, t('send.links.help')));
 }
 
+// Case « Envoyer aussi les colonnes que j'ajouterai » (voir new-columns.js) : décochée d'emblée, telle que l'export l'est pour un export
+// modifié, jamais en Échange. Sans elle, une colonne ajoutée plus tard ne part pas : la carte de l'export le dit, avec un bouton pour l'envoyer.
+function autoColsBlock(ctx) {
+  if (ctx.exp?.echange) {
+    ctx.autoCols = false;
+    return null;
+  }
+  if (ctx.autoCols === undefined) ctx.autoCols = Boolean(ctx.exp?.autoCols);
+  const box = el('input', { type: 'checkbox', checked: ctx.autoCols, onchange: () => { ctx.autoCols = box.checked; } });
+  return el('div', { class: 'form auto-cols' }, el('label', { class: 'check' }, box, t('send.autoCols')), el('p', { class: 'muted small' }, t('send.autoCols.help')));
+}
+
 // Éléments des colonnes envoyés en plus des données, chacun sa case (`ctx.elements`) : la mise en forme (voir options.js,
 // rules.js, docformat.js : en-têtes, règles conditionnelles simples, monnaie résolue, langue du document, en plus des
 // formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js). Chaque
@@ -185,7 +197,7 @@ async function showColumns(ctx) {
   };
   ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
     removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
-    ...blocks, linksBlock(ctx, schema), elementsNode,
+    ...blocks, linksBlock(ctx, schema), elementsNode, autoColsBlock(ctx),
     adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
     backButton(() => showTables(ctx)),
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
@@ -229,7 +241,7 @@ const selectionOf = ctx => ctx.chosen.map(table => ({ table, columns: ctx.select
 
 async function save(ctx, name, report) {
   const { exp } = ctx;
-  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, ...ctx.elements, rules: ctx.rules });
+  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, ...ctx.elements, rules: ctx.rules, autoCols: Boolean(ctx.autoCols) });
   return exp ? showEdited(ctx, { name, changed: saved.changed, report }) : showCreated(ctx, { name, created: saved.created });
 }
 

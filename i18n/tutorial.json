@@ -251,12 +251,14 @@
     "text": {
       "fr": [
         "La carte de l’export liste ses tables et ses destinataires. Pour l’export : Ajouter un destinataire (sans refaire l’export) ; Modifier (tables, colonnes, nom, pour tous) ; Tout renvoyer ; Supprimer.",
+        "Une colonne que vous ajoutez à une table de l’export ne part pas toute seule : la carte le dit, avec « Envoyer ces colonnes » ou « Ne pas les envoyer ». Une colonne renommée ou d’un autre type y est dite par son nom ; « Modifier » remet l’export d’accord. À l’étape Colonnes, une case (décochée d’emblée) envoie seules les colonnes que vous ajouterez.",
         "Pour une personne : Mettre en pause, puis Reprendre, qui propose de rattraper les changements de la pause (recommandé) ; Débloquer la file si un envoi échoue ; Révoquer, sans toucher aux autres.",
         "Un renvoi part vers tous les destinataires de l’export ; chez ceux qui avaient déjà ces lignes, il est sans effet.",
         "Un envoi long se prévoit et se suit : avant « Tout renvoyer » (ou « Envoyer » à l’ajout d’un destinataire), le widget dit ce qu’il va coûter (lignes, taille, lots, durée). Pendant l’envoi, la carte de l’export affiche où il en est (lignes et lots, temps restant), la pause qui ménage le serveur de Grist (20 Mo par tranche de 10 minutes, tous destinataires confondus) avec l’heure de reprise, et, si un destinataire est en erreur, pourquoi rien ne part. Gardez une page du widget ouverte jusqu’à la fin."
       ],
       "en": [
         "The export card lists its tables and recipients. For the export: Add a recipient (without redoing the export); Edit (tables, columns, name, for everyone); Resend all; Delete.",
+        "A column you add to a table of the export is not sent by itself: the card says so, with “Send these columns” or “Do not send them”. A column that was renamed or changed type is named there; “Edit” brings the export back in line. At the Columns step, a box (unticked by default) sends the columns you add by itself.",
         "For one person: Pause, then Resume, which offers to catch up on changes made during the pause (recommended); Unblock the queue when a delivery fails; Revoke, without affecting the others.",
         "A resend goes to all recipients of the export; for those who already had these rows, it has no effect.",
         "A long send is announced and followed: before “Resend all” (or “Send” when adding a recipient), the widget says what it will cost (rows, size, batches, time). While it runs, the export card shows where it stands (rows and batches, time left), the pause that spares Grist’s server (20 MB per 10 minutes, all recipients combined) with the time it resumes, and, if a recipient is failing, why nothing leaves. Keep a widget page open until it is done."

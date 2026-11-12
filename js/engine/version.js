@@ -162,7 +162,14 @@
 //         cellules remplies, lignes qui ne bougent pas, exemples). `approveStructure` écrit et note `adopted: true` (`noted` de `saveEntries`) ; une
 //         réception qui applique seule, ou une destination vide, note `adopted` à la première recopie sans rien retenir. Une note sans `ask` ou sans
 //         `adopt` ne change pas (réceptions d'avant, GFS qui ne passe pas `options.ask`). `planConsolidation` rend aussi `attached`, `sameValue` est exportée.
-export const ENGINE_VERSION = '4.7.0';
+// 4.8.0 (12 novembre 2026, syncPlus 0.24.0, point 5 de la liste du porteur : « colonnes non envoyées, renommages, type changé ») : mineure, rien n'est
+//         ajouté au port ni aux tables, `CODE_FORMAT` et texte des formules de `Synchro` inchangés. `logic/new-columns.js` (`knownColumns`, `newColumns`,
+//         `exportFlags`, `widenedSelection`) et `source/new-columns.js` (`baselineNewColumns`, `pendingColumns`, `sendNewColumns`, `dismissNewColumns`,
+//         `autoSendNewColumns`) : l'entrée d'un export dans la note SOURCE garde `known` (les colonnes envoyables de chaque table à l'enregistrement ou au
+//         dernier choix) et `autoCols` ; une colonne ajoutée depuis, ni envoyée ni connue, est « nouvelle » (jamais pour un Échange). `saveChosenExport`
+//         accepte `autoCols` et écrit `known`. `logic/exports.js` : `driftDetails` dit chaque colonne changée (`gone` avec `to` quand un seul pendant du
+//         même type reste, `retyped` avec `was`/`now`, `shown`) ; `exportDrift` ne change pas.
+export const ENGINE_VERSION = '4.8.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

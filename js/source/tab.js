@@ -4,7 +4,7 @@
 import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../engine/logic/common.js';
 import { known } from '../engine/errors.js';
 import { maskKey } from '../engine/logic/codes.js';
-import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
+import { conditionExport, driftDetails, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
 import { STATES, parseLot } from '../engine/logic/journal.js';
 import { eventsOf, recentDrops, vanishedRecipients } from '../engine/logic/notes.js';
@@ -20,9 +20,12 @@ import { protectSync, ruleRefusal, syncRules } from '../engine/acl.js';
 import { ensureSyncTable, identified, isCharge, protectMemos, readHooks, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
+import { newColumns } from '../engine/logic/new-columns.js';
+import { autoSendNewColumns, baselineNewColumns, dismissNewColumns, sendNewColumns } from '../engine/source/new-columns.js';
+import { driftNotice, newColumnsNotice } from './new-columns.js';
 import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.js';
 import { canReinforce, invitationState, startReinforcement } from '../engine/source/invite.js';
-import { confirmSend, flowView } from './flow.js';
+import { confirmSend, flowView, progressTo } from './flow.js';
 import { filesPending, resendFiles } from '../engine/source/files.js';
 import { cancelInvitation, clearHistory, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
@@ -128,6 +131,9 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
     tooBig: mine.filter(r => r[TYPE_COL] === KIND.full && (parseLot(r[LOT_COL]) || {}).tooBig).map(r => r[TABLE_COL]),
     ...exportDrift(schema, tables),
+    // Le détail de ces colonnes, et celles ajoutées depuis l'enregistrement (voir new-columns.js) : jamais pour un Échange.
+    details: driftDetails(schema, tables),
+    fresh: entry.retour || entry.echange ? [] : newColumns(schema, tables, entry.known),
   };
 }
 
@@ -181,6 +187,9 @@ async function upgradeSource(state) {
   // Lignes qui quittent un export (la CIBLE est passive, la SOURCE est prévenue) : voir observeRows.
   const recipientsOf = id => (current.exports.find(exp => exp.id === id) || { recipients: [] }).recipients.length;
   if (await watchRows(current.note, trackedCounts(current.rows), recipientsOf)) current = await loadState();
+  // Colonnes ajoutées aux tables d'un export : la référence se pose sans rien dire, et un export qui les envoie seul le fait (voir new-columns.js).
+  if (await baselineNewColumns(current.exports)) current = await loadState();
+  if (await autoSendNewColumns(current.exports).catch(noteError)) current = await loadState();
   catchUp(refreshSource);
   return current;
 }
@@ -285,12 +294,13 @@ function rulesLine(exp) {
 }
 
 // Avis d'un export : tables perdues, colonnes changées, envoi incomplet, fichiers à envoyer, Échange.
-const exportNotes = exp => [
+const exportNotes = (exp, newColumnsActions) => [
   !exp.tables.length && !exp.retour ? message('err', t('send.export.rowsGone')) : null,
   exp.hidden.length ? message('err', t('send.public.hiddenNow', { tables: exp.hidden.join(', ') })) : null,
   exp.structure ? message('warn', t('send.renforce.structure')) : null,
   exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
-  exp.changed.length ? message('warn', t('send.export.drift', { cols: exp.changed.join(', ') })) : null,
+  driftNotice(exp),
+  newColumnsNotice(exp, newColumnsActions),
   filesPending(exp.id) ? message('info', t('send.files.pending', { n: filesPending(exp.id) })) : null,
   exp.retour ? message('info', t('send.exchange.managed')) : null,
   exp.echange && !exp.retour ? el('p', { class: 'muted small' }, exp.recipients.length > 1 ? t('send.exchange.hub', { n: exp.recipients.length }) : t('send.exchange.with')) : null,
@@ -335,7 +345,7 @@ function exportCard(exp, state, open, out) {
     behindNotice(exp, state),
     vanishedNotice(exp),
     shrinkNotices(exp),
-    exportNotes(exp),
+    exportNotes(exp, newColumnsButtons(exp, ownerOnly, out)),
     flowSlot(exp, state.charge),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
     eventsBlock(exp, out, ownerOnly),
@@ -345,6 +355,15 @@ function exportCard(exp, state, open, out) {
       actionButton(t('send.action.load'), 'send', load, ownerOnly, out, { reason: n ? '' : t('send.load.nobody') }),
       actionButton(t('send.action.delete'), 'trash', () => deleteExport(exp), ownerOnly, out, { kind: 'btn-danger-text' })));
 }
+
+// Les deux gestes de l'avis des colonnes ajoutées : les envoyer (l'export est enregistré avec elles, la table renvoyée), ou les ignorer.
+const newColumnsButtons = (exp, ownerOnly, out) => ({
+  send: actionButton(t('send.new.send'), 'send', async () => {
+    const n = await sendNewColumns(exp, progressTo(out));
+    notice = n === null ? message('info', t('send.load.queued')) : message('ok', n ? t('send.edit.saved', { n }) : t('send.edit.savedNone'));
+  }, ownerOnly, out, { kind: 'btn-primary' }),
+  dismiss: actionButton(t('send.new.dismiss'), 'x', () => dismissNewColumns(exp), ownerOnly, out),
+});
 
 // Destinataires de cet export dont les envois attendent derrière l'envoi en échec d'une autre personne (la file de
 // Grist est commune à tout le document) : un seul avis, quel que soit leur nombre.

@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.23.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.24.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -128,6 +128,10 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   lignes déjà présentes rattachées. Une table ajoutée plus tard à l'export est proposée dans une
   fenêtre. Une table déjà remplie n'est pas touchée avant un aperçu (lignes ajoutées, rattachées,
   valeurs remplacées) à accepter sur la carte, et un type de colonne qui ne convient pas est signalé.
+- **Colonnes ajoutées à la SOURCE** : une colonne ajoutée après coup à une table de l'export ne part
+  pas toute seule ; la carte de l'export le dit, avec « Envoyer ces colonnes » ou « Ne pas les
+  envoyer ». Une colonne renommée ou d'un autre type y est dite par son nom. Une case de l'export
+  (décochée d'emblée) les envoie seules.
 - **Retouches respectées** : une valeur corrigée, une ligne ou une colonne supprimée à la main
   dans la CIBLE reste ainsi jusqu'au prochain changement de la ligne dans la SOURCE, et la carte la
   signale une dizaine de secondes après, avec le détail (ligne, valeur d'ici, valeur de la SOURCE)

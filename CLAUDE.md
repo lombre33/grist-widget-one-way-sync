@@ -372,7 +372,35 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.23.0 (12 novembre 2026)
+## État : V0.24.0 (12 novembre 2026)
+
+V0.24.0 (Antoine, 12 novembre, point 5 de sa liste : « SOURCE : colonnes non envoyées, renommages, type changé »). Moteur **4.8.0** (mineure, dite dans `GFS-ETAT.md`). Étape 5 de l'ordre
+convenu (voir la V0.22.0), partie « dire » ; le suivi d'un renommage jusqu'à la CIBLE (`was`, correspondance côté CIBLE) n'est **pas** codé.
+- **Constat d'avant** : une colonne ajoutée à une table de l'export ne partait pas, sans un mot (l'export garde la liste de ses colonnes) ; une colonne renommée ou d'un autre type
+  donnait seulement « colonnes changées : Table.Col ».
+- **Colonnes ajoutées** (`logic/new-columns.js`, `source/new-columns.js`, `js/source/new-columns.js`) : l'entrée de l'export (note SOURCE) garde `known` = `{ table: [colonnes envoyables à
+  l'enregistrement ou au dernier choix] }` (`saveChosenExport` l'écrit, `exportableColumns`, donc ni Blob ni colonne du système). Une colonne envoyable ni envoyée ni connue est
+  « nouvelle » : la carte de l'export dit « N colonnes ne partent pas » (`data-new-columns`, une ligne par table) avec **Envoyer ces colonnes** (`sendNewColumns` : `saveChosenExport` avec
+  `widenedSelection`, `exportFlags` relit les cases de l'export, puis `finishEdit` renvoie la table) et **Ne pas les envoyer** (`dismissNewColumns` : elles deviennent connues, plus rien
+  n'est dit). **Jamais pour un Échange** (ses colonnes se suivent seules). Un export d'avant le suivi (sans `known`, ou une table que `known` ne cite pas) reçoit sa référence **sans rien
+  dire** à la première ouverture d'un propriétaire (`baselineNewColumns`, appelée par `upgradeSource`) : ce qui n'était pas envoyé alors est un choix.
+- **Case « Envoyer aussi les colonnes que j'ajouterai à ces tables »** (`autoCols`, étape Colonnes, hors du repli, **décochée d'emblée**, telle que l'export l'est pour un export modifié,
+  absente en Échange) : un propriétaire qui ouvre la page du widget envoie seul ces colonnes (`autoSendNewColumns`, sous le verrou `gristsync-new-columns`) avec ce qu'elles contiennent :
+  c'est dit dans l'aide de la case.
+- **Colonnes changées, dites par leur nom** (`driftDetails`, `driftNotice`) : `exportDrift` ne change pas (ses tests comparent `{lost, changed}`) ; `driftDetails` donne une ligne par
+  colonne : `gone` (« n'existe plus (supprimée, ou renommée) » ; avec `to` quand une **seule** colonne envoyable non envoyée a le même type que la seule colonne disparue de ce type :
+  « « Commune » est du même type, elle a sans doute été renommée », jamais une certitude, la personne décide), `retyped` (« est passée du type Texte au type Entier », la CIBLE garde son
+  type), `shown` (la colonne affichée par une Référence a changé). **Modifier** remet l'export d'accord comme avant.
+- **Pas fait, dit** : propager un renommage (la colonne de la CIBLE garde l'ancien nom, la nouvelle arrive comme une colonne de plus) ; rien pour les colonnes **retirées** de la SOURCE hors
+  ce que la 0.22 dit déjà côté CIBLE ; les colonnes ajoutées à une table d'un export en lien public sont dites comme les autres (le lien public enregistre aussi `known`).
+- **Piège vu à l'e2e** : l'essai du parcours principal (et le harnais) acceptait la réception sans cocher « Appliquer automatiquement… », donc depuis la 0.22 la colonne « Interne » restait
+  tenue et l'historique n'en parlait pas (le parcours complet de la 0.23 l'a révélé) ; ils cochent maintenant la case. Pour attendre un envoi de colonne, l'essai doit rester sur la page
+  de la SOURCE jusqu'à ce que les valeurs soient dans le journal de la CIBLE (le renvoi est repris par la page ouverte), puis passer à la CIBLE (qui recopie page ouverte).
+- Testé : unit 478 (`engine-new-columns.test.mjs` : référence posée sans rien dire, colonne nouvelle dite puis envoyée ou ignorée, Échange exclu, `autoCols`, `driftDetails` renommage
+  probable ou ambigu, changement de type) ; e2e `ONLY_NEWCOLS=1` (`newColumnsSteps`, vrai Grist : avis puis « Ne pas les envoyer », avis de la seule autre colonne puis « Envoyer ces colonnes »
+  reçue chez la CIBLE, renommage et changement de type dits, « Modifier » avec la case, colonne suivante envoyée seule ; `SHOTS=<dossier>` fait deux captures).
+
+## État précédent : V0.23.0 (12 novembre 2026)
 
 V0.23.0 (Antoine, 12 novembre : « si je choisis une table existante déjà avec les bonnes colonnes ou mapping avec déjà de la data, que se passe-t-il ? est-ce que la sync marche ? » ;
 point 2 de sa liste : « adopter les colonnes déjà présentes (aperçu, contrôle de type, alerte) »). Moteur **4.7.0** (mineure, dite dans `GFS-ETAT.md`). Étape 4 de l'ordre convenu (voir la V0.22.0).

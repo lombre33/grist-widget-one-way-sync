@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.23.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.24.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -123,6 +123,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   “What a reader or the public link sees”.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked. A table that already has rows is not touched before a preview (rows added, attached, values replaced) that you accept on the card, and a column type that does not suit is flagged.
   A table added to the export later is offered in a dialog.
+- **Columns added in the SOURCE**: a column added later to a table of the export is not sent by itself;
+  the export's card says so, with “Send these columns” or “Do not send them”. A column that was renamed or
+  changed type is named there. A box on the export (unticked by default) sends them by itself.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET
   stays that way until the row changes again in the SOURCE, and the card flags it about ten
   seconds later, with the detail (row, value here, SOURCE value) and a “Fix” button that puts the

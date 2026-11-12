@@ -1225,6 +1225,81 @@ try {
     assert.equal(await widget().locator('[data-structure="adopt"]').count(), 0, 'plus d\'aperçu');
     step('Table déjà remplie : « Appliquer » rattache, ajoute et remplace, laisse les autres lignes ; les modifications suivantes passent seules');
   }
+  // --- SOURCE : une colonne ajoutée à une table de l'export ne part pas toute seule ; la carte le dit, avec « Envoyer ces colonnes » (l'export
+  // est enregistré avec elles, la table renvoyée) ou « Ne pas les envoyer » (elles sont connues, plus rien n'est dit). Une colonne
+  // renommée, d'un autre type, est dite par son nom ; la case « Envoyer aussi les colonnes que j'ajouterai » les envoie ensuite seule.
+  async function newColumnsSteps() {
+    const src = await fichesDoc('Colonnes ajoutées SOURCE');
+    const dst = await newDocWithWidget('Colonnes ajoutées CIBLE');
+    const columnsHere = async () => (await api('GET', `/docs/${dst.doc}/tables/Fiches/columns`)).columns.map(c => c.id).sort();
+    const fresh = () => widget().locator('[data-new-columns]');
+    const drift = () => widget().locator('[data-drift]');
+    await startExport(src, 'Fiches', 'Annuaire');
+    await approve(await accept(dst.doc, dst.url, await plainInvitation(), '« Annuaire » : table Fiches.'), { url: src.url });
+    // La CIBLE recopie tant que sa page est ouverte : l'essai y passe pour attendre, puis revient à la SOURCE.
+    const toCible = () => openWidgetTab(dst.url, 'Recevoir');
+    await toCible();
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 3, 'lignes reçues', 90000);
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().locator('[data-export]').first().waitFor();
+    assert.equal(await fresh().count(), 0, 'rien n\'a changé : aucun avis');
+    // Une colonne de plus : dite, pas envoyée.
+    await applyActions(src.doc, [['AddColumn', 'Fiches', 'Population', { type: 'Int' }], ['BulkUpdateRecord', 'Fiches', [1, 2, 3], { Population: [10, 20, 30] }]]);
+    await openWidgetTab(src.url, 'Envoyer');
+    await fresh().getByText(/1 colonne ne part pas/).waitFor({ timeout: 30000 });
+    assert.match(await fresh().innerText(), /Fiches\s:\sPopulation/);
+    if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'colonnes-1-avis.png') });
+    await page.waitForTimeout(3000);
+    assert.deepEqual(await columnsHere(), ['Nom', 'Ville', 'id_sync'].sort(), 'rien n\'est parti');
+    // « Ne pas les envoyer » : connue, plus rien n'est dit, même après un rechargement.
+    await fresh().getByRole('button', { name: 'Ne pas les envoyer', exact: true }).click();
+    await waitFor(async () => (await fresh().count()) === 0, 'avis retiré', 30000);
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().locator('[data-export]').first().waitFor();
+    assert.equal(await fresh().count(), 0, 'toujours rien à dire');
+    assert.ok(!(await columnsHere()).includes('Population'), 'la colonne ignorée ne part pas');
+    // Une autre colonne : seule celle-ci est dite ; « Envoyer ces colonnes » l'envoie.
+    await applyActions(src.doc, [['AddColumn', 'Fiches', 'Region', { type: 'Text' }], ['BulkUpdateRecord', 'Fiches', [1, 2, 3], { Region: ['Rhône', 'Île-de-France', 'Loire'] }]]);
+    await openWidgetTab(src.url, 'Envoyer');
+    await fresh().getByText(/1 colonne ne part pas/).waitFor({ timeout: 30000 });
+    assert.match(await fresh().innerText(), /Fiches\s:\sRegion/);
+    assert.ok(!/Population/.test(await fresh().innerText()), 'la colonne ignorée n\'est plus citée');
+    await fresh().getByRole('button', { name: 'Envoyer ces colonnes', exact: true }).click();
+    await waitFor(async () => (await fresh().count()) === 0, 'avis retiré après l\'envoi', 60000);
+    await toCible();
+    await waitFor(async () => { const rows = await records(dst.doc, 'Fiches'); return rows.length === 3 && rows.every(r => r.Region); }, 'colonne envoyée reçue et remplie', 90000);
+    assert.deepEqual((await records(dst.doc, 'Fiches')).map(r => `${r.Nom}:${r.Region}`).sort(), ['Anna:Rhône', 'Basile:Île-de-France', 'Céline:Loire']);
+    step('SOURCE : une colonne ajoutée est dite et ne part pas ; « Ne pas les envoyer » la range (rien de plus dit) ; « Envoyer ces colonnes » l\'envoie et la CIBLE la reçoit');
+    // Colonne renommée (son seul pendant du même type est cité), autre type : dits par leur nom.
+    await applyActions(src.doc, [['RenameColumn', 'Fiches', 'Ville', 'Commune'], ['ModifyColumn', 'Fiches', 'Region', { type: 'Int' }]]);
+    await openWidgetTab(src.url, 'Envoyer');
+    await drift().getByText(/2 colonnes ont changé depuis l’export/).waitFor({ timeout: 30000 });
+    const said = await drift().innerText();
+    assert.match(said, /Fiches\s:\sla colonne\s«\sVille\s»\sn’existe plus\s;\s«\sCommune\s»\sest du même type, elle a sans doute été renommée/);
+    assert.match(said, /Fiches\s:\sla colonne\s«\sRegion\s»\sest passée du type Texte au type Entier/);
+    if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'colonnes-2-changees.png') });
+    // « Modifier » remet l'export d'accord (Commune au lieu de Ville) et pose la case : les colonnes ajoutées partent ensuite seules.
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByRole('checkbox', { name: 'Commune' }).first().check();
+    const auto = dialog().getByRole('checkbox', { name: 'Envoyer aussi les colonnes que j’ajouterai à ces tables' });
+    assert.ok(!(await auto.isChecked()), 'décochée d\'emblée : une colonne ajoutée ne part pas sans accord');
+    await auto.check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré\s:/).waitFor({ timeout: 90000 });
+    await dialogButton('Fermer').click();
+    await waitFor(async () => (await drift().count()) === 0, 'plus aucune colonne changée', 30000);
+    await applyActions(src.doc, [['AddColumn', 'Fiches', 'Note', { type: 'Text' }], ['BulkUpdateRecord', 'Fiches', [1, 2, 3], { Note: ['n-a', 'n-b', 'n-c'] }]]);
+    await openWidgetTab(src.url, 'Envoyer');
+    // Le widget de la SOURCE l'envoie à l'ouverture de l'onglet : les valeurs sont dans le journal de la CIBLE (le renvoi est fini) avant qu'on y passe.
+    await waitFor(async () => { const journal = JSON.stringify(await records(dst.doc, 'Journal_Annuaire')); return ['n-a', 'n-b', 'n-c'].every(v => journal.includes(v)); }, 'colonne ajoutée envoyée seule', 90000);
+    await toCible();
+    await waitFor(async () => (await columnsHere()).includes('Note'), 'colonne ajoutée créée chez la CIBLE', 90000);
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).every(r => r.Note), 'colonne envoyée seule remplie', 90000);
+    assert.equal(await fresh().count(), 0, 'rien n\'est dit : elle est partie');
+    step('SOURCE : colonne renommée et colonne d\'un autre type dites par leur nom ; la case « Envoyer aussi les colonnes que j\'ajouterai » envoie la suivante seule');
+  }
   // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
   // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
   // une ligne qui cite une ligne arrivée en même temps (la table vise elle-même) est complétée au
@@ -2221,8 +2296,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3238,6 +3313,7 @@ try {
   await typesSteps();
   await structureSteps();
   await adoptSteps();
+  await newColumnsSteps();
   await linksSteps();
   await formatSteps();
   await formulasSteps();

@@ -121,7 +121,8 @@ export const isFileColumn = c => c.type === 'Attachments';
 // (elles partiraient vides ou fausses). « Modifier » remet l'export d'accord avec les tables.
 export function exportDrift(schema, tables) {
   const lost = tables.filter(tb => !schema.has(tb.table)).map(tb => tb.table);
-  const changed = tables.filter(tb => schema.has(tb.table)).flatMap(({ table, columns }) => {
+  const present = tables.filter(tb => schema.has(tb.table));
+  const changed = present.flatMap(({ table, columns }) => {
     const current = new Map(exportableColumns(schema.columns(table)).map(c => [c.id, c]));
     return columns.filter((c) => {
       const cur = current.get(c.id);
@@ -130,6 +131,29 @@ export function exportDrift(schema, tables) {
   });
   return { lost, changed };
 }
+
+// Le détail de `changed` (voir exportDrift), une ligne par colonne : `gone` (n'existe plus : supprimée ou renommée), `retyped` (autre type :
+// `was`, `now`), `shown` (la colonne qu'elle affiche a changé). Une colonne disparue qui a un seul pendant, du même type, parmi les
+// colonnes envoyables non envoyées, porte `to` (elle a sans doute été renommée) : jamais une certitude, la personne décide.
+export const driftDetails = (schema, tables) => tables.filter(tb => schema.has(tb.table)).flatMap(driftOf(schema));
+
+const typeOf = c => c.source || c.type;
+const driftOf = schema => ({ table, columns }) => {
+  const current = new Map(exportableColumns(schema.columns(table)).map(c => [c.id, c]));
+  const sent = new Set(columns.map(c => c.id));
+  const unsent = [...current.values()].filter(c => !sent.has(c.id));
+  const gone = columns.filter(c => !current.has(c.id));
+  return columns.flatMap((c) => {
+    const cur = current.get(c.id);
+    if (!cur) {
+      const twins = unsent.filter(u => typeOf(u) === typeOf(c));
+      const alike = gone.filter(g => typeOf(g) === typeOf(c));
+      return [{ table, id: c.id, kind: 'gone', ...(twins.length === 1 && alike.length === 1 ? { to: twins[0].id } : {}) }];
+    }
+    if (cur.source !== typeOf(c)) return [{ table, id: c.id, kind: 'retyped', was: typeOf(c), now: cur.source }];
+    return (cur.visible || '') !== (c.visible || '') ? [{ table, id: c.id, kind: 'shown' }] : [];
+  });
+};
 
 // ---------------------------------------------------------------------------------------------
 // Lignes Synchro d'un export
