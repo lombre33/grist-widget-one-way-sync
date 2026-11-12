@@ -41,7 +41,7 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
   const columnRows = () => [...tables.values()].flatMap(tb => tb.columns);
 
   const records = {
-    _grist_Tables: () => [...tables].map(([tableId, tb]) => ({ id: tb.id, tableId, primaryViewId: 0, summarySourceTable: 0 })),
+    _grist_Tables: () => [...tables].map(([tableId, tb]) => ({ id: tb.id, tableId, primaryViewId: 0, summarySourceTable: 0, rawViewSectionRef: tb.rawSection || 0 })),
     _grist_Tables_column: columnRows,
   };
 
@@ -94,6 +94,8 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
         if (tables.has(tableId)) throw new Error(`Table already exists "${tableId}"`);
         const table = { id: nextTable++, columns: [], rows: [], next: 1 };
         tables.set(tableId, table);
+        // Comme Grist, la table a une section de données brutes ; sa description est celle de la table.
+        table.rawSection = runMeta('AddRecord', '_grist_Views_section', [null, { tableRef: table.id, parentKey: 'record', description: '' }]);
         for (const { id, ...info } of args[0]) addColumn(table, id, info);
         return { table_id: tableId };
       }

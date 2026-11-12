@@ -6,6 +6,7 @@ import {
 } from './common.js';
 import { REFUSED, STATES, compareOrder, completeLists, destColumns, lastMark, latestByKey, pendingLists, sentColumns } from './journal.js';
 import { exchangeColumns } from './exports.js';
+import { noteSent, sentElements } from './descriptions.js';
 
 // Échange, chez le document qui l'administre : ce qu'il fait de chaque type de changement reçu d'un
 // participant (`regles` de l'export : accepter, refuser, ou garder à valider sur la carte), et d'un
@@ -490,6 +491,8 @@ function planRemovals({ plan, dest, destRows, archived }) {
 export function receivedColumns(entry, tableRows, schema, allowed, now) {
   let sent = sentColumns(tableRows, entry.columns || []);
   const doc = (sent.find(c => c.doc) || {}).doc; // langue et monnaie du document de la SOURCE, si elle les envoie
+  const sends = sentElements(sent); // ce que l'export envoie en plus des données (voir descriptions.js)
+  const { tableNote } = noteSent(sent);
   let next = entry;
   if (allowed) {
     const kept = exchangeColumns(sent, allowed, entry.map);
@@ -497,5 +500,5 @@ export function receivedColumns(entry, tableRows, schema, allowed, now) {
     next = { ...entry, map: kept.map };
   }
   const map = newColumnsMap(next, destColumns(sent), schema.columns(next.dest).map(c => c.colId));
-  return { sent, doc, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
+  return { sent, doc, sends, tableNote, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
 }

@@ -57,7 +57,14 @@
 //         `_grist_DocInfo` (SOURCE et CIBLE). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte des formules ne changent : un
 //         export sans `style` envoie exactement la description d'avant (essai `engine-format`, `formulas-golden`), une version
 //         d'avant ignore les champs en plus.
-export const ENGINE_VERSION = '2.7.0';
+// 2.8.0 (12 novembre 2026, demande du porteur : « les éléments de mise en forme, plus globalement tout ce qu'il serait bien de reprendre »,
+//         d'après le widget d'import/export de structure) : les descriptions des colonnes et des tables peuvent partir avec l'export
+//         (`saveChosenExport({ …, notes, tableNote })`, clés `desc` et `tdesc` de la description signée des colonnes, nettoyées et
+//         bornées par `logic/descriptions.js`). CIBLE : `target/describe.js` les pose sur les colonnes créées par le moteur, une
+//         fois, et sur la table si sa description est vide ; `restyle(journal, elements)` reprend sur demande les éléments choisis
+//         (`style`, `notes`, `table`) ; la note de chaque table garde `sends`, `described`, `tabled`. Le moteur lit
+//         `_grist_Views_section` (`fetchRows`). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte des formules ne changent.
+export const ENGINE_VERSION = '2.8.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

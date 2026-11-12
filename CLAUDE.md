@@ -365,7 +365,39 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.16.0 (11 novembre 2026)
+## État : V0.16.1 (12 novembre 2026)
+
+V0.16.1 (Antoine, 12 novembre : « est-ce que les éléments de mise en forme des colonnes pourraient être repris aussi (à la demande) » ; « plus
+globalement, regarde tous les éléments qu'il serait bien de reprendre, inspire-toi du widget import/export de table »
+(`lombre33/Grist_Table_structure_import`, lu en lecture seule). Carte de décision « Jusqu'où étendre ce qui est repris de la SOURCE ? » :
+**Descriptions + sélecteur d'éléments** (la mise en forme à la demande existait déjà, voir la 0.16.0). Moteur **2.8.0** (mineure, dite dans `GFS-ETAT.md`).
+- **Descriptions** (`js/engine/logic/descriptions.js`, `target/describe.js`) : `desc` (description de chaque colonne, vide si elle n'en a pas : la clé
+  dit que l'export l'envoie) et `tdesc` (description de la table, sur la première colonne) dans la description signée des colonnes ; nettoyées et
+  bornées (`cleanNote` : pas de caractère de contrôle ni de sens d'écriture, 300 et 500 caractères). Hors `withoutOpts` : changer un texte ne renvoie
+  aucune ligne ; `refreshOptions` réécrit la description des colonnes quand un texte change (et lit `_grist_Views_section` seulement si un export
+  envoie `tdesc`). **Vérifié dans un Grist 1.7** : la description d'une table est celle de sa **section de données brutes**
+  (`_grist_Tables.rawViewSectionRef` → `_grist_Views_section.description`, `UpdateRecord` ; la page « Données brutes » la montre dans une infobulle) ;
+  `AddColumn` **ignore** `description` (il faut `ModifyColumn` ou `UpdateRecord` sur `_grist_Tables_column`) ; **écrire une valeur dans une colonne formule
+  est refusé** (500 « Can't save value to formula column », utile pour les formules à venir).
+- **CIBLE** : comme pour les formats, seules les colonnes créées par le widget (`own`) reçoivent la description, une fois (`entry.described`) et
+  seulement si elles n'en ont pas ; la table la reçoit quand la sienne est vide (`entry.tabled`) ; une description retouchée ou effacée ici n'est pas
+  refaite. Jamais sur `id_sync` (sa description est la note du widget), jamais en Échange. `entry.sends` (`style`, `notes`, `table`) dit ce que l'export
+  envoie (marque `fmt` gardée par `exportSchema`).
+- **Sélecteur d'éléments** : à l'étape Colonnes de l'assistant d'export, une ligne repliée « Envoyé avec les colonnes : … » (`elementsBlock`, remplace
+  la case `styleBlock`) ouvre trois cases (mise en forme, descriptions des colonnes, descriptions des tables), cochées d'emblée pour un nouvel export,
+  telles que l'export l'est pour un export modifié, chacune avec le nombre de colonnes ou de tables concernées (`elementCounts`). Côté CIBLE, le bouton
+  « Reprendre depuis la SOURCE » (ancien « Reprendre la mise en forme ») ouvre une fenêtre à une case par élément que l'export envoie
+  (`restyle(journal, { style, notes, table })`) ; le bouton n'apparaît que si l'export envoie quelque chose.
+- Testé : unit 368 (`engine-notes.test.mjs` : envoi, application, retouche gardée, mise à jour sans renvoi, reprise par élément, texte nettoyé, `planNotes`) ;
+  e2e `ONLY_FORMAT=1` (vrai Grist : les trois cases, les descriptions arrivent, retouche gardée, reprise élément par élément, cases décochées).
+- **Pas repris, par choix** (triage dit à Antoine) : formules et formules de déclenchement (demandées ensuite, voir plus bas si codées), liens
+  bidirectionnels, règles d'accès, tables de résumé, tri / filtres / graphiques / mise en page des vues. Réglages de la vue modèle (largeurs, ordre
+  des colonnes, règles par vue) : option écartée par Antoine, à vérifier dans un vrai Grist avant tout.
+- **Formules** (Antoine, 12 novembre, après la carte : « également prévoir de pouvoir sync les formules […] une case à part et un message qui demande
+  si l'user est sûr de le vouloir avec les risques de passer du python »). Carte de décision posée : quand la CIBLE applique les formules (sur clic d'un
+  propriétaire — recommandé —, à l'acceptation, ou dès l'envoi). Voir la suite de ce fichier si codé.
+
+## État précédent : V0.16.0 (11 novembre 2026)
 
 V0.16.0 (retour d'un utilisateur, relayé par Antoine, 11 novembre : « une page de budget à dupliquer, le style est américain (USD par
 défaut) et, quand je passe en Euro, le style d'écriture reste américain » ; Antoine : « il faudrait rajouter une option pour que ça

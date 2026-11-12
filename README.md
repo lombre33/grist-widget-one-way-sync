@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.16.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.16.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -105,11 +105,14 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 - **Liens entre tables** : une colonne Référence qui vise une autre table de l'export devient,
   chez le destinataire, une vraie Référence vers la table reçue (case « Garder les liens entre les
   tables », cochée d'emblée), qui affiche la même colonne.
-- **Mise en forme des colonnes** : en-têtes, couleurs, devise et règles de mise en forme
-  conditionnelle simples peuvent partir avec l'export (case « Envoyer la mise en forme des
-  colonnes », cochée d'emblée). Une règle n'est jamais copiée telle quelle : elle est relue puis
-  réécrite avec les colonnes du destinataire. La carte signale une langue de document différente
-  (elle décide de l'écriture des nombres) et un propriétaire peut régler le document d'un clic.
+- **Éléments des colonnes** : en-têtes, couleurs, devise et règles de mise en forme
+  conditionnelle simples (case « Envoyer la mise en forme des colonnes »), descriptions des
+  colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, cochée d'emblée,
+  dit combien de colonnes sont concernées (étape Colonnes, repliée sous « Envoyé avec les colonnes »).
+  Une règle n'est jamais copiée telle quelle : elle est relue puis réécrite avec les colonnes du
+  destinataire. La carte signale une langue de document différente (elle décide de l'écriture des
+  nombres) et un propriétaire peut régler le document d'un clic. Le bouton « Reprendre depuis la
+  SOURCE » remet, élément par élément, ce qui a été retouché chez le destinataire.
 - **Destinations au choix** : table nouvelle ou existante, colonnes mises en correspondance,
   lignes déjà présentes rattachées. Une table ajoutée plus tard à l'export est proposée dans une
   fenêtre.

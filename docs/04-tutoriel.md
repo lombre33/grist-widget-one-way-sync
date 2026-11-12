@@ -420,8 +420,16 @@ cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le s
 et les règles de mise en forme conditionnelle simples (comparaisons sur les colonnes envoyées). Une
 règle n'est jamais copiée telle quelle : elle est relue, puis réécrite avec les colonnes du
 destinataire ; une règle plus complexe n'est pas envoyée. Seules les colonnes créées par le widget
-la prennent, une fois : ce qui est retouché chez le destinataire reste, et le bouton **Reprendre la
-mise en forme** de la carte remet tout d'accord avec la SOURCE.
+la prennent, une fois : ce qui est retouché chez le destinataire reste, et le bouton **Reprendre
+depuis la SOURCE** de la carte remet tout d'accord avec la SOURCE.
+
+**Descriptions.** Deux autres cases, sous la même ligne repliée **Envoyé avec les colonnes**, envoient
+le texte de la description de chaque colonne (300 caractères au plus) et celui de chaque table (500
+caractères au plus). Chaque case dit combien de colonnes ou de tables sont concernées. Le texte part
+tel quel et chaque destinataire peut le lire : ne cochez pas la case si vos descriptions portent des
+notes internes. Chez le destinataire, une colonne créée par le widget la reçoit une fois (si elle n'en
+a pas), la table aussi si la sienne est vide ; ce qui est écrit ou effacé ici n'est pas écrasé, et
+**Reprendre depuis la SOURCE** (une case par élément) le remet d'accord.
 
 **Langue du document.** Grist écrit les séparateurs des nombres et la devise par défaut d'après la
 langue du document, pas d'après la colonne : un budget copié d'un document français dans un document

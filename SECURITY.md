@@ -423,6 +423,10 @@ onglets du même navigateur (`ONLY_TABS=1`).
   « Risques acceptés ») et les styles dans les options de la colonne. Le réglage de langue et de devise du
   document (`_grist_DocInfo`) n'est écrit que sur le clic confirmé d'un propriétaire. Les règles et styles
   posés sont suivis par colonne dans la note du journal (`styled`).
+- Depuis la 0.16.1 : si l'export envoie les descriptions, la CIBLE écrit la description (`description` de
+  `_grist_Tables_column`) des colonnes qu'elle a créées et celle de la table (section de données brutes,
+  `description` de `_grist_Views_section`) si elle est vide, une fois (`described`, `tabled` dans la note). Jamais
+  sur `id_sync` ni dans la note du journal. « Reprendre depuis la SOURCE » les remplace sur demande.
 
 ## Chaîne d'approvisionnement
 
@@ -506,6 +510,12 @@ Pour un usage en production :
   abîmées de `tests/unit/robustness.test.mjs` vérifie le point fixe (ce qui est réécrit se relit à l'identique).
   Reste, comme pour toute mise en forme reçue, qu'une SOURCE peut colorer à sa guise les colonnes qu'elle a
   fait créer, et qu'un lot signé par la clé d'une réception est la seule voie d'arrivée de ces règles.
+- **Descriptions (0.16.1)** : un texte libre qu'une SOURCE fait écrire dans les infobulles de la CIBLE (Grist y
+  rend des liens cliquables, jamais du HTML). `logic/descriptions.js` (`cleanNote`) le nettoie : sans caractère de
+  contrôle ni de sens d'écriture, lignes vides en trop retirées, 300 caractères par colonne et 500 par table au
+  plus (la description des colonnes accompagne chaque envoi : le total reste loin de 1 Mo). Il est signé avec les
+  colonnes, donc hors de portée de la clé du formulaire. Reste qu'un destinataire lit tout ce que la SOURCE y écrit :
+  la case le dit, et chaque case est décochable (une description « interne » ne part pas si la case est décochée).
 - **Langue du document (0.16)** : la SOURCE dit la langue et la devise de son document ; la CIBLE ne les valide
   que par forme (`fr-FR`, `EUR`) et ne les écrit jamais d'elle-même. Le bouton « Régler le document comme la SOURCE »
   est réservé aux propriétaires, passe par une confirmation qui dit que tout le document change d'écriture

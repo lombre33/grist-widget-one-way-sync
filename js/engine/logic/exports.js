@@ -6,6 +6,7 @@ import { rowFilter } from './filters.js';
 import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
 import { parseRule, ruleRefs } from './rules.js';
+import { cleanNote, noteSent, tableNoteOf, withTableNote } from './descriptions.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -18,13 +19,14 @@ export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND
 // comme la liste de ses fichiers (voir files.js). `opts` : liste de choix et format de la colonne
 // (voir options.js), s'il y en a. Avec `extras` (l'export envoie « la mise en forme des colonnes »), `opts`
 // porte aussi le style de l'en-tête, la monnaie résolue d'après `doc` (langue et monnaie du document, voir
-// docformat.js) et les règles de mise en forme conditionnelle ; chaque colonne est alors marquée `fmt`.
-export function exportableColumns(cols, { extras = false, doc = null } = {}) {
+// docformat.js) et les règles de mise en forme conditionnelle ; chaque colonne est alors marquée `fmt`. Avec `notes`
+// (l'export envoie les descriptions des colonnes, voir descriptions.js), chaque colonne porte la sienne dans `desc`.
+export function exportableColumns(cols, { extras = false, doc = null, notes = false } = {}) {
   const skip = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
   return cols.filter(c => !skip.has(c.colId) && !c.colId.startsWith('gristHelper_')).map((c) => {
     const type = /^Ref(List)?:/.test(c.type) ? 'Text' : c.type;
     const opts = sourceOptions(c, type, cols, { extras, doc });
-    return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}), ...(extras ? { fmt: true } : {}) };
+    return { id: c.colId, label: c.label || c.colId, type, source: c.type, visible: c.visible || '', ...(opts ? { opts } : {}), ...(extras ? { fmt: true } : {}), ...(notes ? { desc: cleanNote(c.description) } : {}) };
   });
 }
 
@@ -57,6 +59,18 @@ function sourceRules(c, cols) {
     const plain = tree && ruleRefs(tree).every(id => byName.has(id) && !CONVERTED.test(byName.get(id).type));
     return plain ? { when: byRow.get(ref).formula, ...ruleStyle(styles[i]) } : null;
   }).filter(Boolean);
+}
+
+// Ce que les tables `tables` ont à envoyer pour chaque élément des colonnes (voir descriptions.js) : colonnes qui ont une
+// mise en forme (`style`) ou une description (`notes`), tables qui ont une description (`tableNote`). `sections` :
+// lignes de `_grist_Views_section`. Sert à dire à la personne ce que chaque case envoie vraiment.
+export function elementCounts(schema, tables, sections) {
+  const columns = (extras) => tables.flatMap(table => exportableColumns(schema.columns(table) || [], { extras, notes: !extras }));
+  return {
+    style: columns(true).filter(c => c.opts).length,
+    notes: columns(false).filter(c => c.desc).length,
+    tableNote: tables.filter(table => tableNoteOf(schema.table(table), sections)).length,
+  };
 }
 
 // Règles de la colonne qui lisent une colonne absente de l'export : laissées (la CIBLE ne l'a pas).
@@ -105,9 +119,10 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc }) => ({
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
   ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
+  ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
 })));
 // Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
 // valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des
@@ -173,11 +188,13 @@ export function exportTables(rows, exportId) {
   return [...tables].map(([table, columns]) => ({ table, columns, filter: filterOf(table) }));
 }
 
-// Listes de choix et formats changés dans les tables d'un export depuis son enregistrement : la
+// Listes de choix, formats et descriptions changés dans les tables d'un export depuis son enregistrement : la
 // description des colonnes de ses lignes Synchro est réécrite, sans renvoi de lignes (la CIBLE la
-// lit à la prochaine ligne reçue). Les options se lisent pour le type envoyé (voir options.js).
+// lit à la prochaine ligne reçue). Les options se lisent pour le type envoyé (voir options.js). `sections` :
+// lignes de `_grist_Views_section` (la description d'une table s'y trouve), lues seulement si un export envoie
+// celle de sa table ; sans elles, la description de table envoyée reste telle quelle.
 const SCHEMA_KINDS = [KIND.keys, KIND.lot, KIND.track, KIND.full, KIND.mark, KIND.files];
-export function optionsActions(rows, schema, doc = null) {
+export function optionsActions(rows, schema, doc = null, sections = null) {
   const ids = [];
   const values = [];
   for (const exportId of new Set(rows.map(r => r[EXPORT_COL]))) {
@@ -185,11 +202,15 @@ export function optionsActions(rows, schema, doc = null) {
       const live = schema.columns(table);
       const here = new Map(live.map(c => [c.colId, c]));
       const extras = columns.some(c => c.fmt);
-      const fresh = columns.map(({ opts, ...c }) => {
+      const fresh = columns.map(({ opts, desc, ...c }) => {
         const next = here.has(c.id) ? sourceOptions(here.get(c.id), c.type, live, { extras, doc }) : opts;
-        return next ? { ...c, opts: next } : c;
+        const note = typeof desc === 'string' ? { desc: here.has(c.id) ? cleanNote(here.get(c.id).description) : desc } : {};
+        return { ...c, ...(next ? { opts: next } : {}), ...note };
       });
-      const value = schemaText(filteredColumns({ columns: extras ? withDoc(pruneRules(fresh), doc) : fresh, filter }));
+      const sent = noteSent(columns);
+      const styled = extras ? withDoc(pruneRules(fresh), doc) : fresh;
+      const described = sent.table && sections ? withTableNote(styled, tableNoteOf(schema.table(table), sections)) : styled;
+      const value = schemaText(filteredColumns({ columns: described, filter }));
       for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
         ids.push(r.id);
         values.push(value);

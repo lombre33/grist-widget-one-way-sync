@@ -797,8 +797,8 @@ try {
   // propre, en-tête coloré, règle « négatif en rouge » et une règle qui sort de la grammaire) envoie sa mise en forme
   // à une CIBLE par défaut (en-US). La CIBLE reprend format, devise et en-tête dans les colonnes qu'elle crée, y
   // reconstruit la règle (jamais la formule d'origine, jamais la règle piégée), dit l'écart de langue et ne règle le
-  // document que sur un clic confirmé d'un propriétaire ; une retouche d'ici reste, « Reprendre la mise en forme »
-  // remet tout d'accord.
+  // document que sur un clic confirmé d'un propriétaire ; une retouche d'ici reste, « Reprendre depuis la SOURCE »
+  // remet tout d'accord. Les descriptions des colonnes et de la table partent avec (cases à part) et se reprennent de même.
   async function formatSteps() {
     const src = await newDocWithWidget('Format SOURCE', [
       ['AddTable', 'Budget', [{ id: 'Libelle', type: 'Text' }, { id: 'Montant', type: 'Numeric' }]],
@@ -823,9 +823,12 @@ try {
       const list = optionsOf(await column(src.doc, table, colId)).rulesOptions || [];
       await applyActions(src.doc, [['UpdateRecord', '_grist_Tables_column', col.id, { widgetOptions: JSON.stringify({ ...optionsOf(await column(src.doc, table, colId)), rulesOptions: [...list, style] }) }]]);
     };
+    const rawSectionOf = async (doc, table) => (await records(doc, '_grist_Tables')).find(tb => tb.tableId === table).rawViewSectionRef;
     await applyActions(src.doc, [['UpdateRecord', '_grist_DocInfo', 1, { documentSettings: JSON.stringify({ ...(await docSettings(src.doc)), locale: 'fr-FR' }) }],
       ['UpdateRecord', '_grist_Tables_column', (await column(src.doc, 'Budget', 'Montant')).id,
-        { widgetOptions: JSON.stringify({ numMode: 'currency', decimals: 2, headerFillColor: '#336699', headerFontBold: true, alignment: 'right' }) }]]);
+        { description: 'Montant TTC en euros', widgetOptions: JSON.stringify({ numMode: 'currency', decimals: 2, headerFillColor: '#336699', headerFontBold: true, alignment: 'right' }) }],
+      ['UpdateRecord', '_grist_Tables_column', (await column(src.doc, 'Budget', 'Libelle')).id, { description: 'Intitulé de la ligne' }],
+      ['UpdateRecord', '_grist_Views_section', await rawSectionOf(src.doc, 'Budget'), { description: 'Lignes du budget 2026' }]]);
     await addRule('Budget', 'Montant', '$Montant < 0', { fillColor: '#FF0000', textColor: '#FFFFFF', fontBold: true });
     await addRule('Budget', 'Libelle', 'len($Libelle) > 3', { fillColor: '#00FF00' }); // hors de la grammaire : ne part jamais
 
@@ -836,8 +839,15 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
+    // Les éléments envoyés avec les colonnes sont repliés derrière une ligne qui dit ce qui part ; chacun a sa case, cochée d'emblée.
+    const elements = dialog().locator('details', { hasText: 'Envoyé avec les colonnes' });
+    assert.match(await elements.locator('summary').innerText(), /mise en forme, descriptions des colonnes, descriptions des tables/);
+    await elements.locator('summary').click();
     const send = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
     assert.ok(await send.isChecked(), 'cochée d\'emblée pour un nouvel export');
+    assert.ok(await dialog().getByRole('checkbox', { name: 'Envoyer les descriptions des colonnes' }).isChecked());
+    assert.ok(await dialog().getByRole('checkbox', { name: 'Envoyer la description des tables' }).isChecked());
+    assert.match(await elements.innerText(), /2\scolonnes concernées/, 'chaque case dit combien de colonnes sont concernées');
     await dialogButton('Continuer').click();
     await dialog().getByLabel('Nom de l’export').fill('Budget');
     await dialogButton('Créer l’export').click();
@@ -874,6 +884,16 @@ try {
     await notice.waitFor({ state: 'detached', timeout: 30000 });
     step('Mise en forme : format, devise (euro), en-tête et règle refaite chez la CIBLE (formule jamais copiée, règle piégée écartée), écart de langue dit puis réglé sur un clic confirmé');
 
+    // Descriptions des colonnes et de la table, posées une fois sur ce que le widget a créé.
+    const noteOf = async (doc, table, colId) => (await column(doc, table, colId)).description;
+    const dstSection = await rawSectionOf(dst.doc, 'Budget');
+    const dstTableNote = async () => (await records(dst.doc, '_grist_Views_section')).find(sec => sec.id === dstSection).description;
+    await waitFor(async () => (await noteOf(dst.doc, 'Budget', 'Libelle')) === 'Intitulé de la ligne' && (await dstTableNote()) === 'Lignes du budget 2026', 'descriptions reçues', 90000);
+    assert.equal(await noteOf(dst.doc, 'Budget', 'Montant'), 'Montant TTC en euros');
+    assert.ok(!String(await noteOf(dst.doc, 'Budget', 'id_sync')).includes('Intitulé'), 'la description de la clé (la note du widget) ne reçoit rien de la SOURCE');
+    step('Descriptions : celles des colonnes et de la table arrivent chez la CIBLE');
+    await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', (await column(dst.doc, 'Budget', 'Libelle')).id, { description: 'Ma description' }]]);
+
     // Ce que Grist affiche : nombre écrit à la française, règle appliquée à la ligne négative.
     await page.goto(dst.url.replace(/\/p\/\d+$/, ''));
     await page.getByText('Budget', { exact: true }).first().click();
@@ -899,20 +919,34 @@ try {
     await waitFor(async () => (await records(dst.doc, 'Budget')).length === 3, 'ligne de plus reçue (un passage a eu lieu)', 90000);
     assert.equal((await montant()).currency, 'USD', 'la devise choisie ici reste');
     assert.deepEqual(await rulesOf(dst.doc, 'Budget', 'Montant'), [], 'la règle retirée ici n\'est pas refaite');
-    await button('Reprendre la mise en forme').click();
-    await dialogButton('Reprendre la mise en forme').click();
+    assert.equal(await noteOf(dst.doc, 'Budget', 'Libelle'), 'Ma description', 'la description retouchée ici reste');
+    // « Reprendre depuis la SOURCE » : on ne coche que la mise en forme, puis seulement les descriptions.
+    await button('Reprendre depuis la SOURCE').click();
+    await dialog().getByRole('checkbox', { name: 'Descriptions des colonnes' }).uncheck();
+    await dialog().getByRole('checkbox', { name: 'Description de la table' }).uncheck();
+    await dialogButton('Reprendre').click();
     await waitFor(async () => (await montant()).currency === 'EUR' && (await rulesOf(dst.doc, 'Budget', 'Montant')).length === 1, 'mise en forme reprise', 90000);
     assert.deepEqual((await rulesOf(dst.doc, 'Budget', 'Montant')).map(r => r.formula), ['$Montant < 0']);
     assert.equal(await helpers(), 1, 'la règle est remplacée, pas doublée');
-    step('Mise en forme : une retouche d\'ici est gardée, « Reprendre la mise en forme » remet la SOURCE sans doubler la règle');
+    assert.equal(await noteOf(dst.doc, 'Budget', 'Libelle'), 'Ma description', 'les descriptions n\'étaient pas demandées');
+    step('Mise en forme : une retouche d\'ici est gardée, « Reprendre depuis la SOURCE » remet la SOURCE sans doubler la règle');
+    await button('Reprendre depuis la SOURCE').click();
+    await dialog().getByRole('checkbox', { name: 'Mise en forme' }).uncheck();
+    await dialogButton('Reprendre').click();
+    await waitFor(async () => (await noteOf(dst.doc, 'Budget', 'Libelle')) === 'Intitulé de la ligne', 'description reprise', 90000);
+    assert.equal(await dstTableNote(), 'Lignes du budget 2026');
+    step('Descriptions : « Reprendre depuis la SOURCE » remet la description retouchée ici, élément par élément');
 
     // Case décochée : ce que la SOURCE envoie redevient le format de base (rien ne part de plus que les listes de choix d'avant).
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    const again = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
-    assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
-    await again.uncheck();
+    await dialog().locator('summary', { hasText: 'Envoyé avec les colonnes' }).click();
+    for (const name of ['Envoyer la mise en forme des colonnes', 'Envoyer les descriptions des colonnes', 'Envoyer la description des tables']) {
+      const again = dialog().getByRole('checkbox', { name });
+      assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
+      await again.uncheck();
+    }
     await dialogButton('Continuer').click();
     await dialogButton('Enregistrer').click();
     await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
@@ -920,7 +954,8 @@ try {
     const lot = JSON.parse((await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot' && r.Synchro_Table === 'Budget').Synchro_Colonnes);
     assert.ok(lot.every(c => !c.fmt && !c.doc), 'plus de marque de mise en forme dans la description des colonnes');
     assert.ok(!JSON.stringify(lot).includes('rules') && !JSON.stringify(lot).includes('headerFill'), 'ni règle ni en-tête');
-    step('Mise en forme : case décochée, la SOURCE n\'envoie plus ni règle, ni en-tête, ni langue');
+    assert.ok(lot.every(c => c.desc === undefined && c.tdesc === undefined), 'ni description de colonne ni de table');
+    step('Mise en forme : cases décochées, la SOURCE n\'envoie plus ni règle, ni en-tête, ni langue, ni description');
   }
   // Pièces jointes d'un document par l'API REST : dépôt, lecture, et empreinte courte d'un contenu.
   function attachmentTools() {

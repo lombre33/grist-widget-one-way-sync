@@ -234,10 +234,21 @@ function formatNotes(group) {
   })];
 }
 
-// « Reprendre la mise en forme » : les colonnes reçues reprennent le style et les règles de la SOURCE, après confirmation.
+// Ce que l'export reçu envoie en plus des données, d'après le sort de ses tables (`sends`, voir loop.js) : 'style', 'notes', 'table'.
+const sentKinds = group => [...new Set(group.note.tables.flatMap(entry => entry.sends || []))];
+
+// « Reprendre depuis la SOURCE » : les éléments cochés (parmi ceux que l'export envoie) reprennent la valeur de la
+// SOURCE dans les colonnes reçues, après confirmation.
 async function restyleReception(group) {
-  if (!(await confirmDialog({ title: t('recv.restyle.title', { name: group.note.name }), body: t('recv.restyle.body'), confirmLabel: t('recv.action.restyle'), kind: 'btn-primary' }))) return;
-  await restyle(group.journal);
+  const kinds = sentKinds(group);
+  const chosen = new Set(kinds);
+  const boxes = kinds.map((kind) => {
+    const box = el('input', { type: 'checkbox', checked: true, onchange: () => { if (box.checked) chosen.add(kind); else chosen.delete(kind); } });
+    return el('label', { class: 'check' }, box, t(`recv.restyle.${kind}`));
+  });
+  const body = [el('p', {}, t('recv.restyle.body')), el('div', { class: 'form' }, ...boxes)];
+  if (!(await confirmDialog({ title: t('recv.restyle.title', { name: group.note.name }), body, confirmLabel: t('recv.restyle.confirm'), kind: 'btn-primary' })) || !chosen.size) return;
+  await restyle(group.journal, Object.fromEntries([...chosen].map(kind => [kind, true])));
   flash = { node: message('ok', t('recv.restyle.done')), until: Date.now() + NOTICE_MS };
   await renderTarget();
 }
@@ -308,7 +319,7 @@ function syncCard(group) {
     el('div', { class: 'card-actions' },
       group.public || note.retour ? null : linkButton(group),
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
-      group.waiting || note.mode === 'echange' ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
+      group.waiting || note.mode === 'echange' || !sentKinds(group).length ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
       group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
