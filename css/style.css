@@ -118,6 +118,11 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .people { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .person { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; background: var(--surface-sunken); }
 .stray-list { list-style: none; margin: 0; padding: 6px 8px; display: grid; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-sunken); font-size: 13px; }
+.formula-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.formula-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; background: var(--surface-sunken); }
+.formula-code { resize: none; margin: 4px 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.formulas-box { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.formulas-panel { margin-top: 8px; }
 .person-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .person-who { font-weight: 600; overflow-wrap: anywhere; }
 .person-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

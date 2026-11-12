@@ -64,7 +64,14 @@
 //         fois, et sur la table si sa description est vide ; `restyle(journal, elements)` reprend sur demande les éléments choisis
 //         (`style`, `notes`, `table`) ; la note de chaque table garde `sends`, `described`, `tabled`. Le moteur lit
 //         `_grist_Views_section` (`fetchRows`). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte des formules ne changent.
-export const ENGINE_VERSION = '2.8.0';
+// 2.9.0 (12 novembre 2026, demande du porteur : « également prévoir de pouvoir sync les formules […] une case à part et un message
+//         qui demande si l'user est sûr de le vouloir avec les risques de passer du python ») : les formules des colonnes peuvent partir
+//         avec l'export (`saveChosenExport({ …, formulas })`, clé `fx` de la description signée des colonnes, nettoyée et bornée par
+//         `logic/column-formulas.js`). CIBLE : un passage ne pose jamais une formule, il les lit (`formulas` dans le résultat de chaque
+//         table) ; `restyle(journal, { formulas: true })`, sur le clic d'un propriétaire après lecture, transforme en colonnes de formule
+//         celles que le moteur a créées et dont la formule n'a pas d'objection (`target/formulas.js`). Ni port, ni nom de table, ni
+//         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent.
+export const ENGINE_VERSION = '2.9.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

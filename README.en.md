@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.16.1 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.17.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -110,6 +110,11 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   rewritten with the receiver's columns. The card flags a different document language (it decides
   how numbers are written) and an owner can set the document with one click. The “Take again from
   the SOURCE” button puts back, element by element, what was retouched on the receiving side.
+- **Column formulas** (0.17): a separate box, unticked by default, after a message reminding that a
+  formula is Python that Grist runs. Nothing is applied by itself on the receiving side: an owner reads
+  them one by one in “Take again from the SOURCE” (those that name a system module or a missing column
+  or table are refused outright), then applies them to the columns created by the widget. See
+  `SECURITY.md` before offering the box on an instance without a sandbox.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET

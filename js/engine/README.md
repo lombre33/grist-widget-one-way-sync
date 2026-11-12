@@ -139,7 +139,7 @@ CIBLE (`target/receive.js`) :
 | `sourceOf(invitation)` | l'invitation lue | le document de la SOURCE tel que la note du journal le garde (`email`, `docId`, `team`, `docName`) ; en Échange, nom et équipe lus chez Grist l'emportent. L'hôte en fait un lien avec `docUrl(origin, team, docId)` (`logic/codes.js`, `origin` : l'instance de **son** document, jamais celle d'un code) |
 | `receptionReply({ journal, note }, lien)` | le lien du formulaire collé | `{ code, control }` : le code de réponse et le code de contrôle |
 | `myEmail(journal)` | | l'e-mail de la personne connectée, calculé par Grist |
-| `restyle(journal, elements?)` (`target/loop.js`) | `elements` : `{ style?, notes?, table? }` (défaut : les trois ; l'hôte lit ce que l'export envoie dans `entry.sends` de la note) | la CIBLE reprend de la SOURCE, dans les colonnes reçues, les éléments demandés : formats, en-têtes et règles (`style`), descriptions des colonnes (`notes`), description de la table (`table`), en remplaçant ce qui a été retouché ici |
+| `restyle(journal, elements?)` (`target/loop.js`) | `elements` : `{ style?, notes?, table?, formulas? }` (défaut : les trois premiers, jamais `formulas` ; l'hôte lit ce que l'export envoie dans `entry.sends` de la note) | la CIBLE reprend de la SOURCE, dans les colonnes reçues, les éléments demandés : formats, en-têtes et règles (`style`), descriptions des colonnes (`notes`), description de la table (`table`), formules de colonne (`formulas`, voir « Formules »), en remplaçant ce qui a été retouché ici |
 | `readDocFormat()`, `alignDocFormat(wanted)` (`target/style.js`) | `wanted` : `{ locale?, currency? }` (`formatGap(source, ici)` dit l'écart) | la langue et la monnaie de ce document ; `alignDocFormat` les écrit dans `_grist_DocInfo` (à ne faire que sur un geste d'un propriétaire, c'est un réglage du document entier) |
 
 Ce que ces fonctions supposent du port : `shareInfo` (document de la clé du formulaire), `createWebhook` (condition
@@ -199,6 +199,26 @@ n'entrent pas dans la comparaison qui décide d'un renvoi (`withoutOpts`) : chan
   « Reprendre ». Jamais sur `id_sync`, jamais en Échange.
 - **Port** : inchangé. Un hôte dont le `fetchRows` lit `_grist_Views_section` envoie et reçoit les descriptions de table ; sans cela
   seules celles des colonnes passent. Essais : `tests/unit/engine-notes.test.mjs`, e2e `ONLY_FORMAT=1`.
+
+## Formules de colonne (2.9.0)
+
+Un export dont `formulas` est vrai (`saveChosenExport({ …, formulas: true })`, jamais en Échange) envoie le texte de chaque vraie colonne de
+formule (`fx`, vide pour une colonne qui n'en est pas une : la clé dit que l'export les envoie) dans la description signée des colonnes ;
+ni formule de déclenchement, ni colonne Référence ou Pièces jointes. Nettoyé et borné par `logic/column-formulas.js` (`cleanFormula` :
+1 500 caractères par formule, 20 000 par table, une formule trop longue ne part pas), hors de la comparaison qui décide d'un renvoi.
+- **CIBLE** (`target/formulas.js`, `planFormulas`) : **un passage ordinaire ne pose jamais une formule**. Il les lit seulement et rend, par
+  table, `formulas` dans le résultat de la table (`state.results`, `tableResult`) : pour chaque formule, `{ id, to, label, formula, state,
+  problems, ok }` (`state` : `data`, `other`, `same`). `restyle(journal, { formulas: true })` pose celles qui n'ont pas d'objection
+  (`ModifyColumn` : `isFormula`, `formula`) sur les colonnes que le moteur a créées (`own`) ; la colonne devient une colonne de formule et
+  `copyColumns` ne l'écrit plus. Jamais sur une colonne qui existait déjà, sur `id_sync`, ni en Échange. Rien de plus dans la note.
+- **Lecture** (`formulaProblems`) : refus d'office d'un mot interdit hors des textes et commentaires (`eval`, `exec`, `open`, `getattr`, `os`,
+  `sys`…), de tout nom à doubles tirets bas (partout), de tout `import` hors de `SAFE_MODULES`, d'une colonne citée absente ou renommée
+  ici, d'une table citée qui n'est pas une table de l'export. Le texte n'est jamais réécrit. **C'est un garde-fou, pas une preuve** : lire
+  `SECURITY.md` (« Formules de colonne »).
+- **Pour l'hôte** : ne proposer `formulas` qu'à un propriétaire, après avoir montré chaque formule lue (`state.results` → `formulas`) et son
+  éventuelle objection, avec un message sur le Python et une confirmation explicite ; le moteur ne demande rien de plus. Sur une instance
+  Grist sans bac à sable (vérifié : l'image Docker officielle laisse une formule lister les fichiers du serveur), ne pas proposer la case.
+- **Port** : inchangé. Essais : `tests/unit/engine-formulas.test.mjs`, e2e `ONLY_FORMULAS=1`.
 
 ## Ce que le moteur écrit dans un document
 

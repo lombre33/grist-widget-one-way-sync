@@ -365,7 +365,51 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.16.1 (12 novembre 2026)
+## État : V0.17.0 (12 novembre 2026)
+
+V0.17.0 (Antoine, 12 novembre : « également prévoir de pouvoir sync les formules. c'est du python mais très très controlé dans grist (pas d'appel
+externe etc.) donc peu de risque, par contre une case à part et un message qui demande si l'user est sûr de le vouloir avec les risques de passer du
+python » ; carte de décision « Quand la CIBLE applique-t-elle les formules envoyées par la SOURCE ? » : **« Sur clic d'un propriétaire »**). Moteur
+**2.9.0** (mineure, dite dans `GFS-ETAT.md`).
+- **Fait vérifié dans un Grist 1.7 (image Docker officielle) qui contredit « très contrôlé »** : une formule de colonne a pu `import os` et lister les
+  fichiers du serveur (`os.listdir("/")`) ; l'image n'a pas de bac à sable renforcé par défaut. La protection dépend de l'instance
+  (`GRIST_SANDBOX_FLAVOR`) : à vérifier auprès de l'administrateur de DINUM avant de proposer la case aux utilisateurs. Dit à Antoine, écrit dans
+  `SECURITY.md` (« Formules de colonne ») et au moteur (`README`, `GFS-ETAT.md`). Aussi vérifié : `ModifyColumn` (`isFormula`, `formula`) transforme une
+  colonne de données en colonne de formule, garde le type et calcule les valeurs ; une formule qui cite une colonne absente ou qui a une faute de syntaxe
+  est acceptée par Grist (cellules en erreur, `null` par l'API) : le widget doit donc lire les formules avant, Grist ne les refuse pas.
+- **SOURCE** (`js/engine/logic/column-formulas.js`) : case « Envoyer aussi les formules des colonnes (Python) », **hors du repli** des autres éléments,
+  **décochée d'emblée** (même pour un nouvel export), grisée s'il n'y a aucune colonne de formule, avec le nombre de colonnes concernées ; cocher ouvre une
+  fenêtre (« Envoyer aussi les formules ? », cinq points : rien ne se pose seul, le destinataire exécute le code chez lui, ce qui est refusé d'office, le bac à
+  sable dépend de l'instance, une formule lourde ralentit) ; « Annuler » laisse la case décochée. Part dans la description signée des colonnes : `fx` sur chaque
+  colonne (texte, vide pour une colonne qui n'est pas une formule : la clé dit que l'export les envoie). Seules les **vraies colonnes de formule** partent
+  (`isFormula`) : ni formule de déclenchement, ni Référence, ni Pièces jointes (elles partent comme du texte ou des fichiers) ; nettoyées (`cleanFormula` :
+  pas de caractère de contrôle ni de sens d'écriture, indentation gardée), 1 500 caractères par formule et 20 000 par table, **jamais coupées** (une formule
+  trop longue ne part pas). Hors de `withoutOpts` (changer une formule ne renvoie aucune ligne), tenues à jour par `optionsActions`. Jamais en Échange.
+- **CIBLE** (`js/engine/target/formulas.js`, `planFormulas`) : **un passage ne pose jamais une formule** ; il les lit et met `formulas` dans le résultat de la
+  table (`state.results`, `tableResult`), une ligne par formule `{ id, to, label, formula, state ('data' | 'other' | 'same'), problems, ok }`. Aucun état de plus
+  dans la note (l'état se lit dans la destination). `entry.sends` contient `'formulas'` quand une formule au moins est envoyée. « Reprendre depuis la SOURCE »
+  (`js/target/restyle.js`, `restyleDialog`, 720 px) : la case « Formules » est **à part, décochée, réservée aux propriétaires** (un éditeur lit « se pose par un
+  propriétaire »), grisée quand rien n'est à poser ; la cocher montre le message, la liste par table (colonne, état, texte Python, objections) et une case
+  **« J'ai lu ces formules… »** sans laquelle « Reprendre » reste grisé. `restyle(journal, { formulas: true })` pose les formules sans objection
+  (`ModifyColumn`) sur les colonnes **créées par le widget** (`own`) : jamais sur une colonne qui existait déjà, sur `id_sync`, ni en Échange. La colonne
+  devient une colonne de formule : `copyColumns` ne l'écrit plus (Grist refuserait, 500 « Can't save value to formula column »), Grist la calcule.
+- **Lecture avant pose** (`formulaProblems`, garde-fou et non preuve) : refus d'office d'un mot interdit hors des textes et commentaires (`eval`, `exec`,
+  `open`, `getattr`, `os`, `sys`, `subprocess`, réseau, fichiers… ; `stripStrings` garde le contenu d'un f"…", où Python exécute les accolades), de tout nom à
+  doubles tirets bas (partout, texte compris : `"{0.__class__}".format(x)`), de tout `import` hors de `SAFE_MODULES` (quinze modules de calcul, de dates et de
+  texte, même derrière un `;` ou un `:`), d'une colonne citée (`$Col`, `rec.Col`) absente d'ici ou renommée (`renamedCol`), d'une table citée
+  (`T.lookupRecords`, `.lookupOne`, `.all`) qui n'est pas une table de l'export ou y a changé de nom. Le texte n'est **jamais réécrit** (Python ne se réécrit pas à
+  l'aveugle). Une colonne qui existait déjà : objection `notOwn`.
+- Testé : unit 386 (`engine-formulas.test.mjs` : envoi sans et avec la case, lecture sans pose, pose sur clic, valeur non recopiée dans la colonne de formule,
+  reprise idempotente, formule changée à la SOURCE, colonne non créée par le widget, Échange, nettoyage, plafonds, 40 cas de lecture) ; e2e `ONLY_FORMULAS=1` dans un
+  vrai Grist (`formulasSteps` : case à part et message, « Annuler », liste et objection « os », bouton grisé jusqu'à « J'ai lu », TVA calculée par Grist, ligne
+  de plus reçue sans erreur, case décochée dans « Modifier » ; `SHOTS=<dossier>` fait deux captures).
+- **Pas fait, dit à Antoine** : une formule qui cite une colonne ou une table renommée n'est pas réécrite (la personne la corrige à la main) ; les règles de
+  mise en forme restent reconstruites par leur grammaire fermée (`rules.js`), jamais copiées ; les formules de déclenchement ne partent pas.
+- **Piège vu à l'e2e** : le parcours complet du 12 novembre a échoué une fois dans `docLinkSteps` (`dialogButton('Annuler')` introuvable, la fenêtre « Ajouter un
+  destinataire » avait disparu, document rechargé ?) et repasse seul ; non reproduit, à surveiller. Une boucle de 25 minutes d'inactivité du conteneur coupe les
+  processus de fond (e2e) : garder le tour actif (commande avec `timeout` dans une boucle d'attente) pendant un parcours complet.
+
+## État précédent : V0.16.1 (12 novembre 2026)
 
 V0.16.1 (Antoine, 12 novembre : « est-ce que les éléments de mise en forme des colonnes pourraient être repris aussi (à la demande) » ; « plus
 globalement, regarde tous les éléments qu'il serait bien de reprendre, inspire-toi du widget import/export de table »
@@ -395,7 +439,7 @@ globalement, regarde tous les éléments qu'il serait bien de reprendre, inspire
   des colonnes, règles par vue) : option écartée par Antoine, à vérifier dans un vrai Grist avant tout.
 - **Formules** (Antoine, 12 novembre, après la carte : « également prévoir de pouvoir sync les formules […] une case à part et un message qui demande
   si l'user est sûr de le vouloir avec les risques de passer du python »). Carte de décision posée : quand la CIBLE applique les formules (sur clic d'un
-  propriétaire — recommandé —, à l'acceptation, ou dès l'envoi). Voir la suite de ce fichier si codé.
+  propriétaire — recommandé —, à l'acceptation, ou dès l'envoi). **Répondue le 12 novembre : « Sur clic d'un propriétaire »** ; codé en V0.17.0 (voir plus haut).
 
 ## État précédent : V0.16.0 (11 novembre 2026)
 

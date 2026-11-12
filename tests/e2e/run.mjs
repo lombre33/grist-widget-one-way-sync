@@ -957,6 +957,105 @@ try {
     assert.ok(lot.every(c => c.desc === undefined && c.tdesc === undefined), 'ni description de colonne ni de table');
     step('Mise en forme : cases décochées, la SOURCE n\'envoie plus ni règle, ni en-tête, ni langue, ni description');
   }
+  // Formules de colonne : à part, jamais envoyées sans la case et son message, jamais posées sans le clic d'un propriétaire.
+  async function formulasSteps() {
+    const src = await newDocWithWidget('Formules SOURCE', [
+      ['AddTable', 'Budget', [{ id: 'Libelle', type: 'Text' }, { id: 'Montant', type: 'Numeric' },
+        { id: 'TVA', type: 'Numeric', isFormula: true, formula: '$Montant * 0.2' },
+        { id: 'Fuite', type: 'Text', isFormula: true, formula: 'import os\nreturn "ok"' }]],
+      ['BulkAddRecord', 'Budget', [null, null], { Libelle: ['Loyer', 'Assurance'], Montant: [100, 80] }],
+    ]);
+    const dst = await newDocWithWidget('Formules CIBLE');
+    const column = async (doc, table, colId) => {
+      const parentId = await tableRef(doc, table);
+      return (await records(doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === parentId);
+    };
+    const sentColumns = async () => JSON.parse((await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot' && r.Synchro_Table === 'Budget').Synchro_Colonnes);
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Budget' }).check();
+    await dialogButton('Continuer').click();
+    // La case est à part (hors du repli des autres éléments), décochée d'emblée, et dit combien de colonnes sont concernées.
+    const box = dialog().getByRole('checkbox', { name: /Envoyer aussi les formules des colonnes/ });
+    await box.waitFor({ timeout: 30000 });
+    assert.ok(await box.isVisible(), 'visible sans ouvrir le repli');
+    assert.ok(!(await box.isChecked()), 'décochée d\'emblée, même pour un nouvel export');
+    assert.match(await dialog().locator('.formulas-box').innerText(), /2\scolonnes de formule/);
+    const warning = widget().getByRole('dialog', { name: 'Envoyer aussi les formules ?' });
+    await box.click();
+    await warning.waitFor();
+    assert.match(await warning.innerText(), /code Python/);
+    assert.match(await warning.innerText(), /seul un propriétaire du document destinataire/);
+    if (process.env.SHOTS) await warning.screenshot({ path: join(process.env.SHOTS, 'formules-1-source-message.png') }); // SHOTS=<dossier> : captures de contrôle
+    await warning.getByRole('button', { name: 'Annuler', exact: true }).click();
+    assert.ok(!(await box.isChecked()), '« Annuler » : la case reste décochée');
+    await box.click();
+    await warning.getByRole('button', { name: 'Envoyer les formules', exact: true }).click();
+    assert.ok(await box.isChecked(), 'cochée après le message');
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Budget');
+    await dialogButton('Créer l’export').click();
+    const code = await plainInvitation();
+    assert.deepEqual((await sentColumns()).map(c => [c.id, c.fx]), [['Libelle', ''], ['Montant', ''], ['TVA', '$Montant * 0.2'], ['Fuite', 'import os\nreturn "ok"']]);
+    const answer = await accept(dst.doc, dst.url, code, /Budget\s»\s:\stable/);
+    await approve(answer, { url: src.url });
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 2, 'lignes reçues', 90000);
+    assert.ok(!(await column(dst.doc, 'Budget', 'TVA')).isFormula && !(await column(dst.doc, 'Budget', 'Fuite')).isFormula, 'rien n\'est posé par la réception : les valeurs arrivent comme des données');
+    const received = async () => (await records(dst.doc, 'Budget')).map(r => [r.Libelle, r.Montant, r.TVA, r.Fuite]).sort((a, b) => a[0].localeCompare(b[0]));
+    assert.deepEqual(await received(), [['Assurance', 80, 16, 'ok'], ['Loyer', 100, 20, 'ok']]);
+    step('Formules : la SOURCE les envoie derrière une case à part et son message (« Annuler » ne coche rien), la CIBLE reçoit les valeurs sans rien poser');
+
+    // CIBLE : la liste des formules lues, avec ce qui s'oppose ; rien ne se pose sans la case « J'ai lu ».
+    await button('Reprendre depuis la SOURCE').click();
+    const formulas = dialog().getByRole('checkbox', { name: /Formules : poser celles de la SOURCE/ });
+    assert.ok(!(await formulas.isChecked()), 'décochée d\'emblée');
+    assert.match(await dialog().innerText(), /1\sformule à poser/, 'une seule est sans objection');
+    await formulas.check();
+    const panel = dialog().locator('.formulas-panel');
+    assert.match(await panel.innerText(), /\$Montant \* 0\.2/);
+    assert.match(await panel.innerText(), /import os/);
+    assert.match(await panel.innerText(), /contient\s«\sos\s», refusé dans une formule reçue/);
+    assert.match(await panel.innerText(), /ne sera pas posée/);
+    assert.ok(await dialogButton('Reprendre').isDisabled(), 'grisé tant que « J\'ai lu » n\'est pas coché');
+    if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'formules-2-cible-liste.png') });
+    await dialog().getByRole('checkbox', { name: /J’ai lu ces formules/ }).check();
+    await dialogButton('Reprendre').click();
+    await waitFor(async () => (await column(dst.doc, 'Budget', 'TVA')).isFormula === true, 'formule posée', 90000);
+    assert.equal((await column(dst.doc, 'Budget', 'TVA')).formula, '$Montant * 0.2');
+    assert.equal((await column(dst.doc, 'Budget', 'TVA')).type, 'Numeric');
+    assert.equal((await column(dst.doc, 'Budget', 'Fuite')).isFormula, false, 'la formule refusée d\'office n\'est jamais posée');
+    assert.deepEqual(await received(), [['Assurance', 80, 16, 'ok'], ['Loyer', 100, 20, 'ok']], 'Grist calcule la TVA ici ; l\'autre colonne garde ses valeurs');
+    step('Formules : « Reprendre depuis la SOURCE » les liste (colonne, texte Python, objections), grise le bouton jusqu\'à « J\'ai lu », pose celle qui n\'a pas d\'objection et refuse celle qui cite os');
+
+    // Une ligne de plus arrive : la colonne de formule n'est pas recopiée (Grist refuserait), le reste l'est.
+    await applyActions(src.doc, [['AddRecord', 'Budget', null, { Libelle: 'Eau', Montant: 50 }]]);
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 3, 'ligne de plus reçue sans erreur', 90000);
+    assert.deepEqual(await received(), [['Assurance', 80, 16, 'ok'], ['Eau', 50, 10, 'ok'], ['Loyer', 100, 20, 'ok']]);
+    assert.equal(await widget().locator('.msg.err, [role="alert"]').count(), 0, 'aucune erreur sur la carte');
+    // Reprendre de nouveau : rien à poser.
+    await button('Reprendre depuis la SOURCE').click();
+    assert.match(await dialog().innerText(), /rien à poser pour le moment/);
+    assert.ok(await dialog().getByRole('checkbox', { name: /Formules : poser celles de la SOURCE/ }).isDisabled());
+    await dialogButton('Annuler').click();
+    step('Formules : une colonne devenue formule n\'est plus recopiée et ne casse rien, la reprise suivante n\'a plus rien à poser');
+
+    // SOURCE : décocher la case retire les formules de la description des colonnes.
+    await openWidget(src.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    const again = dialog().getByRole('checkbox', { name: /Envoyer aussi les formules des colonnes/ });
+    assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
+    await again.uncheck();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
+    await dialogButton('Fermer').click();
+    assert.ok((await sentColumns()).every(c => c.fx === undefined), 'plus de formule dans la description des colonnes');
+    step('Formules : case décochée dans « Modifier », la SOURCE n\'envoie plus aucune formule');
+  }
   // Pièces jointes d'un document par l'API REST : dépôt, lecture, et empreinte courte d'un contenu.
   function attachmentTools() {
     const auth = { Authorization: `Bearer ${env.apiKey}` };
@@ -1517,8 +1616,8 @@ try {
     await B.tab.close();
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2474,6 +2573,7 @@ try {
   await choicesSteps();
   await linksSteps();
   await formatSteps();
+  await formulasSteps();
   await straySteps();
   await docLinkSteps();
   await tabSteps();

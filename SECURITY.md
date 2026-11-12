@@ -466,6 +466,12 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   `_grist_Tables_column`) des colonnes qu'elle a créées et celle de la table (section de données brutes,
   `description` de `_grist_Views_section`) si elle est vide, une fois (`described`, `tabled` dans la note). Jamais
   sur `id_sync` ni dans la note du journal. « Reprendre depuis la SOURCE » les remplace sur demande.
+- Depuis la 0.17.0 : si l'export envoie les formules (case à part, décochée d'emblée, après un message), la CIBLE ne
+  pose **rien toute seule**. Sur le clic d'un propriétaire (« Reprendre depuis la SOURCE », case « Formules », après
+  lecture de chaque formule et case « J'ai lu »), elle transforme en colonne de formule (`ModifyColumn` : `isFormula`,
+  `formula`) les colonnes que le widget a créées (`own`) dont la formule n'a pas d'objection ; la colonne reçoit alors son
+  résultat et n'est plus recopiée. Jamais sur une colonne qui existait déjà, sur `id_sync`, ni en Échange. Rien n'est noté
+  de plus dans la note du journal (l'état se lit dans la destination).
 
 ## Chaîne d'approvisionnement
 
@@ -556,6 +562,26 @@ Pour un usage en production :
   plus (la description des colonnes accompagne chaque envoi : le total reste loin de 1 Mo). Il est signé avec les
   colonnes, donc hors de portée de la clé du formulaire. Reste qu'un destinataire lit tout ce que la SOURCE y écrit :
   la case le dit, et chaque case est décochable (une description « interne » ne part pas si la case est décochée).
+- **Formules de colonne (0.17.0)** : une formule est du **Python que Grist exécute** sur les données du document :
+  c'est le plus fort des éléments que la SOURCE peut faire reprendre, d'où une case à part, un message, et le clic d'un
+  propriétaire. **Ce que fait le widget** (`js/engine/logic/column-formulas.js`) : la SOURCE n'envoie que le texte des
+  vraies colonnes de formule (ni formule de déclenchement, ni colonne Référence ou Pièces jointes), nettoyé (pas de
+  caractère de contrôle ni de sens d'écriture, 1 500 caractères par formule, 20 000 par table : une formule trop
+  longue ne part pas, jamais coupée) et signé avec les colonnes (hors de portée de la clé du formulaire). La CIBLE lit
+  chaque formule avant toute écriture et **refuse d'office** : un mot qui n'a rien à faire dans une formule de colonne
+  (`eval`, `exec`, `open`, `getattr`, `os`, `sys`, `subprocess`, réseau, fichiers…, cherchés hors des textes et des
+  commentaires), tout nom à doubles tirets bas (partout, texte compris), tout `import` hors de quinze modules de calcul,
+  de dates et de texte, une colonne citée qui n'est pas dans la destination ou y a changé de nom, une table citée qui
+  n'est pas une table de l'export. Le texte n'est jamais réécrit. **Ce que le widget ne garantit pas** : cette lecture
+  est un garde-fou, pas une preuve (Python se dissimule de bien des façons) ; la vraie protection est le bac à sable de
+  l'instance Grist et la lecture de la personne. **Vérifié le 12 novembre 2026** dans l'image Docker officielle de Grist
+  (sans bac à sable renforcé) : une formule de colonne a pu `import os` et lister les fichiers du serveur. Sur une
+  instance dont les formules tournent sans bac à sable, poser une formule reçue revient donc à laisser la SOURCE
+  exécuter du code sur le serveur : à vérifier auprès de l'administrateur de l'instance (réglage `GRIST_SANDBOX_FLAVOR`)
+  avant de proposer la case aux utilisateurs. Même avec bac à sable, une formule peut ralentir ou bloquer le document
+  (boucle sans fin) : l'Historique du document permet de revenir en arrière. Aucun passage de recopie ne pose une formule
+  tout seul, ni l'ouverture de l'onglet ; l'écran ne propose la case qu'à un propriétaire, et le moteur ne pose rien sans
+  `restyle(journal, { formulas: true })`.
 - **Langue du document (0.16)** : la SOURCE dit la langue et la devise de son document ; la CIBLE ne les valide
   que par forme (`fr-FR`, `EUR`) et ne les écrit jamais d'elle-même. Le bouton « Régler le document comme la SOURCE »
   est réservé aux propriétaires, passe par une confirmation qui dit que tout le document change d'écriture

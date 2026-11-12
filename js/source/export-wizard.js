@@ -5,6 +5,7 @@ import { isUserTable } from '../engine/logic/common.js';
 import { ownsSync } from '../engine/logic/strays.js';
 import { elementCounts, exportableColumns, isFileColumn } from '../engine/logic/exports.js';
 import { noteSent } from '../engine/logic/descriptions.js';
+import { formulasOffered } from '../engine/logic/column-formulas.js';
 import { linkable } from '../engine/logic/links.js';
 import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
 import { missingSyncColumns } from '../engine/logic/formulas.js';
@@ -14,7 +15,7 @@ import { finishEdit, saveChosenExport } from '../engine/source/export.js';
 import { receivedDests } from '../engine/logic/received.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
-import { backButton, cancelButton, checkList, closeButtons, el, laterButton, message, openWizard, pickField, run } from '../ui.js';
+import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
@@ -118,16 +119,19 @@ function linksBlock(ctx, schema) {
 // formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js). Chaque
 // case dit combien de colonnes (de tables) sont concernées. Cochées d'emblée pour un nouvel export ; pour un export
 // modifié, telles que l'export l'est déjà. Repliées derrière une ligne qui dit ce qui part. Jamais en Échange (les
-// colonnes y vont dans les deux sens).
+// colonnes y vont dans les deux sens). Les formules (voir column-formulas.js) ont leur case à part, hors du repli, décochée
+// d'emblée, et un message qui demande si l'on est sûr : c'est du Python qu'un destinataire exécutera chez lui.
 const ELEMENTS = [['style', 'send.el.style', 'send.el.style.count'], ['notes', 'send.el.notes', 'send.el.notes.count'], ['tableNote', 'send.el.tableNote', 'send.el.tableNote.count']];
 async function elementsBlock(ctx, schema) {
   if (ctx.exp?.echange) {
-    ctx.elements = { style: false, notes: false, tableNote: false };
+    ctx.elements = { style: false, notes: false, tableNote: false, formulas: false };
     return null;
   }
   if (!ctx.elements) {
     const sent = ctx.exp ? noteSent(ctx.exp.tables.flatMap(tb => tb.columns)) : null;
-    ctx.elements = ctx.exp ? { style: ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)), notes: sent.notes, tableNote: sent.table } : { style: true, notes: true, tableNote: true };
+    ctx.elements = ctx.exp
+      ? { style: ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)), notes: sent.notes, tableNote: sent.table, formulas: formulasOffered(ctx.exp.tables.flatMap(tb => tb.columns)) }
+      : { style: true, notes: true, tableNote: true, formulas: false };
   }
   const counts = elementCounts(schema, ctx.chosen, await fetchRows('_grist_Views_section'));
   const summary = el('summary', {});
@@ -138,8 +142,30 @@ async function elementsBlock(ctx, schema) {
     return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t(name), el('span', { class: 'muted small' }, ` · ${t(count, { n: counts[key] })}`)), el('p', { class: 'muted small' }, t(`${name}.help`)));
   });
   refresh();
-  return el('details', { class: 'guide options-more' }, summary, ...boxes);
+  return el('div', {}, el('details', { class: 'guide options-more' }, summary, ...boxes), formulasBox(ctx, counts.formulas));
 }
+
+// La case des formules : hors du repli, jamais cochée sans que la personne ait lu le message. Rien à envoyer (aucune colonne
+// de formule) : grisée, sauf si l'export les envoie déjà (on peut alors la décocher).
+function formulasBox(ctx, count) {
+  const box = el('input', {
+    type: 'checkbox', checked: ctx.elements.formulas, disabled: !count && !ctx.elements.formulas,
+    onchange: async () => {
+      if (box.checked && !(await formulasWarning())) box.checked = false;
+      ctx.elements.formulas = box.checked;
+    },
+  });
+  return el('div', { class: 'form formulas-box' },
+    el('label', { class: 'check' }, box, t('send.el.formulas'), el('span', { class: 'muted small' }, ` · ${t('send.el.formulas.count', { n: count })}`)),
+    el('p', { class: 'muted small' }, t('send.el.formulas.help')));
+}
+
+// Le message avant d'envoyer des formules : du Python, que seul un propriétaire du document destinataire peut poser, après les
+// avoir lues.
+const formulasWarning = () => confirmDialog({
+  title: t('send.formulas.title'), confirmLabel: t('send.formulas.confirm'), kind: 'btn-primary',
+  body: [el('p', {}, t('send.formulas.intro')), el('ul', {}, ['own', 'run', 'refused', 'sandbox', 'slow'].map(k => el('li', {}, t(`send.formulas.${k}`))))],
+});
 
 // 2. Colonnes, par table, et ce que le widget ajoutera pour la synchro.
 async function showColumns(ctx) {

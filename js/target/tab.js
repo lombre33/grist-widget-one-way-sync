@@ -20,6 +20,7 @@ import { TALLY_GRACE_S } from '../engine/logic/tally.js';
 import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
 import { optionsDialog } from './options.js';
+import { restyleDialog } from './restyle.js';
 import { receiveWizard } from './wizard.js';
 import { sourceLine } from './source-line.js';
 import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
@@ -234,20 +235,18 @@ function formatNotes(group) {
   })];
 }
 
-// Ce que l'export reçu envoie en plus des données, d'après le sort de ses tables (`sends`, voir loop.js) : 'style', 'notes', 'table'.
+// Ce que l'export reçu envoie en plus des données, d'après le sort de ses tables (`sends`, voir loop.js) : 'style', 'notes', 'table', 'formulas'.
 const sentKinds = group => [...new Set(group.note.tables.flatMap(entry => entry.sends || []))];
 
 // « Reprendre depuis la SOURCE » : les éléments cochés (parmi ceux que l'export envoie) reprennent la valeur de la
-// SOURCE dans les colonnes reçues, après confirmation.
+// SOURCE dans les colonnes reçues, après confirmation. Les formules (Python) sont à part : voir restyle.js.
 async function restyleReception(group) {
   const kinds = sentKinds(group);
-  const chosen = new Set(kinds);
-  const boxes = kinds.map((kind) => {
-    const box = el('input', { type: 'checkbox', checked: true, onchange: () => { if (box.checked) chosen.add(kind); else chosen.delete(kind); } });
-    return el('label', { class: 'check' }, box, t(`recv.restyle.${kind}`));
-  });
-  const body = [el('p', {}, t('recv.restyle.body')), el('div', { class: 'form' }, ...boxes)];
-  if (!(await confirmDialog({ title: t('recv.restyle.title', { name: group.note.name }), body, confirmLabel: t('recv.restyle.confirm'), kind: 'btn-primary' })) || !chosen.size) return;
+  const formulas = kinds.includes('formulas')
+    ? group.note.tables.map(entry => ({ table: entry.dest, items: (state.results.get(tableKey(group.journal, entry.table)) || {}).formulas || [] })).filter(f => f.items.length)
+    : [];
+  const chosen = await restyleDialog({ name: group.note.name, kinds, owner: group.owner, formulas });
+  if (!chosen || !chosen.size) return;
   await restyle(group.journal, Object.fromEntries([...chosen].map(kind => [kind, true])));
   flash = { node: message('ok', t('recv.restyle.done')), until: Date.now() + NOTICE_MS };
   await renderTarget();

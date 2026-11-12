@@ -7,6 +7,7 @@ import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
 import { parseRule, ruleRefs } from './rules.js';
 import { cleanNote, noteSent, tableNoteOf, withTableNote } from './descriptions.js';
+import { formulasOffered, sourceFormula, withFormulas } from './column-formulas.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
 // « fin » de son export, envoyée directement à l'adresse de son webhook. Sans elle, la CIBLE, qui ne
@@ -70,6 +71,7 @@ export function elementCounts(schema, tables, sections) {
     style: columns(true).filter(c => c.opts).length,
     notes: columns(false).filter(c => c.desc).length,
     tableNote: tables.filter(table => tableNoteOf(schema.table(table), sections)).length,
+    formulas: tables.reduce((sum, table) => sum + (schema.columns(table) || []).filter(c => sourceFormula(c)).length, 0),
   };
 }
 
@@ -119,10 +121,11 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc }) => ({
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, fx }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
   ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
   ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
+  ...(typeof fx === 'string' && withOpts ? { fx } : {}),
 })));
 // Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
 // valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des
@@ -210,7 +213,8 @@ export function optionsActions(rows, schema, doc = null, sections = null) {
       const sent = noteSent(columns);
       const styled = extras ? withDoc(pruneRules(fresh), doc) : fresh;
       const described = sent.table && sections ? withTableNote(styled, tableNoteOf(schema.table(table), sections)) : styled;
-      const value = schemaText(filteredColumns({ columns: described, filter }));
+      const formulas = formulasOffered(columns) ? withFormulas(described, live) : described;
+      const value = schemaText(filteredColumns({ columns: formulas, filter }));
       for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
         ids.push(r.id);
         values.push(value);

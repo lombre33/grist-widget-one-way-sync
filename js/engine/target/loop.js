@@ -17,6 +17,7 @@ import { resendValue } from '../logic/resend.js';
 import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short, waitingVersions } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
+import { formulaColumns } from './formulas.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
@@ -258,7 +259,7 @@ async function prepareColumns(ctx, noted, tableRows) {
   }
   // Choix ajoutés à la SOURCE, format d'une colonne créée avant l'arrivée de sa description ; ou, sur
   // demande (« Reprendre la mise en forme »), le style de chaque colonne reçue remis sur celui de la SOURCE.
-  const again = ctx.restyle || {}; // « Reprendre depuis la SOURCE » : les éléments à reprendre ({ style, notes, table })
+  const again = ctx.restyle || {}; // « Reprendre depuis la SOURCE » : les éléments à reprendre ({ style, notes, table, formulas })
   const options = (again.style ? restyleOptionActions : optionActions)(ctx.schema, { ...received.entry, own }, kept);
   if (options.length) {
     await apply(options);
@@ -275,10 +276,12 @@ async function prepareColumns(ctx, noted, tableRows) {
   const styled = await styleColumns(ctx, linked.entry, kept, { replace: Boolean(again.style) });
   // Descriptions des colonnes et de la table, envoyées par la SOURCE si l'export les porte.
   const described = await describeColumns(ctx, styled, destColumns(kept), { tableNote: received.tableNote, replace: Boolean(again.notes), replaceTable: Boolean(again.table) });
+  // Formules de colonne : lues à chaque passage (la carte les montre), posées seulement sur « Reprendre depuis la SOURCE ».
+  const formulas = await formulaColumns(ctx, described, kept, { replace: Boolean(again.formulas) });
   const entry = { ...described, sends: received.sends.length ? received.sends : undefined, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
   const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
   const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
-  return { entry, dropped, copyCols, types, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs };
+  return { entry, dropped, copyCols, types, formulas, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs };
 }
 
 // Références conservées (voir links.js) : une colonne que la SOURCE envoie comme Référence vers une
@@ -320,13 +323,13 @@ async function copyTable(ctx, noted) {
   const renamed = followRenames(noted, ctx.schema);
   if (!ctx.schema.has(renamed.dest)) return { entry: renamed, error: failure('destMissing', { dest: renamed.dest }) };
   const tableRows = ctx.groups.get(renamed.table) || [];
-  const { entry, copyCols, types, dropped, fileCols, links } = await prepareColumns(ctx, renamed, tableRows);
+  const { entry, copyCols, types, dropped, fileCols, links, formulas } = await prepareColumns(ctx, renamed, tableRows);
   const present = fileCols.length ? await ctx.files() : new Map();
   // Échange : une version dont un fichier n'est pas encore arrivé attend (voir waitingVersions).
   const waiting = ctx.exchange ? waitingVersions(tableRows, fileCols.map(([from]) => from), present) : new Map();
   const key = tableKey(ctx.journal, entry.table);
   const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest, present.size, links.map(s => [s.to, s.target])]);
-  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, wrote: false, ...lastRead.get(key) };
+  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, formulas, wrote: false, ...lastRead.get(key) };
   // Références conservées : la cellule porte le numéro de la ligne d'ici qui a la clé citée.
   const lookups = await linkLookups(links);
   const rows = resolveLinks(resolveRows(tableRows, fileCols.map(([from]) => from), present), links, lookups);
@@ -351,7 +354,7 @@ async function copyTable(ctx, noted) {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
-  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, links, wrote: plan.actions.length > 0, ...lastRead.get(key) };
+  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, links, formulas, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
 
 // Pour chaque table d'ici visée par une Référence : ses lignes (voir targetRows).
@@ -623,7 +626,8 @@ export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${
 
 // « Reprendre depuis la SOURCE » : la prochaine recopie de ce journal remet sur ceux de la SOURCE les éléments
 // demandés (`elements` : `style` = style des colonnes reçues et règles conditionnelles, voir replaceOptions et
-// planRules ; `notes` = descriptions des colonnes ; `table` = description de la table, voir planNotes).
+// planRules ; `notes` = descriptions des colonnes ; `table` = description de la table, voir planNotes ; `formulas` =
+// formules de colonne, voir formulaColumns : l'écran ne le propose qu'à un propriétaire, après lecture).
 // Un passage est lancé aussitôt ; le journal n'est refait qu'une fois.
 const restyles = new Map();
 export async function restyle(journal, elements = { style: true, notes: true, table: true }) {

@@ -6,6 +6,8 @@
 // colonne d'un export qui envoie les descriptions de colonnes ; `tdesc` sur la première colonne d'un export qui
 // envoie celle de la table. La présence de la clé dit que l'export l'envoie, même vide.
 
+import { formulasSent } from './column-formulas.js';
+
 // Longueur maximale d'une description de colonne, et de la table. La description des colonnes part avec chaque
 // envoi (un lot la porte) : 40 colonnes de 300 caractères restent loin du mégaoctet que Grist accepte par envoi.
 export const NOTE_MAX = 300;
@@ -43,11 +45,12 @@ export function noteSent(columns) {
 export const withTableNote = (columns, note) => columns.map(({ tdesc, ...c }, i) => (i === 0 && typeof note === 'string' ? { ...c, tdesc: note } : c));
 
 // Ce que l'export envoie, vu de la CIBLE d'après ses colonnes : `style` (la mise en forme, marque `fmt`),
-// `notes` (descriptions de colonnes) et `table` (description de la table). Les éléments envoyés, sous forme de liste.
+// `notes` (descriptions de colonnes), `table` (description de la table) et `formulas` (au moins une formule de colonne,
+// voir column-formulas.js). Les éléments envoyés, sous forme de liste.
 export function sentElements(columns) {
   const list = Array.isArray(columns) ? columns : [];
   const sent = noteSent(list);
-  return [...(list.some(c => c && c.fmt) ? ['style'] : []), ...(sent.notes ? ['notes'] : []), ...(sent.table ? ['table'] : [])];
+  return [...(list.some(c => c && c.fmt) ? ['style'] : []), ...(sent.notes ? ['notes'] : []), ...(sent.table ? ['table'] : []), ...(formulasSent(list) ? ['formulas'] : [])];
 }
 
 // Descriptions à poser dans la destination `entry.dest` (voir la note de l'entrée : `own`, `map`, `described`,

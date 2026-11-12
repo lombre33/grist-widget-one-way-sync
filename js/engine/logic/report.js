@@ -73,14 +73,14 @@ export const driftResult = (drift, labelCol, droppedCols) => ({
 // la visite précédente (`lastVisit`, secondes ; dont les colonnes ajoutées par la SOURCE, `added`),
 // valeurs retouchées à la main (`drift`). Table verrouillée que la personne ne peut pas recopier
 // (`locked`) : rien de plus.
-export function tableResult({ entry, stats, copyCols, types, links, numbers, drift, dropped, pending, gaps, files, error, locked }, groups, lastVisit) {
+export function tableResult({ entry, stats, copyCols, types, links, formulas, numbers, drift, dropped, pending, gaps, files, error, locked }, groups, lastVisit) {
   if (error) return { table: entry.table, error };
   if (locked) return { table: entry.table, stats, dest: entry.dest, locked: true };
   const labelCol = copyCols.some(([from]) => from === entry.label) ? entry.label : (copyCols[0] || [])[0];
   const recent = recentChanges(groups.get(entry.table) || [], labelCol, lastVisit, Infinity, { copyCols, numbers });
   const added = (entry.addedCols || []).filter(a => a.at > (lastVisit || 0));
   return {
-    table: entry.table, stats, dest: entry.dest, copyCols, labelCol, labelCols: copyCols.map(([c]) => c), types, links, recent, added, files,
+    table: entry.table, stats, dest: entry.dest, copyCols, labelCol, labelCols: copyCols.map(([c]) => c), types, links, formulas, recent, added, files,
     ...driftResult(drift, labelCol, dropped), ...reviewResult(pending, gaps, labelCol),
   };
 }

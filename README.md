@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.16.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.17.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -113,6 +113,11 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   destinataire. La carte signale une langue de document différente (elle décide de l'écriture des
   nombres) et un propriétaire peut régler le document d'un clic. Le bouton « Reprendre depuis la
   SOURCE » remet, élément par élément, ce qui a été retouché chez le destinataire.
+- **Formules des colonnes** (0.17) : une case à part, décochée d'emblée, après un message qui rappelle qu'une
+  formule est du Python que Grist exécute. Rien n'est posé tout seul chez le destinataire : un
+  propriétaire les lit une à une dans « Reprendre depuis la SOURCE » (celles qui citent un module
+  système ou une colonne ou une table absente sont refusées d'office), puis les pose sur les colonnes
+  créées par le widget. Voir `SECURITY.md` avant de proposer la case sur une instance sans bac à sable.
 - **Destinations au choix** : table nouvelle ou existante, colonnes mises en correspondance,
   lignes déjà présentes rattachées. Une table ajoutée plus tard à l'export est proposée dans une
   fenêtre.
