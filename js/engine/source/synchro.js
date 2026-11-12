@@ -244,7 +244,9 @@ export async function refreshMajLe(schema = null, rows = null) {
 // Rend vrai si elle vient d'être créée. Une table du même nom qui n'est pas la nôtre n'est pas touchée.
 export async function createSyncTable(tables = [], schema = null) {
   if ((schema || await readSchema()).has(SYNC_TABLE)) return false;
-  await apply([['AddTable', SYNC_TABLE, syncColumns(tables)]]);
+  // manualSort part avec la création, dans la même action : sinon deux onglets (l'écran qui s'affiche et l'assistant qui crée l'export)
+  // la retireraient chacun de leur côté, et le second se verrait répondre « No such column: Synchro.manualSort » (vu à l'e2e).
+  await apply([['AddTable', SYNC_TABLE, syncColumns(tables)], ['RemoveColumn', SYNC_TABLE, SORT_COL]]);
   await dropPages([SYNC_TABLE]);
   return true;
 }

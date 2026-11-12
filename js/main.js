@@ -9,7 +9,7 @@ import { readSchema } from './grist.js';
 import { readSourceNote } from './engine/source/synchro.js';
 import { receivedJournals } from './engine/logic/received.js';
 import { readLost } from './engine/target/lost.js';
-import { copyField, el, errorText, icon, message, noteError, openModal } from './ui.js';
+import { copyField, el, errorText, icon, message, noteError, openModal, unreachable } from './ui.js';
 import { startOfferNotice } from './tab-link-ui.js';
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
@@ -52,9 +52,6 @@ function showStartProblem(text, { withAddress = false, reload = false, access = 
   showScreen(message('warn', text), access ? accessHelp() : null, withAddress ? copyField(widgetUrl()) : null,
     reload ? el('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, t('start.reload')) : null);
 }
-
-// Requête qui n'a pas abouti (réseau, ou document rechargé par Grist après un changement de règles).
-const unreachable = e => e instanceof TypeError && /fetch|load failed|network/i.test(e.message);
 
 async function select(tab, retry = true) {
   for (const button of document.querySelectorAll('[data-tab]')) button.setAttribute('aria-selected', String(button.dataset.tab === tab));
@@ -201,7 +198,8 @@ async function openFirstScreen() {
   else if (wizardAsked('reception')) await select('receive'); // « Accepter une invitation » demandé juste avant le rechargement des règles
   else if (wizardAsked('export') && ownsSync(schema)) await select('send'); // « Nouvel export » demandé juste avant le rechargement des règles
   else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
-  else if (ownsSync(schema) || await lostSynchro(schema)) await select('send');
+  // Une table Synchro sans export (posée par protectSync, puis l'assistant fermé) ne dit pas que ce document envoie : l'accueil.
+  else if ((ownsSync(schema) && readSourceNote(schema).exports.length) || await lostSynchro(schema)) await select('send');
   else if ((await readLost()).length) await select('receive');
   else showHome(await isOwnerHere() === false);
   if (journals.length) consolidateAll();

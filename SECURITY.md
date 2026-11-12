@@ -133,10 +133,19 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
 - **`Synchro` réservée aux propriétaires** : ses formules lisent les tables sans les règles
   d'accès, et elle porte les clés de signature des destinataires. À l'ouverture de l'onglet Envoyer par un
   propriétaire, le widget pose des règles de mémo « Synchro : réservée aux propriétaires », avant
-  les autres : un lecteur ne la voit pas, un éditeur ne voit ni ne modifie ses lignes. Seule
-  exception, pour la recopie d'un Échange par un éditeur : les lignes `echange` et `lot` des
-  exports en Échange, sans leur contenu, et leur colonne `Synchro_Renvoi`. Un éditeur ne voit donc
-  plus les cartes des exports. **Limite** : par défaut, Grist laisse les éditeurs modifier la
+  les autres : un lecteur ne la voit pas, un éditeur ne voit ni ne modifie ses lignes. **Depuis la 0.19, ces règles sont
+  posées avant la première donnée d'un export** (`protectSync`, `js/engine/acl.js`) : « Nouvel export » crée la table `Synchro`
+  vide, pose les règles même si un assistant est ouvert, et Grist recharge le document ; l'assistant se rouvre seul (une
+  préférence qui ne garde qu'une heure, `askWizard`). Avant, la table naissait avec le premier export et ses règles à la
+  fermeture du premier assistant : pendant ce temps, une colonne cachée aux lecteurs par une règle de la personne se lisait
+  dans le lot (vérifié en 0.18, sonde `tests/e2e/tools/probe-gaps.mjs`, 200 avant, 403 après). Un Échange reçu passe par la
+  même étape avant d'écrire dans `Synchro` (`syncUnprotected`, fenêtre « Protéger ce document »). **Sans Échange, la règle est
+  un refus net** (`user.Access != OWNER` → `-CRUD`, sans condition de ligne) : Grist ne vide les options d'une colonne que si
+  la lecture est refusée sans condition, et une règle de lignes laissait donc lire la note de la SOURCE (fiches des destinataires,
+  clé privée d'une invitation en attente) aux éditeurs par `_grist_Tables_column`. Seule exception, pour la recopie d'un Échange par
+  un éditeur : les lignes `echange` et `lot` des exports en Échange, sans leur contenu, et leur colonne `Synchro_Renvoi` ; les
+  règles d'avant restent alors, et la note est lisible par les éditeurs de ce document (risque accepté, voir plus bas). Un éditeur
+  ne voit donc plus les cartes des exports. **Limite** : par défaut, Grist laisse les éditeurs modifier la
   structure du document, donc les formules de `Synchro` (ce qui part) et la description de ses
   colonnes ; une règle d'accès n'y peut rien. Il faut décocher « Permettre aux éditeurs de modifier
   la structure » ; en Renforcé, la carte de l'export le demande tant que ce n'est pas fait. Changer
@@ -201,7 +210,7 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   plus une fois par heure, page ouverte : un co-propriétaire peut en changer l'adresse dans les
   réglages de Grist ; la carte signale un autre document que celui de la fiche, et une adresse qui
   n'est plus celle d'un formulaire de cette instance. Ce contrôle protège de l'erreur, pas d'un
-  co-propriétaire décidé, qui peut aussi réécrire la fiche (le mémo du webhook).
+  co-propriétaire décidé, qui peut aussi réécrire la fiche (la note de la SOURCE, depuis la 0.19 ; le mémo du webhook n'est plus qu'un jeton).
 - **Code de contrôle** : 6 caractères tirés de SHA-256(clé de partage, secret, niveau, clés
   publiques de l'invitation et de la réponse), montrés des deux côtés (sans 0, 1, I, L, O). La clé
   de partage est tirée par Grist : le reste de l'adresse (le préfixe d'équipe, que Grist ne
@@ -365,7 +374,8 @@ onglets du même navigateur (`ONLY_TABS=1`).
 
 - SOURCE : seul un **propriétaire** crée, suspend ou supprime un webhook, donc branche ou révoque
   un destinataire, et lui seul voit et modifie les lignes de `Synchro` (règles posées par le
-  widget, voir plus haut). Un éditeur voit « réservé aux propriétaires » à la place des cartes ; il
+  widget, voir plus haut). Un éditeur voit « réservé aux propriétaires » à la place des cartes (depuis
+  la 0.19, sans Échange, la table lui est refusée tout entière : il retrouve l'accueil grisé, comme un lecteur) ; il
   ne peut élargir ce que reçoivent les destinataires branchés que si Grist lui laisse modifier la
   structure (réglage par défaut, voir plus haut).
 - CIBLE : un **éditeur** accepte une invitation, range les tables et recopie. Les journaux sont
@@ -409,12 +419,31 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   « Lien public ») refuse aussi les tables de métadonnées (`_grist_Tables_column` répond 403 en anonyme, vu au
   parcours de bout en bout) : rien de plus n'y est lisible. Sans export public, ou sur une CIBLE, elles se
   lisent, d'où la correction ci-dessus.
-- **Toujours lisible** (non corrigé) : le nom, le **mémo** (courriel du destinataire · document ·
-  équipe/nom du document) et la **condition** (identifiant de l'export) des webhooks, par
-  `_grist_Triggers`, sans leur adresse ; le widget relit ce mémo pour montrer qui reçoit
-  (`hookMemo`), le déplacer demanderait de refaire les webhooks. Aussi : le journal d'une réception
-  dont la case « réservé aux éditeurs » est décochée se lit en entier par tout lecteur, note
-  comprise (c'est ce que la case dit) ; les éditeurs et les propriétaires lisent tout, comme avant.
+- **Mémo des webhooks, corrigé en 0.19 (moteur 4.0.0)** : `_grist_Triggers` (nom, mémo, condition, table de chaque
+  webhook) se lit **en anonyme sur un document public**, sans l'adresse. Le mémo portait la fiche du destinataire : courriel,
+  document, équipe/nom. Il n'est plus qu'un jeton opaque (`r-` et douze chiffres hexadécimaux, `MEMO_TOKEN`) ; la fiche est dans
+  la note de la SOURCE (`dest`, options de `Synchro_Export`, cachée aux lecteurs et, sans Échange, aux éditeurs), rangée **avant**
+  la création du webhook (`rememberDest`) et remise dans les webhooks que lit le moteur (`readHooks`, `identifyHooks`). Les
+  webhooks d'avant sont migrés à l'ouverture par un propriétaire (`protectMemos`, un seul verrou, une seule écriture de la note,
+  `PATCH` du mémo par six à la fois) ; la fiche d'un destinataire parti est retirée de la note après 10 minutes (`staleDest`).
+  Vérifié (e2e) : la lecture anonyme de `_grist_Triggers` ne donne ni courriel ni identifiant de document.
+- **Toujours lisible** (reste) : le nom d'un webhook (le nom de l'export), sa **condition** (identifiant de l'export, nécessaire à
+  Grist) et sa table, par `_grist_Triggers` ; ils disent qu'un export de ce nom existe, pas qui reçoit. Aussi : le journal d'une
+  réception dont la case « réservé aux éditeurs » est décochée se lit en entier par tout lecteur, note comprise (c'est ce que la case
+  dit) ; les éditeurs et les propriétaires lisent tout, comme avant.
+- **Refus de Grist à poser les règles, dit depuis la 0.19** : une règle d'une personne qui nomme une colonne effacée
+  (« Invalid columns in rules for table Contacts: Prenom ») fait refuser à Grist *tout* changement de règles, donc celles du
+  widget ; avant, `syncRules` l'écrivait dans la console et rien d'autre. Le refus est gardé (`ruleRefusal`), montré aux propriétaires
+  des deux onglets (`rulesRefusedNotice`, avec le texte de Grist), et bloque « Nouvel export » tant qu'il dure : le widget ne pose
+  pas de données qu'il ne sait pas protéger. Il ne touche **jamais** aux règles d'autrui.
+- **Audit offensif de la 0.19** (12 novembre, Grist 1.7.22, sondes `tests/e2e/tools/probe-surfaces.mjs` et `probe-gaps.mjs`, rejouables) :
+  415 routes de lecture de l'API lues par quatre rôles (visiteur du lien public, lecteur nommé, éditeur nommé, détenteur de la
+  clé d'un formulaire) sur une SOURCE et une CIBLE branchées. Constaté protégé : tables de données, enregistrements, SQL, CSV, XLSX,
+  téléchargement et sqlite, historique, instantanés, webhooks, règles d'accès, partages (403) ; la clé d'écriture d'un formulaire
+  n'est lisible nulle part (elle est dans l'adresse du webhook, réservée aux propriétaires) ; l'adresse de l'iframe du widget ne
+  contient pas l'identifiant du document ; `localStorage` du widget ne garde aucun secret (la préférence de reprise d'assistant ne
+  garde qu'une heure). La clé d'un formulaire n'écrit ni métadonnées, ni autre table, ni SQL, ni règles, et ne lit que les
+  colonnes, descriptions et options du journal (la note du journal, voulu : voir « La clé du formulaire de réception »).
 - **Mise à niveau** : un document d'avant la 0.18 est lu tel quel (la note de la description est
   encore lue), puis déplacé dans les options à la première ouverture d'un propriétaire (SOURCE) ou
   d'une personne qui peut écrire (CIBLE, premier passage de recopie), sans rien perdre : la note
@@ -432,8 +461,9 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
 
 ## Ce que le widget écrit et garde
 
-- Pas de table de réglages. Les destinataires branchés sont les webhooks eux-mêmes (le mémo garde
-  la fiche), visibles par les propriétaires dans les paramètres du document.
+- Pas de table de réglages. Les destinataires branchés sont les webhooks eux-mêmes ; leur mémo n'est qu'un jeton
+  depuis la 0.19, la fiche (courriel, document, équipe) est dans la note de la SOURCE (`dest`), visible par les
+  propriétaires dans les paramètres du document comme dans le widget.
 - SOURCE : `id_sync` et `MajLe` dans chaque table envoyée (et la case `Supprime` en Échange), la
   table `Synchro` (dont une ligne `signature` par export, qui garde la clé de chaque
   destinataire), une note (exports, invitations en attente avec l'empreinte de leur secret, leur
@@ -552,6 +582,24 @@ Pour un usage en production :
   le signale et propose de débloquer la file.
 - Sans Redis, la file d'envoi de Grist vit en mémoire : un redémarrage du serveur la perd (le
   widget renvoie ce qui manque à la prochaine ouverture par un propriétaire).
+- **Fuites d'information, reste après l'audit de la 0.19** (voir « Ce que voit un lecteur ou le lien public ») :
+  - le nom d'un webhook (nom de l'export) et sa condition (identifiant de l'export) se lisent par `_grist_Triggers` sur un
+    document public : ils disent qu'un export existe, pas qui reçoit ni quoi ;
+  - dans un document qui a un **Échange**, les éditeurs gardent un accès limité à `Synchro` pour la recopie : ils lisent
+    donc la note de la SOURCE (fiches des destinataires, invitations en attente) par les métadonnées. Les éditeurs de ce
+    document sont de confiance par construction (ils écrivent déjà dans les tables échangées) ;
+  - la note du journal d'une réception (secret de l'invitation, courriel et document de la SOURCE, clés publiques) est lue par les
+    éditeurs de la CIBLE et par la clé du formulaire : voulu, le secret est nécessaire pour refaire la réponse ; le lien du
+    formulaire reste un droit d'écriture à ne jamais diffuser ;
+  - pendant l'assistant « Recevoir », le journal et son formulaire existent environ une seconde avant que la règle qui les
+    réserve aux éditeurs ne soit posée : le journal est alors vide (aucune donnée n'est encore arrivée) ;
+  - une SOURCE qu'une version d'avant la 0.19 a déjà ouverte reste sans ces protections jusqu'à l'ouverture de l'onglet
+    Envoyer ou Recevoir par un propriétaire (migration des mémos, règles de `Synchro`) ;
+  - un onglet resté ouvert sur un moteur 3.x repose les règles d'avant (rechargement du document) et réécrit la fiche
+    dans le mémo : recharger tous les onglets après la mise à niveau ;
+  - les descriptions, formats, listes de choix et formules (si la case est cochée) des colonnes partent *vers les
+    destinataires* par défaut : c'est le principe de l'export, pas une fuite vers un tiers ;
+  - le widget se charge depuis GitHub Pages (chaîne d'approvisionnement, voir plus haut) et ne peut pas être vérifié par Grist.
 - **Lecture seule (0.12)** : le verrou d'une réception protège ses tables des retouches à la main des
   non-propriétaires, pas d'un éditeur du document CIBLE. La règle posée dans les règles d'accès
   (mémo `LOCK_MEMO`) est la seule référence : la note du journal peut demander un verrou (`verrou`),

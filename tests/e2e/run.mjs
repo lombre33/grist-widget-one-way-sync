@@ -92,7 +92,8 @@ async function waitFor(check, what, timeout = 30000) {
 
 const { tableRef, newDocWithWidget, pageOf, publishedForms, formKey, formLink } = docTools({ env, api, applyActions, records, waitFor, widgetUrl: WIDGET_URL });
 
-const step = text => console.log(`· ${text}`);
+let lastStep = 'départ';
+const step = text => { lastStep = text; console.log(`· ${text}`); };
 // Images d'aide montrées par l'assistant à l'étape Lien (img/) : la carte du formulaire publié
 // avec son bouton « Partager », puis la fenêtre de partage avec « Copier le lien ».
 async function helpShots(formUrl, back) {
@@ -288,11 +289,11 @@ page.on('console', (m) => {
   // Erreurs du widget seulement, grist-plugin-api.js compris (son thème ne doit plus heurter la
   // politique de sécurité du widget).
   if (!where.startsWith(`http://localhost:${WIDGET_PORT}`) && !where.endsWith('grist-plugin-api.js')) return;
-  errors.push(`${m.text()} (${where})`);
+  errors.push(`${m.text()} (${where}) [après : ${lastStep.slice(0, 70)}]`);
 });
 // Exception non rattrapée dans le widget (la console ne la voit pas toujours).
 const widgetCode = `http://localhost:${WIDGET_PORT}`;
-page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) errors.push(`${e.message} (pageerror)`); });
+page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) errors.push(`${e.message} (pageerror) [après : ${lastStep.slice(0, 70)}]`); });
 await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
 
 const widget = () => page.frameLocator('iframe').first();
@@ -1720,7 +1721,12 @@ try {
     await openWidgetTab(bad.url, 'Envoyer');
     await waitFor(async () => (await records(bad.doc, '_grist_ACLRules')).some(r => r.memo === OWNER_MEMO), 'règles du widget posées une fois la règle corrigée', 60000);
     await rulesSettled(bad.doc);
+    // Le document s'est rechargé : une table Synchro sans export n'est pas un rôle, le widget revient à l'accueil.
+    await openWidgetTab(bad.url, 'Envoyer');
     assert.equal(await widget().getByText('Les règles d’accès du widget n’ont pas pu être posées').count(), 0, 'l\'avis est parti');
+    // Le serveur est parfois occupé par les étapes d'avant (files de webhooks, grosses tables) : l'onglet se dessine plus tard.
+    await widget().getByRole('button', { name: 'Nouvel export', exact: true }).waitFor({ timeout: 120000 })
+      .catch(async (e) => { console.log('écran à ce moment :', JSON.stringify((await widget().locator('body').innerText()).slice(0, 800))); throw e; });
     await newExport('Fiches', 'Net');
     await dialog().getByText('Export « Net » créé.').waitFor({ timeout: 120000 });
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
@@ -1770,7 +1776,10 @@ try {
   await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
   await dialog().getByText(/3 colonnes sur 5 · toutes les lignes/).waitFor();
   await shot('03-source-colonnes', 'modal');
-  assert.ok(!(await records(source.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'rien d\'écrit avant la fin de l\'assistant');
+  // Depuis la 0.19 la table Synchro est créée vide, avec ses règles d'accès, avant l'assistant (voir protectSync) : aucune ligne
+  // d'export n'existe encore, donc rien de lisible avant la fin de l'assistant.
+  assert.equal((await records(source.doc, 'Synchro')).length, 0, 'aucune ligne d\'export avant la fin de l\'assistant');
+  assert.ok((await records(source.doc, '_grist_ACLRules')).some(r => r.memo === 'Synchro : réservée aux propriétaires'), 'règles de Synchro posées avant la première ligne');
   await dialogButton('Continuer').click();
   await dialog().getByLabel('Nom de l’export').fill('Annuaire');
   await shot('03b-source-nom');
@@ -2496,7 +2505,9 @@ try {
   await dialog().getByText('Table reçue d’un autre document').waitFor();
   await page.keyboard.press('Escape');
   await dialog().waitFor({ state: 'detached' });
-  assert.ok(!(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro'), 'assistant fermé : rien d\'écrit');
+  // La table Synchro, vide et protégée, est posée avant l'assistant (0.19) : aucune ligne n'est écrite.
+  const syncAfter = (await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro') ? (await records(target.doc, 'Synchro')).length : 0;
+  assert.equal(syncAfter, 0, 'assistant fermé : aucune ligne d\'export écrite');
   step('CIBLE : une table reçue peut être relayée (avis affiché), journaux exclus');
 
   // --- Lignes forgées avec le lien du formulaire : rejetées et signalées ; lien coupé, puis la

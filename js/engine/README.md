@@ -236,10 +236,39 @@ des colonnes qu'il ne peut pas lire, mais pas leur **description** (vérifié su
 - **Règle d'accès de plus** : `keyAclRules` (mémo « Synchro : clé de signature cachée aux lecteurs ») cache la colonne `id_sync` des tables
   qui portent une clé (`signedTables`) à `user.Access == VIEWER`. Posée par `syncRules` (propriétaire), qui recharge le document si elle
   change. Un hôte qui n'appelle pas `syncRules` n'a pas cette règle : la clé reste lisible par les lecteurs.
-- **Ce qui reste lisible** : le mémo des webhooks (`_grist_Triggers` : courriel du destinataire, document, équipe/nom) et la condition
-  (identifiant de l'export), et le journal d'une réception dont la case « réservé aux éditeurs » est décochée.
+- **Ce qui reste lisible** : la condition des webhooks (identifiant de l'export) et le journal d'une réception dont la case « réservé aux
+  éditeurs » est décochée. Le mémo des webhooks (courriel du destinataire, document, équipe/nom) ne l'est plus depuis la 4.0.0, voir
+  ci-dessous.
 - **Port** : inchangé. Essais : `tests/unit/note-store.test.mjs`, `engine-note-store.test.mjs`, `acl.test.mjs`, `common.test.mjs` ; e2e (lecture
   anonyme des métadonnées, SOURCE et CIBLE), sonde `tests/e2e/tools/probe-public.mjs` (`STRICT=1`).
+
+## Rien d'écrit avant la protection, mémo opaque (4.0.0)
+
+Audit offensif du 12 novembre (415 routes de lecture, visiteur du lien public, lecteur, éditeur, détenteur de la clé d'un formulaire ; sondes
+`tests/e2e/tools/probe-surfaces.mjs` et `probe-gaps.mjs`). **Version majeure** parce que le mémo d'un webhook ne dit plus rien du
+destinataire : un moteur 3.x y lit un nom, y écrit encore la fiche, et reposerait des règles d'accès d'avant.
+- **`protectSync()`** (`acl.js`) : crée la table `<préfixe>Synchro` vide (`createSyncTable`), pose les règles d'accès même si un assistant est
+  ouvert (`syncRules({ force: true, strict: true })`) et rend vrai si le document va se recharger. L'hôte l'appelle **avant** d'ouvrir l'assistant
+  d'export (Sync+ : `newExport` de `js/source/tab.js`, qui note la demande avec `askWizard` AVANT l'appel, la page étant rechargée avant qu'il
+  ne rende, puis rouvre l'assistant avec `wizardAsked`). Il lève `rulesRefused` si Grist refuse les règles, `syncTableForeign` si une table
+  nommée `Synchro` n'est pas celle du moteur. **`syncUnprotected()`** dit, sans rien écrire, si un Échange reçu écrirait dans une `Synchro` sans
+  règles : l'hôte passe alors par `protectSync` avant (`showProtect` de `js/target/wizard.js`). Un hôte qui crée un export sans `protectSync`
+  garde la fenêtre d'avant : la première ligne d'export, copie des colonnes envoyées, est lisible jusqu'à la pose des règles.
+- **`ruleRefusal()`** : texte du dernier refus de Grist à poser les règles (une règle d'une personne nomme une colonne effacée : « Invalid
+  columns in rules for table X: Y »), `null` sinon. L'hôte le montre aux propriétaires (`rulesRefusedNotice` dans Sync+) et bloque le nouvel export.
+  Le moteur ne touche jamais aux règles d'autrui.
+- **Mémo = jeton** : `MEMO_TOKEN` (`r-` et douze chiffres hexadécimaux, `isMemoToken` de `logic/notes.js`). La fiche (courriel, document,
+  équipe/nom) est dans la note de la SOURCE (`dest`, `putDest`, `destOf`, `staleDest`, `dropDest`) ; `rememberDest(memo)` la range et rend le
+  jeton **avant** `createWebhook` (`approveReply`, `wireExchange`) ; `readHooks()` rend les webhooks avec leur fiche remise dans `fields.memo`
+  (`identifyHooks`, le jeton brut est dans `fields.memoToken`) ; `protectMemos()` (propriétaire, sous le verrou `gristsync-memos`) donne
+  un jeton aux webhooks d'avant et retire les fiches des destinataires partis (`DEST_GRACE_S` = 600 s). L'hôte qui lisait `listWebhooks` pour
+  montrer qui reçoit passe par `readHooks()`.
+- **Port** : `renameWebhook(id, nom, mémo?)` prend un mémo facultatif (`createRestPort` l'envoie seulement s'il est donné) ; `PORT_SHAPE` ne change pas.
+- **Éditeurs** : sans Échange, `ownerAclRules` n'est plus qu'un refus de `Synchro` (`-CRUD`) à qui n'est pas propriétaire, sans condition de
+  ligne : Grist vide alors les options de `Synchro_Export` dans les métadonnées qu'un éditeur lit, donc la note de la SOURCE (fiches, clé privée
+  d'une invitation) lui est cachée. Avec un Échange (`exchangeIds` non vide), les cinq règles d'avant restent et la note est lisible par ses éditeurs.
+- **Essais** : `tests/unit/engine-protect.test.mjs`, `engine-memo.test.mjs`, `acl.test.mjs` ; e2e `ONLY_PROTECT=1` (vrai Grist : règles avant
+  la première ligne, refus d'une règle orpheline dit, Échange avec l'étape de protection, mémos opaques lus en anonyme).
 
 ## Ce que le moteur écrit dans un document
 

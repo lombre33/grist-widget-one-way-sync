@@ -367,7 +367,47 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.18.0 (12 novembre 2026)
+## État : V0.19.0 (12 novembre 2026)
+
+V0.19.0 (Antoine, 12 novembre : « Peux-tu vérifier si d'autres edge cases comme ça sont possibles ? vérifier toutes les approches possibles qui seraient
+exploitées pour tenter d'accéder à la donnée en récupérant des infos mal protégées ? »). Moteur **4.0.0, majeure** (dite dans `GFS-ETAT.md`).
+- **Audit offensif** (Grist 1.7.22, sondes rejouables `tests/e2e/tools/probe-surfaces.mjs`, `probe-gaps.mjs`) : 415 routes de lecture de l'API lues par
+  un visiteur du lien public, un lecteur nommé, un éditeur nommé et le détenteur de la clé d'un formulaire, sur une SOURCE et une CIBLE branchées.
+  **Protégé** (403 ou invisible) : données, SQL, CSV, XLSX, téléchargement, historique, instantanés, webhooks, règles, partages ; la clé d'un formulaire
+  n'est lisible nulle part et n'écrit ni métadonnées, ni autre table, ni SQL, ni règles ; l'adresse de l'iframe du widget n'a pas l'identifiant du
+  document ; `localStorage` sans secret. **Quatre trous corrigés** :
+  1. **Mémo des webhooks** : `_grist_Triggers` se lit en anonyme sur un document public ; le mémo (courriel, document, équipe du destinataire) est
+     maintenant un jeton `r-<12 hex>` (`MEMO_TOKEN`), la fiche est dans la note de la SOURCE (`dest`). `rememberDest` (avant `createWebhook`),
+     `readHooks()` (remet la fiche), `protectMemos()` (migre les webhooks d'avant, verrou `gristsync-memos`, retire les fiches des partis après 10 min).
+  2. **Fenêtre avant les règles** : `Synchro` naissait avec le premier export, ses règles à la fermeture du premier assistant ; entre les deux, une colonne
+     cachée par une règle de la personne se lisait dans le lot. `protectSync()` (`js/engine/acl.js`) crée la table vide et pose les règles **avant**
+     l'assistant (`syncRules({ force, strict })`, même assistant ouvert) ; le document se recharge et l'assistant se rouvre seul (`askWizard` /
+     `wizardAsked` de `js/prefs.js`, une heure de vie, aucune donnée). **Piège** : la préférence se note AVANT `protectSync` (la page se recharge avant qu'il
+     ne rende). Un Échange reçu passe par la même étape (`syncUnprotected`, `showProtect` de `js/target/wizard.js`).
+  3. **Refus de Grist tu** : une règle d'une personne qui nomme une colonne effacée (« Invalid columns in rules for table X: Y ») fait refuser tout
+     changement de règles. `ruleRefusal()` garde le texte, `rulesRefusedNotice` (`js/rules-notice.js`) le montre aux propriétaires, « Nouvel export » est
+     bloqué. Le widget ne touche jamais aux règles d'autrui.
+  4. **Éditeurs et note de la SOURCE** : la règle de `Synchro` portait une condition de ligne, Grist ne vide les options d'une colonne que pour un refus sans
+     condition : un éditeur lisait la note (fiches, clé privée d'une invitation en attente) par les métadonnées. Sans Échange, `ownerAclRules` est un seul
+     refus `user.Access != OWNER` → `-CRUD`. Avec un Échange, les cinq règles d'avant restent. **Effet visible** : un éditeur de la SOURCE arrive sur l'accueil
+     grisé (comme un lecteur), plus sur l'écran « réservé aux propriétaires ».
+- **Effets à dire** : « Nouvel export » sur un document sans protection recharge le document une fois, puis l'assistant se rouvre ; fermer l'assistant laisse
+  une table `Synchro` vide (sans ligne) et ses règles, et le widget ne la prend pas pour un rôle (`openFirstScreen` : `Synchro` sans export = accueil à deux tuiles, vu à l'e2e sur la CIBLE) ; un onglet 3.x resté ouvert repose les règles d'avant et réécrit la fiche dans le mémo : recharger.
+- **Reste lisible, dit à Antoine** : nom et condition des webhooks (nom et identifiant de l'export) ; note de la SOURCE par les éditeurs d'un document qui
+  a un Échange ; note du journal par les éditeurs de la CIBLE et la clé du formulaire (voulu : le secret refait la réponse) ; le journal de la CIBLE
+  pendant l'assistant « Recevoir » (environ une seconde, vide). À faire par Antoine : lire sur DINUM, en fenêtre privée, `…/api/docs/<id>/tables/_grist_Tables_column/records`
+  et `…/_grist_Triggers/records` d'un document public.
+- **Carte de décision « Combien de temps garder les valeurs d'une ligne supprimée dans le journal de la CIBLE ? »** : répondue le 12 novembre,
+  **« Comme aujourd'hui »** (aucune purge automatique, rien de codé). Antoine a ajouté : « peut-être prévoir côté cible et source un bouton pour effacer
+  manuellement l'historique et clean les journaux » (voir l'état suivant si codé).
+- **Deux correctifs trouvés à l'e2e complet** : `createSyncTable` retire `manualSort` dans la même action que `AddTable` (sinon deux onglets, l'écran qui s'affiche
+  et l'assistant qui crée l'export, la retirent chacun et le second reçoit « No such column: Synchro.manualSort ») ; `run` (`js/ui.js`) n'écrit qu'un avertissement
+  pour une requête coupée par le rechargement du document (`unreachable`, aussi employé par `select`).
+- Testé : unit 411 (`engine-protect`, `engine-memo`, `acl`) ; e2e complet, `ONLY_PROTECT=1` (règles avant la première ligne, refus d'une règle orpheline
+  dit et « Nouvel export » bloqué, Échange avec l'étape de protection, mémos opaques lus en anonyme). Le test de la SOURCE vérifie maintenant que `Synchro` est
+  vide avec ses règles avant la fin de l'assistant (avant : « rien d'écrit »).
+
+## État précédent : V0.18.0 (12 novembre 2026)
 
 V0.18.0 (Antoine, 12 novembre : « peux-tu regarder dans un document partagé en lecture seule mais public via lien […] si un user qui arrive sur le
 lien voit les tables gérées par le widget (côté cible et source) » ; carte de décision « Comment corriger la fuite des notes du widget sur un
@@ -390,7 +430,7 @@ document public ? » : **« Notes à l'abri, complet »**). Moteur **3.0.0, maje
   `-R` pour `user.Access == VIEWER` sur la colonne `id_sync` des tables que `signedTables` trouve (clé de signature présente), posée par `syncRules`.
 - **Vérifié** : la sonde ne trouve plus ni clé de signature, ni clé privée, ni secret, SOURCE et CIBLE ; l'e2e lit les métadonnées en anonyme sur les deux
   documents (`noteLeaks`) ; la clé du formulaire lit toujours la note du journal (par ses colonnes : c'est voulu, voir SECURITY.md).
-- **Reste lisible, dit à Antoine** : le mémo des webhooks (`_grist_Triggers` : courriel du destinataire · document · équipe/nom) et leur condition
+- **Reste lisible, dit à Antoine** (le mémo des webhooks a été mis à l'abri en 0.19) : le mémo des webhooks (`_grist_Triggers` : courriel du destinataire · document · équipe/nom) et leur condition
   (identifiant de l'export) ; le journal d'une réception dont la case « réservé aux éditeurs » est décochée. Mises à niveau : un onglet resté ouvert sur
   le moteur 2.x ne lit pas les notes déplacées (il les croit vides et pourrait les réécrire) : recharger. À vérifier par Antoine sur DINUM : lire
   `…/api/docs/<id>/tables/_grist_Tables_column/records` d'un document public dans une fenêtre privée.

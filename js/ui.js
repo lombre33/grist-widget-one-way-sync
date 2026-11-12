@@ -346,6 +346,9 @@ export function pickField({ items, value, label, onChange = () => {} }) {
 // dessine rien. Les écrans les prennent d'ici.
 export { errorText, failure, noteError, recentErrors };
 
+// Requête qui n'a pas abouti (réseau, ou document rechargé par Grist après un changement de règles).
+export const unreachable = e => e instanceof TypeError && /fetch|load failed|network/i.test(e.message);
+
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).
 export async function run(button, out, fn) {
@@ -354,7 +357,9 @@ export async function run(button, out, fn) {
   try {
     return await fn();
   } catch (e) {
-    if (!known(e)) console.error(e); // une erreur prévue (code mal copié, lien refusé) n'est qu'un message
+    // Une erreur prévue (code mal copié, lien refusé) n'est qu'un message ; une requête coupée par le rechargement du document
+    // (règles d'accès posées pendant l'action) n'est qu'un avertissement : le widget se recharge et reprend.
+    if (!known(e)) (unreachable(e) ? console.warn : console.error)(e);
     noteError(e);
     if (out) out.replaceChildren(message('err', errorText(e)));
     return undefined;
