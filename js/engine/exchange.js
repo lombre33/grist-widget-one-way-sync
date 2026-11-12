@@ -11,7 +11,7 @@ import { clearExport, dropExport, putExport, setExport, setPause } from './logic
 import { apply, createWebhook, deleteWebhook, deleteWebhookWithNotice, readSchema } from './port.js';
 import { removeTechnicalTables } from './pages.js';
 import {
-  endRows, exportHooks, pruneKeys, putRecipientKey, readSourceNote, removeExport, saveExport, setOnlyKey, syncRows, updateSourceNote,
+  endRows, exportHooks, pruneKeys, putRecipientKey, readSourceNote, rememberDest, removeExport, saveExport, setOnlyKey, syncRows, updateSourceNote,
 } from './source/synchro.js';
 import { receivedJournals } from './logic/received.js';
 
@@ -45,7 +45,7 @@ export async function wireExchange(note, retour = '', key = '') {
   // ce soit. Posée avant le webhook, qui ne part donc jamais sans elle.
   await setOnlyKey(note.export, PENDING_LABEL, key);
   const hookId = await createWebhook({
-    name: hookName(note.name, note.export), memo: hookMemo(note.from || {}), url: retour,
+    name: hookName(note.name, note.export), memo: await rememberDest(hookMemo(note.from || {})), url: retour,
     tableId: SYNC_TABLE, condition: exportCondition(note.export),
   });
   await putRecipientKey(note.export, hookId, key, PENDING_LABEL);

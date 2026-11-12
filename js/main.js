@@ -2,7 +2,7 @@
 // l'onglet, Réglages.
 import { GRIST_ORIGINS, VERSION, widgetUrl } from './config.js';
 import { LANG, t, translatePage } from './i18n.js';
-import { applyTheme, readPref, writePref } from './prefs.js';
+import { applyTheme, readPref, wizardAsked, writePref } from './prefs.js';
 import { sleep } from './engine/logic/common.js';
 import { ownsSync } from './engine/logic/strays.js';
 import { readSchema } from './grist.js';
@@ -198,6 +198,8 @@ async function openFirstScreen() {
   const backLink = readSourceNote(schema).invitations.some(inv => inv.journal && !inv.ready);
   ready = true;
   if (picked) await select(picked);
+  else if (wizardAsked('reception')) await select('receive'); // « Accepter une invitation » demandé juste avant le rechargement des règles
+  else if (wizardAsked('export') && ownsSync(schema)) await select('send'); // « Nouvel export » demandé juste avant le rechargement des règles
   else if (!backLink && journals.some(r => !r.note.retour)) await select('receive');
   else if (ownsSync(schema) || await lostSynchro(schema)) await select('send');
   else if ((await readLost()).length) await select('receive');

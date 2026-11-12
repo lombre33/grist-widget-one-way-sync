@@ -219,7 +219,7 @@ export function fakePort(doc, { owner = true, world = null } = {}) {
     createWebhook: abroad ? async fields => abroad.create(fields) : unsupported('createWebhook'),
     webhookConditions: async () => (abroad ? abroad.conditions() : new Map()),
     setWebhookEnabled: abroad ? async (id, enabled) => abroad.patch(id, { enabled }) : unsupported('setWebhookEnabled'),
-    renameWebhook: abroad ? async (id, name) => abroad.patch(id, { name }) : async () => {},
+    renameWebhook: abroad ? async (id, name, memo) => abroad.patch(id, memo === undefined ? { name } : { name, memo }) : async () => {},
     deleteWebhook: abroad ? async id => abroad.remove(id) : unsupported('deleteWebhook'),
     deleteWebhookWithNotice: unsupported('deleteWebhookWithNotice'),
     clearWebhookQueue: async () => {},

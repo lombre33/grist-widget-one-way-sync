@@ -3,6 +3,8 @@
 import { docIdentity, readSchema } from '../grist.js';
 import { VERSION } from '../config.js';
 import { formWhere, linkFigures } from '../form-link.js';
+import { protectSync, syncUnprotected } from '../engine/acl.js';
+import { known } from '../engine/errors.js';
 import { canRelink, checkDestinations, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
 import { sourceLine } from './source-line.js';
 import { confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
@@ -14,6 +16,7 @@ import { receptionOptions } from './options.js';
 import { stepHelp } from '../tutorial.js';
 import { tabLink } from '../tab-link.js';
 import { tabSendBlock } from '../tab-link-ui.js';
+import { askWizard, dropWizard } from '../prefs.js';
 import { t } from '../i18n.js';
 
 const STEP = { code: 0, dest: 1, link: 2, reply: 3 };
@@ -37,6 +40,7 @@ function showCode(ctx) {
   area.value = ctx.offered;
   const next = async () => {
     const invitation = await readInvitation(area.value);
+    if (invitation.mode === 'echange' && await syncUnprotected()) return showProtect(ctx);
     ctx.origin = (await docIdentity()).origin; // pour le lien vers le document de la SOURCE (voir sourceLine)
     const known = await knownReception(invitation);
     return known ? showRelink(ctx, known, invitation) : showDest(ctx, invitation);
@@ -47,6 +51,29 @@ function showCode(ctx) {
     ctx.offeredRead = true;
     run(null, report, next);
   }
+}
+
+// Un Échange renvoie à la SOURCE des tables de ce document, par la table technique Synchro. Ses règles d'accès (réservée aux
+// propriétaires) sont posées avant d'y écrire quoi que ce soit : Grist recharge alors le document, donc le widget et cet
+// assistant, d'où cette étape, avant toute écriture. Le code est à recoller ensuite.
+function showProtect(ctx) {
+  const report = el('div', { class: 'report' });
+  const protect = async () => {
+    askWizard('reception'); // le widget qui repart rouvre l'assistant (le rechargement coupe cet appel avant son retour)
+    try {
+      await protectSync();
+    } catch (e) {
+      // Une erreur prévue (table Synchro d'une autre personne, règle refusée par Grist) est dite ; un appel coupé par le
+      // rechargement du document n'en est pas une.
+      if (known(e)) {
+        dropWizard('reception');
+        throw e;
+      }
+    }
+    ctx.wizard.show(STEP.code, [message('info', t('common.reloading'))], []);
+  };
+  ctx.wizard.show(STEP.code, [message('info', t('recv.protect.body'), t('recv.protect.title')), report],
+    [cancel, { label: t('recv.protect.ok'), kind: 'btn-primary', onClick: () => run(null, report, protect) }]);
 }
 
 // Document vérifié chez Grist : nom (dossier · équipe), ou espace personnel.

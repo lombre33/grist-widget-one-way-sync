@@ -59,6 +59,13 @@ const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${t
 // aux lecteurs du document (voir columnNote). `syncNoteWrite` : l’action qui la réécrit, sans toucher aux autres options.
 const syncNoteOf = column => JSON.parse(column.widgetOptions || '{}').syncNote || {};
 const syncNoteWrite = (column, note) => ['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: JSON.stringify({ ...JSON.parse(column.widgetOptions || '{}'), syncNote: note }) }];
+// Fiche d'un destinataire (« e-mail · document · équipe/nom ») : le mémo de son webhook n'est qu'un jeton (il se lit dans les
+// métadonnées du document, que Grist montre aux lecteurs), la fiche est dans la note de la SOURCE (`dest`).
+const hookCard = async (doc, hook) => {
+  const column = (await records(doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export' && syncNoteOf(c).exports);
+  const entry = ((column && syncNoteOf(column).dest) || {})[hook.fields.memo];
+  return entry ? entry.m : hook.fields.memo;
+};
 // Clé de signature reçue par une destination (note de sa colonne id_sync, voir storeKey).
 const receivedKeyOf = async (doc, table, slot) => {
   const ref = await tableRef(doc, table);
@@ -400,11 +407,26 @@ try {
   }
   // CIBLE : coller le code de l'invitation dans l'assistant de réception.
   async function pasteInvitation(url, code) {
-    await openWidget(url);
-    await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
-    await button('Accepter une invitation').click();
-    await dialog().locator('textarea.code').first().fill(code);
-    await dialogButton('Continuer').click();
+    const paste = async (again = false) => {
+      if (!again) {
+        await openWidget(url);
+        await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
+        await button('Accepter une invitation').click();
+      }
+      await dialog().locator('textarea.code').first().fill(code);
+      await dialogButton('Continuer').click();
+    };
+    // Un Échange renvoie des tables d'ici par la table Synchro : ses règles d'accès sont posées d'abord (le document se recharge
+    // et l'assistant avec lui), le code est à recoller. Les autres invitations passent à l'étape suivante (bouton « Retour »).
+    const protect = dialogButton('Protéger et recharger');
+    for (let tries = 0; tries < 3; tries++) {
+      await paste(tries > 0); // après le rechargement, l'assistant se rouvre seul sur l'étape Code
+      await Promise.race([protect.waitFor({ timeout: 30000 }), dialogButton('Retour').waitFor({ timeout: 30000 })]).catch(() => {});
+      if (!(await protect.count())) return;
+      await protect.click();
+      await protect.waitFor({ state: 'detached', timeout: 60000 });
+      await page.waitForTimeout(3000);
+    }
   }
   // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
   // publié, rendre la réponse.
@@ -1635,8 +1657,77 @@ try {
     await B.tab.close();
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+
+  // Règles d'accès posées AVANT la première donnée d'un export (protectSync). Le document est public et une règle cache la colonne
+  // Email aux lecteurs : la table Synchro est créée vide, refusée au public dès que l'assistant est ouvert, et le reste ; le
+  // document se recharge avant l'assistant, qui se rouvre seul. Puis Grist refuse de poser les règles (une règle d'autrui vise
+  // une colonne effacée) : aucun export n'est créé, l'onglet le dit ; la règle corrigée, tout reprend.
+  async function protectSteps() {
+    const OWNER_MEMO = 'Synchro : réservée aux propriétaires';
+    const src = await fichesDoc('Protection SOURCE');
+    await applyActions(src.doc, [['BulkUpdateRecord', 'Fiches', [1, 2, 3], { Ville: ['anna@secret.fr', 'basile@secret.fr', 'celine@secret.fr'] }],
+      ['AddRecord', '_grist_ACLResources', -1, { tableId: 'Fiches', colIds: 'Ville' }],
+      ['AddRecord', '_grist_ACLRules', null, { resource: -1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: 'Ville cachée aux lecteurs' }]]);
+    await api('PATCH', `/docs/${src.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
+    const anon = async (doc, path) => {
+      const res = await fetch(`${TEAM}/api/docs/${doc}${path}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      return { status: res.status, text: await res.text() };
+    };
+    const hidden = async (doc, label) => {
+      for (const path of ['/tables/Synchro/records', '/tables/Synchro/columns', '/sql?q=select+*+from+Synchro', '/download/csv?tableId=Synchro']) {
+        const res = await anon(doc, path);
+        assert.ok([403, 404].includes(res.status), `${label} : ${path} refusée au public (HTTP ${res.status})`);
+        assert.ok(!res.text.includes('secret.fr'), `${label} : ${path} ne montre pas la colonne cachée`);
+      }
+    };
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    assert.equal((await anon(src.doc, '/tables/Synchro/records')).status, 404, 'pas encore de table Synchro');
+    await button('Nouvel export').click();
+    // Les règles sont posées d'abord, le document se recharge, puis l'assistant s'ouvre : rien à recliquer.
+    await dialog().getByRole('checkbox', { name: 'Fiches' }).check();
+    assert.ok((await records(src.doc, '_grist_ACLRules')).some(r => r.memo === OWNER_MEMO), 'règles du widget en place avant la première donnée');
+    assert.equal((await records(src.doc, 'Synchro')).length, 0, 'table Synchro vide tant que l\'export n\'est pas créé');
+    await hidden(src.doc, 'assistant ouvert, rien d\'écrit');
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Secret');
+    await dialogButton('Créer l’export').click();
+    await dialog().getByText('Export « Secret » créé.').waitFor({ timeout: 120000 });
+    assert.ok((await records(src.doc, 'Synchro')).length > 0, 'l\'export est écrit');
+    await hidden(src.doc, 'fenêtre « Export créé » encore ouverte');
+    step('Protection : la table Synchro naît vide avec ses règles, le document se recharge avant l\'assistant, qui se rouvre seul ; rien de la colonne cachée n\'est lisible par le public pendant l\'assistant');
+
+    // Grist refuse de poser les règles : une règle d'autrui vise une colonne qui n'existe plus.
+    const bad = await fichesDoc('Protection refus');
+    await applyActions(bad.doc, [['AddRecord', '_grist_ACLResources', -1, { tableId: 'Fiches', colIds: 'Ville' }],
+      ['AddRecord', '_grist_ACLRules', null, { resource: -1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: 'Ville cachée' }]]);
+    await applyActions(bad.doc, [['RemoveColumn', 'Fiches', 'Ville']]);
+    await openWidget(bad.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await widget().getByText(/Invalid columns in rules for table Fiches: Ville/).first().waitFor({ timeout: 60000 });
+    assert.equal(await dialog().count(), 0, 'aucun assistant : un export ne s\'écrit pas sans ses règles');
+    assert.ok(!(await records(bad.doc, '_grist_ACLRules')).some(r => r.memo === OWNER_MEMO), 'Grist a refusé : aucune règle du widget');
+    assert.equal((await records(bad.doc, 'Synchro')).length, 0, 'aucune ligne dans Synchro');
+    await openWidgetTab(bad.url, 'Envoyer');
+    await widget().getByText('Les règles d’accès du widget n’ont pas pu être posées').waitFor({ timeout: 60000 });
+    assert.ok((await records(bad.doc, '_grist_ACLRules')).some(r => r.memo === 'Ville cachée'), 'la règle de la personne est intacte : le widget ne touche jamais aux règles d\'autrui');
+    // La personne corrige sa règle : l'avis part, les règles du widget sont posées, l'export se crée.
+    const mine = (await records(bad.doc, '_grist_ACLRules')).filter(r => r.memo === 'Ville cachée').map(r => r.resource);
+    await applyActions(bad.doc, [['BulkRemoveRecord', '_grist_ACLRules', (await records(bad.doc, '_grist_ACLRules')).filter(r => r.memo === 'Ville cachée').map(r => r.id)],
+      ['BulkRemoveRecord', '_grist_ACLResources', mine]]);
+    await openWidgetTab(bad.url, 'Envoyer');
+    await waitFor(async () => (await records(bad.doc, '_grist_ACLRules')).some(r => r.memo === OWNER_MEMO), 'règles du widget posées une fois la règle corrigée', 60000);
+    await rulesSettled(bad.doc);
+    assert.equal(await widget().getByText('Les règles d’accès du widget n’ont pas pu être posées').count(), 0, 'l\'avis est parti');
+    await newExport('Fiches', 'Net');
+    await dialog().getByText('Export « Net » créé.').waitFor({ timeout: 120000 });
+    step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
+  }
+
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -1933,9 +2024,13 @@ try {
   // Fiche du destinataire : équipe/nom du document, lu chez Grist ; un mémo d'avant la 0.10.1, sans
   // le nom, est complété à l'affichage.
   await widget().locator('.person-who', { hasText: `${env.team}/Cible 2` }).waitFor();
-  const firstHook = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks.find(h => !h.fields.memo.includes('Cible 2'));
-  assert.ok(firstHook.fields.memo.endsWith(`${env.team}/Cible`), 'nom du document dans le mémo');
-  await api('PATCH', `/docs/${source.doc}/webhooks/${firstHook.id}`, { memo: firstHook.fields.memo.replace('/Cible', '') });
+  const sourceHooks = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
+  for (const h of sourceHooks) assert.match(h.fields.memo, /^r-[0-9a-f]{12}$/, 'le mémo d’un webhook n’est qu’un jeton : il se lit dans les métadonnées du document');
+  const cards = await Promise.all(sourceHooks.map(async h => ({ hook: h, card: await hookCard(source.doc, h) })));
+  const firstHook = cards.find(c => !c.card.includes('Cible 2'));
+  assert.ok(firstHook.card.endsWith(`${env.team}/Cible`), 'nom du document dans la fiche, rangée dans la note');
+  // Un webhook d’avant (mémo = fiche, sans le nom du document) : repris dans la note au prochain affichage, le nom complété.
+  await api('PATCH', `/docs/${source.doc}/webhooks/${firstHook.hook.id}`, { memo: firstHook.card.replace('/Cible', '') });
   await openWidget(source.url);
   // Le nom est un lien : le texte réservé aux lecteurs d'écran le suit.
   await widget().locator('.person-who', { hasText: new RegExp(`${env.team}/Cible(?! 2)`) }).waitFor({ timeout: 30000 });
@@ -2002,7 +2097,7 @@ try {
   // --- Révoquer le second seulement : le premier continue
   // Un webhook détourné (adresse changée dans les réglages de Grist) est signalé sur sa ligne.
   const hooksNow = (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
-  const second = hooksNow.find(h => (h.fields.memo || '').includes(target2.doc.slice(0, 10)));
+  const second = (await Promise.all(hooksNow.map(async h => ({ h, card: await hookCard(source.doc, h) })))).find(x => x.card.includes(target2.doc.slice(0, 10))).h;
   const first = hooksNow.find(h => h.id !== second.id);
   await api('PATCH', `/docs/${source.doc}/webhooks/${second.id}`, { url: first.fields.url });
   await openWidget(source.url);
@@ -2584,6 +2679,11 @@ try {
   assert.ok((await records(source.doc, '_grist_Tables_column')).some(c => c.colId === 'Synchro_Export' && syncNoteOf(c).exports), 'la note de la SOURCE existe (contrôle non vide)');
   const onSource = await metadata(source.doc);
   assert.ok(onSource.status === 403 || noteLeaks(onSource.columns).length === 0, 'la note de la SOURCE n\'est pas lisible dans les métadonnées, en anonyme');
+  // Les webhooks sont dans les métadonnées (`_grist_Triggers`), lisibles par tous : leur mémo n'y dit rien du destinataire.
+  const anonTriggers = await fetch(`${TEAM}/api/docs/${source.doc}/tables/_grist_Triggers/records`);
+  const triggerText = anonTriggers.status === 200 ? await anonTriggers.text() : '';
+  if (anonTriggers.status === 200) assert.ok(triggerText.includes('"memo":"r-'), 'contrôle non vide : les webhooks de la SOURCE sont lus');
+  assert.ok(!triggerText.includes('@') && !triggerText.includes(target.doc.slice(0, 10)), 'le mémo des webhooks ne montre ni e-mail ni document du destinataire, en anonyme');
   step('Lien public sur une SOURCE qui a un export public : les métadonnées du document ne montrent pas sa note');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
@@ -2637,6 +2737,7 @@ try {
   await formulasSteps();
   await straySteps();
   await docLinkSteps();
+  await protectSteps();
   await tabSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');

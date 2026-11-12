@@ -54,6 +54,11 @@ export function publicAclRules(exportIds, { keepDeny = false } = {}) {
 // 'echange' et 'lot', pour la recopie ; ni celles des autres exports, ni la note.
 export function ownerAclRules(exchangeIds = []) {
   const ids = exchangeIds.filter(id => HEX16.test(id)).sort().map(id => `"${id}"`).join(', ');
+  // Sans Échange, un éditeur n'a rien à lire dans Synchro. Un refus sans condition de ligne cache aussi ses colonnes aux
+  // métadonnées du document (Grist vide les options d'une colonne illisible) : la note de la SOURCE, dont la clé privée d'une
+  // invitation en attente et les fiches des destinataires, ne se lit plus par un éditeur. Avec un Échange, les règles
+  // ci-dessous (conditionnelles à la ligne) laissent lire les colonnes, donc la note, par les éditeurs.
+  if (!ids) return [{ tableId: SYNC_TABLE, colIds: '*', aclFormula: 'user.Access != OWNER', permissionsText: '-CRUD', memo: OWNER_MEMO }];
   const EXCHANGE_ROWS = `${EDITOR} and rec.${EXPORT_COL} in [${ids}] and rec.${TYPE_COL} in ["${KIND.swap}", "${KIND.lot}"]`;
   const rule = (colIds, aclFormula, permissionsText) => ({ tableId: SYNC_TABLE, colIds, aclFormula, permissionsText, memo: OWNER_MEMO });
   return [

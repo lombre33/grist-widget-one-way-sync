@@ -2,6 +2,7 @@
 // colonnes) avec ses destinataires. Une seule table technique, Synchro ; un webhook par
 // destinataire, filtré par Grist sur les lignes de son export.
 import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../engine/logic/common.js';
+import { known } from '../engine/errors.js';
 import { maskKey } from '../engine/logic/codes.js';
 import { conditionExport, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
@@ -14,8 +15,8 @@ import { LONG_SECONDS } from '../engine/logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, webhookConditions } from '../grist.js';
 import { expiresAt, unkeyedRecipients } from '../engine/logic/trust.js';
 import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
-import { syncRules } from '../engine/acl.js';
-import { ensureSyncTable, isCharge, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
+import { protectSync, ruleRefusal, syncRules } from '../engine/acl.js';
+import { ensureSyncTable, identified, isCharge, protectMemos, readHooks, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
 import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.js';
@@ -30,9 +31,11 @@ import { keysBlock } from './keys.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { hookDoc, hookShown } from './shown.js';
+import { rulesRefusedNotice } from '../rules-notice.js';
 import { confirmDialog, docLink, el, icon, message, noteError, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
+import { askWizard, dropWizard, wizardAsked } from '../prefs.js';
 
 // Fiche affichée d'un destinataire : sans l'identifiant du document (il reste dans l'infobulle, `personLabel`).
 const personShown = h => hookShown(h.fields.memo, hookCheck(h.id).docName) || '—';
@@ -69,6 +72,7 @@ async function loadState() {
   const all = ownsSync(schema) ? await fetchRows(SYNC_TABLE) : [];
   const rows = all.filter(r => !isCharge(r));
   const note = readSourceNote(schema);
+  hooks = identified(hooks, note); // le mémo de chaque webhook devient la fiche de son destinataire (rangée dans la note)
   // Règles d'accès (lisibles par un propriétaire seulement) : revérifiées à chaque affichage.
   const [resources, aclRules] = ownerOnly ? [[], []] : await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
   const acl = { resources, rules: aclRules };
@@ -137,6 +141,8 @@ export async function renderSource(root = container, { periodic = false } = {}) 
     return;
   }
   redraw(container, sourceView(state, access, open));
+  // « Nouvel export » demandé juste avant le rechargement que les règles d'accès ont causé : l'assistant s'ouvre.
+  if (!periodic && wizardAsked('export', { consume: true }) && !state.ownerOnly && !state.foreign && !blocksNew(state.lost)) run(null, container.querySelector('.out'), newExport);
   if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
   if (state.ownerOnly) return;
   resumeExchange(state);
@@ -153,6 +159,7 @@ async function upgradeSource(state) {
   if (await ensureSyncTable(current.schema, current.rows)) current = await loadState();
   if (await refreshMajLe(current.schema, current.rows)) current = await loadState();
   if (await refreshOptions(current.schema, current.rows)) current = await loadState();
+  if (await protectMemos()) current = await loadState(); // fiches des destinataires hors du mémo des webhooks (lisible par tous)
   // Lignes qui quittent un export (la CIBLE est passive, la SOURCE est prévenue) : voir observeRows.
   const recipientsOf = id => (current.exports.find(exp => exp.id === id) || { recipients: [] }).recipients.length;
   if (await watchRows(current.note, trackedCounts(current.rows), recipientsOf)) current = await loadState();
@@ -173,12 +180,37 @@ function sourceCards(state, open, out) {
 }
 
 // « Nouvel export » : grisé quand rien ne peut s'écrire (table d'une autre personne, table perdue) ou pour qui n'est pas propriétaire.
-function newExportButton(state) {
+function newExportButton(state, out) {
   const why = state.foreign ? t('send.foreign.blocked') : blocksNew(state.lost) ? t('send.lost.blocked') : null;
   return el('button', {
     class: 'btn btn-primary', type: 'button', disabled: state.ownerOnly || Boolean(why), title: why,
-    onclick: () => exportWizard(null, renderSource),
+    onclick: e => run(e.currentTarget, out, newExport),
   }, icon('plus'), t('send.new'));
+}
+
+// Avant l'assistant, les règles d'accès de Synchro sont posées (protectSync) : la première ligne d'un export copie les
+// colonnes envoyées, y compris celles qu'une règle cache aux lecteurs, et personne ne doit pouvoir la lire dans
+// l'intervalle. Si Grist recharge le document pour cela, le widget repart et rouvre l'assistant (`wizardAsked`, qui refait
+// ce même contrôle). Un appel coupé en route par le rechargement (il échoue alors sans message utile) n'est pas une erreur ;
+// un refus de Grist ou une table Synchro d'une autre personne (erreurs prévues) sont dits à la personne.
+async function newExport() {
+  askWizard('export'); // noté AVANT : le rechargement de Grist coupe le widget en plein appel, avant que protectSync rende la main
+  let posted;
+  try {
+    posted = await protectSync();
+  } catch (e) {
+    if (known(e)) {
+      dropWizard('export');
+      throw e;
+    }
+    posted = true;
+  }
+  if (posted) {
+    reloading(container, renderSource);
+    return;
+  }
+  dropWizard('export');
+  exportWizard(null, renderSource);
 }
 
 // Contenu de l'onglet : « Nouvel export », avertissements, avis de la dernière action, cartes.
@@ -188,9 +220,10 @@ function sourceView(state, access, open) {
   const out = el('div', { class: 'out' }, notice);
   notice = null;
   const cards = sourceCards(state, open, out);
-  return [el('div', { class: 'toolbar' }, newExportButton(state)),
+  return [el('div', { class: 'toolbar' }, newExportButton(state, out)),
     state.ownerOnly ? message('info', t('send.ownersOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
+    state.ownerOnly ? null : rulesRefusedNotice(),
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : state.ownerOnly ? null : el('p', { class: 'muted' }, t('send.empty')),
     roleGuide({ you: 'source' })].filter(Boolean);
@@ -440,7 +473,9 @@ async function tickFlows() {
   let hooks;
   let conditions;
   try {
-    [charge, hooks, conditions] = await Promise.all([currentCharge(), listWebhooks(), webhookConditions()]);
+    let read;
+    [charge, read] = await Promise.all([currentCharge(), readHooks()]);
+    ({ hooks, conditions } = read);
   } catch (e) {
     if (loading) watchFlows();
     return;

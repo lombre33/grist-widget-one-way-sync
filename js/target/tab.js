@@ -19,6 +19,10 @@ import { SHOWN } from '../engine/logic/report.js';
 import { TALLY_GRACE_S } from '../engine/logic/tally.js';
 import { uploadErrors } from '../engine/target/files.js';
 import { offerDialog } from './dest.js';
+import { rulesRefusedNotice } from '../rules-notice.js';
+import { wizardAsked } from '../prefs.js';
+import { protectMemos } from '../engine/source/synchro.js';
+import { ownsSync } from '../engine/logic/strays.js';
 import { optionsDialog } from './options.js';
 import { restyleDialog } from './restyle.js';
 import { receiveWizard } from './wizard.js';
@@ -124,17 +128,21 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
     return;
   }
   const schema = await readSchema();
+  if (!periodic && owner && ownsSync(schema)) await protectMemos(); // Échange : le webhook de retour garde la fiche de la SOURCE hors de son mémo
   const groups = await receivedGroups(schema, owner || state.viewer);
   const out = el('div', { class: 'out' }, lastNotice());
   await prepareReceptions(groups, { owner, periodic }, out);
   const cards = groups.map(safeCard);
   redraw(container, [targetToolbar(groups, out),
     state.readOnly ? message('warn', t('common.readonly')) : null,
+    owner ? rulesRefusedNotice() : null,
     out,
     lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
     cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small', title: t('recv.auto.detail') }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
     roleGuide({ you: 'target' })].filter(Boolean));
   if (!state.readOnly) await openPending(groups, periodic);
+  // « Accepter une invitation » demandé juste avant le rechargement que la pose des règles d'accès de Synchro a causé (Échange).
+  if (!periodic && !state.readOnly && wizardAsked('reception', { consume: true }) && !document.querySelector('.scrim')) receiveWizard(null, renderTarget);
 }
 
 // Ouvre seul, une fois par chargement : l'assistant d'une réception qui attend son lien, sinon la

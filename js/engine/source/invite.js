@@ -32,7 +32,7 @@ import { failure } from '../errors.js';
 import { testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
 import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
-import { pruneKeys, putRecipientKey, recordEvent, saveExport, sourceFrom, syncRows, updateSourceNote } from './synchro.js';
+import { pruneKeys, putRecipientKey, recordEvent, rememberDest, saveExport, sourceFrom, syncRows, updateSourceNote } from './synchro.js';
 import { publicCode } from './actions.js';
 import { resendTables } from './resend.js';
 import { exportEstimate } from './estimate.js';
@@ -169,7 +169,8 @@ export async function approveReply(exp, inv, reply, { compared = false } = {}) {
   const r = reply.recipient;
   await putRecipientKey(exp.id, inv.id, reply.keys.down);
   const memo = hookMemo({ ...r, docName: reply.share.name });
-  const hook = await createWebhook({ name: hookName(exp.name, exp.id), memo, url: reply.url, tableId: SYNC_TABLE, condition: exportCondition(exp.id) });
+  // Le mémo d'un webhook se lit dans les métadonnées du document : il ne porte qu'un jeton, la fiche reste dans la note.
+  const hook = await createWebhook({ name: hookName(exp.name, exp.id), memo: await rememberDest(memo), url: reply.url, tableId: SYNC_TABLE, condition: exportCondition(exp.id) });
   await recordEvent(exp.id, 'join', { who: hookLabel(memo) });
   await putRecipientKey(exp.id, hook, reply.keys.down, inv.id);
   if (inv.journal) {

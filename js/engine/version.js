@@ -82,7 +82,23 @@
 //         un moteur 2.x ne lit pas les notes d'un document 3.x (il les croit vides et pourrait les réécrire), donc tous les onglets d'un
 //         même document doivent avoir le moteur 3 (recharger les onglets ouverts). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte
 //         des formules de `Synchro` ne changent.
-export const ENGINE_VERSION = '3.0.0';
+// 4.0.0 (12 novembre 2026, audit des fuites d'information demandé par le porteur : « vérifier toutes les approches possibles qui seraient
+//         exploitées pour accéder à la donnée en récupérant des infos mal protégées ») : MAJEURE parce que le mémo d'un webhook ne dit plus
+//         rien du destinataire. Grist montre `_grist_Triggers` (mémo compris) à toute personne qui lit le document, lien public compris :
+//         le mémo n'est plus qu'un jeton (`r-` et douze chiffres hexadécimaux), la fiche « e-mail · document · équipe/nom » est dans la note
+//         de la SOURCE (`dest`, `putDest`, `identifyHooks` de `logic/notes.js`), remise dans les webhooks que lit le moteur (`readHooks`) ;
+//         `rememberDest` la range avant de créer un webhook, `protectMemos` (propriétaires, à l'affichage) donne un jeton aux webhooks
+//         d'avant et retire les fiches des destinataires partis. Un moteur 3.x lit le jeton comme un nom de destinataire et écrit encore la
+//         fiche dans le mémo : `protectMemos` la reprend. Sont aussi dans cette version : (1) les règles d'accès de `Synchro` se posent AVANT la
+//         première donnée d'un export (`protectSync` de `acl.js` : table créée vide, règles posées même pendant un assistant, le document se
+//         recharge avant que l'assistant s'ouvre ; `syncUnprotected` pour un Échange reçu ; `createSyncTable` de `source/synchro.js`) ; (2) un
+//         refus de Grist à poser les règles n'est plus tu (`ruleRefusal`, `syncRules({ strict })`) ; (3) sans Échange, `ownerAclRules` n'est plus
+//         qu'un refus sans condition de ligne pour qui n'est pas propriétaire, ce qui cache aussi la note de la SOURCE aux éditeurs (Grist vide
+//         les options d'une colonne illisible) ; avec un Échange, les règles d'avant restent. Port : `renameWebhook(id, nom, mémo?)` prend un
+//         mémo facultatif (`createRestPort`), `PORT_SHAPE` ne change pas. Ni nom de table, ni `CODE_FORMAT`, ni texte des formules de `Synchro` ne
+//         changent. Tous les onglets d'un même document doivent avoir le moteur 4 : un onglet 3.x resté ouvert repose les règles d'avant à
+//         chaque affichage (le document se recharge) et réécrit la fiche dans le mémo ; recharger les onglets.
+export const ENGINE_VERSION = '4.0.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

@@ -4,7 +4,8 @@
 //   invitations: [{ id, export, hash, at, renforce, journal, ready, pub, prive }],
 //   pauses: [{ hook, export, at, columns }], fichiers: { <export>: { f, h, p } },
 //   historique: { <export>: [{ at, kind, who, n }] },
-//   lignes: { <export>: { at, n: { <table>: nombre de lignes } } } }.
+//   lignes: { <export>: { at, n: { <table>: nombre de lignes } } },
+//   dest: { <jeton de mémo>: { m: « e-mail · document · équipe/nom », at } } }.
 // Chaque opération rend une nouvelle note, sans toucher à celle qu'elle reçoit.
 import { cleanLabel } from './codes.js';
 
@@ -131,4 +132,43 @@ export function recentDrops(events, now) {
   const seen = new Set();
   return events.filter(e => e.kind === 'shrink' && e.who && now - e.at < DROP_SHOWN_S && !seen.has(e.who) && seen.add(e.who))
     .map(e => ({ table: e.who, n: e.n || 0, at: e.at }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Destinataires. Le mémo d'un webhook se lit dans les métadonnées du document (`_grist_Triggers`), que Grist montre à
+// toute personne qui lit le document, lien public compris : il n'y met donc qu'un jeton (`r-` et douze chiffres
+// hexadécimaux), et la fiche du destinataire (e-mail, document, équipe et nom) reste dans cette note, que les lecteurs
+// ne lisent pas. `identifyHooks` remet la fiche dans les webhooks que lisent les écrans et le moteur.
+
+export const MEMO_TOKEN = /^r-[0-9a-f]{12}$/;
+export const isMemoToken = memo => MEMO_TOKEN.test(String(memo || ''));
+
+// La note, avec la fiche `memo` rangée sous `token` (heure `at`, en secondes).
+export const putDest = (note, token, memo, at) => ({ ...note, dest: { ...note.dest, [token]: { m: String(memo), at } } });
+
+// Fiche rangée sous `token`, ou null.
+export function destOf(note, token) {
+  const entry = note.dest && Object.hasOwn(note.dest, token) ? note.dest[token] : null;
+  return entry && typeof entry.m === 'string' ? entry.m : null;
+}
+
+// Webhooks dont le mémo est un jeton connu de la note : leur mémo devient la fiche (le jeton reste dans `memoToken`).
+// Les autres (mémo d'avant la 4.0, ou jeton inconnu) sont rendus tels quels.
+export const identifyHooks = (hooks, note) => hooks.map((h) => {
+  const memo = h.fields.memo;
+  const card = isMemoToken(memo) ? destOf(note, memo) : null;
+  return card === null ? h : { ...h, fields: { ...h.fields, memo: card, memoToken: memo } };
+});
+
+// Jetons de la note qu'aucun webhook ne porte (`memos` : les mémos des webhooks, tels que Grist les garde) et posés il y a
+// plus de `grace` secondes : un destinataire révoqué, ou un jeton posé avant un webhook qui n'a pas pu se créer. Le délai
+// laisse à un onglet le temps de créer son webhook après avoir rangé la fiche.
+export const staleDest = (note, memos, now, grace) => Object.entries(note.dest || {})
+  .filter(([token, entry]) => !memos.has(token) && !(Number.isFinite(entry && entry.at) && now - entry.at < grace)).map(([token]) => token);
+
+export function dropDest(note, tokens) {
+  if (!tokens.length) return note;
+  const { dest, ...rest } = note;
+  const left = Object.fromEntries(Object.entries(dest || {}).filter(([token]) => !tokens.includes(token)));
+  return Object.keys(left).length ? { ...rest, dest: left } : rest;
 }

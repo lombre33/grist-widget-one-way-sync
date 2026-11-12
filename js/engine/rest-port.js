@@ -225,7 +225,7 @@ function webhookEditPort({ rest, webhookConditions, postToHook }) {
   return {
     createWebhook,
     setWebhookEnabled: (id, enabled) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { enabled }),
-    renameWebhook: (id, name) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, { name }),
+    renameWebhook: (id, name, memo) => rest('PATCH', `/webhooks/${encodeURIComponent(id)}`, memo === undefined ? { name } : { name, memo }),
     deleteWebhook,
     deleteWebhookWithNotice,
     clearWebhookQueue: () => rest('DELETE', '/webhooks/queue'),
