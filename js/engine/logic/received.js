@@ -187,3 +187,11 @@ export function storeKeyActions(schema, tables, slot, key) {
   return tables.map(table => keyColumn(schema, table)).filter(c => c && keysOf(c)[slot] !== key)
     .map(c => noteAction(c, { signature: { ...keysOf(c), [slot]: key } }));
 }
+// Clé retirée de sa place dans les destinations `tables` (retour à l'ancien fonctionnement, voir reinforce.js).
+export function dropKeyActions(schema, tables, slot) {
+  return tables.map(table => keyColumn(schema, table)).filter(c => c && slot in keysOf(c))
+    .map((c) => {
+      const { [slot]: gone, ...rest } = keysOf(c);
+      return noteAction(c, Object.keys(rest).length ? { signature: rest } : null);
+    });
+}

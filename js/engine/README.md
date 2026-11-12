@@ -333,3 +333,19 @@ erreurs prévues, et les 86 clés `diag.*` du diagnostic (`logic/diagnostic.js` 
 nombres y sont donnés en texte, sans séparateur de milliers : le diagnostic se colle dans un message). Reste **en français,
 écrit dans le document** : les mémos des règles d'accès (« Synchro : réservée aux propriétaires »…), qui sont des données
 lues par des personnes de langues différentes et qui servent à reconnaître les règles du widget.
+
+## Renforcer la sécurité d'un partage d'avant les clés (4.4.0)
+
+Un partage branché avant les clés de signature (Alpha) n'a pas de clé propre au destinataire. **Rien n'est imposé** : il continue d'arriver
+tel quel. Le renforcer = une invitation de la SOURCE qui **remplace** l'envoi de cette personne (`startReinforcement(exp, hook)`, `canReinforce`),
+reprise par la CIBLE comme une nouvelle invitation d'une réception connue (`relinkReception`).
+- **CIBLE** : la note du journal garde `renf` (`logic/reinforce.js`) : `{ at }` quand le code est collé (seulement si la réception n'avait ni
+  sceau ni clé, `isUnsignedReception`), `{ at, done }` à la première livraison signée vue (`unpack`, `finishRenf`). Entre les deux, `checkSigned(...,
+  { grace })` accepte les envois **sans** signature (l'ancien webhook de la SOURCE n'a pas encore été remplacé) ; une mauvaise signature reste rejetée, une
+  ligne `fin` n'est jamais tolérée. Au bout de 7 jours (`GRACE_S`), l'ancien envoi est refusé (`renfState` = `expired`) : l'hôte dit « interrompu » et
+  propose de renvoyer la réponse ou `revertReinforcement(journal)` (retire clé publique, sceau et attente ; permis tant que ce n'est pas fini).
+- **SOURCE** : l'invitation porte `replaces` (id du webhook). `approveReply` crée le nouveau webhook avec sa clé, **supprime l'ancien sans avis de fin**
+  (la CIBLE ne doit pas se croire coupée), note l'événement `reinforce` (pas `join` : le compte des destinataires ne change pas) et laisse l'export
+  intact ; `replacedHook` refuse une réponse d'un autre document (`reinforceOtherDoc`). `controlResend(exp, inv, progress)` renvoie ce qui a changé
+  depuis l'invitation : la livraison signée qui finit le renforcement. Un Échange ou un lien public ne passent pas ici (`reinforceNot`).
+- **Port** : inchangé, ni table ni `CODE_FORMAT`. Essais : `tests/unit/engine-reinforce.test.mjs`, e2e `ONLY_RENF=1` (vrai Grist, des deux côtés).

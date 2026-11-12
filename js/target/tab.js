@@ -28,6 +28,7 @@ import { optionsDialog } from './options.js';
 import { restyleDialog } from './restyle.js';
 import { addWidgetFor, readWidgetSpots, widgetCandidates, widgetLabel } from './widget-page.js';
 import { receiveWizard } from './wizard.js';
+import { reinforceKind, reinforceNotes } from './reinforce.js';
 import { sourceLine } from './source-line.js';
 import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
@@ -85,6 +86,13 @@ function receptionFlags({ schema, journal, note, waiting, owner, forms }) {
     unreserved: Boolean(note.reserve) && !note.reserved && !owner,
     formGone: linked && !note.retour && !waiting && !forms.has(journal),
   };
+}
+
+// Réceptions branchées avant les clés de signature (« Vos partages », js/news.js) : le nombre qui se renforce.
+export async function reinforceReceptions() {
+  const schema = await readSchema();
+  return receivedJournals(schema).filter(({ journal, note }) => note.mode === 'reponse' || !note.mode)
+    .filter(({ journal, note }) => !note.retour && !note.sceau && !receivedKey(schema, journal, note)).length;
 }
 
 const button = (label, iconName, onclick, kind = '') => smallButton(label, iconName, onclick, { kind, disabled: state.readOnly });
@@ -173,6 +181,7 @@ function cardStatus(group) {
   const { journal, note } = group;
   if (group.waiting) return ['waiting', 'pending'];
   if (note.ended) return ['ended', 'off'];
+  if (reinforceKind(group) === 'expired') return ['error', 'err'];
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
   if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
@@ -217,7 +226,7 @@ function stateNotes(group) {
   return [
     note.ended ? message('warn', t('recv.ended', { at: dateText(note.ended * 1000) })) : null,
     group.formGone ? message('err', t('recv.formGone')) : null,
-    group.unsigned && !group.waiting ? message('warn', t('recv.unsigned')) : null,
+    reinforceNotes(group, { rerender: renderTarget, out: () => container.querySelector('.out'), readOnly: state.readOnly }),
     group.unreserved ? message('info', t('recv.reserve.owner')) : null,
     locked ? message('info', t('recv.lock.waiting')) : null,
   ];

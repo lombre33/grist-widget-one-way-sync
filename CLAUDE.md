@@ -372,7 +372,42 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.20.0 (12 novembre 2026)
+## État : V0.21.0 (12 novembre 2026)
+
+V0.21.0 (Antoine, 12 novembre, « pour moi c'est good » sur la maquette de la fenêtre « Renforcer la sécurité » et des nouveautés, après la carte
+« Maquette puis code » ; décisions de fond du 6 novembre : mise à niveau **optionnelle** (option B), vocabulaire « Renforcer la sécurité » (jamais « renouveler »
+ni « Bêta » dans l'interface, suggestion et non ordre, avis informatifs en gris-bleu), anciens partages **jamais forcés**, rien ne casse). Moteur **4.4.0**
+(mineure, dite dans `GFS-ETAT.md`). **Rien n'est publié** (Alpha gelée, `main` n'est pas transmis à grist-factory sans demande explicite).
+- **Partage « d'avant les clés »** = destinataire sans clé de signature : côté SOURCE `unsignedHooks` (ligne `signature` de `Synchro` sans clé pour ce webhook ;
+  une clé commune `'*'` d'avant la 0.10 = rien à dire), côté CIBLE réception sans sceau ni clé notée (`isUnsignedReception`). Pas d'identification possible d'un
+  webhook d'Alpha au sein d'un export déjà « à clés » (aucun champ ne le dit) : l'avis `send.person.noKey` d'un destinataire sans clé est donc remplacé par la
+  suggestion de renforcer quand elle est possible (le renforcement répare aussi une clé perdue), et reste pour un destinataire en pause.
+- **Parcours** (SOURCE puis CIBLE, `js/source/tab.js` `reinforceNotice`/`reinforceLine`/`reinforce`, `js/source/recipient-wizard.js` en mode `renf`, `js/target/reinforce.js`) :
+  (1) SOURCE, bouton « Renforcer la sécurité » sur la ligne de la personne → `startReinforcement` (invitation avec `replaces`) → assistant à 3 étapes
+  (Invitation, Réponse, Contrôle) sans l'étape Options ; (2) CIBLE : coller le code d'une invitation d'une réception connue sans clé → écran « reprise »
+  avec texte dédié (`recv.relink.*.renf`), `relinkReception` fait `startRenf` ; (3) SOURCE : coller la réponse, comparer, approuver → `approveReply`
+  crée le webhook neuf, **supprime l'ancien sans avis de fin**, événement `reinforce` ; `controlResend` renvoie ce qui a changé depuis l'invitation ;
+  (4) CIBLE : la première livraison signée vue finit (`finishRenf`) → « Partage renforcé » (un mois). Un renforcement se fait **une personne à la fois**
+  (la maquette montrait un choix multiple : non codé, dit à Antoine).
+- **Délai de 7 jours** (`GRACE_S`, `logic/reinforce.js`) : tant que la première livraison signée n'est pas vue, la CIBLE accepte aussi les envois SANS signature
+  (`checkSigned(..., { grace })` : jamais une mauvaise signature, jamais une ligne `fin`). Passé le délai : carte « Renforcement interrompu » (erreur, `role=alert`,
+  état « Erreur »), qui dit la date, ce qui est refusé, et offre « Renvoyer ma réponse » ou « Revenir à l'ancien fonctionnement » (`revertReinforcement` : retire clé
+  publique, sceau, attente ; permis tant que ce n'est pas fini). Côté SOURCE : « Renforcement : attend sa réponse », « Renforcement expiré » (sur la ligne de
+  l'invitation, « Refaire le code »). Risque accepté écrit dans `SECURITY.md`.
+- **Nouveautés** (`js/news.js`, `NEWS_VERSION` = '0.21', préférence `news` du navigateur) : fenêtre en deux écrans (« Nouveautés », neuf points cliquables ; « Vos
+  partages », chiffres de ce document : exports, destinataires à renforcer, invitations d'avant les clés à refaire, réceptions à renforcer) ouverte **une fois par
+  version et par navigateur**, seulement dans un document déjà installé, pas en lecture seule, jamais par-dessus un assistant (`showNews` de `js/main.js`) ; son
+  bouton « Renforcer la sécurité » ouvre l'onglet Envoyer ou Recevoir. À relever (`NEWS_VERSION`, textes `news.*`) à chaque version qui mérite une fenêtre.
+  Les essais la **désactivent** (`serveWidget({ news })` de `tests/e2e/shared.mjs` réécrit `newsSeen`) sauf `newsSteps`.
+- **Pas couvert, dit** : un Échange d'avant les clés (sa « reprise » tire déjà de nouvelles clés) ; un destinataire en pause (à reprendre d'abord) ; le renvoi de
+  contrôle part pour **tous** les destinataires de l'export (ce qu'ils ont déjà est sans effet chez eux) ; les invitations en attente d'avant les clés restent à
+  refaire (`codeOld`, comme avant).
+- Testé : unit 425 (`engine-reinforce.test.mjs` : états, délai, fin à la première livraison signée, mauvaise signature rejetée même dans le délai, retour arrière,
+  remplacement du webhook et de la clé, réponse d'un autre document refusée) ; e2e `ONLY_RENF=1` (vrai Grist : partage rendu « d'avant » à la main des deux côtés,
+  suggestion, invitation, ancien envoi accepté pendant l'attente, retour à l'ancien fonctionnement, reprise, approbation, un seul webhook et neuf, clé notée, livraison signée
+  reçue, « Partage renforcé », historique) et `ONLY_NEWS=1` (deux écrans, ne revient pas), captures `docs/images/32` à `36`.
+
+## État précédent : V0.20.0 (12 novembre 2026)
 
 V0.20.0 (Antoine, 12 novembre, sur le bouton proposé en 0.15.1 : « ajouter sur la carte de réception un bouton « Ajouter le widget à la page de la table reçue » : oui » ;
 et la question « si un même import est multi table avec sous référence il suffit que le widget soit ouvert dans une table pour gérer tous les imports et les mises à jour ? »).

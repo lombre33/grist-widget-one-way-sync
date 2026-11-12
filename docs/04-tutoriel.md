@@ -590,6 +590,22 @@ d'origine. Deux limites :
 Le widget refuse les **boucles** : renvoyer une table reçue vers le document d'où elle vient, ou
 une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Échange](#échange-dans-les-deux-sens).
 
+## Renforcer la sécurité d'un partage plus ancien
+
+Un partage branché avec une version d'avant les clés de signature (Alpha) **continue de fonctionner, rien n'est obligatoire**. Pour qu'il soit
+protégé comme les nouveaux, chaque partage se renforce une fois, personne par personne :
+
+1. **SOURCE** : onglet Envoyer, sur la ligne du destinataire, « Renforcer la sécurité ». Le widget prépare un nouveau code (valable 7 jours) à lui
+   transmettre. Seules les invitations pas encore acceptées sont à refaire de toute façon.
+2. **CIBLE** : onglet Recevoir, « Accepter une invitation », coller ce code. La même réception reprend, avec ses tables et ses données ; copier le lien
+   du formulaire, puis renvoyer la réponse à la SOURCE. Pendant l'attente, l'ancien envoi continue d'arriver (7 jours au plus). On peut
+   « Revenir à l'ancien fonctionnement » à tout moment, tant que ce n'est pas fini.
+3. **SOURCE** : « Coller la réponse », comparer le code de contrôle, « Approuver et brancher ». Le nouvel envoi remplace l'ancien et un envoi de
+   contrôle part ; à sa première livraison signée, la carte de la CIBLE dit « Partage renforcé ».
+
+Si le délai de 7 jours se termine avant la fin, la carte de la CIBLE dit « Renforcement interrompu » : renvoyer la réponse à la SOURCE, ou revenir à
+l'ancien fonctionnement. Les destinataires en pause se reprennent d'abord ; un Échange d'avant les clés se reprend par une nouvelle invitation.
+
 ## Si quelque chose coince
 
 | Symptôme | Cause probable | Que faire |

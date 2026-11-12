@@ -25,8 +25,9 @@ const TEAM = `${env.grist}/o/${env.team}`;
 
 // --- Widget servi en local (shared.mjs). Le bilan des lignes (tally.js) : le délai de 10 minutes est ramené à
 // 20 secondes pour le test.
+let newsOn = false; // vrai pendant l'essai de la fenêtre des nouveautés (voir newsSteps)
 const server = await serveWidget({
-  env, port: WIDGET_PORT,
+  env, port: WIDGET_PORT, news: () => newsOn,
   adjust(path, body) {
     if (path !== '/js/engine/logic/tally.js') return body;
     const patched = String(body).replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
@@ -855,6 +856,143 @@ try {
     assert.ok(onPages.includes(await viewOf(other)) && !onPages.includes(await viewOf(first)), `la section est sur la page de ${other}, pas sur celle de ${first}`);
     assert.equal(await widget().getByRole('button', { name: /Ajouter le widget à la page/ }).count(), 0, 'le widget est sur la page d\'une table de la réception : plus de bouton');
     step('Ajouter le widget : réception de deux tables, la fenêtre demande laquelle, la section arrive sur la page choisie, le bouton disparaît');
+  }
+
+  // --- Renforcer la sécurité d'un partage d'avant les clés de signature (V0.21) : suggestion des deux côtés, invitation qui
+  // remplace l'envoi, attente de la première livraison signée, retour à l'ancien fonctionnement, puis partage renforcé.
+  async function renfSteps() {
+    const src = await fichesDoc('Renforcer SOURCE');
+    const dst = await newDocWithWidget('Renforcer CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.');
+    await approve(answer, { url: src.url });
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    // Le partage devient « d'avant les clés » : la SOURCE n'a plus de clé pour ce destinataire, la CIBLE ni clé ni sceau.
+    const signRow = (await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'signature');
+    await applyActions(src.doc, [['UpdateRecord', 'Synchro', signRow.id, { Synchro_Colonnes: '' }]]);
+    const columns = await records(dst.doc, '_grist_Tables_column');
+    const keyColumn = columns.find(c => c.colId === 'id_sync');
+    const noteColumn = columns.find(c => c.colId === 'Synchro_Ids' && JSON.parse(c.widgetOptions || '{}').syncNote?.sceau);
+    const noteOf = JSON.parse(noteColumn.widgetOptions);
+    const { sceau, pub, pubSource, ...oldNote } = noteOf.syncNote;
+    await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', keyColumn.id, { widgetOptions: '' }],
+      ['UpdateRecord', '_grist_Tables_column', noteColumn.id, { widgetOptions: JSON.stringify({ ...noteOf, syncNote: oldNote }) }]]);
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Ville: 'Brest' }]]);
+    await waitFor(async () => (await fiches()).Anna?.Ville === 'Brest', 'envoi sans signature reçu comme avant', 90000);
+
+    // Suggestion des deux côtés, rien d'alarmant.
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().locator('[data-renf="suggest"]').waitFor({ timeout: 60000 });
+    await widget().getByText('Renforcer la sécurité (1)').waitFor();
+    assert.equal(await widget().locator('.msg-warn, .msg-err').count(), 0, 'la suggestion n\'est ni un avertissement ni une erreur');
+    await openWidgetTab(dst.url, 'Recevoir');
+    await widget().locator('[data-renf="suggest"]').waitFor({ timeout: 60000 });
+    await widget().getByText('Rien ne s’arrête et rien n’est imposé').waitFor();
+    await shot('32-renforcer-cible-suggestion', 'card');
+
+    // SOURCE : « Renforcer la sécurité » prépare l'invitation qui remplace l'envoi.
+    await openWidgetTab(src.url, 'Envoyer');
+    const oldHooks = (await api('GET', `/docs/${src.doc}/webhooks`)).webhooks.map(h => h.id);
+    await button('Renforcer la sécurité').click();
+    await dialog().getByText('Cette invitation remplace l’ancien envoi').waitFor();
+    const newCode = await dialog().locator('textarea.code').first().inputValue();
+    await dialogButton('Plus tard').click();
+    await widget().getByText(/Renforcement de [\s\S]*invitation du/).waitFor();
+    await widget().getByText('Renforcement : attend sa réponse').waitFor();
+    assert.deepEqual((await api('GET', `/docs/${src.doc}/webhooks`)).webhooks.map(h => h.id), oldHooks, 'l\'ancien envoi continue en attendant');
+
+    // CIBLE : coller le nouveau code reprend la même réception ; l'ancien envoi reste accepté.
+    const reinforce = async () => {
+      await openWidgetTab(dst.url, 'Recevoir');
+      await button('Accepter une invitation').click();
+      await dialog().locator('textarea.code').first().fill(newCode);
+      await dialogButton('Continuer').click();
+      await dialog().getByText(/n’avait pas encore de clé de signature/).waitFor();
+      await dialogButton('Renforcer la sécurité').click();
+      const forms = await publishedForms(dst.doc);
+      const reply = await testLink('Lien du formulaire', await formLink(dst.doc, forms[0]), 'Le lien fonctionne');
+      shownControl = await dialog().locator('.control-code strong').first().textContent();
+      await dialogButton('Fermer').click();
+      return reply;
+    };
+    await reinforce();
+    await widget().locator('[data-renf="pending"]').waitFor({ timeout: 60000 });
+    await widget().getByText(/Les envois de la SOURCE continuent d’arriver comme avant/).waitFor();
+    await shot('33-renforcer-cible-en-cours', 'card');
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Ville: 'Lille' }]]);
+    await waitFor(async () => (await fiches()).Basile?.Ville === 'Lille', 'ancien envoi accepté pendant l\'attente', 90000);
+
+    // Retour à l'ancien fonctionnement : la CIBLE redevient comme avant, l'invitation reste valable ; on recommence.
+    await button('Revenir à l’ancien fonctionnement').click();
+    await dialog().getByText(/redevient telle qu’avant/).waitFor();
+    await dialogButton('Revenir à l’ancien fonctionnement').click();
+    await widget().locator('[data-renf="suggest"]').waitFor({ timeout: 60000 });
+    const reply = await reinforce();
+    await widget().locator('[data-renf="pending"]').waitFor({ timeout: 60000 });
+
+    // SOURCE : approuver la réponse remplace l'envoi (un webhook neuf), puis l'envoi de contrôle part.
+    await openWidget(src.url);
+    await button('Coller la réponse').click();
+    await dialog().locator('textarea.code').first().fill(reply);
+    await dialogButton('Vérifier').click();
+    await dialog().getByText(env.email).waitFor();
+    assert.equal(await dialog().locator('.control-code strong').textContent(), shownControl, 'même code de contrôle des deux côtés');
+    await shot('34-renforcer-source-approuver', 'modal');
+    await dialogButton('Approuver et brancher').click();
+    await dialog().getByText('Nouvel envoi branché').waitFor();
+    await dialog().getByText(/Envoi de contrôle terminé|en attente|déjà en cours|Envoi en file/).waitFor({ timeout: 120000 });
+    await dialogButton('Fermer').click();
+    await dialog().waitFor({ state: 'detached' });
+    const hooks = (await api('GET', `/docs/${src.doc}/webhooks`)).webhooks.map(h => h.id);
+    assert.equal(hooks.length, 1, 'un seul envoi : l\'ancien est remplacé');
+    assert.ok(!oldHooks.includes(hooks[0]), 'le webhook est neuf');
+    assert.ok(Object.keys(JSON.parse((await records(src.doc, 'Synchro')).find(r => r.Synchro_Type === 'signature').Synchro_Colonnes || '{}')).includes(String(hooks[0])), 'la clé du nouvel envoi est notée');
+
+    // La première livraison signée finit le renforcement, sans rien perdre.
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 3, { Ville: 'Metz' }]]);
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await fiches()).Céline?.Ville === 'Metz', 'livraison signée reçue', 120000);
+    await widget().locator('[data-renf="done"]').waitFor({ timeout: 120000 });
+    await widget().getByText(/Partage renforcé le/).waitFor();
+    assert.equal(await widget().getByText('Arrivées suspectes').count(), 0, 'aucune arrivée suspecte');
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().locator('[data-renf="suggest"]').waitFor({ state: 'detached' });
+    const history = widget().locator('details.history', { hasText: 'Historique des envois' });
+    await history.locator('summary').click();
+    await history.getByText(/sécurité renforcée/).waitFor();
+    step('Renforcer la sécurité : suggestion des deux côtés, invitation qui remplace l\'envoi, ancien envoi accepté pendant l\'attente, retour à l\'ancien fonctionnement, approbation, première livraison signée, partage renforcé');
+  }
+
+  // --- Fenêtre des nouveautés : une fois par version, deux écrans, « Plus tard » la ferme pour de bon.
+  async function newsSteps() {
+    newsOn = true;
+    try {
+      const doc = await fichesDoc('Nouveautés');
+      await startExport(doc, 'Fiches', 'Annuaire');
+      await plainInvitation();
+      await rulesSettled(doc.doc);
+      await openWidget(doc.url);
+      await widget().getByRole('heading', { name: 'syncPlus : les nouveautés' }).waitFor({ timeout: 30000 });
+      await widget().getByRole('button', { name: 'Pièces jointes', exact: true }).click();
+      await widget().getByText(/une seule fois par destinataire/).waitFor();
+      await shot('35-nouveautes', 'modal');
+      await dialogButton('Continuer').click();
+      await dialog().getByText('Vos partages actuels continuent de fonctionner').waitFor();
+      await dialog().getByText(/1 export/).waitFor();
+      await shot('36-nouveautes-partages', 'modal');
+      await dialogButton('Plus tard').click();
+      await dialog().waitFor({ state: 'detached' });
+      await openWidget(doc.url); // déjà vue : elle ne revient pas
+      await widget().locator('.topbar').waitFor();
+      await page.waitForTimeout(3000);
+      assert.equal(await dialog().count(), 0, 'les nouveautés ne reviennent pas');
+    } finally {
+      newsOn = false;
+    }
+    step('Nouveautés : une fois par version, deux écrans, ne revient pas');
   }
 
   // --- Export filtré : la liste des choix d'une colonne Choix ne part pas (elle montrerait des
@@ -1890,8 +2028,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2909,6 +3047,8 @@ try {
   await protectSteps();
   await cleanSteps();
   await widgetPageSteps();
+  await renfSteps();
+  await newsSteps();
   await tabSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');

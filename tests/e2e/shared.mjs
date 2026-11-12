@@ -13,7 +13,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 // Le widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées (config.js) et à la
 // politique de sécurité (index.html), comme le ferait une instance qui héberge sa propre copie. `adjust(chemin,
 // corps)` rend le corps à servir : un essai y change une constante (un budget, un délai) quand son scénario l'exige.
-export async function serveWidget({ env, port, adjust = (path, body) => body }) {
+export async function serveWidget({ env, port, adjust = (path, body) => body, news = () => false }) {
   const server = createServer(async (req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     try {
@@ -21,6 +21,9 @@ export async function serveWidget({ env, port, adjust = (path, body) => body }) 
       if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
       if (path === '/js/config.js') body = String(body).replace('GRIST_ORIGINS = [', `GRIST_ORIGINS = ['${env.grist}', `);
       res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+      // La fenêtre des nouveautés (js/news.js) s'ouvre une fois par version dans un document installé : elle gênerait tous les
+      // essais, sauf celui qui la regarde (`news()` vrai).
+      if (path === '/js/news.js' && !news()) body = String(body).replace("readPref('news') === NEWS_VERSION", 'true');
       res.end(adjust(path, body));
     } catch (e) {
       res.writeHead(404); res.end();

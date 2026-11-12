@@ -24,6 +24,7 @@ import { updateJournalNote, upgradeJournal } from './journals.js';
 import { moveNotes } from '../note-move.js';
 import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, restyleOptionActions, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
+import { finishRenf, graceOpen, renfState } from '../logic/reinforce.js';
 import { noteHeldFiles } from '../source/files.js';
 import { attachments, receiveFiles } from './files.js';
 import { styleColumns } from './style.js';
@@ -208,11 +209,15 @@ async function trusted(journal, note, rows, seal) {
 // flot anormal) et la fin de l'envoi annoncée par la SOURCE (`ended`, heure ; effacée si des
 // données arrivent ensuite). Avec la clé de signature, les lignes mal signées sont rejetées. Rend
 // la note à jour, les lignes du journal, et s'il reste des lignes reçues pour le passage suivant.
-async function unpack(journal, { key, seal, note }) {
+async function unpack(journal, { key, seal, note: known }) {
+  let note = known;
   let rows = await fetchRows(journal);
   const raw = rows.filter(isRaw);
   const flood = flooded(journal, raw);
-  const { bad, bare } = key && raw.length ? await checkSigned(raw, key, note.export) : {};
+  // Un partage en cours de renforcement accepte, 7 jours au plus, l'ancien envoi sans signature ; la première
+  // livraison signée avec la nouvelle clé finit le renforcement (voir reinforce.js).
+  const { bad, bare, signed } = key && raw.length ? await checkSigned(raw, key, note.export, { grace: graceOpen(note, nowS()) }) : {};
+  if (signed && ['pending', 'expired'].includes(renfState(note, nowS()))) note = await updateJournalNote(journal, n => finishRenf(n, nowS()));
   const plan = planUnpack(rows, journal, { exportId: note.mode === 'public' ? null : note.export, max: RAW_BATCH, now: nowS(), bad, bare });
   if (plan.actions.length) {
     lastArrival = Date.now();

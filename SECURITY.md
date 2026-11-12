@@ -606,6 +606,14 @@ d'un document :
   le signale et propose de débloquer la file.
 - Sans Redis, la file d'envoi de Grist vit en mémoire : un redémarrage du serveur la perd (le
   widget renvoie ce qui manque à la prochaine ouverture par un propriétaire).
+- **Renforcer la sécurité d'un partage d'avant les clés (0.21, délai de 7 jours)** : un partage branché avant les clés de signature n'a pas de
+  clé propre au destinataire ; rien ne le coupe, il se renforce quand la personne le décide (invitation de la SOURCE qui remplace l'envoi,
+  code collé par la CIBLE, réponse approuvée). **Risque accepté** (décision du porteur, 6 novembre) : entre le code collé par la CIBLE et la
+  première livraison signée avec la nouvelle clé, 7 jours au plus, la CIBLE accepte aussi les envois SANS signature (l'ancien webhook n'est pas
+  encore remplacé) ; une ligne forgée avec la clé du formulaire peut y passer, exactement comme avant le renforcement (qui n'a jamais eu de
+  signature). Une signature fausse reste rejetée, une ligne `fin` non signée n'est jamais tolérée, et le délai écoulé, l'ancien envoi est refusé
+  comme tout envoi non signé (la carte le dit : « Renforcement interrompu »). « Revenir à l'ancien fonctionnement » retire la clé préparée.
+  Un Échange d'avant les clés ne passe pas par là (sa reprise tire déjà de nouvelles clés).
 - **Ce que le journal garde, et le bouton « Effacer l'historique » (0.19.1)** : le journal d'une réception garde la dernière version de
   chaque clé (copie de ce qui est dans la destination), l'avant de chaque modification et le numéro des lignes supprimées (`Sync_Avant`), et les
   valeurs de la dernière version d'une clé supprimée à la SOURCE. Décision du porteur (12 novembre) : aucune purge automatique. Un

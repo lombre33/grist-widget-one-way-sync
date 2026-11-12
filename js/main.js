@@ -5,7 +5,7 @@ import { LANG, t, translatePage } from './i18n.js';
 import { applyTheme, readPref, wizardAsked, writePref } from './prefs.js';
 import { sleep } from './engine/logic/common.js';
 import { ownsSync } from './engine/logic/strays.js';
-import { readSchema } from './grist.js';
+import { isReadOnly, readSchema } from './grist.js';
 import { readSourceNote } from './engine/source/synchro.js';
 import { receivedJournals } from './engine/logic/received.js';
 import { readLost } from './engine/target/lost.js';
@@ -14,9 +14,10 @@ import { startOfferNotice } from './tab-link-ui.js';
 import { diagnostic } from './diagnostic.js';
 import { roleGuide } from './guide.js';
 import { accessHelp, tutorialView } from './tutorial.js';
-import { isOwnerHere, lostSynchro, refreshSource, renderSource } from './source/tab.js';
+import { isOwnerHere, lostSynchro, reinforceFacts, refreshSource, renderSource } from './source/tab.js';
 import { startAutoCatchUp } from './engine/source/resend.js';
-import { receiveOffered, refreshTarget, renderTarget } from './target/tab.js';
+import { receiveOffered, refreshTarget, reinforceReceptions, renderTarget } from './target/tab.js';
+import { newsSeen, openNews } from './news.js';
 import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
 import { startEngine } from './engine/index.js';
 import { syncPort } from './sync-port.js';
@@ -203,6 +204,17 @@ async function openFirstScreen() {
   else if ((await readLost()).length) await select('receive');
   else showHome(await isOwnerHere() === false);
   if (journals.length) consolidateAll();
+  await showNews(schema, journals);
+}
+
+// Les nouveautés, une fois par version : seulement dans un document déjà installé (reçoit ou envoie), jamais pendant un
+// assistant ni sans pouvoir écrire (un lecteur ne renforce rien).
+async function showNews(schema, journals) {
+  const installed = journals.length || (ownsSync(schema) && readSourceNote(schema).exports.length);
+  if (!installed || newsSeen() || document.querySelector('.scrim') || isReadOnly()) return;
+  const [source, receptions] = await Promise.all([reinforceFacts().catch(() => ({})), reinforceReceptions().catch(() => 0)]);
+  if (document.querySelector('.scrim')) return;
+  openNews({ facts: { exports: 0, people: 0, invitations: 0, ...source, receptions }, onGo: tab => select(tab) });
 }
 
 start();

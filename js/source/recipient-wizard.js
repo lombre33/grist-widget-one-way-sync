@@ -17,7 +17,7 @@ import { formWhere, linkFigures } from '../form-link.js';
 import { cancelPendingInvitation } from '../engine/source/actions.js';
 import { rememberDocName, sourceDocName } from '../engine/source/synchro.js';
 import {
-  approveReply, checkReply, enablePublicLink, invitationCode, invitationState, linkReturn, loadPlan, renewInvitation, sendExisting, startInvitation, startReturn,
+  approveReply, checkReply, controlResend, enablePublicLink, invitationCode, invitationState, linkReturn, loadPlan, renewInvitation, sendExisting, startInvitation, startReturn,
 } from '../engine/source/invite.js';
 import { estimateLines, progressTo } from './flow.js';
 import {
@@ -34,14 +34,23 @@ const STEP = { options: 0, invitation: 1, reply: 2, load: 3 };
 const later = laterButton();
 const back = backButton;
 
+// Renforcer la sécurité d'un destinataire (invitation qui en remplace un, `replaces`) : trois étapes, sans les options
+// (on ne change ni le mode ni le niveau de l'export), la dernière est le contrôle au lieu de l'envoi de l'existant.
+const at = (ctx, step) => (ctx.renf ? step - 1 : step);
+
 // `onClose` : appelé à la fermeture (l'onglet se redessine). Une invitation expirée est refaite,
-// après confirmation (voir renew).
-export async function recipientWizard(exp, pending, onClose) {
+// après confirmation (voir renew). `started` : l'invitation qu'un renforcement vient de faire (`entry`, `secret`) :
+// l'assistant s'ouvre sur son code.
+export async function recipientWizard(exp, pending, onClose, started = null) {
   const expired = pending && invitationState(pending) === 'expired';
   if (expired && !(await confirmNewCode())) return null;
-  const steps = ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'].map(k => t(k));
-  const ctx = { exp, steps, onClose, codes: new Map(), wizard: openWizard({ title: t('send.person.title', { name: exp.name }), steps, onClose }) };
+  const renf = Boolean((started || pending || {}).replaces || ((started || {}).entry || {}).replaces);
+  const keys = renf ? ['send.step.invitation', 'send.step.reply', 'send.renf.step.control'] : ['send.step.options', 'send.step.invitation', 'send.step.reply', 'send.step.load'];
+  const steps = keys.map(k => t(k));
+  const title = renf ? t('send.renf.title', { name: exp.name }) : t('send.person.title', { name: exp.name });
+  const ctx = { exp, steps, onClose, renf, codes: new Map(), wizard: openWizard({ title, steps, onClose }) };
   return ctx.wizard.start(() => {
+    if (started) return showInvitation(ctx, started.entry, started.secret);
     if (!pending) return showOptions(ctx);
     if (pending.journal && !pending.ready) return showBack(ctx, pending);
     return expired ? renew(ctx, pending) : showReply(ctx, pending);
@@ -127,10 +136,10 @@ async function showInvitation(ctx, entry, secret, retour = '') {
   // Échange : le code de contrôle de l'envoi de retour, que la CIBLE voit en lisant l'invitation.
   const backCode = control ? controlLine(t('send.invite.backCode'), control) : null;
   const onTab = inviteOnTab(code);
-  ctx.wizard.show(STEP.invitation, [el('p', {}, t('send.invite.help')), codeField(code),
+  ctx.wizard.show(at(ctx, STEP.invitation), [ctx.renf ? message('info', t('send.renf.invite')) : null, el('p', {}, t('send.invite.help')), codeField(code),
     el('p', { class: 'muted small' }, t('send.invite.until', { at: dateText(expire * 1000) })), backCode, handoffButton('target', mode, 1, code), onTab, report,
     stepHelp(['s-invite', 't-code', 't-dest', 't-link', 't-reply']), roleGuide({ you: 'source', mode, current: 1 })],
-  [back(() => run(null, report, () => backToOptions(ctx, entry))), later, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(ctx, entry) }]);
+  [ctx.renf ? cancelButton() : back(() => run(null, report, () => backToOptions(ctx, entry))), later, { label: t('send.reply.ready'), kind: 'btn-primary', onClick: () => showReply(ctx, entry) }]);
   // La réponse de l'autre onglet fait passer à l'étape Réponse, déjà remplie et contrôlée.
   if (onTab) tabLink().awaitReply(entry.id, reply => showReply(ctx, entry, reply), { alive: () => report.isConnected });
 }
@@ -202,11 +211,11 @@ function showReply(ctx, inv, arrived = '') {
     fiche.replaceChildren(...replyFiche(reply, identity),
       ...(inv.renforce ? [el('label', { class: 'check' }, compared, t('send.reply.compared'))] : []));
     const go = () => approve(ctx, inv, reply, compared.checked); // le moteur refuse sans elle en sécurité renforcée
-    ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, go) }]);
+    ctx.wizard.show(at(ctx, STEP.reply), body, [toInvitation, later, { label: t('send.reply.approve'), kind: 'btn-primary', onClick: () => run(null, report, go) }]);
   };
   const toInvitation = back(() => run(null, report, () => backToInvitation(ctx, inv)));
   if (invitationState(inv) === 'expired') report.replaceChildren(message('warn', t('send.invite.expired')));
-  ctx.wizard.show(STEP.reply, body, [toInvitation, later, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
+  ctx.wizard.show(at(ctx, STEP.reply), body, [toInvitation, later, { label: t('send.reply.check'), kind: 'btn-primary', onClick: () => run(null, report, check) }]);
   // La première réponse arrivée de l'autre onglet reste : une autre, différente, ne la remplace pas sous les yeux de la
   // personne (rien n'identifie l'expéditeur d'un message du canal) ; elle peut la recoller elle-même si c'est celle-là.
   let taken = '';
@@ -250,7 +259,22 @@ function replyFiche(reply, { docId, origin }) {
 // Approuver la réponse (approveReply : le webhook et la clé de ce destinataire), puis proposer l'existant.
 async function approve(ctx, inv, reply, compared) {
   await approveReply(ctx.exp, inv, reply, { compared });
-  await showLoad(ctx);
+  await (ctx.renf ? showControl(ctx, inv) : showLoad(ctx));
+}
+
+// 3 (renforcement). Contrôle : le nouvel envoi est branché, l'ancien arrêté. Un renvoi des lignes changées depuis
+// l'invitation fait partir la première livraison signée, que la CIBLE reconnaît pour finir le renforcement. La fenêtre
+// se ferme pendant l'envoi, qui continue.
+async function showControl({ exp, wizard, onClose }, inv) {
+  const report = el('div', { class: 'report' });
+  wizard.show(2, [message('ok', t('send.renf.connected')), el('p', {}, t('send.renf.control')), report, el('p', { class: 'muted small' }, t('send.load.background'))], closeButtons());
+  report.replaceChildren(message('info', t('send.load.start')));
+  await run(null, report, async () => {
+    const n = await controlResend(exp, inv, progressTo(report));
+    if (!report.isConnected) return onClose && onClose();
+    return wizard.show(3, n === null ? message('info', t('send.load.queued')) : message('ok', t('send.renf.done', { n })), closeButtons());
+  });
+  return null;
 }
 
 // 4. Envoi : le branchement n'envoie que les modifications à venir ; proposer l'existant. La

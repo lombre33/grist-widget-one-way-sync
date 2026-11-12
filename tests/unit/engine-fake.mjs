@@ -292,7 +292,7 @@ export function fakeWorld() {
       return {
         list: () => list.map(h => ({ id: h.id, fields: { ...h.fields }, usage: null })),
         create: ({ name, memo, url, tableId, condition }) => {
-          const id = ++counter;
+          const id = `hook-${++counter}`; // une chaîne, comme chez Grist (les clés de signature se rangent sous son identifiant)
           list.push({ id, fields: { name, memo, url, tableId, condition, enabled: true } });
           return id;
         },

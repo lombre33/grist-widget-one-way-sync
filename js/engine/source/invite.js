@@ -21,18 +21,18 @@
 // faut l'avoir comparé (l'écran le demande, le moteur ne le sait pas).
 import { SYNC_TABLE, journalId, nowS, randomHex, sha256 } from '../logic/common.js';
 import { buildInvitation, buildWebhookUrl, loopingTables, parseFormLink, parseReply } from '../logic/codes.js';
-import { exportCondition, exportEmail, hookLabel, hookMemo, hookName, readTables } from '../logic/exports.js';
-import { dropInvitation, putInvitation, setExport } from '../logic/notes.js';
+import { exportCondition, exportEmail, hookLabel, hookMemo, hookName, memoDoc, readTables } from '../logic/exports.js';
+import { dropInvitation, putInvitation, setExport, setPause } from '../logic/notes.js';
 import { codeFacts, controlCode, expiresAt, isExpired, isPrivateKey, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
 import { hiddenTables } from '../logic/acl.js';
 import { receivedDests } from '../logic/received.js';
-import { createWebhook, docIdentity, fetchRows, readSchema, shareInfo, t } from '../port.js';
+import { createWebhook, deleteWebhook, docIdentity, fetchRows, readSchema, shareInfo, t } from '../port.js';
 import { appVersion } from '../version.js';
 import { failure } from '../errors.js';
 import { testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
 import { createJournal, storeKey, updateJournalNote } from '../target/journals.js';
-import { pruneKeys, putRecipientKey, recordEvent, rememberDest, saveExport, sourceFrom, syncRows, updateSourceNote } from './synchro.js';
+import { pruneKeys, putRecipientKey, readHooks, recordEvent, rememberDest, saveExport, sourceFrom, syncRows, updateSourceNote } from './synchro.js';
 import { publicCode } from './actions.js';
 import { resendTables } from './resend.js';
 import { exportEstimate } from './estimate.js';
@@ -53,16 +53,38 @@ async function withKeys(entry) {
 // 1. Une invitation pour un envoi dans un seul sens : secret tiré ici (le code ne le garde nulle part,
 // seulement son empreinte), paire de clés, 7 jours. Une invitation renforcée rend l'export renforcé (plus
 // de lien public). Rend l'export à jour, l'invitation (`entry`, à garder pour la suite) et son secret.
-export async function startInvitation(exp, { renforce = false } = {}) {
+export async function startInvitation(exp, { renforce = false, replaces = '' } = {}) {
   let current = exp;
   if (renforce && !exp.renforce) {
     await updateSourceNote(note => setExport(note, exp.id, { renforce: true }));
     current = { ...exp, renforce: true };
   }
   const secret = randomHex(16);
-  const entry = await withKeys({ id: randomHex(8), export: exp.id, hash: await sha256(secret), at: nowS(), ...(renforce ? { renforce: true } : {}) });
+  const entry = await withKeys({ id: randomHex(8), export: exp.id, hash: await sha256(secret), at: nowS(), ...(renforce ? { renforce: true } : {}), ...(replaces ? { replaces } : {}) });
   await updateSourceNote(note => putInvitation(note, entry));
   return { exp: current, entry, secret };
+}
+
+// Renforcer la sécurité d'un destinataire déjà branché (voir reinforce.js) : une invitation comme les autres, qui
+// porte le webhook qu'elle remplace (`replaces`). À l'approbation de la réponse, un webhook neuf (avec sa clé propre)
+// prend la place de l'ancien, sans avis de fin ; l'export, son historique et la réception de la personne ne changent pas.
+// Seul un destinataire actif d'un envoi dans un seul sens se renforce ici (l'Échange se reprend par sa propre reprise).
+export const canReinforce = (exp, hook) => Boolean(!exp.echange && !exp.public && hook && hook.fields.enabled);
+export async function startReinforcement(exp, hook) {
+  if (!canReinforce(exp, hook)) throw new Error('reinforceNot');
+  return startInvitation(exp, { renforce: Boolean(exp.renforce), replaces: hook.id });
+}
+
+// Le webhook que `inv` remplace, s'il est encore là ; sa personne doit être celle de la réponse (le document dit par
+// Grist, pas par le code), sinon une réponse d'un autre document prendrait la place d'un destinataire. Null sans `replaces`
+// ou si l'ancien webhook a disparu entre-temps (l'invitation vaut alors celle d'un nouveau destinataire).
+async function replacedHook(exp, inv, reply) {
+  if (!inv.replaces) return null;
+  const old = (await readHooks()).of(exp.id).find(h => h.id === inv.replaces);
+  if (!old) return null;
+  const { docId } = memoDoc(old.fields.memo);
+  if (docId && !sameDoc(reply.share.docId, docId)) throw new Error('reinforceOtherDoc');
+  return old;
 }
 
 // Le code à transmettre pour l'invitation `entry` (et son secret). `retour` : l'adresse d'écriture du
@@ -167,12 +189,16 @@ export async function approveReply(exp, inv, reply, { compared = false } = {}) {
   // Sécurité renforcée : le code de contrôle doit avoir été comparé avec la personne (`compared`, case de l'écran).
   if (inv.renforce && !compared) throw new Error('codeNotCompared');
   const r = reply.recipient;
+  const old = await replacedHook(exp, inv, reply);
   await putRecipientKey(exp.id, inv.id, reply.keys.down);
   const memo = hookMemo({ ...r, docName: reply.share.name });
   // Le mémo d'un webhook se lit dans les métadonnées du document : il ne porte qu'un jeton, la fiche reste dans la note.
   const hook = await createWebhook({ name: hookName(exp.name, exp.id), memo: await rememberDest(memo), url: reply.url, tableId: SYNC_TABLE, condition: exportCondition(exp.id) });
-  await recordEvent(exp.id, 'join', { who: hookLabel(memo) });
+  // Renforcement : ni arrivée ni départ dans l'historique (le compte des destinataires ne change pas), un seul événement.
+  await recordEvent(exp.id, old ? 'reinforce' : 'join', { who: hookLabel(memo) });
   await putRecipientKey(exp.id, hook, reply.keys.down, inv.id);
+  // L'ancien envoi s'arrête sans avis de fin : la CIBLE ne doit pas se croire coupée. Le nouveau est déjà branché.
+  if (old) await deleteWebhook(old.id);
   if (inv.journal) {
     await addDeleteColumns(exp.tables.map(tb => tb.table));
     await saveExport(exp.id, exp.tables, { swap: true });
@@ -188,7 +214,8 @@ export async function approveReply(exp, inv, reply, { compared = false } = {}) {
   }
   await updateSourceNote((note) => {
     const rest = dropInvitation(note, inv.id);
-    return inv.journal ? setExport(rest, exp.id, { echange: true }) : rest;
+    const kept = old ? setPause(rest, old.id) : rest;
+    return inv.journal ? setExport(kept, exp.id, { echange: true }) : kept;
   });
   await pruneKeys(exp.id);
   return hook;
@@ -208,3 +235,9 @@ export async function loadPlan(exp) {
 // `progress` reçoit l'avancement, voir resendTables). Rend le nombre de lignes envoyées, ou null si le
 // renvoi attend son tour.
 export const sendExisting = (exp, progress) => resendTables(exp.id, exp.tables.map(tb => tb.table), progress);
+
+// Renforcement : la CIBLE reconnaît le nouvel envoi à sa première livraison signée. Un renvoi de contrôle (ce que les
+// destinataires ont déjà n'est pas touché : une version sans changement est sans effet chez eux) fait partir cette
+// livraison tout de suite, avec ce qui a changé depuis l'invitation. Rend le nombre de lignes envoyées, ou null si le
+// renvoi attend son tour.
+export const controlResend = (exp, inv, progress) => resendTables(exp.id, exp.tables.map(tb => tb.table), progress, inv.at);

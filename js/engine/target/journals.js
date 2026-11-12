@@ -7,7 +7,7 @@ import {
   APPLIED_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, KEY_COL, MISSING_COL, ORDER_COL, RECEIVED_COL, SEAL_COL, STATE_COL,
 } from '../logic/common.js';
 import { syncColumns } from '../logic/formulas.js';
-import { addDestColumnsActions, journalNote, journalNoteAction, storeKeyActions } from '../logic/received.js';
+import { addDestColumnsActions, dropKeyActions, journalNote, journalNoteAction, storeKeyActions } from '../logic/received.js';
 import { apply, readSchema } from '../port.js';
 import { dropPages, hideColumn } from '../pages.js';
 
@@ -41,6 +41,11 @@ export async function upgradeJournal(schema, journal) {
 // Clé de signature notée dans les destinations (voir receivedKey).
 export async function storeKey(tables, slot, key) {
   await apply(storeKeyActions(await readSchema(), tables, slot, key));
+}
+
+// Clé de signature retirée des destinations (voir dropKeyActions).
+export async function dropKey(tables, slot) {
+  await apply(dropKeyActions(await readSchema(), tables, slot));
 }
 
 export async function createJournal(journal, note) {

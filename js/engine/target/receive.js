@@ -13,14 +13,15 @@ import { APPLIED_COL, AUTHOR_COL, EXPORT_COL, LIST_COL, journalId, nowS } from '
 import { buildReply, buildWebhookUrl, parseFormLink, parseInvitation } from '../logic/codes.js';
 import { codeFacts, controlCode, linkKeys, newKeyPair, sameDoc } from '../logic/trust.js';
 import { foreignSync } from '../logic/strays.js';
-import { missingColumns, optionsNote, receivedJournals } from '../logic/received.js';
+import { keySlot, missingColumns, optionsNote, receivedJournals, receivedKey } from '../logic/received.js';
+import { canRevert, revertedNote, startRenf } from '../logic/reinforce.js';
 import { apply, docIdentity, fetchRows, isOwner, readSchema, shareInfo } from '../port.js';
 import { appVersion } from '../version.js';
 import { ensureForm, removeTechnicalTables } from '../pages.js';
 import { testUrl } from '../form-link.js';
 import { wireExchange } from '../exchange.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
-import { createJournal, prepareDest, storeKey, updateJournalNote } from './journals.js';
+import { createJournal, dropKey, prepareDest, storeKey, updateJournalNote } from './journals.js';
 import { consolidateAll } from './loop.js';
 import { checkDests } from './dest.js';
 
@@ -80,6 +81,11 @@ export async function knownReception(invitation) {
 export const canRelink = (known, invitation) => invitation.mode !== 'public' && invitation.mode === (known.note.mode || 'reponse') && !known.note.retour
   && (known.note.from || {}).docId === invitation.from.docId;
 
+// Réception branchée avant les clés de signature (ni sceau ni clé notée) : la renforcer est une suggestion.
+export async function isUnsignedReception(known) {
+  return !known.note.sceau && !receivedKey(await readSchema(), known.journal, known.note);
+}
+
 // Reprend la réception `known` avec la nouvelle invitation : son journal et ses tables restent, les clés
 // de signature sont tirées de nouveau (avec la clé publique de cette invitation). Un Échange rebranche
 // son retour sur la nouvelle adresse. Rend le journal et sa note, pour l'étape du lien.
@@ -88,7 +94,11 @@ export async function relinkReception(known, invitation) {
   const { id, secret, name, renforce } = invitation;
   const from = sourceOf(invitation);
   const keys = await receptionKeys(invitation);
-  await updateJournalNote(known.journal, n => ({ ...n, id, secret, name, from, renforce: renforce || undefined, ...keyNote(invitation, keys) }));
+  // Une réception qui n'a jamais eu de clé (branchée avant les signatures) attend la première livraison signée en
+  // acceptant l'ancien envoi, 7 jours au plus (voir reinforce.js).
+  const wasUnsigned = await isUnsignedReception(known);
+  const now = nowS();
+  await updateJournalNote(known.journal, n => startRenf({ ...n, id, secret, name, from, renforce: renforce || undefined, ...keyNote(invitation, keys) }, wasUnsigned, now));
   await storeKey(known.note.tables.map(tb => tb.dest), invitation.export, keys.down);
   const note = receivedJournals(await readSchema()).find(r => r.journal === known.journal).note;
   if (invitation.mode === 'echange') await wireExchange(note, invitation.retour, keys.up);
@@ -189,4 +199,15 @@ export async function receptionReply({ journal, note }, link) {
     recipient: { email: await myEmail(journal), docId: identity.docId, team: identity.team, at: new Date().toISOString().slice(0, 16).replace('T', ' ') },
   });
   return { code, control: await controlCode(url, note.secret, codeFacts({ renforce: note.renforce, pub: note.pubSource }, note.pub)) };
+}
+
+// « Revenir à l'ancien fonctionnement » : une réception dont le renforcement n'est pas fini (la nouvelle clé n'a jamais
+// signé une livraison) n'avait pas de clé avant lui ; elle l'oublie et accepte de nouveau l'ancien envoi tel quel.
+// Rend la note du journal.
+export async function revertReinforcement(journal) {
+  const schema = await readSchema();
+  const known = receivedJournals(schema).find(r => r.journal === journal);
+  if (!known || !canRevert(known.note, nowS())) throw new Error('revertNone');
+  await dropKey(known.note.tables.map(tb => tb.dest), keySlot(journal, known.note));
+  return updateJournalNote(journal, revertedNote);
 }

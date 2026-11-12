@@ -200,14 +200,32 @@ function parseSigs(text) {
   }
 }
 
+// Ligne d'un type signé qui ne porte aucune signature (ni `"sigs"` ni `"sig"`) : un envoi d'avant la clé, tel que l'ancien
+// webhook d'un partage en cours de renforcement l'envoie encore (voir reinforce.js). L'avis de fin est exclu : il ne coupe
+// une réception que signé.
+export function isUnsigned(row) {
+  const col = SIGNED[row[TYPE_COL]];
+  if (!col || row[TYPE_COL] === KIND.end) return false;
+  const text = typeof row[col] === 'string' ? row[col] : '';
+  return text !== '' && !SIG_TAIL.test(text) && !SIGS_TAIL.test(text);
+}
+
 // Lignes brutes de l'export `exportId` (celles d'un autre export sont laissées au contrôle du
-// dépliage) : { bad (mal signées), bare (listes vides) }, ensembles de numéros de lignes.
-export async function checkSigned(rows, key, exportId) {
-  const out = { bad: new Set(), bare: new Set() };
+// dépliage) : { bad (mal signées), bare (listes vides), signed (nombre de lignes signées avec cette clé), tolerated
+// (nombre de lignes sans signature acceptées) }. `grace` : un partage en cours de renforcement accepte, pour un
+// temps, les envois sans aucune signature (voir reinforce.js) ; une signature fausse reste rejetée.
+export async function checkSigned(rows, key, exportId, { grace = false } = {}) {
+  const out = { bad: new Set(), bare: new Set(), signed: 0, tolerated: 0 };
   for (const row of rows) {
     if (row[EXPORT_COL] !== exportId) continue;
     const verdict = await signature(row, key);
-    if (verdict !== 'ok') out[verdict].add(row.id);
+    if (verdict === 'ok') {
+      if (SIGNED[row[TYPE_COL]]) out.signed++;
+    } else if (verdict === 'bad' && grace && isUnsigned(row)) {
+      out.tolerated++;
+    } else {
+      out[verdict].add(row.id);
+    }
   }
   return out;
 }

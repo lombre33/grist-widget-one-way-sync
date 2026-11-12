@@ -42,11 +42,11 @@ export function dropExport(note, id) {
 // rattrapages, pauses, destinataires), du plus récent au plus ancien, les EVENTS_KEPT derniers.
 // Les envois ordinaires partent de Grist sans le widget : l'état de chaque destinataire (dernier
 // succès, erreur) les dit. `event` : { at (secondes), kind ('join', 'resend', 'catchup', 'unblock',
-// 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'), who (destinataire, ou table pour
+// 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink', 'reinforce'), who (destinataire, ou table pour
 // 'shrink'), n (lignes ou tables) }.
 export const EVENTS_KEPT = 30;
 const WHO_MAX = 80;
-const EVENT_KINDS = ['join', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'];
+const EVENT_KINDS = ['join', 'reinforce', 'resend', 'catchup', 'unblock', 'pause', 'autopause', 'resume', 'revoke', 'edit', 'editSent', 'shrink'];
 export function addEvent(note, exportId, { at, kind, who = '', n = 0 }) {
   const event = { at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(n ? { n } : {}) };
   const before = (note.historique || {})[exportId];

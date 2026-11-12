@@ -14,13 +14,14 @@ import { flowMoves } from '../engine/logic/health.js';
 import { LONG_SECONDS } from '../engine/logic/estimate.js';
 import { deleteWebhook, docIdentity, fetchRows, listWebhooks, publicAccess, readSchema, webhookConditions } from '../grist.js';
 import { expiresAt, unkeyedRecipients } from '../engine/logic/trust.js';
+import { unsignedHooks } from '../engine/logic/reinforce.js';
 import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
 import { protectSync, ruleRefusal, syncRules } from '../engine/acl.js';
 import { ensureSyncTable, identified, isCharge, protectMemos, readHooks, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
 import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.js';
-import { invitationState } from '../engine/source/invite.js';
+import { canReinforce, invitationState, startReinforcement } from '../engine/source/invite.js';
 import { confirmSend, flowView } from './flow.js';
 import { filesPending, resendFiles } from '../engine/source/files.js';
 import { cancelInvitation, clearHistory, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
@@ -32,7 +33,7 @@ import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { hookDoc, hookShown } from './shown.js';
 import { rulesRefusedNotice } from '../rules-notice.js';
-import { confirmDialog, docLink, el, icon, message, noteError, pill, redraw, reloading, run, smallButton } from '../ui.js';
+import { confirmDialog, docLink, el, icon, message, noteError, notice as noticeBox, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
 import { dateText, t } from '../i18n.js';
 import { askWizard, dropWizard, wizardAsked } from '../prefs.js';
@@ -47,6 +48,11 @@ let here = '';
 // La même fiche, le document en lien (nouvel onglet) tant que le lien du destinataire désigne bien le document
 // approuvé : pas de lien quand le contrôle horaire dit le contraire (autre document, adresse qui n'est pas celle d'un
 // formulaire), le texte reste.
+const personNameOf = (exp, inv) => {
+  const h = exp.recipients.find(r => r.id === inv.replaces);
+  return h ? personShown(h) : t('send.renf.someone');
+};
+
 function personWho(h) {
   const { other, bad, docName } = hookCheck(h.id);
   const { who, place, url } = hookDoc(h.fields.memo, docName, other || bad ? '' : here);
@@ -91,6 +97,14 @@ async function loadState() {
   return { ownerOnly, schema, rows, note, exports, unsafe, charge, strays, syncCols, keys, blocker, lost, foreign: !ownerOnly && !lost && foreignSync(schema) };
 }
 
+// Ce que « Vos partages » (js/news.js) annonce : exports, destinataires dont l'envoi se renforce, invitations d'avant les clés (à refaire).
+export async function reinforceFacts() {
+  const { exports, note } = await loadState();
+  const mine = exports.filter(exp => !exp.retour);
+  const people = mine.filter(exp => !exp.echange && !exp.public).reduce((n, exp) => n + exp.recipients.filter(h => exp.unsigned.has(h.id)).length, 0);
+  return { exports: mine.length, people, invitations: note.invitations.filter(inv => !inv.pub && !inv.journal).length };
+}
+
 function exportState(id, { note, rows, schema, acl, recipients }) {
   const mine = rows.filter(r => r[EXPORT_COL] === id);
   const tables = exportTables(rows, id);
@@ -107,6 +121,8 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     ledger: eventsOf(note, id, { all: true }),
     // Destinataires sans clé de signature (ligne 'signature' de Synchro perdue) : leur CIBLE rejette les envois.
     unkeyed: new Set(unkeyedRecipients((mine.find(r => r[TYPE_COL] === KIND.sign) || {})[SCHEMA_COL], recipients.map(h => h.id), eventsOf(note, id, { all: true }).some(e => e.kind === 'join'))),
+    // Destinataires sans clé de signature (envoi d'avant les clés) : leur partage se renforce, par une invitation qui remplace l'envoi.
+    unsigned: new Set(unsignedHooks((mine.find(r => r[TYPE_COL] === KIND.sign) || {})[SCHEMA_COL], recipients)),
     // Tables dont des lignes ou la liste des clés restent à envoyer (voir exportFlow).
     owed: recipients.length ? new Set(mine.filter(r => lotLate(r) || listDue(r)).map(r => r[TABLE_COL])).size : 0,
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
@@ -238,9 +254,15 @@ function resumeExchange(state) {
   if (pending && !resumed && !document.querySelector('.scrim')) openRecipient(...pending);
 }
 
-const openRecipient = (exp, pending = null) => {
+const openRecipient = (exp, pending = null, started = null) => {
   resumed = true;
-  recipientWizard(exp, pending, renderSource);
+  recipientWizard(exp, pending, renderSource, started);
+};
+
+// Renforcer la sécurité de ce destinataire : une invitation qui remplace son envoi (voir reinforce.js).
+const reinforce = async (exp, hook) => {
+  const started = await startReinforcement(exp, hook);
+  openRecipient(started.exp, null, started);
 };
 
 // Bouton d'une carte : grisé pour qui n'est pas propriétaire, ou avec la raison (`reason`).
@@ -309,6 +331,7 @@ function exportCard(exp, state, open, out) {
     el('div', { class: 'card-head' }, el('strong', {}, exp.name), statusPill(status, tone, { n: n + (exp.public ? 1 : 0) })),
     el('p', { class: 'muted small' }, tablesLine(exp)),
     keyNotice(exp, state),
+    reinforceNotice(exp),
     behindNotice(exp, state),
     vanishedNotice(exp),
     shrinkNotices(exp),
@@ -390,11 +413,15 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
     el('div', { class: 'person-head' }, el('span', { class: 'person-who', title: personLabel(h) }, personWho(h)), slot.pill),
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
-    exp.unkeyed.has(h.id) ? message('err', t('send.person.noKey')) : null,
+    // Sans clé de signature : si le renforcement est possible, il est aussi la réparation (un envoi neuf, avec sa clé) ;
+    // l'avis d'erreur ne reste que lorsqu'il ne l'est pas (en pause) ou déjà en cours.
+    exp.unkeyed.has(h.id) && !renfPossible(exp, h) ? message('err', t('send.person.noKey')) : null,
+    reinforceLine(exp, h),
     autoPaused ? message('info', t(autoPaused.why === 'slow' ? 'send.paused.slow' : 'send.paused.auto')) : null,
     status === 'paused' && !autoPaused ? message('info', t('send.paused.manual')) : null,
     slot.lines,
     el('div', { class: 'person-actions' },
+      reinforceable(exp, h) ? smallButton(t('send.renf.action'), 'key', () => run(null, out, () => reinforce(exp, h)), { disabled: ownerOnly }) : null,
       status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
       failing && !waits ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
       action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
@@ -491,6 +518,21 @@ async function tickFlows() {
 // Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et
 // son code peut être refait (nouveau secret) : il n'est gardé nulle part.
 // Une invitation vaut 7 jours : expirée, son code est à refaire.
+// Renforcement de la sécurité (voir engine/logic/reinforce.js) : l'invitation en cours d'un destinataire, ses avis et son bouton.
+const pendingFor = (exp, h) => exp.invitations.find(inv => inv.replaces === h.id);
+const renfPossible = (exp, h) => exp.unsigned.has(h.id) && !exp.echange && !exp.public && Boolean(pendingFor(exp, h) || canReinforce(exp, h));
+const reinforceable = (exp, h) => exp.unsigned.has(h.id) && !pendingFor(exp, h) && canReinforce(exp, h);
+
+function reinforceLine(exp, h) {
+  if (!exp.unsigned.has(h.id) || pendingFor(exp, h) || exp.echange || exp.public) return null;
+  return message('info', t(canReinforce(exp, h) ? 'send.renf.person' : 'send.renf.paused'));
+}
+
+function reinforceNotice(exp) {
+  if (!exp.unsigned.size || exp.echange || exp.public || exp.retour) return null;
+  return noticeBox({ tone: 'info', title: t('send.renf.title.n', { n: exp.unsigned.size }), lines: [t('send.renf.body'), t('send.renf.safe'), t('send.renf.how')], 'data-renf': 'suggest' });
+}
+
 function inviteRow(exp, inv, ownerOnly, out) {
   const state = invitationState(inv);
   const back = state === 'link';
@@ -498,7 +540,8 @@ function inviteRow(exp, inv, ownerOnly, out) {
   const until = t(expired ? 'send.invite.expiredOn' : 'send.invite.until', { at: dateText(expiresAt(inv.at) * 1000) });
   return el('li', { class: 'person' },
     el('div', { class: 'person-head' },
-      el('span', { class: 'person-who' }, t('send.invite.pending', { at: dateText(inv.at * 1000) })), expired ? statusPill('expired', 'err') : statusPill('invited', 'pending')),
+      el('span', { class: 'person-who' }, inv.replaces ? t('send.renf.pending', { who: personNameOf(exp, inv), at: dateText(inv.at * 1000) }) : t('send.invite.pending', { at: dateText(inv.at * 1000) })),
+      expired ? statusPill(inv.replaces ? 'renfExpired' : 'expired', 'err') : statusPill(inv.replaces ? 'renfWait' : 'invited', 'pending')),
     el('p', { class: 'muted small' }, [back ? t('send.mode.echange') : until, inv.renforce ? t('send.renforce.on') : ''].filter(Boolean).join(' · ')),
     el('div', { class: 'person-actions' },
       wizardButton(back ? t('send.back.resume') : expired ? t('send.newCode.ok') : t('send.reply'), back ? 'link' : expired ? 'key' : 'paste', () => openRecipient(exp, inv), { primary: true, ownerOnly }),

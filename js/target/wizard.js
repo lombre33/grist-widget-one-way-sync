@@ -5,7 +5,7 @@ import { VERSION } from '../config.js';
 import { formWhere, linkFigures } from '../form-link.js';
 import { protectSync, syncUnprotected } from '../engine/acl.js';
 import { known } from '../engine/errors.js';
-import { canRelink, checkDestinations, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
+import { canRelink, checkDestinations, isUnsignedReception, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
 import { sourceLine } from './source-line.js';
 import { confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
@@ -84,12 +84,13 @@ const shareText = share => `${share.name} (${[share.folder, share.personal ? t('
 // le même mode. La fiche est montrée avant : la personne confirme que c'est bien la même SOURCE.
 // Un Échange rebranche son retour sur la nouvelle adresse. Les clés de signature sont tirées de
 // nouveau, avec la clé publique de cette invitation.
-function showRelink(ctx, known, invitation) {
+async function showRelink(ctx, known, invitation) {
   if (!canRelink(known, invitation)) throw new Error('alreadyReceived');
+  const reinforcing = await isUnsignedReception(known);
   const report = el('div', { class: 'report' });
-  const relink = async () => showLink(ctx, await relinkReception(known, invitation), message('info', t('recv.relink')));
-  ctx.wizard.show(STEP.dest, [message('info', t('recv.relink.confirm', { name: known.note.name, journal: known.journal })), sourceFiche(invitation, ctx.origin), report],
-    [back(() => showCode(ctx)), cancel, { label: t('recv.relink.ok'), kind: 'btn-primary', onClick: () => run(null, report, relink) }]);
+  const relink = async () => showLink(ctx, await relinkReception(known, invitation), message('info', t(reinforcing ? 'recv.relink.renf' : 'recv.relink')));
+  ctx.wizard.show(STEP.dest, [message('info', t(reinforcing ? 'recv.relink.confirm.renf' : 'recv.relink.confirm', { name: known.note.name, journal: known.journal })), sourceFiche(invitation, ctx.origin), report],
+    [back(() => showCode(ctx)), cancel, { label: t(reinforcing ? 'recv.relink.ok.renf' : 'recv.relink.ok'), kind: 'btn-primary', onClick: () => run(null, report, relink) }]);
 }
 
 // D'où vient une invitation : export, tables, personne et document qui l'ont faite ; pour un
