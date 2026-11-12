@@ -16,11 +16,14 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 ## Conventions d'Antoine
 
 - Répondre en français.
-- **Nom du produit : « syncPlus »** (Antoine, 12 novembre : « Le produit sera syncPlus pour être cohérent avec le reste du
-  naming de GFS »), écrit ainsi partout où une personne le lit (titre de l'écran en français et en anglais, README, tutoriel,
-  diagnostic, consignes à transmettre) et dans la doc de développement. Plus de « Synchro », « Sync », « Synchro Grist », « Grist
-  Sync » ni « Sync+ » comme nom de produit. **Ne changent pas** : la table technique `Synchro` et ses colonnes (formules,
-  webhooks, règles d'accès, codes), la marque `syncPlus` des partages (`MARK_KEY`), l'adresse publique (`WIDGET_URL`).
+- **Nom : « Sync+ » à l'écran, « syncPlus » pour le produit** (Antoine, 12 novembre : « Le produit sera syncPlus pour être
+  cohérent avec le reste du naming de GFS », puis, sur l'écriture montrée : « à l'écran : Sync+ »). **« Sync+ »** : tout ce que le
+  widget affiche (titre de l'onglet et de la barre en français et en anglais, fenêtre des nouveautés, diagnostic, consignes à
+  transmettre, tutoriel intégré) et, dans les README et `docs/04`, le nom à choisir dans la galerie et l'exemple de nom de page.
+  **« syncPlus »** : le produit et le dépôt (titre des README, qui disent une fois « Sync+ à l'écran », doc de développement,
+  commentaires, `GFS-ETAT.md`). Plus de « Synchro », « Sync », « Synchro Grist » ni « Grist Sync » comme nom. **Ne changent pas** :
+  la table technique `Synchro` et ses colonnes (formules, webhooks, règles d'accès, codes), la marque `syncPlus` des partages
+  (`MARK_KEY`), l'adresse publique (`WIDGET_URL`). Une expression régulière d'essai échappe le « + » (`/^Sync\+ …/`).
 - Toute question à choix (2 à 4 options) passe par une carte de décision dédiée quand l'outil
   existe dans la session, jamais par des options écrites dans le corps du texte.
 - Jamais la charte graphique DSFR (réservée aux services de l'État).
@@ -447,6 +450,20 @@ point 2 de sa liste : « adopter les colonnes déjà présentes (aperçu, contr�
 - Testé : unit 466 (`engine-adopt.test.mjs` : aperçu puis « Appliquer », sans colonne commune, réception qui applique seule, table créée, table existante vide, `typeFit`, `fitIssues`, `adoptionStep`,
   `adoptionPreview`) ; e2e `ONLY_ADOPT=1` (`adoptSteps`, vrai Grist : note de type et fenêtre de confirmation dans l'assistant, rien d'écrit avant l'accord, aperçu chiffré, « À valider », « Appliquer »,
   modification suivante sans aperçu ; `SHOTS=<dossier>` fait deux captures).
+
+## État précédent : V0.22.1 (12 novembre 2026)
+
+V0.22.1 (Antoine, 12 novembre, en réponse à « si tu préfères « Sync+ » ou « SyncPlus » à l'écran, dis-le » : « à l'écran : Sync+ »).
+Textes seulement, **moteur inchangé (4.6.0)**, aucun comportement ne change.
+- **À l'écran, « Sync+ »** : `index.html` (titre de l'onglet et de la barre), `app.title`, `news.title`, `diag.title`, `guide.install`
+  (fr et en), tutoriel intégré (`i18n/tutorial.json` : nom dans la galerie, exemple de nom de page), et les mêmes deux endroits de
+  `docs/04` et des README. Le produit et le dépôt restent « syncPlus » (titre des README, avec « Sync+ à l'écran » dit une fois).
+  Voir « Conventions d'Antoine ». Barre du haut mesurée à 700, 420, 380 et 360 px en français et en anglais : rien ne déborde.
+- **À aligner à la publication (pas ici, Alpha et grist-factory gelés)** : le nom de l'entrée dans la galerie de widgets vient du
+  manifeste de grist-factory ; le tutoriel dit « Choisir Sync+ dans la galerie ».
+- Essais liés au nom : `diagnostic.test.mjs`, `engine-flow.test.mjs`, `betises.mjs` (préfixe de l'écran), `run.mjs` (titre des
+  nouveautés). Captures refaites (`CAPTURES=1`, parcours complet vert, 74 étapes, lancé juste avant la reprise de la 0.22.0) : elles
+  montrent la barre « Sync+ ».
 
 ## État précédent : V0.22.0 (12 novembre 2026)
 

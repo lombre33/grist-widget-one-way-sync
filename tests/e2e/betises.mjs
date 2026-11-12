@@ -24,7 +24,7 @@ async function read(view, url, tab, shot = '') {
     else await view.open(url);
     await sleep(tab ? 6000 : 12000);
     if (shot) await shootPage(view, shot);
-    return flat(await view.text()).replace(/^syncPlus Envoyer Recevoir Tutoriel/, '').trim().slice(0, 1100);
+    return flat(await view.text()).replace(/^Sync\+ Envoyer Recevoir Tutoriel/, '').trim().slice(0, 1100);
   } catch (e) {
     const body = flat(await view.page.locator('body').innerText().catch(() => ''));
     return `[le widget ne s'affiche pas : ${e.message.split('\n')[0]}] page : ${body.slice(0, 300)}`;
@@ -216,13 +216,13 @@ async function runPerson(name, spec) {
     if (spec.first) {
       await sleep(6000);
       const first = flat(await view.text());
-      log(`[${name}] premier écran : ${first.replace(/^syncPlus Envoyer Recevoir Tutoriel/, '').trim().slice(0, 700)}`);
+      log(`[${name}] premier écran : ${first.replace(/^Sync\+ Envoyer Recevoir Tutoriel/, '').trim().slice(0, 700)}`);
       log(`[${name}] ATTENDU au premier écran (${spec.first}) : ${spec.first.test(first) ? 'OUI' : 'NON'}`);
     }
     for (const tab of spec.doc === 'src' ? ['Envoyer', 'Recevoir'] : ['Recevoir', 'Envoyer']) {
       await view.widget().getByRole('tab', { name: tab }).click({ timeout: 10000 }).catch(() => {});
       await sleep(7000);
-      log(`[${name}] onglet ${tab} : ${flat(await view.text()).replace(/^syncPlus Envoyer Recevoir Tutoriel/, '').trim().slice(0, 900)}`);
+      log(`[${name}] onglet ${tab} : ${flat(await view.text()).replace(/^Sync\+ Envoyer Recevoir Tutoriel/, '').trim().slice(0, 900)}`);
       await shootPage(view, `${name}-${tab}`);
     }
   } catch (e) {

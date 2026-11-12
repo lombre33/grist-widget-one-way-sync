@@ -18,8 +18,8 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 ## What it does
 
 A team keeps a reference table in Grist (contacts, sites, a classification) and other teams need
-it in their own documents. syncPlus sends them a copy they can build on, and updates it whenever
-a row is added, changed or deleted in the original.
+it in their own documents. syncPlus (shown as “Sync+” on screen) sends them a copy they can build
+on, and updates it whenever a row is added, changed or deleted in the original.
 
 - **Nothing to host**: Grist itself carries the changes, even when nobody has the document open.
 - **You choose what leaves**: the tables, the columns and, optionally, the rows.
@@ -176,7 +176,7 @@ another instance, if the widget says on connecting that it "does not allow webho
 address", write to its administrator and ask for the instance's address to be added to the list of
 allowed webhook domains (Grist's `ALLOWED_WEBHOOK_DOMAINS` setting).
 
-1. In each document: **Add New**, **Add Page**, **Custom** widget. Pick syncPlus from the
+1. In each document: **Add New**, **Add Page**, **Custom** widget. Pick Sync+ from the
    instance's **gallery** if it is there; otherwise **Custom URL** and the official address,
    `https://grist-factory.github.io/grist-widget-syncPlus/`, never an address received by email.
    Then **Add Widget**.
