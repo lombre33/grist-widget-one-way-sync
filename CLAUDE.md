@@ -408,11 +408,11 @@ bas ce qui a été codé en attendant, et la mémoire du projet pour les répons
   `ONLY_FORMAT=1` (`formatSteps`, vrai Grist 1.7) : réception de `1 234,50 €` avec en-tête, devise euro et règle rouge sur la ligne
   négative, avis de langue, « Annuler » ne règle rien, clic confirmé règle `fr-FR` sans toucher `engine`, retouche (USD, règle retirée)
   gardée, « Reprendre la mise en forme » sans doubler la règle, case décochée dans « Modifier ».
-- Les cartes de décision (sens de la reprise : complète seulement / suivre en continu ; langue : sur clic / à l'acceptation ; règles
-  conditionnelles : oui / non) n'avaient pas de réponse à la fin de cette session : le codage suit les recommandations (complète seulement,
-  sur clic d'un propriétaire, règles réécrites). Si Antoine choisit autrement : « suivre en continu » = une option de la CIBLE qui lève
-  `styled` à chaque changement de la description ; « à l'acceptation » = une case dans l'assistant CIBLE qui appelle `alignDocFormat` ;
-  « pas de règles » = vider `sentRules` côté SOURCE.
+- Cartes de décision. **Sens de la reprise : Antoine a choisi le 12 novembre « Compléter + bouton Reprendre »**, ce qui est codé (complète
+  seulement, retouche gardée, bouton « Reprendre la mise en forme »). Langue (sur clic d'un propriétaire / à l'acceptation) et règles
+  conditionnelles (oui / non) : sans réponse à ce jour, le codage suit les recommandations (clic d'un propriétaire, règles réécrites). Si
+  Antoine choisit autrement : « à l'acceptation » = une case dans l'assistant CIBLE qui appelle `alignDocFormat` ; « pas de règles » =
+  vider `sentRules` côté SOURCE (« suivre en continu », non retenu, aurait été une option de la CIBLE levant `styled` à chaque changement).
 
 ## État précédent : V0.15.3 (11 novembre 2026)
 
