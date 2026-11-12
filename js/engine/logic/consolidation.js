@@ -115,7 +115,7 @@ export function addedColumns({ columns = [], map = {}, addedCols = [] }, next, a
 // Grist commence par la marque 'L'.
 // Un nombre reçu et le même nombre écrit en texte sont égaux : une Référence qui n'affiche que le
 // numéro de ligne (ou une colonne numérique) part en nombre, et la colonne Texte d'ici le garde en texte.
-function sameValue(sent, have) {
+export function sameValue(sent, have) {
   const norm = x => (isBlank(x) ? null : Array.isArray(x) && x[0] === 'L' ? x.slice(1) : x);
   const [a, b] = [norm(sent), norm(have)];
   if (typeof a === 'number' && typeof b === 'string') return String(a) === b;
@@ -439,7 +439,7 @@ export function planConsolidation({
     actions: [
       ...consolidationActions({ destTable, journalTable, copyCols, exchange, deleteCol: ctx.deleteCol, archive: archive && !exchange, uncheck: archived.size > 0 || (archive && !exchange) }, { ...plan, removeIds, listGone, leftGone }),
     ],
-    stats: plan.stats, gone,
+    stats: plan.stats, gone, attached: plan.attached,
     pending: plan.pending.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     waiting: plan.waiting.map(item => ({ ...item, n: numbers.get(item.key) || null })),
     fix: { actions: fixActions(destTable, plan.fixes, copyCols, ctx.deleteCol, now), keys: plan.fixes.map(f => f.key) },

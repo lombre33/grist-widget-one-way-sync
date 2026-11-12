@@ -185,7 +185,8 @@ function cardStatus(group) {
   if (reinforceKind(group) === 'expired') return ['error', 'err'];
   const tables = note.tables.map(tb => state.results.get(tableKey(journal, tb.table)) || {});
   if ((state.results.get(journal) || {}).error || tables.some(r => r.error)) return ['error', 'err'];
-  if (tables.some(r => r.pendingCount)) return ['review', 'pending'];
+  // Changements d'un Échange à valider, colonnes ou table déjà remplie qui attendent l'accord de la personne (voir structure.js).
+  if (tables.some(r => r.pendingCount || (r.structure && (r.structure.adoption || r.structure.held.length)))) return ['review', 'pending'];
   const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && (r.files.waiting || r.files.held));
   return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
 }

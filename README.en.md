@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.22.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.23.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -121,7 +121,7 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   cannot read them, no longer in their description; the `id_sync` column of received tables is hidden from readers
   by an access rule. An older document is moved the next time an owner or an editor opens it. See `SECURITY.md`,
   “What a reader or the public link sees”.
-- **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
+- **Destinations of your choice**: new or existing table, matched columns, existing rows linked. A table that already has rows is not touched before a preview (rows added, attached, values replaced) that you accept on the card, and a column type that does not suit is flagged.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET
   stays that way until the row changes again in the SOURCE, and the card flags it about ten

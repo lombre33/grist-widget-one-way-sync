@@ -7,13 +7,14 @@ import { exportSchema } from '../engine/logic/codes.js';
 import { exportableColumns } from '../engine/logic/exports.js';
 import { wireExchange } from '../engine/exchange.js';
 import { destColumns } from '../engine/logic/journal.js';
+import { fitIssues } from '../engine/logic/adopt.js';
 import { checkDests } from '../engine/target/dest.js';
 import { prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
 import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { consolidateAll } from '../engine/target/loop.js';
 import { backButton, confirmDialog, el, laterButton, message, openModal, pickField, run } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
-import { t } from '../i18n.js';
+import { t, typeName } from '../i18n.js';
 
 // Choix de la destination d'une table. `dest()` rend son nom : une table existante, ou le nom
 // tapé (un nom qui est celui d'une table existante, aux majuscules près, désigne cette table). Une
@@ -34,33 +35,55 @@ export function destField(schema, table) {
 }
 
 // Colonne qui reçoit chaque colonne envoyée (la même, une autre, ou une nouvelle), et colonne
-// commune qui rattache les lignes déjà là au lieu de les doubler. `read()` rend { map, match }.
+// commune qui rattache les lignes déjà là au lieu de les doubler. `read()` rend { map, match } ;
+// `issues()` : les colonnes d'ici dont le type ne convient pas à ce qui est envoyé (voir fitIssues), dites
+// sous les champs à mesure que la personne choisit, et à confirmer avant de continuer (`confirmFit`).
 export function mappingBlock(schema, table, dest, columns) {
-  const destCols = schema.columns(dest).filter(c => !c.isFormula && c.colId !== KEY_COL).map(c => c.colId);
+  const hereCols = schema.columns(dest);
+  const destCols = hereCols.filter(c => !c.isFormula && c.colId !== KEY_COL).map(c => c.colId);
+  const notes = el('div', { class: 'fit-notes' });
+  const refresh = () => notes.replaceChildren(...fitIssues(columns, mapNow(), hereCols).map(issue => el('p', {
+    class: `small msg msg-${issue.level === 'bad' ? 'err' : 'warn'}`, role: 'status',
+  }, fitText(issue))));
   const maps = destColumns(columns).map(c => ({
     id: c.id,
     field: pickField({
       label: c.id, value: destCols.includes(c.id) ? c.id : '',
       items: [...(destCols.includes(c.id) ? [] : [{ value: '', label: t('recv.col.new', { col: c.id }) }]), ...destCols.map(d => ({ value: d, label: d }))],
+      onChange: refresh,
     }),
   }));
+  const mapNow = () => Object.fromEntries(maps.map(m => [m.id, m.field.value() || m.id]));
   const match = pickField({
     label: t('recv.match'), value: '',
     items: [{ value: '', label: t('recv.match.none') }, ...destCols.map(d => ({ value: d, label: d }))],
   });
+  refresh();
   const node = el('div', { class: 'form' },
     el('h3', {}, `${table} → ${dest}`),
     ...maps.map(m => el('div', { class: 'dest-row' }, el('span', {}, `${m.id} →`), m.field)),
+    notes,
     el('label', {}, t('recv.match')), match,
     el('p', { class: 'muted small' }, t('recv.match.help')));
   const read = () => {
-    const map = Object.fromEntries(maps.map(m => [m.id, m.field.value() || m.id]));
+    const map = mapNow();
     const targets = Object.values(map);
     if (new Set(targets).size !== targets.length) throw new Error('mapTwice');
     if (match.value() && !targets.includes(match.value())) throw new Error('matchUnmapped');
     return { map, match: match.value() };
   };
-  return { node, read };
+  return { node, read, issues: () => fitIssues(columns, mapNow(), hereCols) };
+}
+
+const fitText = issue => t(`recv.fit.${issue.level}`, { col: issue.id, to: issue.to, sent: typeName(issue.sent), here: typeName(issue.here) });
+
+// Types qui ne correspondent pas (voir fitIssues) : rien ne se fait sans que la personne le sache. Rend vrai si elle continue.
+export async function confirmFit(issues) {
+  if (!issues.length) return true;
+  return confirmDialog({
+    title: t('recv.fit.title'), body: [el('p', {}, t('recv.fit.body')), el('ul', { class: 'small' }, ...issues.map(issue => el('li', {}, fitText(issue))))],
+    confirmLabel: t('recv.fit.ok'),
+  });
 }
 
 // Table qui n'existe pas encore (`dests`) : le widget la crée, avec sa propre page, et n'y est pas. Il ne
@@ -102,7 +125,9 @@ export async function offerDialog(group, offer, onDone) {
     await onDone();
   };
   const accept = async (picked, m) => {
-    const entry = { ...picked, own: missingColumns(await readSchema(), picked.dest, offer.columns, picked.map || {}) };
+    const before = await readSchema();
+    // Réception qui demande l'accord, table qui existait : sa première recopie attend un aperçu (voir adopt.js).
+    const entry = { ...picked, own: missingColumns(before, picked.dest, offer.columns, picked.map || {}), ...(group.note.ask && !exchange && before.has(picked.dest) ? { adopt: true } : {}) };
     await prepareDest({ dest: entry.dest, columns: offer.columns, map: entry.map });
     await storeKey([entry.dest], keySlot(group.journal, group.note), receivedKey(await readSchema(), group.journal, group.note));
     // Deux éditeurs qui rangent la même table : la première réponse compte.
@@ -132,7 +157,7 @@ export async function offerDialog(group, offer, onDone) {
     m.setButtons([backButton(() => { step.replaceChildren(first); m.setButtons(buttons); }),
       { label: t('recv.offer.accept'), kind: 'btn-primary', onClick: mm => run(null, report, () => {
         const { map, match } = mapping.read();
-        return accept({ ...entry, map, ...(match ? { match } : {}) }, mm);
+        return confirmFit(mapping.issues()).then(go => (go ? accept({ ...entry, map, ...(match ? { match } : {}) }, mm) : null));
       }) }]);
     return null;
   };

@@ -963,5 +963,20 @@
   "recv.formulas.problem.missingCol": "names the column “{name}”, which is not in this document",
   "recv.formulas.problem.renamedCol": "names the column “{name}”, which is called “{to}” here",
   "recv.formulas.problem.foreignTable": "names the table “{name}”, which is not a table of this export",
-  "recv.formulas.problem.renamedTable": "names the table “{name}”, which is called “{to}” here"
+  "recv.formulas.problem.renamedTable": "names the table “{name}”, which is called “{to}” here",
+  "recv.adopt.title": "“{dest}” already has rows: nothing is written to it yet",
+  "recv.adopt.body": "Here is what will happen if you apply, based on the rows received so far (more may still arrive). Your rows only change with your agreement.",
+  "recv.adopt.table": "{table} → {dest}",
+  "recv.adopt.add": "{n} {n|row will be added|rows will be added}.",
+  "recv.adopt.attach": "{n} {n|row here will be attached|rows here will be attached} to the SOURCE’s by column “{match}” (same value).",
+  "recv.adopt.over": "{n} {n|value here will be replaced|values here will be replaced} by the SOURCE’s.",
+  "recv.adopt.fill": "{n} {n|empty cell will be filled|empty cells will be filled}.",
+  "recv.adopt.untouched": "{n} {n|row here does|rows here do} not move: {n|it stays|they stay} as {n|it is|they are}.",
+  "recv.adopt.sample": "“{key}”: {col} goes from “{here}” to “{sent}”.",
+  "recv.adopt.nomatch": "No common column was chosen to attach rows: if these rows already exist here they will be duplicated. Cancel the reception and start again choosing the common column to avoid that.",
+  "recv.fit.risky": "{col} → {to}: the SOURCE sends type {sent}, the column here is of type {here}. Values that do not fit are kept, but marked invalid by Grist.",
+  "recv.fit.bad": "{col} → {to}: the SOURCE sends type {sent}, the column here is of type {here}, which cannot receive these values. Choose another column or a new one.",
+  "recv.fit.title": "Some column types do not match",
+  "recv.fit.body": "Nothing is changed in your columns, but these values may be invalid or unusable:",
+  "recv.fit.ok": "Continue anyway"
 }

@@ -18,6 +18,7 @@ import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short, waitingVersions } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
 import { backfillActions, acknowledged, structureChanges } from '../logic/structure.js';
+import { adoptionPreview, adoptionStep } from '../logic/adopt.js';
 import { formulaColumns } from './formulas.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
@@ -347,6 +348,14 @@ async function copyTable(ctx, noted) {
   const rows = resolveLinks(resolveRows(tableRows, fileCols.map(([from]) => from), present), links, lookups);
   const destRows = await fetchRows(entry.dest);
   const plan = planTable(ctx, entry, { rows, destRows, copyCols, waiting });
+  // Table qui existait avant la réception, dans une réception qui demande l'accord : rien n'y est écrit avant que la personne ait vu
+  // ce qui arriverait aux lignes déjà là (voir adopt.js).
+  const adopting = adoptionStep(ctx, entry, destRows);
+  if (adopting === 'hold' && plan.stats.added + plan.stats.updated > 0) {
+    const adoption = adoptionPreview(plan, { copyCols, destRows, match: entry.match || '' });
+    return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, formulas, structure: { held: [], gone: [], retyped: [], ...structure, adoption },
+      numbers: rowNumbers(destRows), drift: [], pending: [], gaps: [], files: null, wrote: false };
+  }
   const presentKeys = new Set([...present.keys()].map(short));
   // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent ensuite
   // complètent les cellules (fillActions). Pas en Échange : une version n'y est écrite qu'avec tous ses
@@ -368,7 +377,7 @@ async function copyTable(ctx, noted) {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
-  return { entry: { ...entry, waiting: files.waiting }, stats: plan.stats, copyCols, types, dropped, links, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
+  return { entry: { ...entry, waiting: files.waiting, ...(adopting === 'mark' ? { adopted: true } : {}) }, stats: plan.stats, copyCols, types, dropped, links, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
 
 // Pour chaque table d'ici visée par une Référence : ses lignes (voir targetRows).
@@ -456,8 +465,8 @@ async function copyContext(schema, journal, note, groups) {
 // pendant le passage (fenêtres de l'onglet) reste.
 async function saveEntries(journal, updates) {
   if (!updates.size) return;
-  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack }) => JSON.parse(JSON.stringify({
-    dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack,
+  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack, adopted }) => JSON.parse(JSON.stringify({
+    dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack, adopted,
   }));
   const merged = n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, dropped: undefined, waiting: undefined, sends: undefined, ...noted(updates.get(tb.table)) } : tb)) });
   await followExchange(await updateJournalNote(journal, merged));

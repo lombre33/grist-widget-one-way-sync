@@ -963,5 +963,20 @@
   "recv.formulas.problem.missingCol": "cite la colonne « {name} », qui n’est pas dans ce document",
   "recv.formulas.problem.renamedCol": "cite la colonne « {name} », qui s’appelle « {to} » ici",
   "recv.formulas.problem.foreignTable": "cite la table « {name} », qui n’est pas une table de cet export",
-  "recv.formulas.problem.renamedTable": "cite la table « {name} », qui s’appelle « {to} » ici"
+  "recv.formulas.problem.renamedTable": "cite la table « {name} », qui s’appelle « {to} » ici",
+  "recv.adopt.title": "« {dest} » contient déjà des lignes : rien n’y est encore écrit",
+  "recv.adopt.body": "Voici ce qui se passera si vous appliquez, d’après les lignes reçues pour l’instant (d’autres peuvent encore arriver). Vos lignes ne changent qu’avec votre accord.",
+  "recv.adopt.table": "{table} → {dest}",
+  "recv.adopt.add": "{n} {n|ligne sera ajoutée|lignes seront ajoutées}.",
+  "recv.adopt.attach": "{n} {n|ligne d’ici sera rattachée|lignes d’ici seront rattachées} à celles de la SOURCE par la colonne « {match} » (même valeur).",
+  "recv.adopt.over": "{n} {n|valeur d’ici sera remplacée|valeurs d’ici seront remplacées} par celles de la SOURCE.",
+  "recv.adopt.fill": "{n} {n|cellule vide sera remplie|cellules vides seront remplies}.",
+  "recv.adopt.untouched": "{n} {n|ligne d’ici ne bouge|lignes d’ici ne bougent} pas : {n|elle reste|elles restent} comme {n|elle est|elles sont}.",
+  "recv.adopt.sample": "« {key} » : {col} passe de « {here} » à « {sent} ».",
+  "recv.adopt.nomatch": "Aucune colonne commune n’a été choisie pour rattacher les lignes : si ces lignes existent déjà ici, elles seront en double. Annulez la réception et recommencez en choisissant la colonne commune pour éviter cela.",
+  "recv.fit.risky": "{col} → {to} : la SOURCE envoie le type {sent}, la colonne d’ici est de type {here}. Les valeurs qui ne conviennent pas seront gardées, mais marquées invalides par Grist.",
+  "recv.fit.bad": "{col} → {to} : la SOURCE envoie le type {sent}, la colonne d’ici est de type {here}, qui ne peut pas recevoir ces valeurs. Choisissez une autre colonne ou une nouvelle.",
+  "recv.fit.title": "Des types de colonnes ne correspondent pas",
+  "recv.fit.body": "Rien n’est modifié dans vos colonnes, mais ces valeurs risquent d’être invalides ou inutilisables :",
+  "recv.fit.ok": "Continuer quand même"
 }

@@ -152,7 +152,17 @@
 //         `auto`, lève `ask`. Les autres changements ne se décident pas ici et sont seulement dits (`structureChanges` : `gone` colonne que la
 //         SOURCE n'envoie plus, `retyped` type changé pour une colonne créée par le widget), acquittés dans `ack`. `tableResult` rend
 //         `structure`. Ni Échange ni lien public.
-export const ENGINE_VERSION = '4.6.0';
+// 4.7.0 (12 novembre 2026, syncPlus 0.23.0, demande du porteur : « si je choisis une table existante déjà avec les bonnes colonnes ou mapping avec
+//         déjà de la data, que se passe-t-il ? » puis « aperçu, contrôle de type, alerte ») : mineure, rien n'est ajouté au port ni aux tables,
+//         `CODE_FORMAT` et texte des formules de `Synchro` inchangés. `logic/adopt.js` : `typeFit` / `fitIssues` (le type de chaque colonne d'ici qui
+//         reçoit une colonne envoyée : 'same', 'fine', 'risky', 'bad'), `adoptionStep` / `adoptionPreview`. Une réception qui demande l'accord (`ask`)
+//         note `adopt: true` dans l'entrée d'une destination qui existait avant elle (`receptionNote` ; `offerDialog` pour une table rangée plus
+//         tard) ; sa première recopie n'écrit rien (`copyTable`, 'hold') quand elle ajouterait ou modifierait des lignes dans une table qui a déjà
+//         des lignes : `structure.adoption` du résultat de la table dit ce qui arriverait (lignes ajoutées, rattachées par `match`, valeurs remplacées,
+//         cellules remplies, lignes qui ne bougent pas, exemples). `approveStructure` écrit et note `adopted: true` (`noted` de `saveEntries`) ; une
+//         réception qui applique seule, ou une destination vide, note `adopted` à la première recopie sans rien retenir. Une note sans `ask` ou sans
+//         `adopt` ne change pas (réceptions d'avant, GFS qui ne passe pas `options.ask`). `planConsolidation` rend aussi `attached`, `sameValue` est exportée.
+export const ENGINE_VERSION = '4.7.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

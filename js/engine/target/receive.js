@@ -137,7 +137,11 @@ function receptionNote(invitation, plans, keys, before, { reserve, options }) {
     ...(mode === 'public' ? { mode, base: invitation.base } : mode === 'echange' ? { mode } : {}),
     ...(invitation.renforce ? { renforce: true } : {}), ...(reserve !== false ? { reserve: true } : {}), ...(keys ? keyNote(invitation, keys) : {}),
     ...(mode === 'echange' ? {} : optionsNote(options || {})),
-    tables: plans.map(p => ({ table: p.tb.table, dest: p.dest, columns: p.tb.columns, own: own(p), ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}) })),
+    tables: plans.map(p => ({
+      table: p.tb.table, dest: p.dest, columns: p.tb.columns, own: own(p), ...(p.map ? { map: p.map } : {}), ...(p.match ? { match: p.match } : {}),
+      // Destination qui existait déjà, réception qui demande l'accord : sa première recopie attend un aperçu (voir adopt.js).
+      ...(options && options.ask && mode !== 'echange' && mode !== 'public' && before.has(p.dest) ? { adopt: true } : {}),
+    })),
     refused: [], missing: {},
   };
 }

@@ -7,7 +7,7 @@ import { protectSync, syncUnprotected } from '../engine/acl.js';
 import { known } from '../engine/errors.js';
 import { canRelink, checkDestinations, isUnsignedReception, createReception, knownReception, mustCompare, readInvitation, receptionReply, relinkReception, sourceOf, undoReception } from '../engine/target/receive.js';
 import { sourceLine } from './source-line.js';
-import { confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
+import { confirmFit, confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,
 } from '../ui.js';
@@ -152,6 +152,7 @@ function showColumns(ctx, invitation, plans, schema) {
   const blocks = plans.filter(p => schema.has(p.dest)).map(p => ({ p, block: mappingBlock(schema, p.tb.table, p.dest, p.tb.columns) }));
   const next = async () => {
     for (const { p, block } of blocks) Object.assign(p, block.read());
+    if (!(await confirmFit(blocks.flatMap(({ block }) => block.issues())))) return null;
     if (invitation.mode === 'echange' && !(await confirmOutgoing(schema, plans.map(p => p.dest), shareText(invitation.share)))) return null;
     return create(ctx, invitation, plans);
   };

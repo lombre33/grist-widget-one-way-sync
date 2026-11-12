@@ -1167,6 +1167,64 @@ try {
     await dialogButton('Annuler').click();
     step('Structure : « Appliquer, puis traiter automatiquement » (avec confirmation) ne demande plus ; la colonne suivante est créée seule et « Options » le montre');
   }
+  // --- Table déjà remplie : la CIBLE choisit une table qui existe, avec ses lignes. Le type de chaque colonne d'ici qui ne convient pas est
+  // dit sous le champ et à confirmer ; une réception qui demande l'accord n'écrit rien avant d'avoir montré ce qui arriverait aux lignes déjà
+  // là (ajoutées, rattachées, valeurs remplacées, lignes qui ne bougent pas) ; « Appliquer » le fait ; ensuite les modifications passent seules.
+  async function adoptSteps() {
+    const src = await fichesDoc('Adopte SOURCE');
+    const dst = await newDocWithWidget('Adopte CIBLE', [
+      ['AddTable', 'Annuaire', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Numeric' }]],
+      ['BulkAddRecord', 'Annuaire', [null, null], { Nom: ['Anna', 'Zoé'], Ville: [12, 7] }],
+    ]);
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    await pasteInvitation(dst.url, code);
+    await dialog().getByText('« Annuaire » : table Fiches.').waitFor();
+    await dialog().getByText('Options avancées').click();
+    assert.ok(!(await dialog().getByRole('checkbox', { name: AUTO_BOX }).isChecked()), 'la réception demande l\'accord, d\'emblée');
+    await pick('Fiches', 'Annuaire');
+    await dialogButton('Continuer').click();
+    await dialog().getByText(/Choisissez la colonne qui reçoit chaque colonne envoyée/).waitFor();
+    await dialog().getByText(/Ville\s→\sVille\s:\sla SOURCE envoie le type Texte, la colonne d’ici est de type Numérique/).waitFor();
+    await pick('Rattacher les lignes déjà là par la colonne', 'Nom');
+    if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'adopte-1-types.png') });
+    await dialogButton('Créer les tables').click();
+    await dialog().getByText('Des types de colonnes ne correspondent pas').waitFor();
+    await dialogButton('Continuer quand même').click();
+    const forms = await waitFor(async () => { const f = await publishedForms(dst.doc); return f.length === 1 && f; }, 'formulaire publié');
+    await openWidget(dst.url);
+    const reply = await testLink('Lien du formulaire', await formLink(dst.doc, forms[0]), 'Le lien fonctionne');
+    shownControl = await dialog().locator('.control-code strong').first().textContent();
+    await dialogButton('Fermer').click();
+    await approve(reply, { url: src.url });
+    // Les lignes arrivent dans le journal, la table d'ici ne bouge pas, l'aperçu le dit.
+    await openWidgetTab(dst.url, 'Recevoir');
+    const preview = widget().locator('[data-structure="adopt"]');
+    await preview.waitFor({ timeout: 90000 });
+    const said = await preview.innerText();
+    assert.match(said, /«\sAnnuaire\s»\scontient déjà des lignes\s:\srien n’y est encore écrit/);
+    for (const part of [/2 lignes seront ajoutées/, /1 ligne d’ici sera rattachée à celles de la SOURCE par la colonne\s«\sNom\s»/, /1 valeur d’ici sera remplacée/, /1 ligne d’ici ne bouge pas/,
+      /«\sAnna\s»\s:\sVille passe de\s«\s12\s»\sà\s«\sLyon\s»/]) assert.match(said, part);
+    const rows = await records(dst.doc, 'Annuaire');
+    assert.match(await widget().locator('article.card').first().innerText(), /À valider/, 'la carte attend l\'accord, elle n\'est pas « À jour »');
+    assert.deepEqual(rows.map(r => `${r.Nom}:${r.Ville}`).sort(), ['Anna:12', 'Zoé:7'], 'rien n\'est écrit avant l\'accord');
+    assert.ok(rows.every(r => !r.id_sync), 'aucune clé posée');
+    if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'adopte-2-apercu.png') });
+    step('Table déjà remplie : le type qui ne convient pas est dit et confirmé ; rien n\'est écrit avant l\'accord, l\'aperçu dit lignes ajoutées, rattachées, valeurs remplacées, lignes qui ne bougent pas');
+    await preview.getByRole('button', { name: 'Appliquer', exact: true }).click();
+    await waitFor(async () => (await records(dst.doc, 'Annuaire')).length === 4, 'lignes ajoutées après l\'accord', 90000);
+    const after = await records(dst.doc, 'Annuaire');
+    assert.deepEqual(after.map(r => r.Nom).sort(), ['Anna', 'Basile', 'Céline', 'Zoé']);
+    assert.equal(after.find(r => r.Nom === 'Anna').Ville, 'Lyon', 'la valeur d\'ici est remplacée par celle de la SOURCE');
+    assert.ok(after.find(r => r.Nom === 'Anna').id_sync, 'la ligne d\'ici rattachée a pris la clé');
+    assert.ok(!after.find(r => r.Nom === 'Zoé').id_sync, 'la ligne d\'ici sans pendant ne bouge pas');
+    await waitFor(async () => (await preview.count()) === 0, 'aperçu retiré', 30000);
+    assert.match(await widget().locator('article.card').first().innerText(), /À jour/);
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Ville: 'Metz' }]]);
+    await waitFor(async () => (await records(dst.doc, 'Annuaire')).some(r => r.Nom === 'Basile' && r.Ville === 'Metz'), 'modification reçue sans nouvel aperçu', 90000);
+    assert.equal(await widget().locator('[data-structure="adopt"]').count(), 0, 'plus d\'aperçu');
+    step('Table déjà remplie : « Appliquer » rattache, ajoute et remplace, laisse les autres lignes ; les modifications suivantes passent seules');
+  }
   // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
   // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
   // une ligne qui cite une ligne arrivée en même temps (la table vise elle-même) est complétée au
@@ -2163,8 +2221,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3176,6 +3234,7 @@ try {
   await choicesSteps();
   await typesSteps();
   await structureSteps();
+  await adoptSteps();
   await linksSteps();
   await formatSteps();
   await formulasSteps();

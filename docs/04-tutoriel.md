@@ -169,6 +169,17 @@ Pour chaque table de l'export, ouvrir la liste et choisir **Nouvelle table** (no
 une table du document. Pour une table existante, le widget demande où va chaque colonne et par
 quelle colonne rattacher les lignes déjà là (voir [Une table ajoutée à l'export](#une-table-ajoutée-à-lexport)).
 
+**Une table déjà remplie** : si le type d'une colonne d'ici ne convient pas à ce que la SOURCE envoie
+(du texte dans une colonne numérique, une Référence, des pièces jointes), le widget le dit sous le
+champ et demande de confirmer avant de continuer ; Grist garde alors les valeurs qui ne conviennent
+pas, mais les marque invalides. Tant que « Appliquer automatiquement les colonnes que la SOURCE
+ajoute à l'export » reste décochée (options avancées, décochée d'emblée), **rien n'est écrit dans une
+table qui existait déjà** avant que la carte de la réception ait montré ce qui arriverait : lignes
+ajoutées, lignes d'ici rattachées à une ligne de la SOURCE, valeurs d'ici remplacées, lignes qui ne
+bougent pas, avec quelques exemples. **Appliquer** fait la première recopie ; les modifications
+suivantes passent seules. Sans colonne commune choisie, l'aperçu prévient que des lignes déjà là
+risquent d'être en double.
+
 ![Destinations](images/08-cible-destinations.png)
 
 Le widget crée un journal pour l'export, `Journal_<export>` (dans « Données source »), et publie

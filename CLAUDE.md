@@ -372,7 +372,32 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.22.0 (12 novembre 2026)
+## État : V0.23.0 (12 novembre 2026)
+
+V0.23.0 (Antoine, 12 novembre : « si je choisis une table existante déjà avec les bonnes colonnes ou mapping avec déjà de la data, que se passe-t-il ? est-ce que la sync marche ? » ;
+point 2 de sa liste : « adopter les colonnes déjà présentes (aperçu, contrôle de type, alerte) »). Moteur **4.7.0** (mineure, dite dans `GFS-ETAT.md`). Étape 4 de l'ordre convenu (voir la V0.22.0).
+- **Ce qui était vrai avant** (dit à Antoine) : une table existante marche, mais sans colonne de rattachement chaque ligne reçue s'ajoute (doublons) ; avec une colonne commune, une ligne d'ici
+  sans clé qui a la même valeur est mise à jour et prend la clé ; aucun aperçu, aucun contrôle de type, valeurs d'ici écrasées sans confirmation.
+- **Contrôle de type** (`typeFit`, `fitIssues`, `logic/adopt.js`) : pour chaque colonne envoyée rangée dans une colonne d'ici qui existe, 'same', 'fine' (Int vers Numérique, tout vers Texte sauf liste de
+  choix et dates, tout vers Quelconque, Texte vers Choix), 'risky' (valeurs gardées mais marquées invalides par Grist : Texte vers Numérique, Date, Booléen…) ou 'bad' (Référence, pièces jointes, colonne
+  du système : le type ne reçoit pas ces valeurs). `mappingBlock` (`js/target/dest.js`) le dit sous les champs à mesure qu'on choisit (avis jaune ou rouge) ; « Créer les tables » (assistant) et « Recevoir »
+  (table ajoutée plus tard) ouvrent une fenêtre « Des types de colonnes ne correspondent pas » avec « Continuer quand même » (`confirmFit`). Jamais un refus : la personne décide.
+- **Aperçu avant la première écriture** (`adoptionStep`, `adoptionPreview`) : une réception qui **demande l'accord** (`ask`) note `adopt: true` sur chaque destination qui existait avant elle
+  (`receptionNote` ; `offerDialog` pour une table rangée après coup). Sa **première recopie n'écrit rien** (`copyTable`, 'hold') si elle ajouterait ou modifierait des lignes d'une table qui a déjà des
+  lignes : le résultat de la table porte `structure.adoption` (lignes ajoutées, lignes d'ici rattachées par `match`, valeurs d'ici remplacées, cellules vides remplies, lignes qui ne bougent pas, trois
+  exemples « Anna : Ville passe de 12 à Lyon »). La carte montre l'avis `data-structure="adopt"` (`js/target/structure.js`) et passe à **« À valider »** (colonnes proposées comprises) ; sans colonne commune
+  il prévient que des lignes déjà là seront en double. **Appliquer** (le même `approveStructure` que la boîte des colonnes, un clic applique tout ce qui attend) fait la recopie et note `adopted: true` ;
+  les modifications suivantes passent seules. Une réception qui applique seule, une destination vide et une note sans `adopt` (réceptions d'avant, GFS) ne retiennent rien (`adoptionStep` : 'mark' ou 'go').
+  Les colonnes manquantes et la clé `id_sync` sont toujours ajoutées à l'acceptation (`prepareDest`), seules les lignes attendent.
+- **Piège vu** : le résultat d'une table « retenue » doit porter `numbers`, `drift`, `pending`, `gaps`, `files` (sinon `driftResult` plante et tout le passage tombe en erreur : le texte d'erreur
+  `error.generic` apparaît sur la carte).
+- **Pas fait, dit** : rattachement par plusieurs colonnes ; aperçu des cellules vides de la table d'ici ; une table ajoutée à l'export (« Recevoir ») dans une table existante n'a l'aperçu que si la réception
+  demande l'accord ; l'aperçu compte les lignes reçues à l'instant (une première livraison en plusieurs tranches l'augmente).
+- Testé : unit 466 (`engine-adopt.test.mjs` : aperçu puis « Appliquer », sans colonne commune, réception qui applique seule, table créée, table existante vide, `typeFit`, `fitIssues`, `adoptionStep`,
+  `adoptionPreview`) ; e2e `ONLY_ADOPT=1` (`adoptSteps`, vrai Grist : note de type et fenêtre de confirmation dans l'assistant, rien d'écrit avant l'accord, aperçu chiffré, « À valider », « Appliquer »,
+  modification suivante sans aperçu ; `SHOTS=<dossier>` fait deux captures).
+
+## État précédent : V0.22.0 (12 novembre 2026)
 
 V0.22.0 (Antoine, 12 novembre, liste de ce qui manque à une synchro propre, points 1 et 2 : « boîte des changements de structure côté CIBLE […] un booléen à
 l'installation, appliquer automatiquement ou me demander, désactivé par défaut […] bouton « traiter » avec le détail des changements et des alertes […] option « traitement
