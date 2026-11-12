@@ -88,6 +88,18 @@ export function newColumnsMap({ columns = [], map = {} }, sent, destColIds) {
   return next;
 }
 
+// Colonnes de données connues d'une table reçue : celles de l'invitation et celles déjà rangées dans `map`.
+const knownColumns = ({ columns = [], map = {} }) => new Set([...columns.map(c => c.id), ...Object.keys(map)]);
+
+// Colonnes envoyées arrivées après l'invitation, avec le nom que la destination leur donnerait (`to`, voir
+// newColumnsMap). Une entrée qui ne connaissait encore aucune colonne (ancien montage) n'en a pas : tout y paraîtrait nouveau.
+export function freshColumns(entry, sent, destColIds) {
+  const known = knownColumns(entry);
+  const fresh = known.size ? destColumns(sent).filter(c => !known.has(c.id)) : [];
+  const names = fresh.length ? newColumnsMap(entry, fresh, destColIds) : {};
+  return fresh.map(c => ({ id: c.id, to: names[c.id], label: c.label || c.id, type: c.type }));
+}
+
 // Colonnes que la SOURCE a ajoutées à l'export, gardées pour l'historique (nom d'ici, heure ; les
 // ADDED_KEPT dernières) : celles que newColumnsMap vient de ranger (`map`). Une entrée qui ne
 // connaissait encore aucune colonne (ancien montage) n'en note pas : tout y paraîtrait nouveau.
@@ -488,7 +500,9 @@ function planRemovals({ plan, dest, destRows, archived }) {
 // que celles-là (voir exchangeColumns). Une colonne ajoutée à l'export après coup ne remplace
 // jamais une colonne de la destination qui porte déjà son nom (elle prend un nom libre) ; elle
 // est notée pour l'historique (`addedCols`, à l'heure `now`, en secondes).
-export function receivedColumns(entry, tableRows, schema, allowed, now) {
+// `hold` (la réception demande l'accord de la personne, voir structure.js) : les colonnes arrivées après coup ne sont
+// ni rangées ni recopiées ; elles sont rendues dans `held`, `all` garde toutes les colonnes envoyées.
+export function receivedColumns(entry, tableRows, schema, allowed, now, { hold = false } = {}) {
   let sent = sentColumns(tableRows, entry.columns || []);
   const doc = (sent.find(c => c.doc) || {}).doc; // langue et monnaie du document de la SOURCE, si elle les envoie
   const sends = sentElements(sent); // ce que l'export envoie en plus des données (voir descriptions.js)
@@ -499,6 +513,10 @@ export function receivedColumns(entry, tableRows, schema, allowed, now) {
     sent = kept.sent;
     next = { ...entry, map: kept.map };
   }
-  const map = newColumnsMap(next, destColumns(sent), schema.columns(next.dest).map(c => c.colId));
-  return { sent, doc, sends, tableNote, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
+  const all = sent;
+  const destIds = schema.columns(next.dest).map(c => c.colId);
+  const held = hold && !allowed ? freshColumns(next, sent, destIds) : [];
+  if (held.length) sent = sent.filter(c => !held.some(h => h.id === c.id));
+  const map = newColumnsMap(next, destColumns(sent), destIds);
+  return { sent, all, held, doc, sends, tableNote, entry: map ? { ...next, map, addedCols: addedColumns(next, map, now) } : next };
 }

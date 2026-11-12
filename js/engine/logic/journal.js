@@ -277,6 +277,8 @@ const lastWhere = (rows, test) => rows.reduce((latest, row) => (test(row) && (!l
 
 // Dernière ligne qui porte la description des colonnes (listes, et première version de chaque lot).
 const latestSchemaRow = rows => lastWhere(rows, r => !isBlank(r[SCHEMA_COL]));
+// La SOURCE a-t-elle déjà décrit les colonnes de cette table ? Sans cela, `sentColumns` rend celles de l'invitation.
+export const hasSchema = rows => Boolean(latestSchemaRow(rows) && validColumns(parseJson(latestSchemaRow(rows)[SCHEMA_COL])));
 
 // Destinations choisies pour des tables reçues (`plans` : [{ table, dest }]) : la première qui ne va
 // pas, avec sa raison, ou null. Une destination ne reçoit qu'une table (`received` : voir

@@ -10,8 +10,9 @@ import { parseRule, printRule } from './rules.js';
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
 //   docName }, mode (absent : réponse ; 'echange', 'public' avec base, l'adresse de la SOURCE),
 //   renforce, reserve (journal réservé aux éditeurs, voir acl.js), reserved (règle posée), archive
-//   (une ligne effacée à la SOURCE reste ici, cochée) et verrou (tables reçues en lecture seule,
-//   voir target/options.js), pub et
+//   (une ligne effacée à la SOURCE reste ici, cochée), verrou (tables reçues en lecture seule,
+//   voir target/options.js), ask (les colonnes que la SOURCE ajoute attendent l'accord de la personne, voir
+//   structure.js), pub et
 //   pubSource (clés publiques de la réponse et de l'invitation, pour le code de la réponse et son
 //   code de contrôle ; jamais de clé privée, voir linkKeys) ;
 // - Échange : retour (journal de retour, chez qui a invité), hook (webhook du participant) ;
@@ -26,7 +27,7 @@ export const journalNote = (schema, tableId) => columnNote(listColumn(schema, ta
 export const journalNoteAction = (schema, tableId, note) => noteAction(listColumn(schema, tableId), note);
 
 // Ce que la note garde des options d'une réception (rien pour une option décochée).
-export const optionsNote = ({ archive, verrou }) => ({ ...(archive ? { archive: true } : {}), ...(verrou ? { verrou: true } : {}) });
+export const optionsNote = ({ archive, verrou, ask }) => ({ ...(archive ? { archive: true } : {}), ...(verrou ? { verrou: true } : {}), ...(ask ? { ask: true } : {}) });
 
 // Journaux d'exports reçus : { journal, note } (note : voir plus haut), dont la note dit d'où ils
 // viennent et où va chaque table.

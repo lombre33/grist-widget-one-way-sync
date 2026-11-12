@@ -372,7 +372,33 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.21.1 (12 novembre 2026)
+## État : V0.22.0 (12 novembre 2026)
+
+V0.22.0 (Antoine, 12 novembre, liste de ce qui manque à une synchro propre, points 1 et 2 : « boîte des changements de structure côté CIBLE […] un booléen à
+l'installation, appliquer automatiquement ou me demander, désactivé par défaut […] bouton « traiter » avec le détail des changements et des alertes […] option « traitement
+automatique à partir de maintenant » »). Moteur **4.6.0** (mineure, dite dans `GFS-ETAT.md`). **Ordre de livraison convenu** : 1 Blob (0.21.1), 2 essai de tous les types
+(fait dans la 0.21.1), 3 cette boîte, 4 adopter les colonnes déjà présentes (aperçu, contrôle de type, alerte), 5 SOURCE : colonnes non envoyées, renommages, type changé,
+6 valeurs par défaut et formules de déclenchement (mêmes garde-fous que les formules), 7 option SOURCE pour l'ordre, les colonnes cachées et les vues. **Droits d'accès : non codés**
+(V1 au plus tôt, après un audit de sécurité ; jamais acceptés par défaut, toujours une fenêtre d'alerte, même quand la SOURCE les change). **Liens bidirectionnels : V1.**
+- **Réglage** (`ask` dans la note du journal, `optionsNote` de `logic/received.js`) : une réception **demande** ou **applique tout seule**. **Une note sans `ask` applique** :
+  les réceptions d'avant et `createReception` sans option (donc GFS) ne changent pas. L'assistant CIBLE de syncPlus pose `{ ask: true }` (`js/target/wizard.js`) : case « Appliquer
+  automatiquement les colonnes que la SOURCE ajoute à l'export », **décochée d'emblée**, dans les options de l'acceptation et dans « Options » de la carte (`receptionOptions`).
+  Ni Échange (ses colonnes se suivent seules) ni lien public.
+- **Réception qui demande** (`logic/structure.js`, `freshColumns` de `logic/consolidation.js`) : une colonne ajoutée à l'export après l'acceptation n'est **ni créée ni recopiée**
+  (`held` de `receivedColumns`, absente de `map` et de `sent`) ; ses valeurs restent dans le journal et les autres colonnes, comme les lignes, continuent d'être recopiées. La carte
+  montre « La SOURCE a ajouté N colonnes à l'export » (`js/target/structure.js`, `.structure`) avec une ligne par colonne (table → destination, nom, type, nom d'arrivée) et deux
+  boutons : **Appliquer** et **Appliquer, puis traiter automatiquement** (fenêtre de confirmation, puis lève `ask`). `approveStructure(journal, { auto })` (`engine/target/loop.js`,
+  même schéma que `restyle` : ensemble `approvals` + `consolidateAll({ reread: true })`) crée les colonnes puis les remplit depuis la **dernière version de chaque clé**
+  (`backfillActions` : seulement les cellules vides et les lignes non supprimées, jamais une retouche faite ici).
+- **Ce qui est seulement dit** (carte « La SOURCE a changé son export », bouton « Compris », `ack` de l'entrée, jamais répété ensuite) : une colonne que la SOURCE n'envoie
+  plus (`gone` : elle reste ici, ses valeurs ne bougent plus) et une colonne créée par le widget dont le type envoyé a changé (`retyped` : la destination garde le sien).
+- Piège vu à l'e2e : le texte des avis porte des espaces insécables autour de `: « »` (`t()`), les expressions régulières de l'essai y mettent `\s`.
+- Testé : unit 450+ (`engine-structure.test.mjs` : colonnes tenues sans rien créer, lignes qui arrivent, remplissage sans écraser une retouche, avis `gone` et `retyped` acquittés,
+  `auto` qui lève `ask`, note sans `ask` inchangée, Échange et lien public exclus) ; e2e `ONLY_STRUCTURE=1` (`structureSteps`, vrai Grist : proposition sans création, ligne qui arrive
+  pendant l'attente, « Appliquer », colonne retirée dite une fois, « Compris », « Appliquer, puis traiter automatiquement », colonne suivante créée seule, « Options » montre la case cochée ;
+  `SHOTS=<dossier>` fait une capture).
+
+## État précédent : V0.21.1 (12 novembre 2026)
 
 V0.21.1 (Antoine, 12 novembre : « le type binaire est bien traité ici ou pas ? […] si le type blob existe il faut qu'il transite sans soucis donc à dev » ; carte
 de décision « Choisir comment une colonne Blob arrive dans la CIBLE » : **« Ne pas envoyer les Blob »**). Moteur **4.5.0** (mineure, dite dans `GFS-ETAT.md`).

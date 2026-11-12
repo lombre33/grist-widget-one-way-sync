@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.21.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.22.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -131,6 +131,8 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   dans la CIBLE reste ainsi jusqu'au prochain changement de la ligne dans la SOURCE, et la carte la
   signale une dizaine de secondes après, avec le détail (ligne, valeur d'ici, valeur de la SOURCE)
   et un bouton « Corriger » qui remet l'état exact de la SOURCE.
+- **Colonnes ajoutées par la SOURCE** : une réception nouvelle demande l'accord (la carte propose les
+  colonnes avec leur détail, un clic les crée et les remplit ; réglage « automatique » dans les options).
 - **Options d'une réception** (hors Échange) : *archive* (une ligne effacée dans la SOURCE reste
   ici, cochée « Supprimée à la source ») et *lecture seule* (seuls les propriétaires écrivent dans
   les tables reçues).

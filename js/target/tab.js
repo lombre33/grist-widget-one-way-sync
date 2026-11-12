@@ -29,6 +29,7 @@ import { restyleDialog } from './restyle.js';
 import { addWidgetFor, readWidgetSpots, widgetCandidates, widgetLabel } from './widget-page.js';
 import { receiveWizard } from './wizard.js';
 import { reinforceKind, reinforceNotes } from './reinforce.js';
+import { structureNotes } from './structure.js';
 import { sourceLine } from './source-line.js';
 import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
 import { roleGuide } from '../guide.js';
@@ -217,7 +218,7 @@ function tableLine(group, entry) {
 
 // Avis d'une réception : envoi coupé par la SOURCE, lignes manquantes, trop grosses, instantané
 // trop gros, lien partagé, arrivées suspectes, tables proposées ou refusées.
-const cardNotes = group => [arrivalNotes(group), ...stateNotes(group), ...gapNotes(group), ...formatNotes(group), ...linkNotes(group)];
+const cardNotes = group => [arrivalNotes(group), ...stateNotes(group), ...structureNotes(group, { rerender: renderTarget, out: () => container.querySelector('.out'), readOnly: state.readOnly }), ...gapNotes(group), ...formatNotes(group), ...linkNotes(group)];
 
 // L'état de la réception : envoi coupé, formulaire disparu, clé de signature, droits.
 function stateNotes(group) {

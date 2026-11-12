@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.21.1 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.22.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -127,6 +127,8 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   stays that way until the row changes again in the SOURCE, and the card flags it about ten
   seconds later, with the detail (row, value here, SOURCE value) and a “Fix” button that puts the
   exact SOURCE state back.
+- **Columns added by the SOURCE**: a new reception asks for your agreement (the card offers the columns with their
+  detail, one click creates and fills them; an "automatic" setting is in the options).
 - **Reception options** (not for Exchange): *archive* (a row deleted in the SOURCE stays here,
   ticked “Deleted at the source”) and *read-only* (only owners write in the received tables).
 - **Large tables**: no row limit (tested with 21,000), big imports sent in batches, a stuck

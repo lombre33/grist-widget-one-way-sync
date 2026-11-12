@@ -142,7 +142,17 @@
 //         en `Numeric`, `Id` en `Int`, ou `null` (Blob et tout type inconnu : la colonne ne part pas et n'est pas proposée) ; `unsentColumns`
 //         les liste pour que l'hôte le dise (`send.columns.unsent`). `SENT_TYPE` passe de `codes.js` à `common.js`. Un export d'avant qui
 //         envoyait un Blob est signalé par l'écart habituel (`exportDrift`), « Modifier » le retire.
-export const ENGINE_VERSION = '4.5.0';
+// 4.6.0 (12 novembre 2026, syncPlus 0.22.0, demande du porteur : « boîte des changements de structure côté CIBLE, réglage appliquer
+//         automatiquement / me demander à l'installation, désactivé par défaut ») : mineure, rien n'est ajouté au port ni aux tables,
+//         `CODE_FORMAT` inchangé, texte des formules de `Synchro` inchangé. Une réception **demande** (`ask: true` dans la note du journal,
+//         `optionsNote`) ou applique tout seule ; **une note sans `ask` applique** (réceptions d'avant, et `createReception` du moteur, donc GFS,
+//         n'ont pas changé). Quand elle demande : une colonne ajoutée à l'export n'est ni créée ni recopiée (`freshColumns`, `held` de
+//         `receivedColumns`) ; ses valeurs restent dans le journal. `approveStructure(journal, { auto })` (`target/loop.js`) la crée puis la
+//         remplit depuis la dernière version de chaque clé (`backfillActions`, `logic/structure.js`, seulement les cellules vides) et, avec
+//         `auto`, lève `ask`. Les autres changements ne se décident pas ici et sont seulement dits (`structureChanges` : `gone` colonne que la
+//         SOURCE n'envoie plus, `retyped` type changé pour une colonne créée par le widget), acquittés dans `ack`. `tableResult` rend
+//         `structure`. Ni Échange ni lien public.
+export const ENGINE_VERSION = '4.6.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

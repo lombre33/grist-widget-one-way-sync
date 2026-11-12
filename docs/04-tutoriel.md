@@ -405,6 +405,16 @@ carte :
 
   ![Ligne gardée en archive](images/27-cible-archive.png)
 
+- **Colonnes ajoutées par la SOURCE** : case « Appliquer automatiquement les colonnes que la SOURCE
+  ajoute à l'export », **décochée d'emblée** pour une réception nouvelle (dans « Options avancées »).
+  Décochée, une colonne ajoutée à l'export n'est ni créée ni recopiée : la carte la propose avec son
+  détail (table, nom d'ici, type) et attend un clic, pendant que les lignes continuent d'arriver.
+  **Appliquer** crée les colonnes et les remplit d'un coup avec les valeurs déjà reçues ;
+  **Appliquer, puis traiter automatiquement** ne demande plus ensuite (le réglage se change dans
+  **Options**). La carte dit aussi, sans rien changer, une colonne que la SOURCE n'envoie plus (elle
+  reste ici, ses valeurs ne bougent plus) ou dont le type a changé (la colonne d'ici garde le sien) ;
+  **Compris** ne la répète plus. Une réception faite avant cette version crée les colonnes toute
+  seule, comme avant.
 - **Tables en lecture seule** : seuls les propriétaires du document écrivent dans les tables
   reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
   personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.

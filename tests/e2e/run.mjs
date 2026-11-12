@@ -18,8 +18,9 @@ import { linkKeys, newKeyPair, readKeys, signText } from '../../js/engine/logic/
 import { PUBLIC_KEY, bucketOf } from '../../js/engine/logic/common.js';
 import { ROOT, docTools, pickTab, serveWidget } from './shared.mjs';
 
-const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e/.env.json'), 'utf8'));
-const WIDGET_PORT = 8585;
+// ENV_FILE=.env-dev.json WIDGET_PORT=8685 : un second Grist (voir start-grist.sh) et un autre port du widget, pour deux parcours à la fois.
+const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e', process.env.ENV_FILE || '.env.json'), 'utf8'));
+const WIDGET_PORT = Number(process.env.WIDGET_PORT) || 8585;
 const WIDGET_URL = `http://localhost:${WIDGET_PORT}/index.html`;
 const TEAM = `${env.grist}/o/${env.team}`;
 
@@ -432,10 +433,16 @@ try {
   }
   // CIBLE : accepter une invitation (destinations par défaut), coller le lien du formulaire
   // publié, rendre la réponse.
-  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = []) {
+  // Depuis la 0.22, une réception nouvelle demande l'accord pour les colonnes que la SOURCE ajoute (case décochée d'emblée) : les essais
+  // qui ne la testent pas la cochent (`ask: true` la laisse décochée, après avoir vérifié qu'elle l'est).
+  const AUTO_BOX = 'Appliquer automatiquement les colonnes que la SOURCE ajoute à l’export';
+  async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = [], { ask = false } = {}) {
     await pasteInvitation(url, code);
     await dialog().getByText(tables).waitFor();
-    if (checks.length) await dialog().getByText('Options avancées').click();
+    await dialog().getByText('Options avancées').click();
+    const auto = dialog().getByRole('checkbox', { name: AUTO_BOX });
+    assert.ok(!(await auto.isChecked()), 'les colonnes ajoutées par la SOURCE attendent l\'accord, d\'emblée');
+    if (!ask) await auto.check();
     for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
     await dialogButton('Continuer').click();
     await confirmNewTable();
@@ -1084,6 +1091,81 @@ try {
     await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 2 && JSON.stringify(await shown(dst.doc)) === JSON.stringify(await shown(src.doc)), 'ajout et modification reçus', 90000);
     assert.deepEqual((await shown(dst.doc))[0], ['Alice', -0.5, -3, false, null, null, 'A', ['L', 'B'], 42]);
     step('Types : chaque type traverse l\'export avec son type et sa valeur (dates, choix, rang) ; le Blob est dit « ne part pas », sans case, et l\'invitation reste lisible');
+  }
+  // --- Changements de structure : une réception qui demande l'accord (case décochée d'emblée) ne crée pas la colonne que la SOURCE
+  // ajoute à l'export, la propose avec son détail ; « Appliquer » la crée et la remplit ; une colonne retirée de l'export est dite ;
+  // « Appliquer, puis traiter automatiquement » ne demande plus la suivante ; une réception d'avant (sans choix) crée toute seule.
+  async function structureSteps() {
+    const src = await fichesDoc('Structure SOURCE');
+    const dst = await newDocWithWidget('Structure CIBLE');
+    const columnsHere = async () => (await api('GET', `/docs/${dst.doc}/tables/Fiches/columns`)).columns.map(c => c.id).sort();
+    const ficheNotice = () => widget().locator('.structure');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.', [], { ask: true }), { url: src.url });
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 3, 'lignes reçues', 90000);
+    assert.equal(await ficheNotice().count(), 0, 'rien à décider');
+    // Une colonne de plus à l'export : proposée, pas créée.
+    const addColumn = async (id, values, reopen) => {
+      await applyActions(src.doc, [['AddColumn', 'Fiches', id, { type: 'Text' }], ['BulkUpdateRecord', 'Fiches', [1, 2, 3], { [id]: values }]]);
+      await openWidget(src.url);
+      await button('Modifier').click();
+      await dialogButton('Continuer').click();
+      await dialog().getByRole('checkbox', { name: id }).first().check();
+      await dialogButton('Continuer').click();
+      await dialogButton('Enregistrer').click();
+      await dialog().getByText(/Enregistré\s:/).waitFor();
+      await dialogButton('Fermer').click();
+      await reopen();
+    };
+    const toCible = () => openWidgetTab(dst.url, 'Recevoir');
+    await addColumn('Pays', ['France', 'France', 'Belgique'], toCible);
+    await ficheNotice().getByText(/La SOURCE a ajouté 1 colonne à l’export/).waitFor({ timeout: 90000 });
+    assert.match(await ficheNotice().innerText(), /Fiches → Fiches\s:\sla colonne\s«\sPays\s»\s\(Texte\) serait créée sous le nom\s«\sPays\s»/);
+    assert.deepEqual(await columnsHere(), ['Nom', 'Ville', 'id_sync'].sort(), 'rien n\'est créé sans accord');
+    if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'structure-1-propose.png') });
+    // Une ligne de la SOURCE continue d'arriver pendant l'attente.
+    await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom: 'Denis', Ville: 'Metz', Pays: 'France' }]]);
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).some(r => r.Nom === 'Denis'), 'ligne reçue pendant l\'attente', 90000);
+    assert.ok(!(await columnsHere()).includes('Pays'), 'toujours rien de créé');
+    await ficheNotice().getByRole('button', { name: 'Appliquer', exact: true }).click();
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).every(r => r.Pays), 'colonne créée et remplie pour toutes les lignes', 90000);
+    assert.deepEqual((await records(dst.doc, 'Fiches')).map(r => `${r.Nom}:${r.Pays}`).sort(), ['Anna:France', 'Basile:France', 'Céline:Belgique', 'Denis:France']);
+    await waitFor(async () => (await ficheNotice().count()) === 0, 'avis retiré', 30000);
+    step('Structure : la colonne ajoutée à l\'export est proposée avec son détail sans rien créer ; les lignes arrivent ; « Appliquer » la crée et la remplit');
+
+    // Une colonne retirée de l'export : dite, une fois, jusqu'à « Compris ».
+    await openWidget(src.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    await dialogButton('Choisir les colonnes').click();
+    await dialog().getByRole('checkbox', { name: 'Ville' }).first().uncheck();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré\s:/).waitFor();
+    await dialogButton('Fermer').click();
+    await toCible();
+    await ficheNotice().getByText(/La SOURCE a changé son export/).waitFor({ timeout: 90000 });
+    assert.match(await ficheNotice().innerText(), /la SOURCE n’envoie plus la colonne\s«\sVille\s»/);
+    await ficheNotice().getByRole('button', { name: 'Compris', exact: true }).click();
+    await waitFor(async () => (await ficheNotice().count()) === 0, 'avis vu', 30000);
+    assert.ok((await columnsHere()).includes('Ville'), 'la colonne reste ici');
+    step('Structure : une colonne que la SOURCE n\'envoie plus est dite, elle reste ici, « Compris » ne la répète plus');
+
+    // « Appliquer, puis traiter automatiquement » : la colonne suivante est créée sans demander.
+    await addColumn('Age', ['30', '40', '50'], toCible);
+    await ficheNotice().getByText(/La SOURCE a ajouté 1 colonne à l’export/).waitFor({ timeout: 90000 });
+    await ficheNotice().getByRole('button', { name: 'Appliquer, puis traiter automatiquement' }).click();
+    await widget().getByRole('dialog', { name: 'Traiter automatiquement à partir de maintenant ?' }).getByRole('button', { name: 'Appliquer et traiter automatiquement' }).click();
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).filter(r => r.Age).length === 4 - 1, 'colonne Age créée et remplie', 90000);
+    await addColumn('Rue', ['a', 'b', 'c'], toCible);
+    await waitFor(async () => (await columnsHere()).includes('Rue'), 'colonne Rue créée sans demander', 90000);
+    assert.equal(await ficheNotice().count(), 0, 'plus d\'avis');
+    await button('Options').click();
+    assert.ok(await dialog().getByRole('checkbox', { name: AUTO_BOX }).isChecked(), 'le réglage est devenu « automatique »');
+    await dialogButton('Annuler').click();
+    step('Structure : « Appliquer, puis traiter automatiquement » (avec confirmation) ne demande plus ; la colonne suivante est créée seule et « Options » le montre');
   }
   // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
   // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
@@ -2081,8 +2163,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3093,6 +3175,7 @@ try {
   await optionsSteps();
   await choicesSteps();
   await typesSteps();
+  await structureSteps();
   await linksSteps();
   await formatSteps();
   await formulasSteps();

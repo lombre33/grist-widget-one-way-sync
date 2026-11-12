@@ -110,8 +110,8 @@ function sourceFiche(invitation, origin) {
 // 2. Destinations : une par table reçue.
 // Le journal est lisible par les éditeurs seulement (case cochée par défaut, voir acl.js) : il garde
 // les versions reçues, quelles que soient les règles des tables de destination. Hors Échange et lien
-// public (la carte n'y a pas de bouton Options), deux options décochées par défaut (voir
-// receptionOptions) : archive, tables en lecture seule. Un Échange renforcé demande d'avoir comparé
+// public (la carte n'y a pas de bouton Options), des options par défaut (voir receptionOptions) : archive et tables en lecture
+// seule décochées, et les colonnes que la SOURCE ajoutera ensuite à valider (case « automatique » décochée). Un Échange renforcé demande d'avoir comparé
 // le code de contrôle de l'envoi de retour.
 async function showDest(ctx, invitation) {
   const schema = await readSchema();
@@ -120,7 +120,7 @@ async function showDest(ctx, invitation) {
   const reserveBox = el('input', { type: 'checkbox', checked: ctx.reserve !== false });
   const compared = el('input', { type: 'checkbox' });
   const askCompared = mustCompare(invitation);
-  const options = ['echange', 'public'].includes(invitation.mode) ? null : receptionOptions(ctx.options || {});
+  const options = ['echange', 'public'].includes(invitation.mode) ? null : receptionOptions(ctx.options || { ask: true });
   const next = async () => {
     ctx.compared = compared.checked; // le moteur refuse sans elle (codeNotCompared)
     ctx.reserve = reserveBox.checked;
