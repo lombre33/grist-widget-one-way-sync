@@ -1066,7 +1066,7 @@ try {
     ]);
     const dst = await newDocWithWidget('Types CIBLE');
     await startExport(src, 'Fiches', 'Types', async () => {
-      await dialog().getByText(/Ne part pas/).waitFor({ timeout: 30000 });
+      await dialog().getByText(/Ne part pas \(Binaire/).waitFor({ timeout: 30000 });
       const text = await dialog().innerText();
       assert.match(text, /Ne part pas \(Binaire\s·\sBinaire \(Blob\)\)/, 'le Blob est dit, avec son type');
       assert.equal(await dialog().getByRole('checkbox', { name: 'Binaire' }).count(), 0, 'et n\'a pas de case');
@@ -1306,30 +1306,36 @@ try {
     assert.equal(await fresh().count(), 0, 'rien n\'est dit : elle est partie');
     step('SOURCE : colonne renommée et colonne d\'un autre type dites par leur nom ; la case « Envoyer aussi les colonnes que j\'ajouterai » envoie la suivante seule');
   }
-  // --- Références conservées : une colonne Référence vers une autre table de l'export devient une
-  // vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
-  // une ligne qui cite une ligne arrivée en même temps (la table vise elle-même) est complétée au
-  // passage suivant ; la case décochée rend le texte.
+  // --- Références conservées, choix par colonne (0.27) : une colonne Référence vers une autre table de l'export
+  // devient une vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
+  // une Liste de références vers une table hors de l'export, dont la personne garde le lien, ajoute cette table
+  // (avec sa seule colonne affichée) et arrive en vraie Liste de références ; une ligne qui cite une ligne arrivée
+  // en même temps (la table vise elle-même) est complétée au passage suivant ; « Valeurs seulement » rend le texte ;
+  // une colonne restée du texte parce qu'elle était remplie se refait d'un clic (« Refaire les références »).
   async function linksSteps() {
     const src = await newDocWithWidget('Liens SOURCE', [
       ['AddTable', 'Villes', [{ id: 'Nom', type: 'Text' }]],
       ['BulkAddRecord', 'Villes', [null, null], { Nom: ['Lyon', 'Paris'] }],
       ['AddTable', 'Gens', [{ id: 'Prenom', type: 'Text' }]],
       ['BulkAddRecord', 'Gens', [null, null, null], { Prenom: ['Anna', 'Basile', 'Céline'] }],
+      ['AddTable', 'Services', [{ id: 'Libelle', type: 'Text' }, { id: 'Budget', type: 'Numeric' }]],
+      ['BulkAddRecord', 'Services', [null, null, null], { Libelle: ['Compta', 'RH', 'IT'], Budget: [1, 2, 3] }],
     ]);
     const column = async (doc, table, colId) => {
       const parentId = await tableRef(doc, table);
       return (await records(doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === parentId);
     };
-    // Lieu : Référence vers Villes (nom de la ville) ; Chef : Référence vers Gens elle-même (prénom).
-    const addRef = async (table, colId, target, shown, values) => {
-      await applyActions(src.doc, [['AddColumn', table, colId, { type: `Ref:${target}` }]]);
+    // Lieu : Référence vers Villes (nom de la ville) ; Chef : Référence vers Gens elle-même (prénom) ; Equipes : Liste de
+    // références vers Services (libellé), table que l'export ne contient pas au départ.
+    const addRef = async (table, colId, target, shown, values, list = false) => {
+      await applyActions(src.doc, [['AddColumn', table, colId, { type: `${list ? 'RefList' : 'Ref'}:${target}` }]]);
       const ref = (await column(src.doc, table, colId)).id;
       await applyActions(src.doc, [['UpdateRecord', '_grist_Tables_column', ref, { visibleCol: (await column(src.doc, target, shown)).id }],
         ['SetDisplayFormula', table, null, ref, `$${colId}.${shown}`], ['BulkUpdateRecord', table, values.map((_, i) => i + 1), { [colId]: values }]]);
     };
     await addRef('Gens', 'Lieu', 'Villes', 'Nom', [1, 2, 0]);
     await addRef('Gens', 'Chef', 'Gens', 'Prenom', [0, 1, 2]);
+    await addRef('Gens', 'Equipes', 'Services', 'Libelle', [['L', 1, 2], ['L', 2], null], true);
     const dst = await newDocWithWidget('Liens CIBLE');
     await openWidget(src.url);
     await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
@@ -1337,9 +1343,26 @@ try {
     await dialog().getByRole('checkbox', { name: 'Gens' }).check();
     await dialog().getByRole('checkbox', { name: 'Villes' }).check();
     await dialogButton('Continuer').click();
-    const keep = dialog().getByRole('checkbox', { name: 'Garder les liens entre les tables' });
-    assert.ok(await keep.isChecked(), 'cochée d\'emblée pour un nouvel export');
+    const refRow = key => dialog().locator(`[data-ref="${key}"]`);
+    const keeps = async key => refRow(key).getByLabel('Garder le lien').isChecked();
+    assert.ok(await keeps('Gens.Lieu') && await keeps('Gens.Chef'), 'liens gardés d\'emblée quand la table visée est cochée');
+    assert.ok(!(await keeps('Gens.Equipes')), 'Services n\'est pas cochée : les valeurs seules, rien ne s\'ajoute sans le choix');
+    assert.equal(await dialog().locator('.table-added').count(), 0);
+    const toRefs = () => dialog().getByRole('heading', { name: 'Références entre tables' }).evaluate(node => node.scrollIntoView({ block: 'start' }));
+    await toRefs();
     await shot('29-source-liens', 'modal');
+    // Garder le lien de la Liste de références ajoute la table Services, avec sa seule colonne affichée.
+    await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
+    await dialog().locator('.table-added', { hasText: 'Services' }).waitFor();
+    assert.match(await dialog().locator('.table-added').innerText(), /1 colonne sur 2 \(Libelle\)/);
+    assert.match(await dialog().locator('.table-block', { hasText: 'Références entre tables' }).innerText(), /Part en plus des tables cochées\s:\sServices \(Libelle\)/);
+    await dialog().locator('.table-added').evaluate(node => node.scrollIntoView({ block: 'end' }));
+    await shot('29b-source-liens-tables-ajoutees', 'modal');
+    // Reprise d'avis : revenir aux valeurs retire la table ajoutée, puis la rajouter.
+    await refRow('Gens.Equipes').getByLabel('Valeurs seulement').check();
+    await dialog().locator('.table-added').waitFor({ state: 'detached' });
+    await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
+    await dialog().locator('.table-added', { hasText: 'Services' }).waitFor();
     await dialogButton('Continuer').click();
     await dialog().getByLabel('Nom de l’export').fill('Annuaire');
     await dialogButton('Créer l’export').click();
@@ -1351,16 +1374,20 @@ try {
     const settled = async () => {
       const gens = await byName('Gens', 'Prenom');
       const villes = await byName('Villes', 'Nom');
-      return Object.keys(gens).length === 3 && Object.keys(villes).length === 2 && { gens, villes };
+      const services = await byName('Services', 'Libelle');
+      return Object.keys(gens).length === 3 && Object.keys(villes).length === 2 && Object.keys(services).length === 3 && { gens, villes, services };
     };
     await waitFor(settled, 'tables reçues', 90000);
     const lieu = await column(dst.doc, 'Gens', 'Lieu');
     const chef = await column(dst.doc, 'Gens', 'Chef');
-    assert.deepEqual([lieu.type, chef.type], ['Ref:Villes', 'Ref:Gens'], 'des vraies Références chez le destinataire');
+    const equipes = await column(dst.doc, 'Gens', 'Equipes');
+    assert.deepEqual([lieu.type, chef.type, equipes.type], ['Ref:Villes', 'Ref:Gens', 'RefList:Services'], 'des vraies Références et une vraie Liste de références chez le destinataire');
+    assert.equal(equipes.visibleCol, (await column(dst.doc, 'Services', 'Libelle')).id, 'la liste affiche la colonne de la SOURCE');
+    assert.ok(!(await records(dst.doc, '_grist_Tables_column')).some(c => c.colId === 'Budget'), 'la colonne Budget de Services ne part pas : seule la colonne affichée est envoyée');
     assert.equal(lieu.visibleCol, (await column(dst.doc, 'Villes', 'Nom')).id, 'elles affichent la colonne de la SOURCE');
     const links = async () => {
-      const { gens, villes } = await settled();
-      return { lieu: [gens.Anna.Lieu, gens.Basile.Lieu, gens.Céline.Lieu], chef: [gens.Anna.Chef, gens.Basile.Chef, gens.Céline.Chef], gens, villes };
+      const { gens, villes, services } = await settled();
+      return { lieu: [gens.Anna.Lieu, gens.Basile.Lieu, gens.Céline.Lieu], chef: [gens.Anna.Chef, gens.Basile.Chef, gens.Céline.Chef], equipes: [gens.Anna.Equipes, gens.Basile.Equipes, gens.Céline.Equipes], gens, villes, services };
     };
     // La ligne visée est dans la même table et arrive en même temps : complétée au passage suivant.
     await waitFor(async () => {
@@ -1370,7 +1397,16 @@ try {
     let now = await links();
     assert.deepEqual(now.lieu, [now.villes.Lyon.id, now.villes.Paris.id, 0], 'Lieu : le numéro de la ligne reçue, vide si la SOURCE est vide');
     assert.equal(now.chef[0], 0);
+    await waitFor(async () => {
+      const next = await links();
+      return Array.isArray(next.equipes[0]) && next.equipes[0].length === 3;
+    }, 'Equipes : la Liste de références arrive', 90000);
+    now = await links();
+    assert.deepEqual(now.equipes[0], ['L', now.services.Compta.id, now.services.RH.id], 'Equipes : les numéros des lignes reçues, dans l\'ordre de la SOURCE');
+    assert.deepEqual(now.equipes[1], ['L', now.services.RH.id]);
+    assert.ok(!now.equipes[2] || now.equipes[2].length <= 1, 'liste vide chez la SOURCE : vide ici');
     assert.equal(await widget().locator('.drift').count(), 0, 'les Références ne sont pas des retouches');
+    assert.match(await widget().locator('.links-done').first().innerText(), /Références refaites/);
     // Une ville renommée dans la SOURCE : la ligne reste la même, la Référence aussi.
     await applyActions(src.doc, [['UpdateRecord', 'Villes', 1, { Nom: 'Villeurbanne' }]]);
     await waitFor(async () => (await records(dst.doc, 'Villes')).some(r => r.Nom === 'Villeurbanne'), 'ville renommée reçue', 90000);
@@ -1385,13 +1421,12 @@ try {
     assert.equal(await widget().locator('.drift').count(), 0, 'toujours aucune retouche');
     step('Références conservées : vraies Références chez le destinataire (colonne affichée reprise), ligne visée arrivée en même temps retrouvée, ville renommée et Référence changée suivies');
 
-    // Case décochée dans « Modifier » : les colonnes redeviennent du texte.
+    // « Valeurs seulement » dans « Modifier » : la colonne redevient du texte, les autres gardent leur lien.
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    const keepAgain = dialog().getByRole('checkbox', { name: 'Garder les liens entre les tables' });
-    assert.ok(await keepAgain.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
-    await keepAgain.uncheck();
+    assert.ok(await keeps('Gens.Lieu') && await keeps('Gens.Equipes'), 'export modifié : tels que l\'export les a enregistrés');
+    await refRow('Gens.Lieu').getByLabel('Valeurs seulement').check();
     await dialogButton('Continuer').click();
     await dialogButton('Enregistrer').click();
     await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
@@ -1401,7 +1436,34 @@ try {
     await waitFor(async () => (await records(dst.doc, 'Gens')).some(r => r.Lieu === 'Paris'), 'texte affiché reçu', 90000);
     now = await byName('Gens', 'Prenom');
     assert.deepEqual([now.Anna.Lieu, now.Basile.Lieu, now.Céline.Lieu], ['Villeurbanne', 'Villeurbanne', 'Paris']);
-    step('Références conservées : case décochée, les colonnes redeviennent du texte');
+    assert.equal((await column(dst.doc, 'Gens', 'Chef')).type, 'Ref:Gens', 'les autres colonnes gardent leur lien');
+    assert.equal((await column(dst.doc, 'Gens', 'Equipes')).type, 'RefList:Services');
+    step('Références conservées : « Valeurs seulement » rend le texte d\'une colonne, les autres gardent leur lien');
+
+    // Le lien est redonné alors que la colonne est remplie de texte : rien n'est touché sans accord, un clic la refait.
+    await openWidget(src.url);
+    await button('Modifier').click();
+    await dialogButton('Continuer').click();
+    await refRow('Gens.Lieu').getByLabel('Garder le lien').check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
+    await dialogButton('Fermer').click();
+    await openWidget(dst.url);
+    await widget().locator('.links-text').waitFor({ timeout: 90000 });
+    assert.match(await widget().locator('.links-text').innerText(), /Gens\.Lieu/);
+    assert.equal((await column(dst.doc, 'Gens', 'Lieu')).type, 'Text', 'rien n\'est touché sans accord');
+    await shot('29c-cible-liens-refaire', 'card');
+    await widget().getByRole('button', { name: 'Refaire les références' }).click();
+    await dialog().getByText(/devient une Référence vers la table Villes/).waitFor();
+    await dialogButton('Refaire les références').click();
+    await waitFor(async () => (await column(dst.doc, 'Gens', 'Lieu')).type === 'Ref:Villes', 'colonne refaite en Référence', 90000);
+    await waitFor(async () => {
+      const next = await links();
+      return next.lieu[0] === next.villes.Villeurbanne.id && next.lieu[1] === next.villes.Villeurbanne.id && next.lieu[2] === next.villes.Paris.id;
+    }, 'cellules refaites d\'après le lien de la SOURCE', 90000);
+    assert.equal(await widget().locator('.links-text').count(), 0, 'plus rien à refaire');
+    step('Références conservées : une colonne remplie de texte reste du texte, « Refaire les références » la convertit et reprend le lien de la SOURCE');
   }
   // --- Mise en forme des colonnes : une SOURCE en français (fr-FR) avec une colonne Montant (monnaie sans devise
   // propre, en-tête coloré, règle « négatif en rouge » et une règle qui sort de la grammaire) envoie sa mise en forme

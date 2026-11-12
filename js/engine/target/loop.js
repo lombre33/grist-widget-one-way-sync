@@ -281,7 +281,7 @@ async function prepareColumns(ctx, noted, tableRows) {
     await apply(values);
     ctx.schema = await readSchema();
   }
-  const linked = await linkColumns(ctx, { ...received.entry, own }, kept, tableRows);
+  const linked = await linkColumns(ctx, { ...received.entry, own }, kept, tableRows, { relink: Boolean(again.links) });
   // Règles de mise en forme conditionnelle de la SOURCE (reconstruites, jamais copiées), et sa langue.
   const styled = await styleColumns(ctx, linked.entry, kept, { replace: Boolean(again.style) });
   // Descriptions des colonnes et de la table, envoyées par la SOURCE si l'export les porte.
@@ -297,18 +297,19 @@ async function prepareColumns(ctx, noted, tableRows) {
   const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
   const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
   const created = ctx.approve ? made.map(id => ({ from: id, to: (received.entry.map || {})[id] || id })) : [];
-  return { entry, dropped, copyCols, types, formulas, structure: ctx.approve ? null : structure, created, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs };
+  return { entry, dropped, copyCols, types, formulas, structure: ctx.approve ? null : structure, created, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs, relinkable: linked.text };
 }
 
-// Références conservées (voir links.js) : une colonne que la SOURCE envoie comme Référence vers une
-// autre table de l'export, créée ici en texte et encore vide, devient une Référence vers la table
-// reçue (affichant la même colonne). Une colonne déjà remplie reste du texte ; dans les deux cas le
-// sort est noté (`linked`) et la destination n'est plus relue pour cela. Jamais en Échange (les
-// colonnes y vont dans les deux sens, par nom). Rend l'entrée à jour et les colonnes qui sont des
-// Références (`specs`). Une colonne dont la SOURCE ne garde plus le lien redevient du texte.
-async function linkColumns(ctx, noted, sent, tableRows) {
-  if (ctx.exchange) return { entry: noted, specs: [] };
-  const plan = planLinks(ctx.schema, noted, sent, ctx.dests);
+// Références conservées (voir links.js) : une colonne que la SOURCE envoie comme Référence ou Liste de références
+// vers une autre table de l'export, créée ici en texte et encore vide, devient une Référence (une Liste de références)
+// vers la table reçue (affichant la même colonne). Une colonne déjà remplie reste du texte ; dans les deux cas le sort
+// est noté (`linked`) et la destination n'est plus relue pour cela. Jamais en Échange (les colonnes y vont dans les
+// deux sens, par nom). Rend l'entrée à jour, les colonnes qui sont des Références (`specs`) et celles qui sont restées
+// du texte (`text`, que « Refaire les références » convertit sur demande : `relink` les convertit toutes, remplies
+// comprises, et leurs cellules reprennent la SOURCE). Une colonne dont la SOURCE ne garde plus le lien redevient du texte.
+async function linkColumns(ctx, noted, sent, tableRows, { relink = false } = {}) {
+  if (ctx.exchange) return { entry: noted, specs: [], text: [] };
+  const plan = planLinks(ctx.schema, noted, sent, ctx.dests, { relink });
   let entry = noted;
   if (plan.undo.length) {
     await apply(unlinkActions(entry.dest, plan.undo));
@@ -316,14 +317,18 @@ async function linkColumns(ctx, noted, sent, tableRows) {
     ctx.schema = await readSchema();
     entry = { ...entry, linked: (entry.linked || []).filter(id => !plan.undo.some(s => s.from === id)) };
   }
-  if (!plan.todo.length) return { entry, specs: plan.ready };
+  if (!plan.todo.length) return { entry, specs: plan.ready, text: plan.text };
   const destRows = await fetchRows(entry.dest);
-  const { convert, decided } = decideLinks(plan.todo, to => destRows.every(r => isBlank(r[to])));
+  const { convert, decided } = decideLinks(plan.todo, to => destRows.every(r => isBlank(r[to])), { all: relink });
   if (convert.length) {
     await apply(convert.flatMap(spec => linkActions(entry.dest, spec)));
     ctx.schema = await readSchema();
   }
-  return { entry: { ...entry, linked: [...new Set([...(entry.linked || []), ...decided])] }, specs: [...plan.ready, ...convert] };
+  return {
+    entry: { ...entry, linked: [...new Set([...(entry.linked || []), ...decided])] },
+    specs: [...plan.ready, ...convert.map(spec => (relink ? { ...spec, relink: true } : spec))],
+    text: [...plan.text, ...plan.todo.filter(spec => !convert.includes(spec))],
+  };
 }
 
 // Réception en archive : la case des lignes parties de la SOURCE, ajoutée à la destination qui ne
@@ -339,13 +344,13 @@ async function copyTable(ctx, noted) {
   const renamed = followRenames(noted, ctx.schema);
   if (!ctx.schema.has(renamed.dest)) return { entry: renamed, error: failure('destMissing', { dest: renamed.dest }) };
   const tableRows = ctx.groups.get(renamed.table) || [];
-  const { entry, copyCols, types, dropped, fileCols, links, formulas, structure, created } = await prepareColumns(ctx, renamed, tableRows);
+  const { entry, copyCols, types, dropped, fileCols, links, relinkable, formulas, structure, created } = await prepareColumns(ctx, renamed, tableRows);
   const present = fileCols.length ? await ctx.files() : new Map();
   // Échange : une version dont un fichier n'est pas encore arrivé attend (voir waitingVersions).
   const waiting = ctx.exchange ? waitingVersions(tableRows, fileCols.map(([from]) => from), present) : new Map();
   const key = tableKey(ctx.journal, entry.table);
   const signature = JSON.stringify([tableRows.map(r => r.id), copyCols, entry.match || '', entry.dest, present.size, links.map(s => [s.to, s.target])]);
-  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, formulas, structure, wrote: false, ...lastRead.get(key) };
+  if (unchanged(key, signature)) return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, relinkable, formulas, structure, wrote: false, ...lastRead.get(key) };
   // Références conservées : la cellule porte le numéro de la ligne d'ici qui a la clé citée.
   const lookups = await linkLookups(links);
   const rows = resolveLinks(resolveRows(tableRows, fileCols.map(([from]) => from), present), links, lookups);
@@ -380,7 +385,7 @@ async function copyTable(ctx, noted) {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
-  return { entry: { ...entry, waiting: files.waiting, ...(adopting === 'mark' ? { adopted: true } : {}) }, stats: plan.stats, copyCols, types, dropped, links, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
+  return { entry: { ...entry, waiting: files.waiting, ...(adopting === 'mark' ? { adopted: true } : {}) }, stats: plan.stats, copyCols, types, dropped, links, relinkable, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
 
 // Pour chaque table d'ici visée par une Référence : ses lignes (voir targetRows).
@@ -658,6 +663,9 @@ export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${
 // formules de colonne, voir formulaColumns : l'écran ne le propose qu'à un propriétaire, après lecture).
 // Un passage est lancé aussitôt ; le journal n'est refait qu'une fois.
 const restyles = new Map();
+// « Refaire les références » : les colonnes que la SOURCE envoie avec leur lien et qui sont restées du texte (déjà remplies
+// quand le lien est arrivé) deviennent des Références, leurs cellules reprennent le lien envoyé (voir linkColumns).
+export const relink = journal => restyle(journal, { links: true });
 export async function restyle(journal, elements = { style: true, notes: true, table: true }) {
   restyles.set(journal, elements);
   try {

@@ -2,7 +2,7 @@
 // des lignes visées, cellules complétées à l'arrivée de la ligne visée.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideLinks, fillLinks, keyIds, linkActions, linkTables, linkable, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/engine/logic/links.js';
+import { decideLinks, fillLinks, keyIds, linkActions, linkOffers, linkTables, linkable, planLinks, refKey, refOf, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/engine/logic/links.js';
 import { exportSchema } from '../../js/engine/logic/codes.js';
 import { exportRowsActions } from '../../js/engine/logic/exports.js';
 import { syncFormulas } from '../../js/engine/logic/formulas.js';
@@ -79,7 +79,7 @@ const sent = [{ id: 'Nom', type: 'Text' }, { id: 'Lieu', type: 'Text', link: 'Vi
 test('CIBLE : une colonne créée ici, encore du texte, est à convertir', () => {
   const plan = planLinks(schema(), entry, sent, dests);
   assert.deepEqual(plan.ready, []);
-  assert.deepEqual(plan.todo, [{ from: 'Lieu', to: 'Lieu', ref: 12, type: 'Text', target: 'Villes_ici', shownId: 'Ville', shown: 21 }]);
+  assert.deepEqual(plan.todo, [{ from: 'Lieu', to: 'Lieu', ref: 12, type: 'Text', target: 'Villes_ici', shownId: 'Ville', shown: 21, list: false }]);
 });
 
 test('CIBLE : déjà une Référence vers la table reçue : prête ; ni créée ici ni décidée : laissée', () => {
@@ -87,11 +87,11 @@ test('CIBLE : déjà une Référence vers la table reçue : prête ; ni créée 
   assert.deepEqual(planLinks(schema({ Lieu: 'Ref:Villes_ici' }), entry, sent, dests).todo, []);
   assert.deepEqual(planLinks(schema(), { ...entry, own: ['Nom'] }, sent, dests).todo, [], 'colonne choisie par la personne');
   assert.deepEqual(planLinks(schema(), { ...entry, linked: ['Lieu'] }, sent, dests).todo, [], 'sort déjà décidé');
-  assert.deepEqual(planLinks(schema({ Lieu: 'Ref:Autre' }), entry, sent, dests), { ready: [], todo: [], undo: [] }, 'Référence vers une autre table');
+  assert.deepEqual(planLinks(schema({ Lieu: 'Ref:Autre' }), entry, sent, dests), { ready: [], todo: [], undo: [], text: [] }, 'Référence vers une autre table');
 });
 
 test('CIBLE : rien tant que la table visée ou sa colonne affichée manque', () => {
-  const none = { ready: [], todo: [], undo: [] };
+  const none = { ready: [], todo: [], undo: [], text: [] };
   assert.deepEqual(planLinks(schema(), entry, sent, new Map()), none);
   assert.deepEqual(planLinks(schema(), entry, sent, new Map([['Villes', { table: 'Villes', dest: 'Absente' }]])), none);
   assert.deepEqual(planLinks(schema(), entry, [{ id: 'Lieu', type: 'Text', link: 'Villes' }], dests), none, 'sans colonne affichée');
@@ -179,4 +179,148 @@ test('colonne rendue au texte : chaque cellule reprend le texte de la dernière 
     ['BulkUpdateRecord', 'Contacts_ici', [101, 102, 103], { Lieu: ['Villeurbanne', '', 'Brest'] }],
   ]);
   assert.deepEqual(textFill({ journalRows, destRows, specs: [], destTable: 'Contacts_ici' }), []);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Choix par colonne (0.27) : Références et Listes de références, tables ajoutées pour un lien
+
+const services = col('Services', { source: 'RefList:Services', visible: 'Libelle' });
+const chef = col('Chef', { source: 'Ref:Contacts', visible: 'Nom' });
+const ville = col('Ville', { source: 'Ref:Villes', visible: 'Nom' });
+const sourceTables = {
+  Contacts: [col('Nom'), ville, services, chef],
+  Villes: [col('Nom'), col('Pays'), col('Region', { source: 'Ref:Regions', visible: 'Nom' })],
+  Services: [col('Libelle'), col('Budget')],
+  Regions: [col('Nom'), col('Code')],
+};
+const offer = (chosen, picked = {}, extra = {}) => linkOffers({
+  chosen, columnsOf: table => sourceTables[table], picked: table => picked[table] || (chosen.includes(table) ? sourceTables[table].map(c => c.id) : undefined), ...extra,
+});
+
+test('SOURCE : une colonne Référence ou Liste de références dit sa table et si c\'est une liste', () => {
+  assert.deepEqual(refOf(ville), { list: false, target: 'Villes' });
+  assert.deepEqual(refOf(services), { list: true, target: 'Services' });
+  assert.equal(refOf(col('Nom')), null);
+  assert.equal(refKey('Contacts', 'Ville'), 'Contacts.Ville');
+});
+
+test('SOURCE : le choix par colonne garde exactement les liens choisis, listes comprises', () => {
+  const tables = [
+    { table: 'Contacts', columns: sourceTables.Contacts, filter: null },
+    { table: 'Villes', columns: [col('Nom')], filter: null },
+    { table: 'Services', columns: [col('Libelle')], filter: null },
+  ];
+  const both = linkTables(tables, new Set(['Contacts.Ville', 'Contacts.Services']));
+  assert.deepEqual(both[0].columns.filter(c => c.link).map(c => [c.id, c.link, c.list === true]), [['Ville', 'Villes', false], ['Services', 'Services', true]]);
+  assert.deepEqual(linkTables(tables, new Set(['Contacts.Services']))[0].columns.filter(c => c.link).map(c => c.id), ['Services']);
+  assert.deepEqual(linkTables(tables, new Set()).flatMap(tb => tb.columns).filter(c => c.link), [], 'aucun lien choisi');
+  assert.deepEqual(linkTables(tables, true)[0].columns.filter(c => c.link).map(c => c.id), ['Ville', 'Chef'], 'true : comme avant, les Références seules');
+  const missing = [tables[0], { table: 'Villes', columns: [col('Pays')], filter: null }];
+  assert.equal(linkTables(missing, new Set(['Contacts.Ville']))[0].columns.find(c => c.id === 'Ville').link, undefined, 'la colonne affichée ne part pas : pas de lien');
+});
+
+test('SOURCE : par défaut le lien est gardé si la table visée est déjà cochée, sinon les valeurs seules partent', () => {
+  const { rows, pulled } = offer(['Contacts', 'Villes']);
+  const by = Object.fromEntries(rows.map(r => [r.key, r]));
+  assert.equal(by['Contacts.Ville'].link, true);
+  assert.equal(by['Contacts.Ville'].inside, true);
+  assert.equal(by['Contacts.Services'].link, false, 'Services n\'est pas cochée : rien ne s\'ajoute sans le choix');
+  assert.equal(by['Contacts.Services'].inside, false);
+  assert.equal(by['Contacts.Chef'].link, true, 'la table se vise elle-même');
+  assert.equal(by['Contacts.Services'].list, true);
+  assert.equal(pulled.size, 0);
+});
+
+test('SOURCE : garder le lien d\'une table hors de l\'export l\'ajoute avec sa seule colonne affichée', () => {
+  const { rows, pulled } = offer(['Contacts'], {}, { choices: new Map([['Contacts.Services', true], ['Contacts.Ville', true]]) });
+  assert.deepEqual([...pulled], [['Villes', ['Nom']], ['Services', ['Libelle']]], 'dans l\'ordre des colonnes');
+  assert.equal(rows.find(r => r.key === 'Contacts.Services').link, true);
+  assert.deepEqual(offer(['Contacts'], {}, { choices: new Map([['Contacts.Services', false]]) }).pulled.size, 0, 'rien à ajouter');
+  // Villes ajoutée n'envoie que Nom : sa colonne Region n'est pas cochée, donc aucune question sur elle.
+  assert.ok(!rows.some(r => r.table === 'Villes'));
+});
+
+test('SOURCE : une table ajoutée peut elle-même avoir une Référence cochée, qui en ajoute une autre', () => {
+  const picked = { Villes: ['Nom', 'Region'] };
+  const { rows, pulled } = offer(['Contacts'], picked, { choices: new Map([['Contacts.Ville', true], ['Villes.Region', true]]) });
+  assert.deepEqual([...pulled].map(([table, cols]) => [table, cols]), [['Villes', ['Nom']], ['Regions', ['Nom']]]);
+  assert.equal(rows.find(r => r.key === 'Villes.Region').link, true);
+  // Sans le choix pour Region, elle reste en valeurs : Regions n'est pas ajoutée.
+  assert.deepEqual([...offer(['Contacts'], picked, { choices: new Map([['Contacts.Ville', true]]) }).pulled.keys()], ['Villes']);
+});
+
+test('SOURCE : lien impossible sans colonne affichée ou si la colonne affichée ne part pas', () => {
+  const none = col('Lieu', { source: 'Ref:Villes', visible: '' });
+  sourceTables.Anon = [none];
+  const { rows } = offer(['Anon'], {}, { choices: new Map([['Anon.Lieu', true]]) });
+  assert.deepEqual([rows[0].ok, rows[0].why, rows[0].link], [false, 'numbers', false]);
+  delete sourceTables.Anon;
+  const hidden = offer(['Contacts', 'Villes'], { Villes: ['Pays'] }, { choices: new Map([['Contacts.Ville', true]]) });
+  const row = hidden.rows.find(r => r.key === 'Contacts.Ville');
+  assert.deepEqual([row.ok, row.why, row.link], [false, 'hidden', false]);
+});
+
+test('SOURCE : un export modifié reprend l\'état enregistré, le choix fait dans la fenêtre l\'emporte', () => {
+  const saved = new Map([['Contacts.Ville', false], ['Contacts.Services', true]]);
+  const old = offer(['Contacts', 'Villes'], {}, { saved });
+  assert.equal(old.rows.find(r => r.key === 'Contacts.Ville').link, false, 'choisi en valeurs avant : reste en valeurs');
+  assert.equal(old.rows.find(r => r.key === 'Contacts.Services').link, true);
+  assert.deepEqual([...old.pulled.keys()], ['Services'], 'son lien tient, la table qu\'il vise s\'ajoute');
+  const changed = offer(['Contacts', 'Villes'], {}, { saved, choices: new Map([['Contacts.Ville', true], ['Contacts.Services', false]]) });
+  assert.deepEqual([changed.rows.find(r => r.key === 'Contacts.Ville').link, changed.rows.find(r => r.key === 'Contacts.Services').link], [true, false]);
+});
+
+// CIBLE : Liste de références
+const listSchema = (types = {}) => {
+  const tables = {
+    Contacts_ici: [{ id: 11, colId: 'Nom', type: 'Text' }, { id: 12, colId: 'Services', type: types.Services || 'Text' }],
+    Services_ici: [{ id: 21, colId: 'Libelle', type: 'Text' }],
+  };
+  return { has: id => id in tables, columns: id => tables[id] || null };
+};
+const listDests = new Map([['Services', { table: 'Services', dest: 'Services_ici' }]]);
+const listEntry = { table: 'Contacts', dest: 'Contacts_ici', own: ['Nom', 'Services'] };
+const listSent = [{ id: 'Nom', type: 'Text' }, { id: 'Services', type: 'Text', link: 'Services', list: true, visible: 'Libelle' }];
+
+test('CIBLE : une colonne texte qui garde un lien de liste devient une Liste de références', () => {
+  const plan = planLinks(listSchema(), listEntry, listSent, listDests);
+  assert.deepEqual(plan.todo.map(s => [s.from, s.list, s.target]), [['Services', true, 'Services_ici']]);
+  assert.deepEqual(linkActions('Contacts_ici', plan.todo[0]), [
+    ['ModifyColumn', 'Contacts_ici', 'Services', { type: 'RefList:Services_ici' }],
+    ['UpdateRecord', '_grist_Tables_column', 12, { visibleCol: 21 }],
+    ['SetDisplayFormula', 'Contacts_ici', null, 12, '$Services.Libelle'],
+  ]);
+  assert.equal(planLinks(listSchema({ Services: 'RefList:Services_ici' }), listEntry, listSent, listDests).ready.length, 1, 'déjà une Liste de références');
+  assert.equal(planLinks(listSchema({ Services: 'Ref:Services_ici' }), listEntry, listSent, listDests).ready.length, 0, 'une Référence simple n\'est pas une liste');
+  const undo = planLinks(listSchema({ Services: 'RefList:Services_ici' }), { ...listEntry, linked: ['Services'] }, [{ id: 'Nom', type: 'Text' }, { id: 'Services', type: 'Text' }], listDests).undo;
+  assert.deepEqual(undo, [{ from: 'Services', to: 'Services' }], 'le lien n\'est plus envoyé : la colonne redevient du texte');
+});
+
+const listSpec = { from: 'Services', to: 'Services', target: 'Services_ici', list: true };
+const listLookups = new Map([['Services_ici', { keys: new Map([['s1', 41], ['s2', 42], ['s3', 43]]), live: new Set([41, 42, 43]) }]]);
+const listKey = `${LINK_PREFIX}Services`;
+
+test('lignes du journal : la cellule Liste de références vaut les numéros des lignes d\'ici qui sont là', () => {
+  const rows = [
+    { id: 1, Services: 'Compta, RH', [listKey]: ['L', 's1', 's2'] }, { id: 2, Services: 'RH', [listKey]: ['L', 's2', 's9'] },
+    { id: 3, Services: '', [listKey]: null }, { id: 4, Services: 'RH', [listKey]: ['L', 's9'] }, { id: 5, Services: 'x', [listKey]: ['L', 's1', 's1', 's3'] },
+  ];
+  assert.deepEqual(resolveLinks(rows, [listSpec], listLookups).map(r => r.Services), [['L', 41, 42], ['L', 42], null, null, ['L', 41, 43]]);
+});
+
+test('cellules de liste complétées : vide, éléments disparus ou ligne arrivée depuis ; une liste complète reste', () => {
+  const version = (id, key, link) => ({ id, id_sync: key, Sync_Applique: true, [listKey]: link });
+  const journalRows = [version(1, 'p1', ['L', 's1', 's2']), version(2, 'p2', ['L', 's1', 's3']), version(3, 'p3', ['L', 's2']), version(4, 'p4', ['L', 's1', 's9']), version(5, 'p5', ['L', 's1'])];
+  const destRows = [
+    { id: 101, id_sync: 'p1', Services: null }, { id: 102, id_sync: 'p2', Services: ['L', 41] }, { id: 103, id_sync: 'p3', Services: ['L', 42] },
+    { id: 104, id_sync: 'p4', Services: ['L', 41] }, { id: 105, id_sync: 'p5', Services: ['L', 17] },
+  ];
+  assert.deepEqual(fillLinks({ journalRows, destRows, specs: [listSpec], lookups: listLookups, destTable: 'Contacts_ici' }), [
+    ['BulkUpdateRecord', 'Contacts_ici', [101, 102, 105], { Services: [['L', 41, 42], ['L', 41, 43], ['L', 41]] }],
+  ]);
+  // Une liste faite d'autres lignes qui existent (retouche) reste.
+  const edited = [{ id: 201, id_sync: 'p1', Services: ['L', 43] }];
+  assert.deepEqual(fillLinks({ journalRows, destRows: edited, specs: [listSpec], lookups: listLookups, destTable: 'Contacts_ici' }), []);
+  // Du texte laissé par la conversion (« Compta, RH ») est refait.
+  assert.equal(fillLinks({ journalRows, destRows: [{ id: 301, id_sync: 'p1', Services: 'Compta, RH' }], specs: [listSpec], lookups: listLookups, destTable: 'Contacts_ici' }).length, 1);
 });

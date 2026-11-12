@@ -7,7 +7,7 @@ import { elementCounts, exportableColumns, isFileColumn, unsentColumns } from '.
 import { noteSent } from '../engine/logic/descriptions.js';
 import { formulasOffered } from '../engine/logic/column-formulas.js';
 import { layoutSent } from '../engine/logic/layout.js';
-import { linkable } from '../engine/logic/links.js';
+import { linkOffers, refKey, refOf } from '../engine/logic/links.js';
 import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
 import { missingSyncColumns } from '../engine/logic/formulas.js';
 import { STATES } from '../engine/logic/journal.js';
@@ -16,7 +16,7 @@ import { finishEdit, saveChosenExport } from '../engine/source/export.js';
 import { receivedDests } from '../engine/logic/received.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
-import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, openWizard, pickField, run } from '../ui.js';
+import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, notice, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
@@ -37,8 +37,15 @@ export function exportWizard(exp, onClose) {
     chosen: exp ? exp.tables.map(tb => tb.table) : [],
     selected: new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []), // table -> colonnes cochées
     filters: new Map(exp ? exp.tables.map(tb => [tb.table, tb.filter]) : []), // table -> filtre de lignes, ou null
+    choices: new Map(), // colonne Référence (refKey) -> garder son lien ? (choix fait dans cette fenêtre)
+    extras: new Map(), // table ajoutée pour un lien -> colonnes cochées en plus de celle que le lien affiche
+    saved: savedLinks(exp), // refKey -> la colonne de l'export enregistré gardait son lien
   }));
 }
+
+// Les liens de l'export enregistré, colonne par colonne (voir linkOffers). Rien pour un nouvel export ni un Échange.
+const savedLinks = exp => (exp && !exp.echange
+  ? new Map(exp.tables.flatMap(tb => tb.columns.filter(c => refOf(c)).map(c => [refKey(tb.table, c.id), Boolean(c.link)]))) : null);
 
 // 1. Tables de l'export. Une table introuvable (renommée, effacée) en sort.
 async function showTables(ctx) {
@@ -48,7 +55,11 @@ async function showTables(ctx) {
   const next = { label: t('common.next'), kind: 'btn-primary', disabled: !ctx.chosen.length, onClick: () => run(null, report, () => showColumns(ctx)) };
   const list = checkList({
     items: tables.map(id => ({ value: id, label: id })), checked: ctx.chosen, label: t('send.step.tables'),
-    onChange: (values) => { ctx.chosen = values; next.disabled = !values.length; ctx.wizard.buttons([cancel, next]); },
+    onChange: (values) => {
+      // Une table cochée ici n'est plus « ajoutée pour un lien » : elle repart de ses colonnes et de son filtre habituels.
+      for (const table of values.filter(v => !ctx.chosen.includes(v))) for (const map of [ctx.extras, ctx.selected, ctx.filters]) map.delete(table);
+      ctx.chosen = values; next.disabled = !values.length; ctx.wizard.buttons([cancel, next]);
+    },
   });
   ctx.wizard.show(0, [el('p', {}, t(ctx.exp ? 'send.edit.tables' : 'send.tables.help')), list, report, stepHelp(['s-tables']),
     ctx.exp ? null : roleGuide({ you: 'source', current: 0 })], [cancel, next]);
@@ -74,7 +85,7 @@ function columnsBlock(ctx, schema, table, relayed) {
   };
   const columns = el('div', { class: 'form' },
     checkList({ items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source) })), wide: true,
-      checked: ctx.selected.get(table), label: table, onChange: (values) => { ctx.selected.set(table, values); describe(); } }),
+      checked: ctx.selected.get(table), label: table, onChange: (values) => { ctx.selected.set(table, values); describe(); if (ctx.refresh) ctx.refresh(); } }),
     files.length ? el('p', { class: 'muted small' }, t('send.columns.files', { cols: files.join(', ') })) : null);
   const editor = filterEditor({
     table, columns: usable, current: ctx.filters.get(table), labelOf: columnLabel,
@@ -103,18 +114,105 @@ function togglePart(part, label, open, onOpen = () => {}) {
   return button;
 }
 
-// Case « Garder les liens » (voir links.js), proposée quand une colonne Référence vise une autre
-// table de l'export (hors Échange, où les colonnes vont dans les deux sens par leur nom). Cochée
-// d'emblée pour un nouvel export ; pour un export modifié, telle que l'export l'est déjà.
-function linksBlock(ctx, schema) {
-  const usable = ctx.chosen.map(table => ({ table, columns: exportableColumns(schema.columns(table)) }));
-  if (ctx.exp?.echange || !linkable(usable)) {
-    ctx.links = false;
-    return null;
+// Ce que la personne décide pour chaque colonne Référence ou Liste de références cochée (voir linkOffers), à
+// l'état de la fenêtre : les choix faits, ceux de l'export enregistré, sinon le lien est gardé quand la table visée est
+// cochée. Les colonnes d'une table ajoutée pour un lien sont celles que le lien affiche et celles que la personne y coche.
+const offersOf = (ctx, schema) => linkOffers({
+  chosen: ctx.chosen, columnsOf: table => exportableColumns(schema.columns(table) || []),
+  picked: table => (ctx.chosen.includes(table) ? ctx.selected.get(table) : [...(ctx.extras.get(table) || [])]),
+  choices: ctx.choices, saved: ctx.saved,
+});
+
+// Bloc d'une table ajoutée pour un lien : elle ne part qu'avec la colonne que la Référence affiche (verrouillée) et celles
+// que la personne coche en plus ; ses lignes peuvent se filtrer comme celles des autres tables.
+function pulledBlock(ctx, schema, { table, required, because, onChange }) {
+  const usable = exportableColumns(schema.columns(table) || []);
+  const picked = () => [...new Set([...required, ...(ctx.extras.get(table) || [])])];
+  const summary = el('p', { class: 'small' });
+  const describe = () => {
+    const names = usable.filter(c => picked().includes(c.id)).map(c => c.label).join(', ');
+    const rows = filterSummary(ctx.filters.get(table));
+    summary.textContent = `${t('send.columns.some', { n: picked().length, total: usable.length })} (${names}) · ${rows ? t('send.rows.filtered', { filter: rows }) : t('send.rows.all')}`;
+  };
+  const columns = el('div', { class: 'form' }, checkList({
+    items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source), locked: required.includes(c.id) })), wide: true,
+    checked: picked(), label: table, onChange: (values) => { ctx.extras.set(table, values.filter(v => !required.includes(v))); describe(); onChange(); },
+  }));
+  const editor = filterEditor({ table, columns: usable, current: ctx.filters.get(table), labelOf: columnLabel, onChange: (filter) => { ctx.filters.set(table, filter); describe(); } });
+  const filtered = Boolean(filterSummary(ctx.filters.get(table)));
+  if (filtered) editor.load();
+  describe();
+  return el('div', { class: 'form table-block table-added' },
+    el('div', { class: 'added-head' }, el('h3', {}, table), el('span', { class: 'pill pill-ok' }, t('send.refs.added'))), summary,
+    el('p', { class: 'muted small' }, t('send.refs.added.because', { cols: because.join(', ') })),
+    el('div', { class: 'block-actions' },
+      togglePart(columns, t('send.columns.pick'), (ctx.extras.get(table) || []).length > 0),
+      togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
+    columns, editor.node);
+}
+
+// Une ligne du bloc « Références entre tables » : la colonne, ce qu'elle vise, le choix « Valeurs seulement » / « Garder le lien »
+// et ce que ce choix fait. `update` la remet à l'état des choix sans la redessiner (le focus reste sur le bouton radio).
+function refRow(ctx, offer, onPick) {
+  const name = `gristsync-ref-${offer.key}`;
+  const note = el('p', { class: 'ref-note muted small' });
+  const radio = (link, label) => {
+    const input = el('input', { type: 'radio', name, checked: false, onchange: () => { ctx.choices.set(offer.key, link); onPick(); } });
+    return { input, node: el('label', { class: 'check' }, input, el('span', {}, label)) };
+  };
+  const values = radio(false, t('send.refs.values'));
+  const keep = radio(true, t('send.refs.link'));
+  const kind = t(offer.list ? 'type.RefList' : 'type.Ref');
+  const update = (now) => {
+    values.input.checked = !now.link;
+    keep.input.checked = now.link;
+    keep.input.disabled = !now.ok;
+    const vars = { target: now.target, shown: now.shown, kind };
+    note.textContent = t(!now.ok ? `send.refs.note.${now.why}` : now.link ? (now.inside ? 'send.refs.note.inside' : 'send.refs.note.pull') : 'send.refs.note.values', vars);
+  };
+  update(offer);
+  return {
+    key: offer.key, update,
+    node: el('div', { class: 'ref-row', 'data-ref': offer.key },
+      el('div', {}, el('strong', {}, offer.label), ' ', el('span', { class: 'muted small' }, t('send.refs.of', { table: offer.table })), ' ', el('span', { class: 'pill pill-off' }, kind),
+        el('div', { class: 'muted small' }, t('send.refs.aim', { target: offer.target, shown: offer.shown || '—' }))),
+      el('div', { class: 'radios', role: 'radiogroup', 'aria-label': `${offer.table} · ${offer.label}` }, values.node, keep.node), note),
+  };
+}
+
+// Colonnes Référence et Liste de références (voir links.js) : pour chacune, n'envoyer que le texte affiché ou garder le lien (la table
+// visée s'ajoute alors à l'export avec sa seule colonne affichée). Hors Échange, où les colonnes vont dans les deux sens par leur
+// nom. `onTables` reçoit les tables de l'export à chaque changement. Rend les nœuds (tables ajoutées, puis bloc des choix).
+function linkSection(ctx, schema, onTables) {
+  if (ctx.exp?.echange) return null;
+  const pulledSlot = el('div', { class: 'form' });
+  const refsSlot = el('div', { class: 'form' });
+  const state = { shown: '', pulled: '', rows: new Map(), summary: el('p', { class: 'small summary' }) };
+  const redrawPulled = (offers) => {
+    const because = (table) => offers.rows.filter(r => r.link && r.target === table).map(r => `${r.table}.${r.label}`);
+    pulledSlot.replaceChildren(...[...offers.pulled].map(([table, required]) => pulledBlock(ctx, schema, { table, required, because: because(table), onChange: refresh })));
+  };
+  const redrawRefs = (offers) => {
+    state.rows = new Map(offers.rows.map(r => [r.key, refRow(ctx, r, refresh)]));
+    const n = offers.rows.length;
+    refsSlot.replaceChildren(...(n ? [el('div', { class: 'form table-block' }, el('h3', {}, t('send.refs.title')),
+      notice({ tone: 'info', title: t('send.refs.found', { n }), lines: [t('send.refs.found.help')] }),
+      ...[...state.rows.values()].map(row => row.node), state.summary)] : []));
+  };
+  function refresh() {
+    const offers = offersOf(ctx, schema);
+    for (const table of [...ctx.extras.keys()]) if (!offers.pulled.has(table)) ctx.extras.delete(table);
+    const rowsSig = JSON.stringify(offers.rows.map(r => [r.key, r.ok, r.why]));
+    if (rowsSig !== state.shown) { state.shown = rowsSig; redrawRefs(offers); } else offers.rows.forEach(r => state.rows.get(r.key).update(r));
+    const pulledSig = JSON.stringify([[...offers.pulled], offers.rows.filter(r => r.link).map(r => [r.key, r.target])]);
+    if (pulledSig !== state.pulled) { state.pulled = pulledSig; redrawPulled(offers); }
+    const items = [...offers.pulled].map(([table, required]) => `${table} (${required.map(id => (exportableColumns(schema.columns(table) || []).find(c => c.id === id) || { label: id }).label).join(', ')})`);
+    state.summary.textContent = items.length ? t('send.refs.summary.some', { items: items.join(', ') }) : t('send.refs.summary.none');
+    onTables([...ctx.chosen, ...offers.pulled.keys()]);
   }
-  if (ctx.links === undefined) ctx.links = ctx.exp ? ctx.exp.tables.some(tb => tb.columns.some(c => c.link)) : true;
-  const box = el('input', { type: 'checkbox', checked: ctx.links, onchange: () => { ctx.links = box.checked; } });
-  return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t('send.links')), el('p', { class: 'muted small' }, t('send.links.help')));
+  ctx.refresh = refresh;
+  refresh();
+  return [pulledSlot, refsSlot];
 }
 
 // Case « Envoyer aussi les colonnes que j'ajouterai » (voir new-columns.js) : décochée d'emblée, telle que l'export l'est pour un export
@@ -188,9 +286,17 @@ async function showColumns(ctx) {
   const schema = await readSchema();
   const relays = receivedDests(schema).map(d => d.dest);
   const report = el('div', { class: 'report' });
+  ctx.refresh = null;
   const blocks = ctx.chosen.map(table => columnsBlock(ctx, schema, table, relays.includes(table)));
-  const adds = ctx.chosen.flatMap(table => missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
-  if (!ownsSync(schema)) adds.push(t('send.check.sync'));
+  // Ce que le widget ajoute aux tables de l'export, celles ajoutées pour un lien comprises (la ligne suit les choix).
+  const addsNode = el('p', { class: 'muted small' });
+  const showAdds = (tables) => {
+    const adds = tables.flatMap(table => missingSyncColumns(schema.columns(table)).map(col => `${table}.${col}`));
+    if (!ownsSync(schema)) adds.push(t('send.check.sync'));
+    addsNode.textContent = adds.length ? t('send.check.missing', { items: adds.join(', ') }) : '';
+    addsNode.classList.toggle('hidden', !adds.length);
+  };
+  const links = linkSection(ctx, schema, showAdds) || (showAdds(ctx.chosen), null);
   const removed = ctx.exp ? ctx.exp.tables.map(tb => tb.table).filter(table => !ctx.chosen.includes(table)) : [];
   const elementsNode = await elementsBlock(ctx, schema);
   const next = () => {
@@ -199,8 +305,7 @@ async function showColumns(ctx) {
   };
   ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
     removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
-    ...blocks, linksBlock(ctx, schema), elementsNode, autoColsBlock(ctx),
-    adds.length ? el('p', { class: 'muted small' }, t('send.check.missing', { items: adds.join(', ') })) : null, report, stepHelp(['s-columns'])], [
+    ...blocks, ...(links || []), elementsNode, autoColsBlock(ctx), addsNode, report, stepHelp(['s-columns'])], [
     backButton(() => showTables(ctx)),
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
@@ -238,12 +343,19 @@ function showName(ctx) {
     { label: ctx.exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(ctx, nameInput.value.trim() || fallback, report)) }]);
 }
 
-// Les choix de la personne : par table, ses colonnes cochées et son filtre (saveChosenExport les écrit).
-const selectionOf = ctx => ctx.chosen.map(table => ({ table, columns: ctx.selected.get(table), filter: ctx.filters.get(table) || null }));
+// Les choix de la personne : par table, ses colonnes cochées et son filtre (saveChosenExport les écrit), les tables ajoutées
+// pour un lien (avec leur seule colonne affichée et ce que la personne y a coché) et les colonnes qui gardent leur lien.
+async function choicesOf(ctx) {
+  const offers = ctx.exp?.echange ? null : offersOf(ctx, await readSchema());
+  const added = offers ? [...offers.pulled].map(([table, required]) => ({ table, columns: [...new Set([...required, ...(ctx.extras.get(table) || [])])], filter: ctx.filters.get(table) || null })) : [];
+  const explicit = ctx.chosen.map(table => ({ table, columns: ctx.selected.get(table), filter: ctx.filters.get(table) || null }));
+  return { selection: [...explicit, ...added], links: new Set(offers ? offers.rows.filter(r => r.link).map(r => r.key) : []) };
+}
 
 async function save(ctx, name, report) {
   const { exp } = ctx;
-  const saved = await saveChosenExport({ exp, name, selection: selectionOf(ctx), links: ctx.links, ...ctx.elements, rules: ctx.rules, autoCols: Boolean(ctx.autoCols) });
+  const { selection, links } = await choicesOf(ctx);
+  const saved = await saveChosenExport({ exp, name, selection, links, ...ctx.elements, rules: ctx.rules, autoCols: Boolean(ctx.autoCols) });
   return exp ? showEdited(ctx, { name, changed: saved.changed, report }) : showCreated(ctx, { name, created: saved.created });
 }
 

@@ -73,7 +73,7 @@ export const driftResult = (drift, labelCol, droppedCols) => ({
 // la visite précédente (`lastVisit`, secondes ; dont les colonnes ajoutées par la SOURCE, `added`),
 // valeurs retouchées à la main (`drift`). Table verrouillée que la personne ne peut pas recopier
 // (`locked`) : rien de plus.
-export function tableResult({ entry, stats, copyCols, types, links, formulas, structure, numbers, drift, dropped, pending, gaps, files, error, locked }, groups, lastVisit) {
+export function tableResult({ entry, stats, copyCols, types, links, relinkable, formulas, structure, numbers, drift, dropped, pending, gaps, files, error, locked }, groups, lastVisit) {
   if (error) return { table: entry.table, error };
   if (locked) return { table: entry.table, stats, dest: entry.dest, locked: true };
   const labelCol = copyCols.some(([from]) => from === entry.label) ? entry.label : (copyCols[0] || [])[0];
@@ -81,12 +81,14 @@ export function tableResult({ entry, stats, copyCols, types, links, formulas, st
   const added = (entry.addedCols || []).filter(a => a.at > (lastVisit || 0));
   return {
     table: entry.table, stats, dest: entry.dest, copyCols, labelCol, labelCols: copyCols.map(([c]) => c), types, links, formulas, structure: structure || null, recent, added, files,
+    relinkable: (relinkable || []).map(s => ({ from: s.from, to: s.to, list: s.list, target: s.target })),
     ...driftResult(drift, labelCol, dropped), ...reviewResult(pending, gaps, labelCol),
   };
 }
 
 // Ce que la carte d'une table montre en plus des compteurs.
 export const cardShape = (result = {}) => JSON.stringify([
-  result.drift || [], result.driftCount || 0, result.pendingIds || [], result.gapCount || 0, result.files || null, result.structure || null,
+  result.drift || [], result.driftCount || 0, result.pendingIds || [], result.gapCount || 0, result.files || null, result.structure || null, result.relinkable || [],
+  (result.links || []).map(s => [s.to, s.target, Boolean(s.list)]),
 ]);
 export const wrote = stats => Boolean(stats && stats.added + stats.updated + stats.removed);

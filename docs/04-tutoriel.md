@@ -439,16 +439,25 @@ carte :
   reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
   personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.
 
-**Liens entre tables.** Dans un export de plusieurs tables, une colonne Référence qui vise une autre
-table de l'export (dont la colonne affichée part aussi) devient, chez le destinataire, une vraie
-Référence vers la table reçue, qui affiche la même colonne : case **Garder les liens entre les
-tables** à l'étape Colonnes, cochée d'emblée.
+**Liens entre tables.** À l'étape Colonnes, le bloc **Références entre tables** liste chaque colonne
+Référence ou Liste de références de l'export, avec la table qu'elle vise et la colonne qu'elle affiche.
+Pour chacune, deux choix : **Valeurs seulement** (le destinataire reçoit le texte affiché) ou **Garder le
+lien** (il reçoit une vraie Référence, ou Liste de références, vers la table reçue, qui affiche la même
+colonne). Quand la table visée est déjà cochée, le lien est gardé d'emblée ; sinon ce sont les valeurs
+seules qui partent, et garder le lien **ajoute la table visée à l'export** avec sa seule colonne
+affichée (un bloc « Ajoutée pour un lien » le dit, on peut y filtrer les lignes ou cocher d'autres
+colonnes ; la ligne « Part en plus des tables cochées » fait le compte).
 
-![Case « Garder les liens entre les tables »](images/29-source-liens.png)
+![Bloc « Références entre tables »](images/29-source-liens.png)
 
-Une colonne déjà remplie chez le destinataire reste du texte ; décocher la case, dans
-**Modifier**, rend le texte. Une Liste de références reste du texte. Une ligne qui arrive avant la
-ligne qu'elle vise est complétée à l'arrivée de celle-ci.
+![Table ajoutée pour un lien](images/29b-source-liens-tables-ajoutees.png)
+
+Une colonne que le destinataire avait déjà remplie de texte reste du texte (rien n'est touché sans
+accord) : sa carte le dit (« … reste du texte ») et un propriétaire clique **Refaire les références**
+pour la convertir et reprendre le lien envoyé par la SOURCE. **Valeurs seulement**, dans **Modifier**, rend
+le texte. Une ligne qui arrive avant les lignes qu'elle vise est complétée à leur arrivée.
+
+![Carte : références refaites, colonne restée du texte](images/29c-cible-liens-refaire.png)
 
 **Mise en forme des colonnes.** La case **Envoyer la mise en forme des colonnes** (étape Colonnes,
 cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise

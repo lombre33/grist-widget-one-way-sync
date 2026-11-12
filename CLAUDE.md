@@ -375,7 +375,46 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.26.0 (12 novembre 2026)
+## État : V0.27.0 (12 novembre 2026)
+
+V0.27.0 (Antoine, 12 novembre : « lorsqu'il y a des références dans les table envoyées, côté source, peut-on l'indiquer ? et demander si l'user veut envoyer le
+contenu uniquement en valeur ou s'il veut ajouter la table/colonne(s) utilisées pour conserver les relations/références ? et dans ce cas il faut que côté cible on
+refasse les références fonctionnelles » ; maquette de trois options (Artifact), carte de décision « Comment proposer le choix valeurs ou références à l'export ? » :
+**« Par colonne, tables ajoutées »**). Moteur **4.11.0** (mineure, dite dans `GFS-ETAT.md`). Remplace la case unique « Garder les liens entre les tables » de la 0.12 (F4).
+- **SOURCE** (étape Colonnes de l'assistant d'export, `js/source/export-wizard.js` : `linkSection`, `refRow`, `pulledBlock`) : le bloc **« Références entre tables »**
+  liste chaque colonne Référence ou Liste de références cochée (table visée, colonne affichée), avec deux choix : « Valeurs seulement » ou « Garder le lien ».
+  Par défaut (nouvel export) le lien est gardé quand la table visée est déjà cochée, **sinon les valeurs seules partent** : aucune table ne s'ajoute sans ce choix.
+  Garder le lien d'une table hors de l'export **l'ajoute** avec sa seule colonne affichée (bloc « Ajoutée pour un lien », colonne affichée verrouillée dans
+  `checkList` (`locked`), on peut y cocher d'autres colonnes et filtrer les lignes ; en cascade : une Référence cochée dans une table ajoutée peut en ajouter une autre) ;
+  la ligne « Part en plus des tables cochées : … » en fait le compte et la ligne « Le widget ajoutera… » compte les tables ajoutées. Lien impossible (radio grisé, note)
+  si la colonne n'affiche aucune colonne de sa table (`numbers`) ou si la colonne affichée ne part pas (`hidden`). Un export modifié reprend l'état enregistré colonne
+  par colonne (`saved`, `savedLinks`) ; un choix fait dans la fenêtre l'emporte. Cocher une table à l'étape Tables qui était « ajoutée pour un lien » la remet à ses
+  colonnes et son filtre habituels. Hors Échange (aucun bloc). Logique pure et testée : `linkOffers`, `refOf`, `refKey` de `logic/links.js` ; `linkTables(tables, on)`
+  accepte un `Set` de `refKey` (exactement ces colonnes, listes comprises) ou `true` (ancien sens : les Références seules) ; `saveChosenExport({ links })` aussi.
+- **Liste de références** : le lot porte la liste des clés des lignes visées dans `Synchro_Cle_<colonne>` **sans changer le texte des formules de `Synchro`**
+  (`getattr(r, id).id_sync` d'un ensemble de lignes rend la liste : vérifié dans Grist ; `formulas-golden` inchangé). La description signée des colonnes porte
+  `link` et `list: true` (`schemaText`, `exportSchema`). **Piège** : la description lue par la CIBLE (`sentColumns` → `exportSchema`) ne garde pas `source` : c'est
+  `list` qui dit que la colonne est une liste, `refOf(c)` ne marche que côté SOURCE.
+- **CIBLE** (`js/engine/logic/links.js`, `target/loop.js`, `js/target/tab.js`) : une colonne texte créée par le widget devient une Liste de références comme une Référence
+  (`RefList:<table>`, `visibleCol`, `SetDisplayFormula`) ; cellules `['L', numéros…]` ou `null` ; une liste incomplète (ligne visée pas encore arrivée) est complétée à
+  l'arrivée (`fillable` : vide, éléments disparus, ou ligne manquante ; **limite dite** : un élément retiré à la main d'une liste qui n'a plus que des lignes qui existent
+  est remis au passage suivant, la SOURCE fait foi). Les cartes disent « Références refaites » (`linksBlock`, `result.links`) et, pour une colonne **restée du texte
+  parce qu'elle était remplie** (`planLinks().text`, `result.relinkable`), « N colonne(s) reste(nt) du texte » avec le bouton **« Refaire les références »** (propriétaires ;
+  confirmation qui dit ce qui change et que les valeurs changées à la main sont remplacées) : `relink(journal)` (`restyle(journal, { links: true })`) convertit ces colonnes
+  (`todo` sans le sort décidé, `decideLinks(…, { all: true })`) et leurs cellules reprennent exactement le lien envoyé (`relink: true` sur la spécification, `fillable`).
+  Jamais sur une colonne qui existait déjà (`own` seulement), jamais en Échange.
+- **Test de l'écran** : un clic sur un radio ne redessine pas les lignes (le focus reste), seulement les notes, le bloc des tables ajoutées et le résumé (`refresh` de
+  `linkSection`) ; les blocs des tables ajoutées ne sont redessinés que si l'ensemble des tables ajoutées ou des liens change.
+- Testé : unit 467 (`links.test.mjs` : choix par colonne, listes, tables ajoutées en cascade, export modifié, liste complétée, `relink` ; `engine-refs.test.mjs` : SOURCE puis
+  CIBLE sur deux Grist en mémoire, liste incomplète puis complétée, colonne remplie de texte puis `relink`) ; e2e `ONLY_LINKS=1` (vrai Grist, `linksSteps` : valeurs d'emblée pour
+  une table hors de l'export, ajout de `Services` avec sa seule colonne `Libelle`, Liste de références reçue, ville renommée suivie, « Valeurs seulement » rend le texte, lien
+  redonné sur une colonne remplie : avis puis « Refaire les références »). Captures : `docs/images/29-source-liens.png`, `29b-source-liens-tables-ajoutees.png`,
+  `29c-cible-liens-refaire.png` (`CAPTURES=1 ONLY_LINKS=1`).
+- **CODE_FORMAT inchangé** (Bêta non publiée) : après la publication, relever `CODE_FORMAT` : une CIBLE d'avant la 4.11 ferait d'une colonne `list` une Référence simple.
+- **Pas fait, dit à Antoine** : une Liste de références vers plusieurs tables ou une Référence « générique » (`Any`) ; l'historique et les retouches montrent toujours les
+  numéros de ligne d'une Référence (pas le texte affiché).
+
+## État précédent : V0.26.0 (12 novembre 2026)
 
 V0.26.0 (Antoine, 12 novembre, point 7 de sa liste : « option SOURCE pour l'ordre, les colonnes cachées, les vues »). Moteur **4.10.0** (mineure, dite dans `GFS-ETAT.md`). Étape 7 et dernière de l'ordre
 convenu (voir la V0.22.0). Une carte de décision a posé le périmètre ; ce qui est codé est l'option recommandée « ordre et colonnes cachées » (à relire si Antoine a répondu autrement).
@@ -1395,7 +1434,7 @@ choix sur la carte de décision : F1 à F3, puis « les autres sauf F7 » ; prop
   `recordEvent` dans `source/synchro.js`). Seuls les événements que le widget conduit y sont :
   destinataire ajouté, envoi ou renvoi, rattrapage, file vidée, pause, reprise, révocation, export
   modifié. Les envois ordinaires partent de Grist sans lui ; l'état de chaque destinataire les dit.
-- **F4, Références conservées** (`js/logic/links.js`, case « Garder les liens entre les tables » à
+- **F4, Références conservées** (remplacée en 0.27 par un choix colonne par colonne, voir plus haut ; `js/logic/links.js`, case « Garder les liens entre les tables » à
   l'étape Colonnes, cochée d'emblée pour un nouvel export, hors Échange) : une colonne Référence
   (pas Liste de références) qui vise une table de l'export, dont la colonne affichée part aussi
   (`linkTables`, `aim`), reçoit `link` (et garde `visible`) dans la description des colonnes

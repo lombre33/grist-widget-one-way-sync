@@ -165,8 +165,8 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, pos, fx, fd }) => ({
-  id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, list, fmt, doc, desc, tdesc, pos, fx, fd }) => ({
+  id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(link && list === true ? { list: true } : {}), ...(opts && withOpts ? { opts } : {}),
   ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
   ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
   ...(isPos(pos) && withOpts ? { pos } : {}),

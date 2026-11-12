@@ -246,7 +246,8 @@ export function copyButton(text, label, onFail = () => {}) {
 
 // Liste à cocher, filtrable au clavier (tables, colonnes, valeurs d'un filtre). `items` :
 // [{ value, label, hint, keywords }] (`hint` : type de la colonne ou nombre de lignes, en discret ;
-// `keywords` : texte cherché en plus du libellé). `checked` : valeurs cochées au départ. `onChange`
+// `keywords` : texte cherché en plus du libellé ; `locked` : coché et grisé, que « Aucun » ne décoche pas).
+// `checked` : valeurs cochées au départ. `onChange`
 // reçoit les valeurs cochées, dans l'ordre de la liste. `label` nomme la liste. « Tous » et « Aucun »
 // ne touchent que ce que la recherche trouve. `wide` : sur plusieurs colonnes quand la place le
 // permet. Une longue liste prend la hauteur de son contenu jusqu'à 45 % de la fenêtre, puis
@@ -259,7 +260,8 @@ export function checkList({ items, checked = [], label = '', onChange, wide = fa
   const filter = el('input', { class: 'search-input', type: 'search', placeholder: t('common.filter'), 'aria-label': name, autocomplete: 'off' });
   const long = items.length > LONG_LIST;
   const list = el('div', { class: `check-list${wide ? ' check-grid' : ''}${long ? ' check-long' : ''}`, role: 'group', 'aria-label': label || null });
-  const chosen = new Set(checked);
+  const locked = new Set(items.filter(it => it.locked).map(it => it.value));
+  const chosen = new Set([...checked, ...locked]);
   const count = el('span', { class: 'check-count muted small', 'aria-live': 'polite' });
   const found = () => items.filter(it => matches(`${it.label} ${it.keywords || ''}`, filter.value));
   const changed = () => {
@@ -272,13 +274,13 @@ export function checkList({ items, checked = [], label = '', onChange, wide = fa
     const more = all.length - shown.length;
     list.replaceChildren(...[...(shown.length ? shown.map(it => el('label', {},
       el('input', {
-        type: 'checkbox', checked: chosen.has(it.value),
+        type: 'checkbox', checked: chosen.has(it.value), disabled: locked.has(it.value),
         onchange: (e) => { if (e.target.checked) chosen.add(it.value); else chosen.delete(it.value); changed(); },
       }), el('span', { class: 'check-label' }, it.label), it.hint ? el('span', { class: 'hint' }, it.hint) : null)) : [el('p', { class: 'muted small' }, t('common.none'))]),
       more > 0 ? el('p', { class: 'muted small check-more' }, t('common.moreItems', { n: more })) : null].filter(Boolean));
   };
   const setShown = (on) => {
-    for (const it of found()) if (on) chosen.add(it.value); else chosen.delete(it.value);
+    for (const it of found()) if (on) chosen.add(it.value); else if (!locked.has(it.value)) chosen.delete(it.value);
     render();
     changed();
   };

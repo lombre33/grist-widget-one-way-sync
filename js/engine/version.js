@@ -185,7 +185,22 @@
 //         (`laid` dans l'entrée de la note), puis sur `restyle(journal, { layout: true })` ; elle retire le champ d'une colonne cachée et répartit les places des champs
 //         entre les colonnes montrées (les autres champs ne bougent pas). Seuls les champs de la section de page sont écrits : jamais une donnée, un droit, un tri
 //         ni un filtre. `sentElements` rend 'layout'.
-export const ENGINE_VERSION = '4.10.0';
+// 4.11.0 (12 novembre 2026, syncPlus 0.27.0, demande du porteur : « lorsqu'il y a des références dans les tables envoyées, côté source, peut-on l'indiquer ?
+//         et demander si l'user veut envoyer le contenu uniquement en valeur ou ajouter la table/colonnes utilisées pour conserver les relations ?
+//         et dans ce cas il faut que côté cible on refasse les références fonctionnelles », puis choix « Par colonne, tables ajoutées ») : le
+//         lien d'une colonne Référence ou Liste de références se décide colonne par colonne. SOURCE : `linkOffers` (`logic/links.js`) dit pour
+//         chaque colonne cochée ce qu'elle vise, si le lien est possible et quelles tables s'ajoutent à l'export (avec leur seule colonne
+//         affichée, en cascade) ; `saveChosenExport({ links })` accepte maintenant un ensemble de `refKey` (« Table.Colonne ») en plus de `true`
+//         (toutes les Références, comme avant : `linkTables(tables, true)` ne touche pas aux listes) ; une Liste de références qui garde son lien
+//         porte `list: true` à côté de `link` dans la description signée des colonnes (le lot porte la liste des clés des lignes visées dans
+//         `Synchro_Cle_<colonne>` : le texte des formules de `Synchro` ne change pas, `getattr(r, id).id_sync` rend la liste pour une Liste de
+//         références). CIBLE : une colonne texte créée par le moteur devient une Liste de références comme une Référence (`RefList:<table>`),
+//         ses cellules reçoivent `['L', numéros…]` et sont complétées à l'arrivée d'une ligne visée (`fillLinks`) ; une colonne restée du texte
+//         parce qu'elle était remplie quand le lien est arrivé est dite dans le résultat de la table (`relinkable`) et `relink(journal)`
+//         (nouveau, sur le clic d'un propriétaire) la convertit et reprend le lien de la SOURCE dans ses cellules. Ni port, ni nom de table, ni
+//         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent. Une CIBLE d'avant la 4.11 qui reçoit une colonne `list` en ferait une
+//         Référence simple : à ne pas mélanger après la publication (relever `CODE_FORMAT` alors).
+export const ENGINE_VERSION = '4.11.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

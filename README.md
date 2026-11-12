@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.25.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.27.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -102,9 +102,12 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   fichier part une fois par destinataire, quand la page SOURCE est ouverte, et n'est déposé
   qu'une fois. Dans un Échange, les fichiers vont dans les deux sens : une ligne attend les
   fichiers de l'autre document avant d'être recopiée, et un fichier reçu n'est pas renvoyé.
-- **Liens entre tables** : une colonne Référence qui vise une autre table de l'export devient,
-  chez le destinataire, une vraie Référence vers la table reçue (case « Garder les liens entre les
-  tables », cochée d'emblée), qui affiche la même colonne.
+- **Liens entre tables** : pour chaque colonne Référence ou Liste de références de l'export, le bloc
+  « Références entre tables » (étape Colonnes) demande si elle part en valeurs seulement ou si elle
+  garde son lien. Garder le lien d'une table qui n'est pas dans l'export l'ajoute avec sa seule
+  colonne affichée ; chez le destinataire, la colonne devient une vraie Référence (ou Liste de
+  références) vers la table reçue, qui affiche la même colonne. Une colonne déjà remplie là-bas reste
+  du texte, jusqu'à ce qu'un propriétaire clique « Refaire les références ».
 - **Éléments des colonnes** : en-têtes, couleurs, devise et règles de mise en forme
   conditionnelle simples (case « Envoyer la mise en forme des colonnes »), descriptions des
   colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, cochée d'emblée,

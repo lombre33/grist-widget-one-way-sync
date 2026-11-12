@@ -13,7 +13,7 @@ import { updateJournalNote } from '../engine/target/journals.js';
 import { dismissLost, markReceptions, readLost } from '../engine/target/lost.js';
 import { receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { currencyOf, formatGap } from '../engine/logic/docformat.js';
-import { consolidateAll, decide, forgetJournal, isAccessError, restoreSource, restyle, state, tableKey } from '../engine/target/loop.js';
+import { consolidateAll, decide, forgetJournal, isAccessError, relink, restoreSource, restyle, state, tableKey } from '../engine/target/loop.js';
 import { alignDocFormat, readDocFormat } from '../engine/target/style.js';
 import { SHOWN } from '../engine/logic/report.js';
 import { TALLY_GRACE_S } from '../engine/logic/tally.js';
@@ -334,7 +334,7 @@ function syncCard(group) {
     cardNotes(group),
     note.tables.map(entry => filesNotes(group, entry)),
     uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
-    note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry)]),
+    note.tables.map(entry => [reviewBlock(group, entry), gapBlock(group, entry), driftBlock(group, entry), linksBlock(group, entry)]),
     group.waiting ? null : history(group),
     el('div', { class: 'report-out' }),
     el('div', { class: 'card-actions' },
@@ -562,6 +562,35 @@ function driftBlock(group, entry) {
     body: total > FOLD_FROM ? fold(`drift:${group.journal}:${entry.table}`, t('recv.drift.show', { n: total }), detail) : detail,
     actions: [button(t('recv.drift.fix'), 'undo', e => run(e.currentTarget, container.querySelector('.out'), () => correct(group, entry, result)))],
   });
+}
+
+// Références (et Listes de références) que la SOURCE garde (voir links.js) : celles qui sont refaites ici, et celles restées du texte
+// parce que la colonne contenait déjà du texte reçu avant que la SOURCE en garde le lien. Le widget n'y touche pas sans accord :
+// un propriétaire clique « Refaire les références », après une fenêtre qui dit ce qui change.
+function linksBlock(group, entry) {
+  const result = state.results.get(tableKey(group.journal, entry.table)) || {};
+  const made = (result.links || []).map(s => ({ ...s, name: `${entry.dest}.${s.to}` }));
+  const text = (result.relinkable || []).map(s => ({ ...s, name: `${entry.dest}.${s.to}` }));
+  const done = made.length ? notice({ tone: 'ok', className: 'links-done', title: t('recv.links.done'), lines: [made.map(s => t('recv.links.item', { name: s.name, target: s.target })).join(' · ')] }) : null;
+  if (!text.length) return done;
+  return [done, notice({
+    tone: 'warn', className: 'links-text', title: t('recv.relink.title', { n: text.length, name: text.map(s => s.name).join(', ') }), lines: [t('recv.relink.body', { n: text.length }),
+      group.owner ? '' : t('recv.relink.owner')],
+    actions: group.owner ? [button(t('recv.relink.button'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => relinkReception(group, entry, text)))] : [],
+  })];
+}
+
+// « Refaire les références » : après confirmation, les colonnes restées du texte deviennent des Références (Listes de références),
+// leurs cellules reprennent le lien envoyé par la SOURCE.
+async function relinkReception(group, entry, text) {
+  const body = [
+    el('ul', {}, text.map(s => el('li', {}, t(s.list ? 'recv.relink.item.list' : 'recv.relink.item', { name: s.name, target: s.target })))),
+    el('p', {}, t('recv.relink.body2')),
+  ];
+  if (!(await confirmDialog({ title: t('recv.relink.confirmTitle', { name: group.note.name }), body, confirmLabel: t('recv.relink.button'), kind: 'btn-primary' }))) return;
+  await relink(group.journal);
+  flash = { node: message('ok', t('recv.relink.done', { cols: text.map(s => s.name).join(', ') })), until: Date.now() + NOTICE_MS };
+  await renderTarget();
 }
 
 // « Corriger » : la table reprend l'état exact de la SOURCE, après confirmation.

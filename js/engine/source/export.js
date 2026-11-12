@@ -45,7 +45,8 @@ async function prepareTables(selection, links, { style = false, notes = false, t
     const calculated = formulas ? withFormulas(noted, schema.columns(table)) : noted;
     tables.push({ table, columns: layout ? withLayout(calculated, schema.columns(table), schema.table(table), sections, fields) : calculated, filter: filter || null });
   }
-  return linkTables(tables, Boolean(links));
+  // `links` : un ensemble de refKey (le choix par colonne), ou vrai (toutes les Références, comme avant la 0.27).
+  return linkTables(tables, links instanceof Set || Array.isArray(links) ? links : Boolean(links));
 }
 
 // Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
@@ -67,7 +68,9 @@ async function noteExport(rules, id, name, extra = {}) {
 }
 
 // Crée l'export (`exp` absent) ou enregistre la modification de `exp`. `selection` : voir
-// prepareTables ; `links` : garder les liens entre les tables (case de l'étape Colonnes) ; `style` : envoyer la
+// prepareTables (les tables ajoutées pour un lien y sont, avec leur seule colonne affichée, voir linkOffers) ;
+// `links` : les colonnes Référence ou Liste de références qui gardent leur lien (ensemble de `refKey`, choix de
+// l'étape Colonnes) ou `true` (toutes les Références qui visent une table de l'export) ; `style` : envoyer la
 // mise en forme des colonnes (en-têtes, règles conditionnelles, monnaie, langue du document), `notes` : leurs
 // descriptions, `autoCols` : envoyer seul les colonnes ajoutées ensuite aux tables (voir new-columns.js), `tableNote` : celle de chaque table, `layout` : l'ordre et les colonnes cachées de la page de chaque table (voir layout.js), `formulas` : leurs formules de colonne, que la CIBLE ne pose que
 // sur le clic d'un propriétaire (cases de l'étape Colonnes, jamais en Échange ; voir column-formulas.js) ; `rules` : règles d'un Échange administré ici ({ ajout, modif,

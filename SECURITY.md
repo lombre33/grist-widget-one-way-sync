@@ -490,7 +490,9 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
     l'accès accordé** (le niveau `access` de la section reste à `none` : Grist demande l'accès complet à la personne, dans
     son panneau de droite ; le widget ne se le donne jamais), une seule fois par page ;
   - *modifier* : la formule ou le déclenchement des colonnes que le widget a créées (`MajLe`, `RecalculLe`, colonnes
-    de `Synchro`), et, à la CIBLE, le type d'une colonne qu'il a créée et qui est encore vide (Référence conservée) ;
+    de `Synchro`), et, à la CIBLE, le type d'une colonne qu'il a créée et qui est encore vide (Référence conservée), ou, sur le
+    clic d'un propriétaire après confirmation (« Refaire les références », 0.27), celui d'une colonne qu'il a créée et que la SOURCE
+    garde en lien mais qui contenait déjà du texte ;
   - *renommer* : seulement une table nommée `Synchro` qui n'est pas la sienne, sur le bouton de la carte, nom proposé
     modifiable ;
   - *supprimer* : ses tables techniques (`Synchro` quand le dernier export est supprimé, un journal quand la
@@ -614,6 +616,15 @@ d'un document :
   signature). Une signature fausse reste rejetée, une ligne `fin` non signée n'est jamais tolérée, et le délai écoulé, l'ancien envoi est refusé
   comme tout envoi non signé (la carte le dit : « Renforcement interrompu »). « Revenir à l'ancien fonctionnement » retire la clé préparée.
   Un Échange d'avant les clés ne passe pas par là (sa reprise tire déjà de nouvelles clés).
+- **Références entre tables (0.27)** : garder le lien d'une colonne Référence ou Liste de références est un choix de la personne qui envoie,
+  colonne par colonne ; quand la table visée n'est pas dans l'export, la garder l'**ajoute** avec la seule colonne que la Référence affiche
+  (le bloc « Ajoutée pour un lien » et la ligne « Part en plus des tables cochées » le disent avant l'enregistrement, aucune table ne
+  s'ajoute sans ce choix). Sont envoyés en plus : la clé (UUID) de la ligne visée, ou la liste des clés des lignes visées, dans le lot signé
+  et scellé comme le reste ; rien d'autre de la table visée. Un export en lien public vérifie, comme avant, qu'aucune règle d'accès d'autrui
+  ne cache de lignes ou de colonnes des tables lues (`hiddenTables`, refus `publicHiddenEdit`), tables visées comprises. À la CIBLE, la
+  conversion d'une colonne en Référence ne touche que les colonnes créées par le widget ; une colonne remplie de texte n'est refaite que sur le
+  clic d'un propriétaire, qui remplace ses cellules par le lien envoyé (Ctrl+Z défait). Une Liste de références dont la liste de clés a été
+  falsifiée ne peut viser que des lignes de la table reçue de cet export (les clés sont résolues dans cette table, 0 ou vide sinon).
 - **Ce que le journal garde, et le bouton « Effacer l'historique » (0.19.1)** : le journal d'une réception garde la dernière version de
   chaque clé (copie de ce qui est dans la destination), l'avant de chaque modification et le numéro des lignes supprimées (`Sync_Avant`), et les
   valeurs de la dernière version d'une clé supprimée à la SOURCE. Décision du porteur (12 novembre) : aucune purge automatique. Un

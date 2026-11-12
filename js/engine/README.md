@@ -315,6 +315,28 @@ créée par le moteur a sa propre page, sans lui : ce bouton le pose là où la 
 - **Port** : inchangé. Essais : `tests/unit/page-widget.test.mjs` (adresses, lecture d'une section, lieu), `engine-widget-page.test.mjs` (ajout, deuxième clic, refus), e2e
   `ONLY_WIDGETPAGE=1` (vrai Grist : bouton, fenêtre, section sans accès, accès accepté dans Grist, recopie par ce widget-là).
 
+## Références entre tables, choix par colonne (4.11.0)
+
+Antoine, 12 novembre : « lorsqu'il y a des références dans les tables envoyées, côté source, peut-on l'indiquer ? et demander si l'user veut
+envoyer le contenu uniquement en valeur ou ajouter la table/colonnes utilisées pour conserver les relations ? et dans ce cas il faut que côté cible
+on refasse les références fonctionnelles » ; choix sur la carte : « Par colonne, tables ajoutées ».
+- **SOURCE** : `linkOffers({ chosen, columnsOf, picked, choices, saved })` (`logic/links.js`) donne, pour chaque colonne Référence (`Ref:T`) ou Liste de
+  références (`RefList:T`) cochée, `{ key, table, id, label, list, target, shown, inside, ok, why, link }` et `pulled` (table à ajouter -> colonnes affichées
+  requises, en cascade). Par défaut le lien est gardé quand la table visée est cochée, sinon les valeurs seules partent (rien ne s'ajoute sans le choix) ;
+  `ok` est faux sans colonne affichée (`numbers`) ou si cette colonne ne part pas (`hidden`). L'hôte ajoute les tables de `pulled` à la `selection`
+  (colonnes affichées seulement, plus ce que la personne y coche) et passe à `saveChosenExport({ links })` un `Set` de `refKey` (`Table.Colonne`) ; `true`
+  garde l'ancien sens (les Références seules, pas les listes). Une liste qui garde son lien porte `link` et `list: true` dans la description signée des
+  colonnes (`schemaText`, `exportSchema`) ; le lot porte les clés des lignes visées (`Synchro_Cle_<colonne>`, une liste pour une liste : le texte des formules
+  de `Synchro` ne change pas, `.id_sync` d'un ensemble de lignes rend la liste).
+- **CIBLE** : `planLinks` rend en plus `text` (colonnes créées par le moteur, restées du texte parce qu'elles étaient remplies) ; une Liste de références est
+  convertie comme une Référence (`ModifyColumn` en `RefList:<table>`, `visibleCol`, `SetDisplayFormula`), ses cellules valent `['L', numéros…]` (`null` si
+  aucune ligne visée n'est là) et sont complétées à l'arrivée d'une ligne visée (`fillLinks`, `fillable` : vide, éléments disparus ou ligne manquante ;
+  cas limite : un élément retiré à la main d'une liste qui n'a plus que des lignes qui existent est remis, la SOURCE fait foi). `relink(journal)` (sur le clic
+  d'un propriétaire, après une confirmation) convertit toutes les colonnes de `relinkable` (résultat de la table : `{ from, to, list, target }`) et leurs cellules
+  reprennent exactement le lien envoyé (`relink: true` sur la spécification, voir `fillable`).
+- **Port** : inchangé. Essais : `tests/unit/links.test.mjs`, `engine-refs.test.mjs` (SOURCE puis CIBLE sur deux Grist en mémoire, liste incomplète
+  puis complétée, `relink`), e2e `ONLY_LINKS=1` (vrai Grist).
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de

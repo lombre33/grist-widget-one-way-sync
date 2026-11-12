@@ -138,6 +138,8 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
         column.rules = column.rules ? [...column.rules, helper.id] : ['L', helper.id];
         return { colRef: helper.id, colId };
       }
+      // Colonne qui affiche une autre colonne de la table visée : rien à calculer ici (visibleCol est écrit à part).
+      case 'SetDisplayFormula': return null;
       case 'RenameTable': tables.set(args[0], need(tableId)); tables.delete(tableId); return null;
       case 'RemoveTable': need(tableId); tables.delete(tableId); return null;
       case 'AddRecord': return addRow(need(tableId), args[1], args[0]);
