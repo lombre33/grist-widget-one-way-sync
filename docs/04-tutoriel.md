@@ -176,12 +176,17 @@ son formulaire de réception sur sa propre page, `Journal_<export>`, rangée jus
 table qui reçoit (une page que vous rangez ensuite à la main n'est jamais déplacée).
 
 **Nouvelle table.** Le widget la crée avec sa propre page, **sans lui dessus** : il ne recopie les
-données reçues que page du widget ouverte, donc qui n'ouvre que cette table ne reçoit rien de
-nouveau. Une fenêtre le dit avant de créer quoi que ce soit. Pour sécuriser la réception, créer
+données reçues que page du widget ouverte, donc qui reste sur la page de cette table ne reçoit rien
+de nouveau. Une fenêtre le dit avant de créer quoi que ce soit. Pour sécuriser la réception, créer
 d'abord la table soi-même, y ajouter le widget (Ajouter un widget à la page, Personnalisée, accès
 complet), puis refaire la procédure depuis cette page en choisissant la table existante ; ou
-continuer, puis ajouter le widget à la page de la table créée : il y retrouve toutes les réceptions
-du document (leur état est dans le document, pas dans une copie du widget).
+continuer, puis cliquer **Ajouter le widget à la page de <table>** sur la carte de la réception :
+le widget pose une section de lui-même sur la page de la table reçue (avec plusieurs tables, la
+fenêtre demande laquelle). Grist demande ensuite l'accès complet pour cette section : ouvrir la
+page, puis le panneau de droite (icône tout en haut à droite) et cliquer sur « Accepter ». Un seul
+widget ouvert suffit pour toutes les réceptions du document, tables et Références comprises (leur
+état est dans le document, pas dans une copie du widget) : le bouton sert à le poser là où vous
+travaillez. Le bouton disparaît dès que le widget est sur la page d'une table de la réception.
 
 **Réception supprimée.** Si le journal est supprimé (avec ou sans la table qui reçoit), l'onglet
 Recevoir le dit : « Réception supprimée : <export> », ce qui reste des tables, ce que fait la SOURCE

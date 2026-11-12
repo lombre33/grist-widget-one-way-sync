@@ -158,13 +158,13 @@
         "Pour chaque table de l’export : Nouvelle table (nom modifiable) ou une table du document.",
         "Pour une table existante, dire où va chaque colonne et par quelle colonne rattacher les lignes déjà là : une ligne dont cette colonne a la même valeur est mise à jour au lieu d’être doublée.",
         "Le widget crée un journal pour l’export et publie son formulaire de réception sur sa propre page, rangée sous celle de la table qui reçoit.",
-        "Nouvelle table : le widget la crée avec sa propre page, sans lui dessus, et il ne recopie que page ouverte. Pour sécuriser la réception, créez d’abord la table vous-même, ajoutez-y le widget (accès complet), puis refaites la procédure depuis cette page en choisissant la table existante ; ou continuez, puis ajoutez le widget à la page de la table créée."
+        "Nouvelle table : le widget la crée avec sa propre page, sans lui dessus, et il ne recopie que page ouverte. Pour sécuriser la réception, créez d’abord la table vous-même, ajoutez-y le widget (accès complet), puis refaites la procédure depuis cette page en choisissant la table existante ; ou continuez, puis cliquez sur « Ajouter le widget à la page de la table » sur la carte de la réception (Grist demande ensuite l’accès complet pour cette section). Un seul widget ouvert suffit pour toutes les réceptions du document."
       ],
       "en": [
         "For each table of the export: New table (name editable) or a table of the document.",
         "For an existing table, say where each column goes and which column attaches rows already there: a row with the same value is updated instead of duplicated.",
         "The widget creates a journal for the export and publishes its receiving form on its own page, placed under the page of the receiving table.",
-        "New table: the widget creates it with its own page, without the widget on it, and it only copies while its page is open. To make reception safe, first create the table yourself, add the widget to it (full access), then redo the procedure from that page and pick the existing table; or continue, then add the widget to the page of the created table."
+        "New table: the widget creates it with its own page, without the widget on it, and it only copies while its page is open. To make reception safe, first create the table yourself, add the widget to it (full access), then redo the procedure from that page and pick the existing table; or continue, then click “Add the widget to the page of the table” on the reception’s card (Grist then asks for full access for that section). A single open widget is enough for all the receptions of the document."
       ]
     },
     "images": ["08-cible-destinations", "08b-cible-colonnes"]

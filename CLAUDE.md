@@ -372,7 +372,37 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.19.2 (12 novembre 2026)
+## État : V0.20.0 (12 novembre 2026)
+
+V0.20.0 (Antoine, 12 novembre, sur le bouton proposé en 0.15.1 : « ajouter sur la carte de réception un bouton « Ajouter le widget à la page de la table reçue » : oui » ;
+et la question « si un même import est multi table avec sous référence il suffit que le widget soit ouvert dans une table pour gérer tous les imports et les mises à jour ? »).
+Moteur **4.3.0** (mineure, dite dans `GFS-ETAT.md`).
+- **Réponse à la question (relu dans le code, `passAll` de `engine/target/loop.js`)** : oui, **un seul widget ouvert suffit pour tout le document**. Chaque passage (toutes les
+  10 s) parcourt tous les journaux (`receivedJournals`), donc toutes les réceptions, toutes les tables d'un export multi-tables et leurs mises à jour ; les tables qui gardent un
+  lien (Référence conservée) sont recopiées après celles qu'elles visent ; le widget écrit à distance (`grist.docApi`), il n'a pas à être sur la page de chaque table. **Limites** :
+  page du widget ouverte **et visible** (l'iframe est détruite quand la personne change de page), par une personne qui peut modifier le document (pas en lecture seule), accès
+  complet accepté ; certains réglages demandent un propriétaire (tables reçues en lecture seule, formules, fichiers d'un Échange). Page fermée, rien ne se perd : le webhook dépose
+  les envois dans le journal, recopiés à la prochaine ouverture. Le texte de la fenêtre « Nouvelle table » (0.15.1) était trop strict (« si vous n'ouvrez que cette table, rien
+  n'y arrive ») : le vrai risque est de rester sur la page de la table créée, qui n'a pas le widget ; `recv.new.body` et `recv.new.after` sont corrigés (le titre est inchangé, l'e2e l'attend).
+- **Le bouton** (`js/target/widget-page.js`, `widgetButton` de `js/target/tab.js`, textes `recv.widget.*`) : sur la carte d'une réception (hors attente du lien et retour d'un Échange),
+  « Ajouter le widget à la page de <table> » (« … d'une table reçue » s'il y en a plusieurs : la fenêtre demande laquelle, `pickField`). **Il disparaît dès que le widget est sur la page
+  d'une table de la réception** (`widgetCandidates`) ; les emplacements sont relus à l'ouverture de l'onglet, pas à chaque redessin périodique (`readWidgetSpots`). Une fenêtre dit ce qui
+  se passe (une section du widget est ajoutée, un seul widget suffit pour le document, Grist demandera l'accès complet) et le résultat reste une minute sur l'onglet (« Widget ajouté à la
+  page de X. Ouvrez cette page, puis acceptez l'accès complet dans le panneau de droite… »). Désactivé en lecture seule ; un refus de Grist (droit de structure) s'affiche comme les autres erreurs.
+- **Moteur** (`widgetSpots`, `addWidgetToPage` de `engine/pages.js`, `engine/logic/page-widget.js`) : `CreateViewSection(table, page, 'custom')` puis `options` = `{customView: "<JSON>"}` (la valeur est
+  elle-même un texte JSON : `{mode:'url', url, access:'none', renderAfterReady:false}`, vérifié). **L'accès n'est jamais accordé par le widget** (`access: 'none'`) : Grist le demande à la
+  personne dans son panneau de droite (bulle « Le widget a besoin de full access », Accepter), comme pour une installation à la main, et le widget montre alors `start.access` et `accessHelp()`.
+  L'adresse vient de l'écran (`servedAt()` de `js/config.js`, jamais lue par le moteur) ; si une section du document est déjà ce widget, son adresse écrite par la personne est reprise (`sectionUrl`).
+  Comparaison d'adresses sans requête, fragment, `index.html` ni barre finale (`widgetAddress`). Sous le verrou `gristsync-widget-page`. Erreurs : `noPageForTable`, `badWidgetUrl`.
+- **Vérifié dans un Grist 1.7** : `CreateViewSection` accepte `'custom'` sur la page d'une table existante (la section reçoit `parentKey: 'custom'`, `options` vide) ; ajouter la section à une page
+  autre que celle du widget ne recharge pas le widget (`window.sameFrame` dans l'e2e) ; la nouvelle section affiche le message d'accès jusqu'à « Accepter », puis le widget démarre et recopie
+  (l'e2e fait la page de la table, le panneau de droite et l'accord, puis une modification de la SOURCE arrive alors que la page Synchro n'est pas ouverte).
+- **Limites** : une table sans page n'a pas de bouton (`noPageForTable` si l'appel est forcé) ; la page qui montre la table est la sienne (`destPageViews`) ; un document dont la
+  personne ne peut pas lire les métadonnées n'a pas de bouton. SECURITY.md (« Actions de structure ») : une section du widget lui-même, sur clic confirmé, sans accès accordé.
+- Testé : unit 427+ (`page-widget`, `engine-widget-page` : ajout sans accès, deuxième clic sans effet, widget d'une autre page, adresse de la personne reprise, refus sans écriture ; le fake de
+  Grist gère `CreateViewSection` `'custom'`) ; e2e `ONLY_WIDGETPAGE=1` (`widgetPageSteps`, dans le parcours complet après `cleanSteps`).
+
+## État précédent : V0.19.2 (12 novembre 2026)
 
 V0.19.2 (Antoine, 12 novembre, carte de décision sur le nom du produit puis : « Le produit sera syncPlus pour être cohérent avec le
 reste du naming de GFS » ; et sur le point 14 de l'audit de sécurité, « demander à DINUM si les webhooks sont limités à l'instance » :
@@ -724,8 +754,8 @@ message »). Moteur **2.4.0** (mineure, dit dans `GFS-ETAT.md`).
   supprimés, avis retiré, journal recréé, `markReceptions`) ; e2e : avertissement (texte, « Annuler » ne crée rien, confirmation),
   page du journal juste sous `Contacts`, partage marqué et toujours publié ; `betises.mjs` : `journalSupprime` et
   `journalEtTableSupprimes` (carte, bouton « Retirer cet avis »).
-- **Pas fait, proposé à Antoine** : un bouton « Ajouter le widget à la page de <table reçue> » sur la carte (le widget créerait
-  lui-même la section ; l'accès complet de cette nouvelle instance resterait à accepter dans le panneau de droite).
+- **Proposé à Antoine, accepté et codé en V0.20.0** : un bouton « Ajouter le widget à la page de <table reçue> » sur la carte (le widget crée
+  lui-même la section ; l'accès complet de cette nouvelle instance reste à accepter dans le panneau de droite).
 
 ## État précédent : V0.15.0 (10 novembre 2026)
 

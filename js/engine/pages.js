@@ -1,9 +1,10 @@
 // Pages du document : formulaires de réception (un par journal, chacun sur sa page) et ménage des
 // pages que laissent les tables techniques.
-import { apply, fetchRows, readSchema } from './port.js';
+import { apply, fetchRows, readSchema, withLock } from './port.js';
 import { parseJson, randomHex } from './logic/common.js';
 import { receptionMark } from './logic/lost.js';
 import { destPageViews, placeBelow } from './logic/page-order.js';
+import { customOptions, sectionUrl, widgetSpot } from './logic/page-widget.js';
 
 const published = section => (parseJson(section.shareOptions) || {}).publish === true;
 
@@ -121,6 +122,39 @@ export async function isOnPage(tableId) {
   const table = tables.find(tb => tb.tableId === tableId);
   const listed = new Set(pages.map(p => p.viewRef));
   return Boolean(table) && sections.some(s => s.tableRef === table.id && listed.has(s.parentId));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Le widget sur la page d'une table reçue
+
+// Pour chaque table de `dests` : la page qui la montre et si le widget d'adresse `url` y est déjà (voir widgetSpot).
+// Une `Map` table -> { view, there }. Trois lectures légères des métadonnées.
+export async function widgetSpots(dests, url) {
+  const [tables, sections, pages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Pages')]);
+  return new Map(dests.map(dest => [dest, widgetSpot(dest, url, tables, sections, pages)]));
+}
+
+// Ajoute le widget d'adresse `url` à la page de la table `dest` : une section « Personnalisée » sur la page qui la montre,
+// sans l'accès accordé (Grist le demande à la personne, dans le panneau de droite, quand elle ouvre la page : le widget ne se
+// donne jamais l'accès complet). Le widget n'a pas besoin d'y être pour recopier (une page ouverte, n'importe laquelle, suffit
+// pour tout le document) : c'est là que la personne reste. Ajouter une section à une autre page que celle du widget ne recharge
+// pas le widget (vérifié). Rend `{ added, view }` (`added` faux : il y était déjà). Lève `noPageForTable` si la table n'a pas de
+// page, `badWidgetUrl` si `url` n'est pas une adresse http(s). Une personne qui ne peut pas changer la structure du document
+// reçoit le refus de Grist.
+export async function addWidgetToPage(dest, url) {
+  // Sous verrou : deux onglets qui cliquent ensemble ne posent pas la section deux fois (la lecture est refaite sous le verrou).
+  return withLock('gristsync-widget-page', async () => {
+    const [tables, sections, pages] = await Promise.all([fetchRows('_grist_Tables'), fetchRows('_grist_Views_section'), fetchRows('_grist_Pages')]);
+    const address = sectionUrl(url, sections);
+    if (!address) throw new Error('badWidgetUrl');
+    const spot = widgetSpot(dest, address, tables, sections, pages);
+    if (!spot.view) throw new Error('noPageForTable');
+    if (spot.there) return { added: false, view: spot.view };
+    const table = tables.find(tb => tb.tableId === dest);
+    const created = (await apply([['CreateViewSection', table.id, spot.view, 'custom', null, null]])).retValues[0];
+    await apply([['UpdateRecord', '_grist_Views_section', created.sectionRef, { options: customOptions(address) }]]);
+    return { added: true, view: spot.view };
+  });
 }
 
 // Efface des tables techniques et les pages qu'elles laissent vides (dont celles de leurs

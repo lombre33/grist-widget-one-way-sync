@@ -295,6 +295,26 @@ Antoine, après la carte « Combien de temps garder les valeurs d'une ligne supp
 - **Port** : inchangé. Essais : `tests/unit/engine-clean.test.mjs` (dont un contrôle que, sans le nouveau sceau, le passage suivant rejette la ligne), e2e
   `ONLY_CLEAN=1` (vrai Grist, CIBLE et SOURCE).
 
+## Le widget sur la page d'une table reçue (4.3.0)
+
+Antoine : « ajouter sur la carte de réception un bouton « Ajouter le widget à la page de la table reçue » ». **Rien ne se fait seul** : l'hôte appelle, après une
+fenêtre qui dit ce qui va changer. À savoir pour l'hôte : **un seul widget ouvert suffit pour tout le document** (`passAll` parcourt tous les journaux, donc toutes
+les réceptions, toutes les tables d'un export multi-tables et leurs Références, dans le bon ordre), mais il ne tourne que page ouverte et visible, et une table
+créée par le moteur a sa propre page, sans lui : ce bouton le pose là où la personne reste.
+- **`widgetSpots(tables, url)`** (`pages.js`) rend une `Map` table -> `{ view, there }` : `view` est la page de la liste qui montre la table (`destPageViews`, `null`
+  si elle n'en a pas), `there` vrai si une section « Personnalisée » de même adresse (`widgetAddress` : sans requête, fragment, `index.html` ni barre finale, http(s)
+  seulement) y est déjà. Trois lectures de métadonnées.
+- **`addWidgetToPage(table, url)`** : ajoute à cette page une section « Personnalisée » (`CreateViewSection(…, 'custom', …)` puis `options`, voir
+  `customOptions` de `logic/page-widget.js`) **sans l'accès accordé** (`access: 'none'`) : Grist le demande à la personne dans son panneau de droite, le moteur ne se
+  donne jamais l'accès complet. Sous le verrou `gristsync-widget-page` (deux onglets qui cliquent ensemble ne posent pas deux sections). Rend `{ added, view }` (`added`
+  faux : il y était déjà). Lève `noPageForTable` (table sans page, ou inconnue), `badWidgetUrl` (pas un lien http(s)) ; une personne qui ne peut pas changer la
+  structure du document reçoit le refus de Grist. L'adresse est **donnée par l'hôte** (le moteur ne lit pas `location`) ; si une section du document est déjà ce widget,
+  son adresse est reprise telle que la personne l'a écrite (`sectionUrl`).
+- **Vérifié dans un Grist 1.7** : `CreateViewSection` accepte `'custom'` sur la page d'une table ; ajouter la section à une autre page que celle du widget ne recharge pas
+  le widget ; le widget de la nouvelle section affiche son message d'accès (`start.access`) jusqu'à « Accepter » dans le panneau de droite, puis recopie.
+- **Port** : inchangé. Essais : `tests/unit/page-widget.test.mjs` (adresses, lecture d'une section, lieu), `engine-widget-page.test.mjs` (ajout, deuxième clic, refus), e2e
+  `ONLY_WIDGETPAGE=1` (vrai Grist : bouton, fenêtre, section sans accès, accès accepté dans Grist, recopie par ce widget-là).
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de

@@ -11,9 +11,9 @@ const WIDGET_URL = 'https://grist-factory.github.io/grist-widget-syncPlus/';
 // Version de test (bêta), servie depuis sa propre adresse : ses codes ne se lisent pas par la
 // version officielle, donc ses consignes donnent la sienne. Partout ailleurs, l'officielle.
 const BETA_URL = 'https://lombre33.github.io/grist-widget-one-way-sync/';
-const servedAt = () => `${location.origin}${location.pathname}`.replace(/index\.html$/, '');
+export const servedAt = () => `${location.origin}${location.pathname}`.replace(/index\.html$/, '');
 export const widgetUrl = () => (servedAt() === BETA_URL ? BETA_URL : WIDGET_URL);
 // D'où cette copie est servie, pour le diagnostic.
 export const servedFrom = () => ({ [BETA_URL]: 'bêta', [WIDGET_URL]: 'officielle' }[servedAt()] || servedAt());
 
-export const VERSION = '0.19.2';
+export const VERSION = '0.20.0';

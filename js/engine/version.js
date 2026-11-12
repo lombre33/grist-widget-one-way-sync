@@ -114,7 +114,15 @@
 //         Grist 1.7) ; le moteur rendait `ownerOnly` pour tout 403, donc « réservé aux propriétaires » à un propriétaire. `restOf` (rest-port.js) rend
 //         maintenant `webhookForbidden` pour ce refus (reconnu au texte que l'`http` de l'hôte met dans `message`), `ownerOnly` pour les autres 403.
 //         Un hôte ajoute le texte `error.webhookForbidden` ; sans lui, la phrase générique cite le code. Ni port, ni table, ni code, ni formule ne changent.
-export const ENGINE_VERSION = '4.2.0';
+// 4.3.0 (12 novembre 2026, demande du porteur : « ajouter sur la carte de réception un bouton « Ajouter le widget à la page de la table
+//         reçue » ») : deux fonctions de plus, que l'hôte appelle ou non (`pages.js`). `widgetSpots(tables, url)` dit, pour chaque table, la page
+//         qui la montre et si le widget d'adresse `url` y est déjà ; `addWidgetToPage(table, url)` ajoute à cette page une section
+//         « Personnalisée » sur `url`, **sans l'accès accordé** (`access: 'none'` : Grist le demande à la personne, le moteur ne se le donne
+//         jamais), une seule fois (verrou `gristsync-widget-page`), et lève `noPageForTable` ou `badWidgetUrl`. L'adresse est donnée par l'hôte
+//         (le moteur ne lit pas `location`) et reprise telle que la personne l'a écrite si une section du document est déjà ce widget
+//         (`logic/page-widget.js` : `widgetAddress`, `customUrl`, `widgetSpot`, `sectionUrl`, `customOptions`). Ni port, ni nom de table, ni
+//         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent.
+export const ENGINE_VERSION = '4.3.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

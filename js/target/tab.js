@@ -26,6 +26,7 @@ import { cleanJournal } from '../engine/target/clean.js';
 import { ownsSync } from '../engine/logic/strays.js';
 import { optionsDialog } from './options.js';
 import { restyleDialog } from './restyle.js';
+import { addWidgetFor, readWidgetSpots, widgetCandidates, widgetLabel } from './widget-page.js';
 import { receiveWizard } from './wizard.js';
 import { sourceLine } from './source-line.js';
 import { cancelButton, confirmDialog, copyField, el, errorText, icon, message, noteError, notice, openModal, pickField, pill, redraw, reloading, run, smallButton } from '../ui.js';
@@ -103,6 +104,7 @@ async function prepareReceptions(groups, { owner, periodic }, out) {
     for (const group of groups.filter(g => g.waiting && !periodic)) await ensureForm(group.journal, { below: group.note.tables.map(tb => tb.dest), note: group.note });
     if (!periodic && owner) await markReceptions(groups.filter(g => !g.waiting)).catch(e => console.warn(e)); // un détail : jamais une raison de passer en lecture seule
     if (!periodic) lostList = await readLost();
+    if (!periodic) await readWidgetSpots(groups);
   } catch (e) {
     if (isAccessError(e)) state.readOnly = true;
     else out.append(message('err', errorText(e)));
@@ -329,8 +331,23 @@ function syncCard(group) {
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
       group.waiting || note.mode === 'echange' || !sentKinds(group).length ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
       group.waiting || !group.owner ? null : button(t('recv.action.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), () => cleanReception(group))),
+      widgetButton(group),
       group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
+}
+
+// « Ajouter le widget à la page de la table reçue » (voir widget-page.js) : absent quand le widget est déjà sur la page d'une
+// table de cette réception. Avis de la dernière action gardé une minute, comme les autres.
+function widgetButton(group) {
+  const candidates = widgetCandidates(group);
+  if (!candidates.length) return null;
+  const add = async () => {
+    const done = await addWidgetFor(group);
+    if (!done) return;
+    flash = { node: message(done.added ? 'ok' : 'info', t(done.added ? 'recv.widget.done' : 'recv.widget.already', { table: done.dest })), until: Date.now() + NOTICE_MS };
+    await renderTarget();
+  };
+  return button(widgetLabel(candidates), 'plus', e => run(e.currentTarget, container.querySelector('.out'), add));
 }
 
 // D'où vient la réception : la personne et son document (en lien, voir sourceLine), lien public, sens de l'Échange.

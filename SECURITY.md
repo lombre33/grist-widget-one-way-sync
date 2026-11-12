@@ -484,7 +484,11 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   - *créer* : la table `Synchro` et ses colonnes (premier export), `id_sync`, `MajLe`, `RecalculLe` dans une table
     envoyée (à l'enregistrement d'un export), un journal et son formulaire (réception acceptée, retour d'un
     Échange), une table de destination ou des colonnes de destination (choisies à l'étape Destinations, avec un
-    avertissement pour une table neuve ; « Corriger » recrée une colonne reçue effacée) ;
+    avertissement pour une table neuve ; « Corriger » recrée une colonne reçue effacée), et, sur le bouton « Ajouter le
+    widget à la page de la table reçue » de la carte d'une réception (0.20, après une fenêtre qui le dit), une section
+    « Personnalisée » du widget lui-même sur la page d'une table reçue : même adresse que le widget qui tourne, **sans
+    l'accès accordé** (le niveau `access` de la section reste à `none` : Grist demande l'accès complet à la personne, dans
+    son panneau de droite ; le widget ne se le donne jamais), une seule fois par page ;
   - *modifier* : la formule ou le déclenchement des colonnes que le widget a créées (`MajLe`, `RecalculLe`, colonnes
     de `Synchro`), et, à la CIBLE, le type d'une colonne qu'il a créée et qui est encore vide (Référence conservée) ;
   - *renommer* : seulement une table nommée `Synchro` qui n'est pas la sienne, sur le bouton de la carte, nom proposé

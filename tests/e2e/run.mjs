@@ -761,6 +761,65 @@ try {
     step('Effacer l\'historique : CIBLE (avant et valeurs supprimées du journal vidés, carte à zéro, recopie intacte) et SOURCE (historique des envois effacé, destinataire gardé)');
   }
 
+  // --- « Ajouter le widget à la page de la table reçue » (carte d'une réception). La table que la réception a créée a sa propre page,
+  // sans le widget : le bouton y pose une section du widget, sans l'accès accordé (Grist le demande), une seule fois. Une fois
+  // l'accès accepté, ce widget-là recopie les envois suivants (un seul widget ouvert suffit pour tout le document).
+  async function widgetPageSteps() {
+    const src = await fichesDoc('Page SOURCE');
+    const dst = await newDocWithWidget('Page CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.');
+    await approve(answer, { url: src.url });
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    const customs = async () => (await records(dst.doc, '_grist_Views_section')).filter(sc => sc.parentKey === 'custom');
+    const fichesView = async () => (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId === 'Fiches').primaryViewId;
+    assert.equal((await customs()).length, 1, 'un seul widget au départ, sur la page Synchro');
+    const add = button('Ajouter le widget à la page de Fiches');
+    await add.waitFor({ timeout: 30000 });
+    await widget().locator('.card-actions').first().scrollIntoViewIfNeeded();
+    const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
+    await widgetFrame.evaluate(() => { window.sameFrame = true; });
+    // « Annuler » n'ajoute rien.
+    await add.click();
+    await dialog().getByText('Ajouter le widget à la page d’une table reçue').waitFor();
+    await dialog().getByText(/Un seul widget ouvert suffit pour tout le document/).waitFor();
+    await dialog().getByText(/Grist demandera ensuite l’accès complet pour cette nouvelle section/).waitFor();
+    await dialogButton('Annuler').click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.equal((await customs()).length, 1, 'annulé : rien n’est ajouté');
+    // Confirmé : une section du widget sur la page de Fiches, sans accès accordé ; le bouton disparaît.
+    await add.click();
+    await dialogButton('Ajouter le widget').click();
+    await widget().getByText(/Widget ajouté à la page de Fiches\. Ouvrez cette page/).waitFor({ timeout: 30000 });
+    const view = await fichesView();
+    const placed = (await customs()).filter(sc => sc.parentId === view);
+    assert.equal(placed.length, 1, 'une section du widget sur la page de la table reçue');
+    const def = JSON.parse(JSON.parse(placed[0].options).customView);
+    assert.deepEqual([def.mode, def.url, def.access], ['url', WIDGET_URL, 'none'], 'même widget, accès non accordé');
+    assert.equal(await add.count(), 0, 'le bouton disparaît une fois le widget sur la page');
+    assert.ok(await widgetFrame.evaluate(() => window.sameFrame), 'ajouter une section à une autre page ne recharge pas le widget');
+    assert.equal((await customs()).length, 2);
+
+    // La personne ouvre la page de Fiches : le widget y demande l'accès complet ; elle l'accepte dans le panneau de droite.
+    await page.goto(`${TEAM}/doc/${dst.doc}/p/${view}`);
+    await widget().locator('.access-help').waitFor({ timeout: 30000 });
+    await widget().getByText('Le widget a besoin de l’accès complet au document', { exact: false }).waitFor();
+    await widget().locator('.access-help').click();
+    await page.locator('.test-right-opener').click();
+    await page.locator('.test-config-widget-access-accept').click();
+    await widget().locator('[data-tab]').first().waitFor({ timeout: 30000 });
+    await pickTab(widget(), 'Recevoir');
+    await widget().locator('.card', { hasText: 'Annuaire' }).waitFor();
+    assert.equal(await widget().getByRole('button', { name: /Ajouter le widget à la page/ }).count(), 0, 'sur la page de la table : plus de bouton');
+    // Ce widget-là recopie : la page Synchro n'est pas ouverte, le changement de la SOURCE arrive quand même.
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Ville: 'Marseille' }]]);
+    await waitFor(async () => (await fiches()).Anna?.Ville === 'Marseille', 'modification reçue par le widget de la page de la table', 90000);
+    step('Ajouter le widget à la page de la table reçue : bouton sur la carte, fenêtre (annuler n\'ajoute rien), section sans accès accordé, widget non rechargé, accès accepté dans Grist puis recopie par ce widget');
+  }
+
   // --- Export filtré : la liste des choix d'une colonne Choix ne part pas (elle montrerait des
   // valeurs de lignes que le filtre retient pas) ; la CIBLE n'apprend que les valeurs qu'elle reçoit.
   async function choicesSteps() {
@@ -1794,8 +1853,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2812,6 +2871,7 @@ try {
   await docLinkSteps();
   await protectSteps();
   await cleanSteps();
+  await widgetPageSteps();
   await tabSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');

@@ -79,10 +79,16 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
     return { viewRef: view, sectionRef: section };
   };
 
+  // Une section « Personnalisée » sur une page existante (`viewRef`) : ses options sont écrites ensuite, comme Grist les range.
+  const createCustomSection = (tableRef, viewRef) => {
+    const section = runMeta('AddRecord', '_grist_Views_section', [null, { parentId: viewRef, parentKey: 'custom', tableRef, options: '' }]);
+    return { tableRef, viewRef, sectionRef: section };
+  };
+
   const run = (action) => {
     const [name, tableId, ...args] = action;
     log.push(action);
-    if (name === 'CreateViewSection') return createFormSection(tableId);
+    if (name === 'CreateViewSection') return args[1] === 'custom' && args[0] ? createCustomSection(tableId, args[0]) : createFormSection(tableId);
     if (tableId === '_grist_Tables_column') {
       const column = columnRows().find(c => c.id === args[0]);
       if (name === 'UpdateRecord' && column) { Object.assign(column, args[1]); return null; }
