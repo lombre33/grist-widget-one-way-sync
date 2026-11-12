@@ -122,7 +122,7 @@
 //         (le moteur ne lit pas `location`) et reprise telle que la personne l'a écrite si une section du document est déjà ce widget
 //         (`logic/page-widget.js` : `widgetAddress`, `customUrl`, `widgetSpot`, `sectionUrl`, `customOptions`). Ni port, ni nom de table, ni
 //         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent.
-// 4.4.0 (12 novembre 2026, Sync+ 0.21.0, validé par le porteur : « Renforcer la sécurité » d'un partage branché avant les clés de signature,
+// 4.4.0 (12 novembre 2026, syncPlus 0.21.0, validé par le porteur : « Renforcer la sécurité » d'un partage branché avant les clés de signature,
 //         option B du 6 novembre : jamais imposé) : mineure, rien n'est ajouté au port ni aux tables, aucun `CODE_FORMAT` : la CIBLE reconnaît
 //         un renforcement à « réception connue, sans clé » et la SOURCE à une invitation qui porte `replaces` (le webhook remplacé). Moteur :
 //         `logic/reinforce.js` (`renfState`, `graceOpen`, `startRenf`, `finishRenf`, `canRevert`, `revertedNote`, `unsignedHooks`) ; note du

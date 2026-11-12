@@ -717,7 +717,7 @@ pièces dans `/mnt/project-files/notes/audit-v2/` (captures, rapports gwaudit av
 - **UI/UX** (0 violation axe sur les écrans parcourus par `ux-audit.mjs`) : barre du haut qui débordait à 380 px en français
   (resserrée sous 420 px), boutons `.btn-small` de 24 px de haut, phrase « Mise à jour automatique » courte (le rythme en
   infobulle). Constats 11 et 12 de l'audit 0.13.1 clos ici, 13 et 14 l'étaient (carte « incomplet » depuis la 0.12.4, « Réception
-  supprimée » depuis la 0.15.1). **Reste le 15, nom du produit** (« Synchro », « Sync », « Synchro Grist », « syncPlus ») : carte de
+  supprimée » depuis la 0.15.1). **Le 15, nom du produit, a été tranché le 12 novembre (« syncPlus », voir la V0.19.2).** Avant (« Synchro », « Sync », « Synchro Grist », « syncPlus ») : carte de
   décision posée à Antoine le 11 novembre, à appliquer selon sa réponse (titre fr et en, README, tutoriel, diagnostic ; revoir la
   barre du haut à 380 px).
 - **gwaudit : 87 puis 89/100** (A 97, B 97, C 61, D, E, F 100). Le 93 de la V0.12.1 ne se compare pas : l'outil a depuis une règle
