@@ -2051,6 +2051,10 @@ try {
   const communes = await waitFor(async () => { const rows = await records(target.doc, 'Communes'); return rows.length === 2 && rows.every(r => r.id_sync) && rows; }, 'table ajoutée rangée dans Communes');
   assert.deepEqual(communes.map(r => `${r.Commune}:${r.Note}`).sort(), ['Lyon:déjà là', 'Paris:'], 'Lyon rattachée, pas doublée');
   assert.deepEqual(await columnsOf(target.doc, 'Communes'), ['Commune', 'Note', 'id_sync'], 'table existante complétée de la seule clé');
+  // La table qui reçoit une clé de signature a sa colonne id_sync cachée aux lecteurs par une règle d'accès (mémo « clé de signature
+  // cachée aux lecteurs »), posée par un propriétaire : le document se recharge, le widget revient sur son premier écran.
+  await waitFor(async () => (await records(target.doc, '_grist_ACLResources')).some(r => r.tableId === 'Communes' && r.colIds === 'id_sync'), 'règle qui cache id_sync de Communes aux lecteurs', 60000);
+  await openWidgetTab(target.url, 'Recevoir');
   await waitFor(async () => { const rows = await records(target.doc, 'Contacts'); return ['Alice:i1', 'Bob:i2'].every(x => rows.some(r => `${r.Nom}:${r.Interne}` === x)); }, 'colonne ajoutée reçue et remplie');
   const shown = await pageColumns(target.doc, 'Contacts');
   assert.ok(shown.includes('Interne') && !shown.includes('id_sync'), `colonne ajoutée visible sur la page, clé masquée : ${shown}`);

@@ -220,6 +220,27 @@ ni formule de déclenchement, ni colonne Référence ou Pièces jointes. Nettoy�
   Grist sans bac à sable (vérifié : l'image Docker officielle laisse une formule lister les fichiers du serveur), ne pas proposer la case.
 - **Port** : inchangé. Essais : `tests/unit/engine-formulas.test.mjs`, e2e `ONLY_FORMULAS=1`.
 
+## Notes à l'abri des lecteurs (3.0.0)
+
+Un lecteur d'un document (le lien public compris) lit `_grist_Tables_column` : Grist y vide le nom, le type, la formule et les **options**
+des colonnes qu'il ne peut pas lire, mais pas leur **description** (vérifié sur Grist 1.7.22). Les notes du moteur (SOURCE :
+`Synchro_Export` ; CIBLE : `Synchro_Ids` du journal et clé de signature de la colonne `id_sync` des tables reçues) sont donc dans les
+**options** de la colonne (`widgetOptions`, clé `syncNote`), jamais dans sa description.
+- **Version majeure** : un moteur 2.x lirait une colonne dont la description est vide et croirait la note vide (il pourrait la réécrire).
+  Tous les onglets d'un même document doivent avoir le moteur 3 ; un document d'avant est lu tel quel puis déplacé.
+- **Pour l'hôte, rien à faire** : `columnNote` (`logic/common.js`) lit les options d'abord, la description d'avant ensuite ; `noteAction`
+  écrit les options (en gardant les autres clés) et vide la description d'une note d'avant. `moveNotes` (`note-move.js`) déplace ce
+  qui reste dans une description : appelé par `ensureSyncTable` (SOURCE, propriétaire) et par chaque passage de recopie (CIBLE, sauf page
+  en lecture seule), il relit le schéma sous un verrou avant d'écrire. Une description écrite à la main n'est jamais touchée (seule la
+  note d'`id_sync` qui porte `signature` compte).
+- **Règle d'accès de plus** : `keyAclRules` (mémo « Synchro : clé de signature cachée aux lecteurs ») cache la colonne `id_sync` des tables
+  qui portent une clé (`signedTables`) à `user.Access == VIEWER`. Posée par `syncRules` (propriétaire), qui recharge le document si elle
+  change. Un hôte qui n'appelle pas `syncRules` n'a pas cette règle : la clé reste lisible par les lecteurs.
+- **Ce qui reste lisible** : le mémo des webhooks (`_grist_Triggers` : courriel du destinataire, document, équipe/nom) et la condition
+  (identifiant de l'export), et le journal d'une réception dont la case « réservé aux éditeurs » est décochée.
+- **Port** : inchangé. Essais : `tests/unit/note-store.test.mjs`, `engine-note-store.test.mjs`, `acl.test.mjs`, `common.test.mjs` ; e2e (lecture
+  anonyme des métadonnées, SOURCE et CIBLE), sonde `tests/e2e/tools/probe-public.mjs` (`STRICT=1`).
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de

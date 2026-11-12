@@ -121,8 +121,10 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 - `CreateViewSection(table, 0, 'form')` crée une page nommée « New page » : la renommer.
   `RemoveTable` efface aussi la page devenue vide de son formulaire (mais pas son partage).
 - Une règle de colonne `user.Access == VIEWER` → `-R` sur `Synchro_Export` retire la colonne **et
-  sa description** de `GET /tables/Synchro/columns` en anonyme ; le filtre des lignes sur cette
-  colonne et la règle de ligne marchent toujours (vérifié, lien public).
+  sa description** de `GET /tables/Synchro/columns` en anonyme (cette route seulement : dans les
+  métadonnées, `_grist_Tables_column`, Grist vide les **options** d'une colonne cachée mais pas sa
+  **description**, voir la V0.18.0) ; le filtre des lignes sur cette colonne et la règle de ligne
+  marchent toujours (vérifié, lien public).
 
 ## Après l'Alpha (branche `beta` fusionnée dans `main` le 16 octobre)
 
@@ -365,7 +367,37 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.17.0 (12 novembre 2026)
+## État : V0.18.0 (12 novembre 2026)
+
+V0.18.0 (Antoine, 12 novembre : « peux-tu regarder dans un document partagé en lecture seule mais public via lien […] si un user qui arrive sur le
+lien voit les tables gérées par le widget (côté cible et source) » ; carte de décision « Comment corriger la fuite des notes du widget sur un
+document public ? » : **« Notes à l'abri, complet »**). Moteur **3.0.0, majeure** (dite dans `GFS-ETAT.md`).
+- **Constat vérifié** (Grist 1.7.22, requêtes anonymes, navigateur sans compte, lecteur nommé, éditeur nommé ; sonde rejouable
+  `tests/e2e/tools/probe-public.mjs`, `STRICT=1`) : les lignes et colonnes de `Synchro` et d'un journal réservé sont cachées partout (tables,
+  enregistrements, SQL 403, CSV, XLSX, téléchargement, historique, Code view, données brutes) ; les règles d'accès, les partages et la liste des
+  webhooks sont réservés aux propriétaires ; **la clé d'écriture d'un formulaire n'est lisible nulle part**. **Mais** `GET
+  /api/docs/<id>/tables/_grist_Tables_column/records` (anonyme) rendait les notes du widget : Grist (`CensorshipInfo`, `GranularAccess.js`) vide
+  `label`, `colId`, `widgetOptions`, `formula`, `type` d'une colonne illisible, **pas `description`**. Fuyaient : courriel du destinataire, documents,
+  exports, nombre de lignes, clé privée d'une invitation en attente, secret d'invitation, clés publiques, **clé de signature** (description de `id_sync`).
+  Rien d'écrit n'était possible sans la clé du formulaire.
+- **Correction** : les notes sont dans les **options** de la colonne (`widgetOptions`, clé `syncNote`, `columnNote` / `noteAction` de
+  `logic/common.js`) : `Synchro_Export` (SOURCE), `Synchro_Ids` du journal, `id_sync` des tables reçues (clé de signature). Lecture : options d'abord,
+  description d'avant ensuite ; écriture : options (autres clés gardées), description d'une note d'avant vidée, description écrite à la main jamais touchée.
+  `moveNotes` (`engine/note-move.js`, `logic/note-store.js`) déplace les notes d'un document d'avant, sous le verrou `gristsync-note-move`, en relisant
+  le schéma avant d'écrire (une note déjà déplacée puis changée n'est pas remplacée par sa copie d'avant) : appelé par `ensureSyncTable` (SOURCE) et par
+  `passAll` (CIBLE, sauf page en lecture seule). Une note déjà dans les options fait foi, la description d'avant revenue (version plus ancienne restée
+  ouverte) est seulement vidée. **Règle d'accès de plus** : `keyAclRules` (mémo `KEY_MEMO`, « Synchro : clé de signature cachée aux lecteurs »),
+  `-R` pour `user.Access == VIEWER` sur la colonne `id_sync` des tables que `signedTables` trouve (clé de signature présente), posée par `syncRules`.
+- **Vérifié** : la sonde ne trouve plus ni clé de signature, ni clé privée, ni secret, SOURCE et CIBLE ; l'e2e lit les métadonnées en anonyme sur les deux
+  documents (`noteLeaks`) ; la clé du formulaire lit toujours la note du journal (par ses colonnes : c'est voulu, voir SECURITY.md).
+- **Reste lisible, dit à Antoine** : le mémo des webhooks (`_grist_Triggers` : courriel du destinataire · document · équipe/nom) et leur condition
+  (identifiant de l'export) ; le journal d'une réception dont la case « réservé aux éditeurs » est décochée. Mises à niveau : un onglet resté ouvert sur
+  le moteur 2.x ne lit pas les notes déplacées (il les croit vides et pourrait les réécrire) : recharger. À vérifier par Antoine sur DINUM : lire
+  `…/api/docs/<id>/tables/_grist_Tables_column/records` d'un document public dans une fenêtre privée.
+- Testé : unit 400 (`note-store`, `engine-note-store` : écriture dans les options, déplacement SOURCE et CIBLE, schéma lu trop tôt, description d'avant
+  revenue, règle posée et retirée ; `acl`, `common`, `received`) ; e2e complet (lecture anonyme des métadonnées SOURCE et CIBLE).
+
+## État précédent : V0.17.0 (12 novembre 2026)
 
 V0.17.0 (Antoine, 12 novembre : « également prévoir de pouvoir sync les formules. c'est du python mais très très controlé dans grist (pas d'appel
 externe etc.) donc peu de risque, par contre une case à part et un message qui demande si l'user est sûr de le vouloir avec les risques de passer du
