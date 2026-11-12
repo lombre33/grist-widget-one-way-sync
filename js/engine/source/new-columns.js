@@ -13,8 +13,11 @@ const tracked = exp => !exp.retour && !exp.echange;
 
 // Pose la référence des exports qui n'en ont pas encore (ou dont une table n'y figure pas) ; rend vrai si la note a changé.
 export async function baselineNewColumns(exports) {
+  const missing = exp => exp.tables.filter(tb => !Array.isArray((exp.known || {})[tb.table]));
+  // Rien à poser dans le cas courant : le schéma (une lecture de plus toutes les 10 secondes) n'est lu que s'il y a une référence à poser.
+  if (!exports.some(exp => tracked(exp) && missing(exp).length)) return false;
   const schema = await readSchema();
-  const due = exports.filter(exp => tracked(exp) && exp.tables.some(tb => schema.has(tb.table) && !Array.isArray((exp.known || {})[tb.table])));
+  const due = exports.filter(exp => tracked(exp) && missing(exp).some(tb => schema.has(tb.table)));
   if (!due.length) return false;
   await updateSourceNote(note => due.reduce((next, exp) => setExport(next, exp.id, { known: { ...(exp.known || {}), ...knownColumns(schema, exp.tables.filter(tb => !Array.isArray((exp.known || {})[tb.table]))) } }), note));
   return true;
@@ -51,6 +54,7 @@ export async function dismissNewColumns(exp) {
 // passage suivant.
 export async function autoSendNewColumns(exports) {
   let sent = false;
-  for (const exp of exports.filter(e => tracked(e) && e.autoCols)) sent = (await sendNewColumns(exp)) !== false || sent;
+  // `fresh` (calculé par l'écran avec le schéma qu'il vient de lire) évite de relire le schéma d'un export qui n'a rien de nouveau.
+  for (const exp of exports.filter(e => tracked(e) && e.autoCols && (e.fresh === undefined || e.fresh.length))) sent = (await sendNewColumns(exp)) !== false || sent;
   return sent;
 }
