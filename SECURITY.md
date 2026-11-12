@@ -405,6 +405,10 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   propriétaire à l'ouverture d'un onglet). Vérifié : la sonde `tests/e2e/tools/probe-public.mjs`
   (`STRICT=1`) ne trouve plus de clé de signature, de clé privée ni de secret, et le parcours de
   bout en bout lit les métadonnées en anonyme sur la SOURCE et sur la CIBLE.
+- **Export public** : sur une SOURCE qui a un export public, la règle générale des lecteurs (`*` → `-R`, voir
+  « Lien public ») refuse aussi les tables de métadonnées (`_grist_Tables_column` répond 403 en anonyme, vu au
+  parcours de bout en bout) : rien de plus n'y est lisible. Sans export public, ou sur une CIBLE, elles se
+  lisent, d'où la correction ci-dessus.
 - **Toujours lisible** (non corrigé) : le nom, le **mémo** (courriel du destinataire · document ·
   équipe/nom du document) et la **condition** (identifiant de l'export) des webhooks, par
   `_grist_Triggers`, sans leur adresse ; le widget relit ce mémo pour montrer qui reçoit

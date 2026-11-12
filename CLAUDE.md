@@ -437,9 +437,15 @@ python » ; carte de décision « Quand la CIBLE applique-t-elle les formules en
   de plus reçue sans erreur, case décochée dans « Modifier » ; `SHOTS=<dossier>` fait deux captures).
 - **Pas fait, dit à Antoine** : une formule qui cite une colonne ou une table renommée n'est pas réécrite (la personne la corrige à la main) ; les règles de
   mise en forme restent reconstruites par leur grammaire fermée (`rules.js`), jamais copiées ; les formules de déclenchement ne partent pas.
-- **Piège vu à l'e2e** : le parcours complet du 12 novembre a échoué une fois dans `docLinkSteps` (`dialogButton('Annuler')` introuvable, la fenêtre « Ajouter un
-  destinataire » avait disparu, document rechargé ?) et repasse seul ; non reproduit, à surveiller. Une boucle de 25 minutes d'inactivité du conteneur coupe les
-  processus de fond (e2e) : garder le tour actif (commande avec `timeout` dans une boucle d'attente) pendant un parcours complet.
+- **Piège vu à l'e2e, cause trouvée le 12 novembre (V0.18.0)** : le parcours complet échouait parfois dans `docLinkSteps` (`dialogButton('Annuler')` ou
+  « Nom de ce document » introuvable, la fenêtre « Ajouter un destinataire » avait disparu). **Cause** : sur un document neuf, `syncRules` ne pose jamais les
+  règles d'accès de `Synchro` pendant un assistant ; elles le sont au premier dessin qui suit la fermeture du premier assistant (« Plus tard »), et Grist recharge
+  alors le document, donc le widget, environ 250 ms après (mesuré : règles 1 → 6 à +150 ms, nouvelle iframe à +270 ms, **déjà ainsi sur la 0.17.0**). Un clic donné
+  dans ces 250 ms (« Ajouter un destinataire » juste après « Plus tard ») est perdu, ou sa fenêtre disparaît. Pas un défaut du widget (comportement voulu : une
+  personne qui clique si vite revoit simplement l'écran), mais une course du test : `rulesSettled(doc)` de `run.mjs` attend les règles puis 1,5 s sans navigation de
+  l'iframe. À employer avant tout clic qui suit la fermeture du premier assistant d'un document neuf, quand le test reste sur la même page. Une boucle de
+  25 minutes d'inactivité du conteneur coupe les processus de fond (e2e) : garder le tour actif (commande avec `timeout` dans une boucle d'attente) pendant un
+  parcours complet.
 
 ## État précédent : V0.16.1 (12 novembre 2026)
 

@@ -303,6 +303,19 @@ async function openWidgetTab(url, name) {
 try {
   const dialog = () => widget().getByRole('dialog');
   const dialogButton = name => dialog().getByRole('button', { name, exact: true });
+  // Le widget pose les règles d'accès de `Synchro` au premier dessin qui suit la fermeture d'un assistant (jamais pendant
+  // un assistant, voir syncRules), et Grist recharge alors le document, donc le widget, environ 250 ms plus tard : un clic
+  // donné entre-temps est perdu (c'était déjà le cas avant la 0.18). Attend que les règles soient là, puis que le widget
+  // soit revenu et resté en place un moment.
+  const rulesSettled = async doc => {
+    await waitFor(async () => (await records(doc, '_grist_ACLRules')).some(r => r.memo === 'Synchro : réservée aux propriétaires'), 'règles du widget posées', 30000);
+    let last = Date.now();
+    const moved = () => { last = Date.now(); };
+    page.on('framenavigated', moved);
+    while (Date.now() - last < 1500) await page.waitForTimeout(100);
+    page.off('framenavigated', moved);
+    await widget().locator('.topbar').waitFor({ timeout: 30000 });
+  };
   // Une table neuve : le widget demande de confirmer (le widget ne sera pas sur sa page, voir confirmNewTables).
   const confirmNewTable = async () => {
     await dialog().getByText('Nouvelle table : le widget n’y sera pas').waitFor({ timeout: 30000 });
@@ -1451,6 +1464,7 @@ try {
     const code = await dialog().locator('textarea.code').first().inputValue();
     assert.equal(JSON.parse(Buffer.from(code.slice('GRISTSYNC2.'.length), 'base64url')).from.docName, 'Lien SOURCE <i>saisi</i> & co', 'le nom part dans l\'invitation');
     await dialogButton('Plus tard').click();
+    await rulesSettled(src.doc);
     // Le nom est gardé pour l'invitation suivante, et se corrige.
     await button('Ajouter un destinataire').click();
     assert.equal(await dialog().getByLabel('Nom de ce document').inputValue(), 'Lien SOURCE <i>saisi</i> & co', 'nom retenu, proposé de nouveau');
