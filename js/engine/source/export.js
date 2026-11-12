@@ -5,6 +5,7 @@
 import { nowS, randomHex } from '../logic/common.js';
 import { exportEmail, exportableColumns, hookName, pruneRules, readTables, withDoc } from '../logic/exports.js';
 import { tableNoteOf, withTableNote } from '../logic/descriptions.js';
+import { withLayout } from '../logic/layout.js';
 import { withFormulas } from '../logic/column-formulas.js';
 import { docFormatOf } from '../logic/docformat.js';
 import { linkTables } from '../logic/links.js';
@@ -25,12 +26,14 @@ import { resendTables } from './resend.js';
 // locale (avec une clé, la prochaine liste de l'origine, qui ne la connaît pas, l'effacerait).
 // Un seul instantané suffit : chaque étape ne touche que sa table, et les colonnes que le widget
 // ajoute ne sont pas envoyables. `selection` : [{ table, columns: [identifiants cochés], filter }].
-async function prepareTables(selection, links, { style = false, notes = false, tableNote = false, formulas = false } = {}) {
+async function prepareTables(selection, links, { style = false, notes = false, tableNote = false, layout = false, formulas = false } = {}) {
   const schema = await readSchema();
   // Avec « la mise en forme des colonnes » : langue et monnaie du document, dites à la CIBLE (voir docformat.js).
   const doc = style ? docFormatOf(await fetchRows('_grist_DocInfo')) : null;
   // La description d'une table est celle de sa section de données brutes (voir descriptions.js).
-  const sections = tableNote ? await fetchRows('_grist_Views_section') : [];
+  const sections = tableNote || layout ? await fetchRows('_grist_Views_section') : [];
+  // La mise en page (ordre et colonnes cachées) est celle de la section de la page de chaque table (voir layout.js).
+  const fields = layout ? await fetchRows('_grist_Views_section_field') : [];
   const relays = receivedDests(schema).map(d => d.dest);
   const tables = [];
   for (const { table, columns: picked, filter } of selection) {
@@ -39,7 +42,8 @@ async function prepareTables(selection, links, { style = false, notes = false, t
     const columns = exportableColumns(schema.columns(table), { extras: style, doc, notes }).filter(c => picked.includes(c.id));
     const styled = style ? withDoc(pruneRules(columns), doc) : columns;
     const noted = tableNote ? withTableNote(styled, tableNoteOf(schema.table(table), sections)) : styled;
-    tables.push({ table, columns: formulas ? withFormulas(noted, schema.columns(table)) : noted, filter: filter || null });
+    const calculated = formulas ? withFormulas(noted, schema.columns(table)) : noted;
+    tables.push({ table, columns: layout ? withLayout(calculated, schema.columns(table), schema.table(table), sections, fields) : calculated, filter: filter || null });
   }
   return linkTables(tables, Boolean(links));
 }
@@ -65,14 +69,14 @@ async function noteExport(rules, id, name, extra = {}) {
 // Crée l'export (`exp` absent) ou enregistre la modification de `exp`. `selection` : voir
 // prepareTables ; `links` : garder les liens entre les tables (case de l'étape Colonnes) ; `style` : envoyer la
 // mise en forme des colonnes (en-têtes, règles conditionnelles, monnaie, langue du document), `notes` : leurs
-// descriptions, `autoCols` : envoyer seul les colonnes ajoutées ensuite aux tables (voir new-columns.js), `tableNote` : celle de chaque table, `formulas` : leurs formules de colonne, que la CIBLE ne pose que
+// descriptions, `autoCols` : envoyer seul les colonnes ajoutées ensuite aux tables (voir new-columns.js), `tableNote` : celle de chaque table, `layout` : l'ordre et les colonnes cachées de la page de chaque table (voir layout.js), `formulas` : leurs formules de colonne, que la CIBLE ne pose que
 // sur le clic d'un propriétaire (cases de l'étape Colonnes, jamais en Échange ; voir column-formulas.js) ; `rules` : règles d'un Échange administré ici ({ ajout, modif,
 // suppression, refus }), ou rien. Rend
 // `{ id, name, tables, changed, created }` : `changed` = les tables qu'il faut renvoyer (modification),
 // `created` = l'export tel que l'écran de ses destinataires l'attend (création).
-export async function saveChosenExport({ exp = null, name, selection, links = false, style = false, notes = false, tableNote = false, formulas = false, rules = null, autoCols = false }) {
+export async function saveChosenExport({ exp = null, name, selection, links = false, style = false, notes = false, tableNote = false, layout = false, formulas = false, rules = null, autoCols = false }) {
   const sends = !exp?.echange;
-  const tables = await prepareTables(selection, links, { style: style && sends, notes: notes && sends, tableNote: tableNote && sends, formulas: formulas && sends });
+  const tables = await prepareTables(selection, links, { style: style && sends, notes: notes && sends, tableNote: tableNote && sends, layout: layout && sends, formulas: formulas && sends });
   if (exp?.public) await refuseHidden(tables);
   const id = exp ? exp.id : randomHex(8);
   const changed = await saveExport(id, tables, { isPublic: Boolean(exp?.public), swap: Boolean(exp?.echange) });

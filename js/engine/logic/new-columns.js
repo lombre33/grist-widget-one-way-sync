@@ -6,6 +6,7 @@
 import { exportableColumns } from './exports.js';
 import { noteSent } from './descriptions.js';
 import { formulasOffered } from './column-formulas.js';
+import { layoutSent } from './layout.js';
 
 // Les colonnes envoyables de chacune des tables `tables` ([{ table, ... }]) qui existent.
 export const knownColumns = (schema, tables) => Object.fromEntries(tables.filter(tb => schema.has(tb.table))
@@ -28,7 +29,7 @@ export function newColumns(schema, tables, known) {
 export function exportFlags(tables) {
   const columns = tables.flatMap(tb => tb.columns);
   const sent = noteSent(columns);
-  return { links: columns.some(c => c.link), style: columns.some(c => c.fmt), notes: sent.notes, tableNote: sent.table, formulas: formulasOffered(columns) };
+  return { links: columns.some(c => c.link), style: columns.some(c => c.fmt), notes: sent.notes, tableNote: sent.table, layout: layoutSent(columns), formulas: formulasOffered(columns) };
 }
 
 // Le choix de colonnes qui enregistre l'export avec `additions` ([{ table, columns: [identifiants] }]) en plus : ses tables, ses colonnes,

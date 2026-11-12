@@ -671,6 +671,12 @@ d'un document :
   plus (la description des colonnes accompagne chaque envoi : le total reste loin de 1 Mo). Il est signé avec les
   colonnes, donc hors de portée de la clé du formulaire. Reste qu'un destinataire lit tout ce que la SOURCE y écrit :
   la case le dit, et chaque case est décochable (une description « interne » ne part pas si la case est décochée).
+- **Ordre et colonnes cachées (0.26.0)** : que de l'affichage. La SOURCE envoie un rang par colonne (`pos`, un entier de -1 à
+  100 000, contrôlé par `isPos` ; signé avec les colonnes, donc hors de portée de la clé du formulaire). La CIBLE n'écrit que
+  des champs de la section de page de sa table (`_grist_Views_section_field` : retirer le champ d'une colonne, changer son
+  rang), seulement pour les colonnes que le widget a créées, une fois chacune puis sur « Reprendre depuis la SOURCE » : ni
+  donnée, ni droit, ni tri, ni filtre, ni vue ajoutée. Une colonne cachée reste pleine de ses données (lisibles par les
+  moyens habituels de Grist), la case ne la protège pas : elle ne sert pas de masque.
 - **Formules de colonne (0.17.0)** : une formule est du **Python que Grist exécute** sur les données du document :
   c'est le plus fort des éléments que la SOURCE peut faire reprendre, d'où une case à part, un message, et le clic d'un
   propriétaire. **Ce que fait le widget** (`js/engine/logic/column-formulas.js`) : la SOURCE n'envoie que le texte des

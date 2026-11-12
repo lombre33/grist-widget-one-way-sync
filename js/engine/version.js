@@ -176,7 +176,16 @@
 //         recalcule quand une colonne change, ou à toute modification, ne part pas. `planFormulas` rend `kind` ('column' ou 'default') sur chaque ligne et pose une
 //         formule par défaut par `ModifyColumn { isFormula: false, formula, recalcWhen: 0 }` (colonne créée par le widget seulement, jamais une colonne de formule
 //         ici : `formulaHere`), sous les mêmes garde-fous et le même clic de propriétaire (`restyle(journal, { formulas: true })`).
-export const ENGINE_VERSION = '4.9.0';
+// 4.10.0 (12 novembre 2026, syncPlus 0.26.0, point 7 de la liste du porteur : « option SOURCE pour l'ordre, les colonnes cachées et les vues ») : mineure, rien n'est
+//         ajouté au port ni aux tables, `CODE_FORMAT` et texte des formules de `Synchro` inchangés. `logic/layout.js` (`modelSection`, `withLayout`, `layoutSent`,
+//         `planLayout`, `isPos`) et `target/layout.js` (`layoutColumns`) : dans la description signée des colonnes, `pos` (rang de la colonne parmi les colonnes
+//         envoyées et montrées par la page de la table, -1 si la page la cache) quand l'export l'envoie (`saveChosenExport({ …, layout })`, case décochée d'emblée,
+//         jamais en Échange). La SOURCE le lit dans la première section de type tableau d'une page de la table (`_grist_Views_section`, `_grist_Views_section_field`)
+//         et le tient à jour (`refreshOptions`, sans renvoi de ligne). La CIBLE (`planLayout`) ne touche que les colonnes créées par le widget : une fois chacune
+//         (`laid` dans l'entrée de la note), puis sur `restyle(journal, { layout: true })` ; elle retire le champ d'une colonne cachée et répartit les places des champs
+//         entre les colonnes montrées (les autres champs ne bougent pas). Seuls les champs de la section de page sont écrits : jamais une donnée, un droit, un tri
+//         ni un filtre. `sentElements` rend 'layout'.
+export const ENGINE_VERSION = '4.10.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

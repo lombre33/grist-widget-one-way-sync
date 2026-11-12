@@ -31,6 +31,7 @@ import { noteHeldFiles } from '../source/files.js';
 import { attachments, receiveFiles } from './files.js';
 import { styleColumns } from './style.js';
 import { describeColumns } from './describe.js';
+import { layoutColumns } from './layout.js';
 import { readSourceNote, syncRows } from '../source/synchro.js';
 import { stopReturn, wireExchange } from '../exchange.js';
 import { errorText, failure, noteError } from '../errors.js';
@@ -285,12 +286,14 @@ async function prepareColumns(ctx, noted, tableRows) {
   const styled = await styleColumns(ctx, linked.entry, kept, { replace: Boolean(again.style) });
   // Descriptions des colonnes et de la table, envoyées par la SOURCE si l'export les porte.
   const described = await describeColumns(ctx, styled, destColumns(kept), { tableNote: received.tableNote, replace: Boolean(again.notes), replaceTable: Boolean(again.table) });
+  // Ordre et colonnes cachées de la page de la table (voir layout.js) : décidés une fois pour les colonnes créées ici, puis sur « Reprendre depuis la SOURCE ».
+  const laid = await layoutColumns(ctx, described, destColumns(kept), { replace: Boolean(again.layout) });
   // Formules de colonne : lues à chaque passage (la carte les montre), posées seulement sur « Reprendre depuis la SOURCE ».
-  const formulas = await formulaColumns(ctx, described, kept, { replace: Boolean(again.formulas) });
-  const structure = ctx.exchange ? null : structureChanges({ ...described, own }, { held: received.held, all: received.all, described: hasSchema(tableRows), here: ctx.schema.columns(received.entry.dest) });
+  const formulas = await formulaColumns(ctx, laid, kept, { replace: Boolean(again.formulas) });
+  const structure = ctx.exchange ? null : structureChanges({ ...laid, own }, { held: received.held, all: received.all, described: hasSchema(tableRows), here: ctx.schema.columns(received.entry.dest) });
   // Un clic sur « Appliquer » : les avis sont vus (voir acknowledged), et les colonnes créées à l'instant se remplissent.
-  const ack = ctx.approve ? acknowledged(described, structure) : described.ack;
-  const entry = { ...described, ...(ack ? { ack } : {}), sends: received.sends.length ? received.sends : undefined, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
+  const ack = ctx.approve ? acknowledged(laid, structure) : laid.ack;
+  const entry = { ...laid, ...(ack ? { ack } : {}), sends: received.sends.length ? received.sends : undefined, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
   const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
   const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
   const created = ctx.approve ? made.map(id => ({ from: id, to: (received.entry.map || {})[id] || id })) : [];
@@ -465,8 +468,8 @@ async function copyContext(schema, journal, note, groups) {
 // pendant le passage (fenêtres de l'onglet) reste.
 async function saveEntries(journal, updates) {
   if (!updates.size) return;
-  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack, adopted }) => JSON.parse(JSON.stringify({
-    dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, tabled, ack, adopted,
+  const noted = ({ dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, laid, tabled, ack, adopted }) => JSON.parse(JSON.stringify({
+    dest, map, match, refs, dropped, addedCols, waiting, own, linked, styled, sourceDoc, sends, described, laid, tabled, ack, adopted,
   }));
   const merged = n => ({ ...n, tables: n.tables.map(tb => (updates.has(tb.table) ? { ...tb, dropped: undefined, waiting: undefined, sends: undefined, ...noted(updates.get(tb.table)) } : tb)) });
   await followExchange(await updateJournalNote(journal, merged));
@@ -650,7 +653,8 @@ export const decide = (journal, ids, choice) => applyDecisions(ids.map(id => `${
 
 // « Reprendre depuis la SOURCE » : la prochaine recopie de ce journal remet sur ceux de la SOURCE les éléments
 // demandés (`elements` : `style` = style des colonnes reçues et règles conditionnelles, voir replaceOptions et
-// planRules ; `notes` = descriptions des colonnes ; `table` = description de la table, voir planNotes ; `formulas` =
+// planRules ; `notes` = descriptions des colonnes ; `table` = description de la table, voir planNotes ; `layout` = ordre et
+// colonnes cachées de la page de la table, voir planLayout ; `formulas` =
 // formules de colonne, voir formulaColumns : l'écran ne le propose qu'à un propriétaire, après lecture).
 // Un passage est lancé aussitôt ; le journal n'est refait qu'une fois.
 const restyles = new Map();

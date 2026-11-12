@@ -103,8 +103,8 @@ test('logique : colonnes nouvelles, choix élargi, ce que l\'export envoie en pl
       [{ table: 'T', filter, columns: ['A', 'C'] }, { table: 'U', filter: null, columns: ['X'] }]);
   });
   await t.test('exportFlags', () => {
-    assert.deepEqual(exportFlags([{ columns: [{ id: 'A' }] }]), { links: false, style: false, notes: false, tableNote: false, formulas: false });
-    assert.deepEqual(exportFlags([{ columns: [{ id: 'A', link: 'x', fmt: true, desc: '', tdesc: 'T', fx: '' }] }]), { links: true, style: true, notes: true, tableNote: true, formulas: true });
+    assert.deepEqual(exportFlags([{ columns: [{ id: 'A' }] }]), { links: false, style: false, notes: false, tableNote: false, layout: false, formulas: false });
+    assert.deepEqual(exportFlags([{ columns: [{ id: 'A', link: 'x', fmt: true, desc: '', tdesc: 'T', pos: 0, fx: '' }] }]), { links: true, style: true, notes: true, tableNote: true, layout: true, formulas: true });
   });
 });
 

@@ -375,7 +375,32 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.25.0 (12 novembre 2026)
+## État : V0.26.0 (12 novembre 2026)
+
+V0.26.0 (Antoine, 12 novembre, point 7 de sa liste : « option SOURCE pour l'ordre, les colonnes cachées, les vues »). Moteur **4.10.0** (mineure, dite dans `GFS-ETAT.md`). Étape 7 et dernière de l'ordre
+convenu (voir la V0.22.0). Une carte de décision a posé le périmètre ; ce qui est codé est l'option recommandée « ordre et colonnes cachées » (à relire si Antoine a répondu autrement).
+- **Constat vérifié dans un Grist 1.7** (sondes `probe-layout*.mjs` du fil, refaites par l'e2e) : une table a trois sortes de sections : données brutes (`rawViewSectionRef`), fiche (`recordCardViewSectionRef`) et une par page ;
+  on ne peut **pas retirer un champ de la section de données brutes** (« Cannot remove raw view section field »), donc les colonnes cachées n'existent que dans une section de page ; l'ordre est `parentPos` de
+  `_grist_Views_section_field`. `RemoveRecord`/`BulkRemoveRecord` sur ce champ cache la colonne, `AddRecord` (`parentId`, `colRef`, `parentPos`) la remontre, `BulkUpdateRecord` de `parentPos` range ; Grist **décale seul**
+  les positions qui se touchent (un échange de deux champs rend 9,5 et 12,5), l'ordre relatif voulu est gardé, même pour une rotation de quatre colonnes ; un `AddRecord` à une position bien plus grande que l'identifiant
+  est ramené à l'identifiant de la nouvelle ligne. La création d'une table par le widget garde déjà l'ordre de la SOURCE (colonnes créées dans l'ordre de l'export) : l'étape ne sert qu'aux ordres changés après, et aux colonnes cachées.
+- **Section modèle** (`modelSection`, `logic/layout.js`) : la première section de type tableau (`parentKey: 'record'`) d'une page (`parentId > 0`), hors données brutes et fiche, la plus petite `id`. Lue des deux côtés.
+- **SOURCE** : case « Envoyer l'ordre et les colonnes cachées de la page » (étape Colonnes, sous « Envoyé avec les colonnes », **décochée d'emblée** : elle change l'affichage chez le destinataire ; jamais en Échange ;
+  `elementCounts.layout` = tables qui ont une page). Chaque colonne porte `pos` dans la description signée des colonnes : son rang parmi les colonnes **envoyées et montrées**, ou -1 si la page la cache ; absent pour une
+  table sans page. `withLayout` (à l'enregistrement), `refreshOptions` relit sections et champs seulement si une description porte `"pos":` et met la description à jour **sans renvoyer de ligne** (`withoutOpts` retire `pos`).
+  `exportFlags` et `sentElements` disent `layout`.
+- **CIBLE** (`planLayout`, `target/layout.js`, appelé par `prepareColumns` après les descriptions) : seules les colonnes **créées par le widget** (`own`) sont touchées. Décidées **une fois** chacune (`laid` dans l'entrée
+  de la note, ajouté à la liste des clés gardées par `saveEntries`), puis à chaque « Reprendre depuis la SOURCE » avec la case « Ordre et colonnes cachées de la page de la table » (`restyle(journal, { layout: true })`) : le
+  champ d'une colonne que la SOURCE cache est retiré ; les colonnes montrées se répartissent, dans l'ordre de la SOURCE, **les places que leurs champs occupaient** (les champs des autres colonnes ne bougent pas) ; sur
+  « Reprendre », une colonne que la SOURCE montre et que la page cache est remontrée (une place de plus, après les autres). Sans page chez le destinataire, rien n'est décidé (`laid` reste vide, le passage suivant essaie encore).
+  Rien n'est lu dans le document tant qu'aucune colonne n'attend une décision.
+- **Pas fait, dit** : les tris, filtres, graphiques, largeurs et réglages d'une vue (« les vues » du point 7), les pages et sous-pages ; une colonne cachée dans une autre page que la section modèle ; une page de la SOURCE
+  qui change de section modèle ; suivre l'ordre de la SOURCE en continu (le destinataire garde ce qu'il a rangé).
+- Testé : unit 493 (`engine-layout.test.mjs` : rangs, section modèle, plans d'écritures dont un échange complet, SOURCE puis CIBLE sur deux Grist en mémoire dont « Reprendre » deux fois de suite, page supprimée à la
+  SOURCE) ; e2e `ONLY_LAYOUT=1` (`layoutSteps`, vrai Grist : case décochée d'emblée avec son compte, `Note` cachée et `Code` en tête chez la CIBLE, données de `Note` reçues, `Note` remontrée ici reste après une ligne de plus
+  et un nouvel ordre de la SOURCE, « Reprendre depuis la SOURCE » range de nouveau ; `SHOTS=<dossier>` fait deux captures). **Piège de l'essai** : une variable locale nommée `page` cache le `page` de Playwright.
+
+## État précédent : V0.25.0 (12 novembre 2026)
 
 V0.25.0 (Antoine, 12 novembre, point 6 de sa liste : « valeurs par défaut et formules de déclenchement (mêmes garde-fous que les formules) »). Moteur **4.9.0** (mineure, dite dans `GFS-ETAT.md`).
 Étape 6 de l'ordre convenu (voir la V0.22.0).

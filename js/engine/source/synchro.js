@@ -208,8 +208,11 @@ export async function refreshOptions(schema, rows) {
   // Un export qui envoie sa mise en forme (colonnes `fmt`) dit aussi la langue et la monnaie du document ; un qui
   // envoie la description de sa table (`tdesc`) la tient de la section de données brutes de la table.
   const doc = sends('"fmt":true') ? docFormatOf(await fetchRows('_grist_DocInfo')) : null;
-  const sections = sends('"tdesc"') ? await fetchRows('_grist_Views_section') : null;
-  const actions = optionsActions(rows, schema, doc, sections);
+  // un qui envoie la mise en page de ses colonnes (`pos`, voir layout.js) la tient de la section de la page de la table.
+  const laidOut = sends('"pos":');
+  const sections = sends('"tdesc"') || laidOut ? await fetchRows('_grist_Views_section') : null;
+  const fields = laidOut ? await fetchRows('_grist_Views_section_field') : null;
+  const actions = optionsActions(rows, schema, doc, sections, fields);
   await apply(actions);
   return actions.length > 0;
 }

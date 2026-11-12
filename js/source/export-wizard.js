@@ -6,6 +6,7 @@ import { ownsSync } from '../engine/logic/strays.js';
 import { elementCounts, exportableColumns, isFileColumn, unsentColumns } from '../engine/logic/exports.js';
 import { noteSent } from '../engine/logic/descriptions.js';
 import { formulasOffered } from '../engine/logic/column-formulas.js';
+import { layoutSent } from '../engine/logic/layout.js';
 import { linkable } from '../engine/logic/links.js';
 import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
 import { missingSyncColumns } from '../engine/logic/formulas.js';
@@ -130,22 +131,23 @@ function autoColsBlock(ctx) {
 
 // Éléments des colonnes envoyés en plus des données, chacun sa case (`ctx.elements`) : la mise en forme (voir options.js,
 // rules.js, docformat.js : en-têtes, règles conditionnelles simples, monnaie résolue, langue du document, en plus des
-// formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js). Chaque
-// case dit combien de colonnes (de tables) sont concernées. Cochées d'emblée pour un nouvel export ; pour un export
+// formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js), l'ordre et
+// les colonnes cachées de la page de chaque table (voir layout.js : décochée d'emblée, elle change l'affichage chez le destinataire).
+// Chaque case dit combien de colonnes (de tables) sont concernées. Cochées d'emblée pour un nouvel export (sauf la mise en page) ; pour un export
 // modifié, telles que l'export l'est déjà. Repliées derrière une ligne qui dit ce qui part. Jamais en Échange (les
 // colonnes y vont dans les deux sens). Les formules (voir column-formulas.js) ont leur case à part, hors du repli, décochée
 // d'emblée, et un message qui demande si l'on est sûr : c'est du Python qu'un destinataire exécutera chez lui.
-const ELEMENTS = [['style', 'send.el.style', 'send.el.style.count'], ['notes', 'send.el.notes', 'send.el.notes.count'], ['tableNote', 'send.el.tableNote', 'send.el.tableNote.count']];
+const ELEMENTS = [['style', 'send.el.style', 'send.el.style.count'], ['notes', 'send.el.notes', 'send.el.notes.count'], ['tableNote', 'send.el.tableNote', 'send.el.tableNote.count'], ['layout', 'send.el.layout', 'send.el.layout.count']];
 async function elementsBlock(ctx, schema) {
   if (ctx.exp?.echange) {
-    ctx.elements = { style: false, notes: false, tableNote: false, formulas: false };
+    ctx.elements = { style: false, notes: false, tableNote: false, layout: false, formulas: false };
     return null;
   }
   if (!ctx.elements) {
     const sent = ctx.exp ? noteSent(ctx.exp.tables.flatMap(tb => tb.columns)) : null;
     ctx.elements = ctx.exp
-      ? { style: ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)), notes: sent.notes, tableNote: sent.table, formulas: formulasOffered(ctx.exp.tables.flatMap(tb => tb.columns)) }
-      : { style: true, notes: true, tableNote: true, formulas: false };
+      ? { style: ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)), notes: sent.notes, tableNote: sent.table, layout: layoutSent(ctx.exp.tables.flatMap(tb => tb.columns)), formulas: formulasOffered(ctx.exp.tables.flatMap(tb => tb.columns)) }
+      : { style: true, notes: true, tableNote: true, layout: false, formulas: false };
   }
   const counts = elementCounts(schema, ctx.chosen, await fetchRows('_grist_Views_section'));
   const summary = el('summary', {});

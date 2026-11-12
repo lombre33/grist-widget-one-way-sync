@@ -109,6 +109,8 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   conditionnelle simples (case « Envoyer la mise en forme des colonnes »), descriptions des
   colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, cochée d'emblée,
   dit combien de colonnes sont concernées (étape Colonnes, repliée sous « Envoyé avec les colonnes »).
+  L'ordre des colonnes et celles que la page de la table cache ont leur case (0.26), décochée d'emblée :
+  le destinataire les reprend une fois sur les colonnes que le widget a créées, puis à la demande.
   Une règle n'est jamais copiée telle quelle : elle est relue puis réécrite avec les colonnes du
   destinataire. La carte signale une langue de document différente (elle décide de l'écriture des
   nombres) et un propriétaire peut régler le document d'un clic. Le bouton « Reprendre depuis la

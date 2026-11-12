@@ -7,6 +7,7 @@ import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
 import { parseRule, ruleRefs } from './rules.js';
 import { cleanNote, noteSent, tableNoteOf, withTableNote } from './descriptions.js';
+import { isPos, layoutSent, modelSection, withLayout } from './layout.js';
 import { formulasOffered, sourceDefault, sourceFormula, withFormulas } from './column-formulas.js';
 
 // Dernier envoi à un destinataire coupé (révoqué, export supprimé, Échange arrêté) : une ligne
@@ -80,14 +81,16 @@ function sourceRules(c, cols) {
 }
 
 // Ce que les tables `tables` ont à envoyer pour chaque élément des colonnes (voir descriptions.js) : colonnes qui ont une
-// mise en forme (`style`) ou une description (`notes`), tables qui ont une description (`tableNote`). `sections` :
-// lignes de `_grist_Views_section`. Sert à dire à la personne ce que chaque case envoie vraiment.
+// mise en forme (`style`) ou une description (`notes`), tables qui ont une description (`tableNote`) ou une page
+// dont on peut envoyer la mise en page (`layout`, voir layout.js). `sections` : lignes de `_grist_Views_section`. Sert à
+// dire à la personne ce que chaque case envoie vraiment.
 export function elementCounts(schema, tables, sections) {
   const columns = (extras) => tables.flatMap(table => exportableColumns(schema.columns(table) || [], { extras, notes: !extras }));
   return {
     style: columns(true).filter(c => c.opts).length,
     notes: columns(false).filter(c => c.desc).length,
     tableNote: tables.filter(table => tableNoteOf(schema.table(table), sections)).length,
+    layout: tables.filter(table => modelSection(schema.table(table), sections)).length,
     formulas: tables.reduce((sum, table) => sum + (schema.columns(table) || []).filter(c => sourceFormula(c) || sourceDefault(c)).length, 0),
   };
 }
@@ -162,10 +165,11 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, fx, fd }) => ({
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, fmt, doc, desc, tdesc, pos, fx, fd }) => ({
   id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(opts && withOpts ? { opts } : {}),
   ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
   ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
+  ...(isPos(pos) && withOpts ? { pos } : {}),
   ...(typeof fx === 'string' && withOpts ? { fx } : {}),
   ...(typeof fd === 'string' && fd && withOpts ? { fd } : {}),
 })));
@@ -237,9 +241,10 @@ export function exportTables(rows, exportId) {
 // description des colonnes de ses lignes Synchro est réécrite, sans renvoi de lignes (la CIBLE la
 // lit à la prochaine ligne reçue). Les options se lisent pour le type envoyé (voir options.js). `sections` :
 // lignes de `_grist_Views_section` (la description d'une table s'y trouve), lues seulement si un export envoie
-// celle de sa table ; sans elles, la description de table envoyée reste telle quelle.
+// celle de sa table ou la mise en page de ses colonnes ; sans elles, la description de table envoyée reste telle quelle.
+// `fields` : lignes de `_grist_Views_section_field` (la mise en page, voir layout.js), lues seulement si un export l'envoie.
 const SCHEMA_KINDS = [KIND.keys, KIND.lot, KIND.track, KIND.full, KIND.mark, KIND.files];
-export function optionsActions(rows, schema, doc = null, sections = null) {
+export function optionsActions(rows, schema, doc = null, sections = null, fields = null) {
   const ids = [];
   const values = [];
   for (const exportId of new Set(rows.map(r => r[EXPORT_COL]))) {
@@ -256,7 +261,8 @@ export function optionsActions(rows, schema, doc = null, sections = null) {
       const styled = extras ? withDoc(pruneRules(fresh), doc) : fresh;
       const described = sent.table && sections ? withTableNote(styled, tableNoteOf(schema.table(table), sections)) : styled;
       const formulas = formulasOffered(columns) ? withFormulas(described, live) : described;
-      const value = schemaText(filteredColumns({ columns: formulas, filter }));
+      const laidOut = layoutSent(columns) && sections && fields ? withLayout(formulas, live, schema.table(table), sections, fields) : formulas;
+      const value = schemaText(filteredColumns({ columns: laidOut, filter }));
       for (const r of rows.filter(x => x[EXPORT_COL] === exportId && x[TABLE_COL] === table && SCHEMA_KINDS.includes(x[TYPE_COL]) && x[SCHEMA_COL] !== value)) {
         ids.push(r.id);
         values.push(value);

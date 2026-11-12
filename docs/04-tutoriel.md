@@ -466,6 +466,13 @@ notes internes. Chez le destinataire, une colonne créée par le widget la reço
 a pas), la table aussi si la sienne est vide ; ce qui est écrit ou effacé ici n'est pas écrasé, et
 **Reprendre depuis la SOURCE** (une case par élément) le remet d'accord.
 
+**Ordre et colonnes cachées.** Une case à part, **Envoyer l'ordre et les colonnes cachées de la page**, décochée
+d'emblée (elle change l'affichage chez le destinataire), envoie le rang de chaque colonne dans la page de la table
+(la première vue en tableau d'une page, pas les données brutes) et celles que cette page cache. Seul l'affichage change :
+les données d'une colonne cachée arrivent comme les autres. Chez le destinataire, les colonnes que le widget a créées la
+reçoivent une fois (celles qui existaient déjà ne bougent pas) ; une retouche faite ici reste, et **Reprendre depuis la
+SOURCE** range de nouveau la page comme celle de la SOURCE. Les tris, filtres, graphiques et autres vues ne sont pas envoyés.
+
 **Formules.** Une case à part, **Envoyer aussi les formules des colonnes (Python)**, décochée d'emblée,
 envoie le texte de chaque colonne de formule, et celui de la **formule par défaut** d'une colonne de
 données (une formule de déclenchement qui ne joue que sur les nouvelles lignes ; pas celle qui se

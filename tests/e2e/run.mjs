@@ -1409,6 +1409,79 @@ try {
   // reconstruit la règle (jamais la formule d'origine, jamais la règle piégée), dit l'écart de langue et ne règle le
   // document que sur un clic confirmé d'un propriétaire ; une retouche d'ici reste, « Reprendre depuis la SOURCE »
   // remet tout d'accord. Les descriptions des colonnes et de la table partent avec (cases à part) et se reprennent de même.
+  // Ordre et colonnes cachées de la page de la table (0.26) : la SOURCE les envoie avec ses colonnes quand la case est cochée ; la CIBLE les pose une
+  // fois sur ce que le widget a créé, sans refaire ce qui est décidé ; « Reprendre depuis la SOURCE » remet tout d'accord.
+  async function layoutSteps() {
+    const columnNames = ['Libelle', 'Montant', 'Reel', 'Note', 'Code'];
+    const src = await newDocWithWidget('Mise en page SOURCE', [
+      ['AddTable', 'Budget', columnNames.map(id => ({ id, type: 'Text' }))],
+      ['BulkAddRecord', 'Budget', [null, null], { Libelle: ['Loyer', 'Eau'], Montant: ['100', '30'], Reel: ['90', '28'], Note: ['n1', 'n2'], Code: ['c1', 'c2'] }],
+    ]);
+    // La page de la table : sa section de type tableau (hors données brutes et fiche), et ses champs rangés comme Grist les affiche.
+    const pageOf = async (doc, table) => {
+      const tb = (await records(doc, '_grist_Tables')).find(x => x.tableId === table);
+      const section = (await records(doc, '_grist_Views_section')).filter(sec => sec.tableRef === tb.id && sec.parentKey === 'record' && sec.parentId > 0
+        && sec.id !== tb.rawViewSectionRef && sec.id !== tb.recordCardViewSectionRef)[0];
+      const columns = (await records(doc, '_grist_Tables_column')).filter(c => c.parentId === tb.id);
+      const fields = (await records(doc, '_grist_Views_section_field')).filter(f => f.parentId === section.id).sort((a, b) => a.parentPos - b.parentPos);
+      return { section: section.id, columns, fields: fields.map(f => ({ id: f.id, col: columns.find(c => c.id === f.colRef).colId, pos: f.parentPos })) };
+    };
+    const pageOrder = async (doc, table) => (await pageOf(doc, table)).fields.map(f => f.col);
+    const fieldOf = async (doc, col) => (await pageOf(doc, 'Budget')).fields.find(f => f.col === col);
+    // La SOURCE : « Note » cachée, « Code » en tête.
+    await applyActions(src.doc, [['RemoveRecord', '_grist_Views_section_field', (await fieldOf(src.doc, 'Note')).id]]);
+    await applyActions(src.doc, [['UpdateRecord', '_grist_Views_section_field', (await fieldOf(src.doc, 'Code')).id, { parentPos: 1 }]]);
+    assert.deepEqual(await pageOrder(src.doc, 'Budget'), ['Code', 'Libelle', 'Montant', 'Reel']);
+
+    const dst = await newDocWithWidget('Mise en page CIBLE');
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Budget' }).check();
+    await dialogButton('Continuer').click();
+    const elements = dialog().locator('details', { hasText: 'Envoyé avec les colonnes' });
+    assert.ok(!/ordre et colonnes cachées/.test(await elements.locator('summary').innerText()), 'la mise en page ne part pas sans accord');
+    await elements.locator('summary').click();
+    const send = dialog().getByRole('checkbox', { name: 'Envoyer l’ordre et les colonnes cachées de la page' });
+    assert.ok(!(await send.isChecked()), 'décochée d\'emblée : elle change l\'affichage chez le destinataire');
+    assert.match(await elements.innerText(), /1\stable concernée/);
+    await send.check();
+    if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'mise-en-page-1-case.png') });
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Budget');
+    await dialogButton('Créer l’export').click();
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, /Budget\s»\s:\stable/), { url: src.url });
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 2, 'lignes reçues', 90000);
+    await waitFor(async () => (await pageOrder(dst.doc, 'Budget')).join() === 'Code,Libelle,Montant,Reel', 'page de la CIBLE rangée comme celle de la SOURCE', 60000);
+    assert.deepEqual((await records(dst.doc, 'Budget')).map(r => r.Note).sort(), ['n1', 'n2'], 'les données de la colonne cachée sont bien là');
+    step('Mise en page : case décochée d\'emblée ; la CIBLE cache « Note » et range « Code » en tête, les données de « Note » sont reçues');
+
+    // Une retouche d'ici (« Note » remontrée à la fin) reste, même quand la SOURCE change l'ordre : la décision est prise une fois.
+    const here = await pageOf(dst.doc, 'Budget');
+    await applyActions(dst.doc, [['AddRecord', '_grist_Views_section_field', null, { parentId: here.section, colRef: here.columns.find(c => c.colId === 'Note').id, parentPos: 9999 }]]);
+    await applyActions(src.doc, [['UpdateRecord', '_grist_Views_section_field', (await fieldOf(src.doc, 'Reel')).id, { parentPos: 0.5 }]]);
+    assert.deepEqual(await pageOrder(src.doc, 'Budget'), ['Reel', 'Code', 'Libelle', 'Montant']);
+    await openWidgetTab(src.url, 'Envoyer'); // la SOURCE met la description de ses colonnes à jour
+    await widget().locator('[data-export]').first().waitFor();
+    await page.waitForTimeout(3000);
+    await applyActions(src.doc, [['AddRecord', 'Budget', null, { Libelle: 'Assurance', Montant: '80', Reel: '79', Note: 'n3', Code: 'c3' }]]);
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await records(dst.doc, 'Budget')).length === 3, 'ligne de plus reçue (un passage a eu lieu)', 90000);
+    assert.deepEqual(await pageOrder(dst.doc, 'Budget'), ['Code', 'Libelle', 'Montant', 'Reel', 'Note'], 'la mise en page décidée une fois n\'est pas refaite');
+    step('Mise en page : une colonne remontrée ici reste, l\'ordre nouveau de la SOURCE ne défait rien tout seul');
+
+    // « Reprendre depuis la SOURCE » : l'ordre de la SOURCE et sa colonne cachée.
+    await button('Reprendre depuis la SOURCE').click();
+    assert.ok(await dialog().getByRole('checkbox', { name: 'Ordre et colonnes cachées de la page de la table' }).isChecked());
+    if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'mise-en-page-2-reprendre.png') });
+    await dialogButton('Reprendre').click();
+    await waitFor(async () => (await pageOrder(dst.doc, 'Budget')).join() === 'Reel,Code,Libelle,Montant', 'ordre de la SOURCE repris', 90000);
+    assert.deepEqual((await records(dst.doc, 'Budget')).map(r => r.Note).sort(), ['n1', 'n2', 'n3'], 'cacher une colonne ne touche pas à ses données');
+    step('Mise en page : « Reprendre depuis la SOURCE » range la page comme celle de la SOURCE et recache « Note »');
+  }
+
   async function formatSteps() {
     const src = await newDocWithWidget('Format SOURCE', [
       ['AddTable', 'Budget', [{ id: 'Libelle', type: 'Text' }, { id: 'Montant', type: 'Numeric' }]],
@@ -2323,8 +2396,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3341,6 +3414,7 @@ try {
   await structureSteps();
   await adoptSteps();
   await newColumnsSteps();
+  await layoutSteps();
   await linksSteps();
   await formatSteps();
   await formulasSteps();

@@ -106,7 +106,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 - **Column elements**: headers, colors, currency and simple conditional formatting rules
   (“Send the column formatting” box), column and table descriptions (separate boxes) can travel
   with the export; each box, ticked by default, says how many columns are concerned (Columns step,
-  folded under “Sent with the columns”). A rule is never copied as it is: it is read, then
+  folded under “Sent with the columns”). The order of the columns and the ones the table's page hides
+  have their own box (0.26), unticked by default: the receiver applies them once to the columns the widget
+  created, then on request. A rule is never copied as it is: it is read, then
   rewritten with the receiver's columns. The card flags a different document language (it decides
   how numbers are written) and an owner can set the document with one click. The “Take again from
   the SOURCE” button puts back, element by element, what was retouched on the receiving side.
