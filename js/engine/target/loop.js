@@ -21,6 +21,7 @@ import { formulaColumns } from './formulas.js';
 import { cardShape, driftResult, endedAt, exportShape, filesSummary, nextSuspect, offersOf, tableResult, wrote } from '../logic/report.js';
 import { apply, docChanges, docIdentity, fetchRows, isOwner, page, prefs, publicRecords, readSchema, t, withLock } from '../port.js';
 import { updateJournalNote, upgradeJournal } from './journals.js';
+import { moveNotes } from '../note-move.js';
 import { addDestColumnsActions, missingColumns, optionActions, receivedJournals, receivedKey, restyleOptionActions, valueChoiceActions } from '../logic/received.js';
 import { checkSeals, checkSigned, isUnpacked, sealMark, sealRows, sealer } from '../logic/trust.js';
 import { noteHeldFiles } from '../source/files.js';
@@ -596,6 +597,7 @@ async function passAll() {
   let schema = await readSchema();
   let upgraded = false;
   for (const { journal } of receivedJournals(schema)) upgraded = (await upgradeJournal(schema, journal)) || upgraded;
+  if (!state.readOnly) upgraded = (await moveNotes(schema)) || upgraded;
   if (upgraded) schema = await readSchema();
   watch.tables = new Set(receivedJournals(schema).flatMap(r => [r.journal, ...r.note.tables.map(tb => tb.dest)]));
   watch.pull = receivedJournals(schema).some(r => r.note.mode === 'public');

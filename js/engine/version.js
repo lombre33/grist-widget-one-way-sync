@@ -71,7 +71,18 @@
 //         table) ; `restyle(journal, { formulas: true })`, sur le clic d'un propriétaire après lecture, transforme en colonnes de formule
 //         celles que le moteur a créées et dont la formule n'a pas d'objection (`target/formulas.js`). Ni port, ni nom de table, ni
 //         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent.
-export const ENGINE_VERSION = '2.9.0';
+// 3.0.0 (12 novembre 2026, vérification du lien public demandée par le porteur : « regarder si un user qui arrive sur le lien voit les
+//         tables gérées par le widget », puis choix « Notes à l'abri, complet ») : les notes du widget (SOURCE : `Synchro_Export` ;
+//         CIBLE : `Synchro_Ids` du journal et clé de signature d'`id_sync`) ne sont plus dans la description des colonnes mais dans leurs
+//         options (`widgetOptions`, clé `syncNote`, voir `columnNote` de `logic/common.js`) : Grist vide les options d'une colonne qu'un
+//         lecteur ne lit pas, pas sa description, et `_grist_Tables_column` se lit en anonyme sur un document public. Les documents
+//         d'avant sont lus tels quels puis déplacés (`moveNotes` de `note-move.js`, appelé par `ensureSyncTable` et par chaque passage de
+//         recopie, `legacyNoteActions` de `logic/note-store.js`) ; une règle d'accès de plus (`keyAclRules`, mémo `KEY_MEMO`) cache la
+//         colonne `id_sync` des tables qui portent une clé de signature aux lecteurs, posée par `syncRules`. Majeure au sens ci-dessus :
+//         un moteur 2.x ne lit pas les notes d'un document 3.x (il les croit vides et pourrait les réécrire), donc tous les onglets d'un
+//         même document doivent avoir le moteur 3 (recharger les onglets ouverts). Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte
+//         des formules de `Synchro` ne changent.
+export const ENGINE_VERSION = '3.0.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

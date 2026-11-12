@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.17.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.18.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -115,6 +115,12 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   them one by one in “Take again from the SOURCE” (those that name a system module or a missing column
   or table are refused outright), then applies them to the columns created by the widget. See
   `SECURITY.md` before offering the box on an instance without a sandbox.
+- **Notes out of readers' sight** (0.18): a reader of the document, public link included, sees the columns'
+  metadata. The widget's notes (recipients' e-mail and documents, private key of a pending invitation, journal
+  secret, signing key) are therefore kept in the options of the hidden columns, which Grist blanks for anyone who
+  cannot read them, no longer in their description; the `id_sync` column of received tables is hidden from readers
+  by an access rule. An older document is moved the next time an owner or an editor opens it. See `SECURITY.md`,
+  “What a reader or the public link sees”.
 - **Destinations of your choice**: new or existing table, matched columns, existing rows linked.
   A table added to the export later is offered in a dialog.
 - **Manual edits respected**: a value fixed, a row or a column deleted by hand in the TARGET

@@ -55,11 +55,15 @@ async function hideColumn(doc, tableId, colIds) {
   return () => applyActions(doc, [['RemoveRecord', '_grist_ACLRules', rule], ['RemoveRecord', '_grist_ACLResources', resource]]);
 }
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
-// Clé de signature reçue par une destination (description de sa colonne id_sync, voir storeKey).
+// Note du widget que porte une colonne : dans ses options (clé syncNote), jamais dans sa description, que Grist laisse lire
+// aux lecteurs du document (voir columnNote). `syncNoteWrite` : l’action qui la réécrit, sans toucher aux autres options.
+const syncNoteOf = column => JSON.parse(column.widgetOptions || '{}').syncNote || {};
+const syncNoteWrite = (column, note) => ['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: JSON.stringify({ ...JSON.parse(column.widgetOptions || '{}'), syncNote: note }) }];
+// Clé de signature reçue par une destination (note de sa colonne id_sync, voir storeKey).
 const receivedKeyOf = async (doc, table, slot) => {
   const ref = await tableRef(doc, table);
   const col = (await records(doc, '_grist_Tables_column')).find(c => c.parentId === ref && c.colId === 'id_sync');
-  return (JSON.parse(col.description || '{}').signature || {})[slot];
+  return (syncNoteOf(col).signature || {})[slot];
 };
 // Colonnes affichées sur la page d'une table (ses vues en grille).
 async function pageColumns(doc, tableId) {
@@ -627,11 +631,11 @@ try {
     const journalNote = async () => {
       const journal = (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_'));
       const column = (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Ids' && c.parentId === journal.id);
-      return { column, note: JSON.parse(column.description) };
+      return { column, note: syncNoteOf(column) };
     };
     const tampered = await journalNote();
     assert.equal(tampered.note.verrou, true);
-    await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', tampered.column.id, { description: JSON.stringify({ ...tampered.note, verrou: false }) }]]);
+    await applyActions(dst.doc, [syncNoteWrite(tampered.column, { ...tampered.note, verrou: false })]);
     await openWidget(dst.url);
     await waitFor(async () => (await journalNote()).note.verrou === true, 'note remise d\'accord avec la règle de lecture seule', 60000);
     assert.equal((await lockRules()).length, 1, 'la règle reste en place');
@@ -689,7 +693,7 @@ try {
     const sent = (await records(src.doc, 'Synchro')).map(r => r.Synchro_Colonnes || '').join();
     assert.ok(!sent.includes('Secret') && !sent.includes('choices'), 'la SOURCE n\'envoie pas sa liste de choix');
     const journal = (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_'));
-    const note = (await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Ids' && c.parentId === journal.id).description;
+    const note = JSON.stringify(syncNoteOf((await records(dst.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Ids' && c.parentId === journal.id)));
     assert.ok(!note.includes('Secret'), 'la note du journal ne garde aucune liste');
     // Une ligne qui entre dans le filtre apporte sa valeur, et seulement elle.
     await applyActions(src.doc, [['UpdateRecord', 'Dossiers', 3, { Nom: 'Un' }]]);
@@ -890,7 +894,8 @@ try {
     const dstTableNote = async () => (await records(dst.doc, '_grist_Views_section')).find(sec => sec.id === dstSection).description;
     await waitFor(async () => (await noteOf(dst.doc, 'Budget', 'Libelle')) === 'Intitulé de la ligne' && (await dstTableNote()) === 'Lignes du budget 2026', 'descriptions reçues', 90000);
     assert.equal(await noteOf(dst.doc, 'Budget', 'Montant'), 'Montant TTC en euros');
-    assert.ok(!String(await noteOf(dst.doc, 'Budget', 'id_sync')).includes('Intitulé'), 'la description de la clé (la note du widget) ne reçoit rien de la SOURCE');
+    assert.equal(await noteOf(dst.doc, 'Budget', 'id_sync'), '', 'la description de la clé reste vide : la note du widget est dans ses options, et ne reçoit rien de la SOURCE');
+    assert.ok(!JSON.stringify(syncNoteOf(await column(dst.doc, 'Budget', 'id_sync'))).includes('Intitulé'));
     step('Descriptions : celles des colonnes et de la table arrivent chez la CIBLE');
     await applyActions(dst.doc, [['UpdateRecord', '_grist_Tables_column', (await column(dst.doc, 'Budget', 'Libelle')).id, { description: 'Ma description' }]]);
 
@@ -1105,7 +1110,7 @@ try {
     await dialogButton('Ajouter un destinataire').click();
     const answer = await accept(dst.doc, dst.url, await invite(), '« Dossiers » : table Dossiers.');
     await approve(answer, { url: src.url });
-    const sent = async () => (JSON.parse((await records(src.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export').description).fichiers || {})[exportId] || { f: '', h: [] };
+    const sent = async () => (syncNoteOf((await records(src.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export')).fichiers || {})[exportId] || { f: '', h: [] };
     await waitFor(async () => { const s = await sent(); return s.f === [sha(small), sha(big)].sort().join(' ') && s.h.length === 1; }, 'fichiers envoyés, page SOURCE ouverte', 60000);
     const piece = async (doc, nom) => (await records(doc, 'Dossiers')).find(r => r.Nom === nom).Piece;
     await openWidget(dst.url);
@@ -1194,9 +1199,9 @@ try {
       })();
       return { seen: () => seen.size, stop: () => { on = false; } };
     };
-    // La note SOURCE est dans la description de Synchro_Export de la table Synchro (les journaux ont la même colonne).
+    // La note SOURCE est dans les options de Synchro_Export de la table Synchro (les journaux ont la même colonne).
     const noted = async doc => {
-      const note = (await records(doc, '_grist_Tables_column')).filter(col => col.colId === 'Synchro_Export').map(col => JSON.parse(col.description || '{}')).find(n => n.exports) || {};
+      const note = (await records(doc, '_grist_Tables_column')).filter(col => col.colId === 'Synchro_Export').map(syncNoteOf).find(n => n.exports) || {};
       return (note.fichiers || {})[exportId] || { f: '', h: [], o: {} };
     };
     const dossiers = async doc => Object.fromEntries((await records(doc, 'Dossiers')).map(r => [r.Nom, r]));
@@ -1945,12 +1950,12 @@ try {
   const moreRows = (await applyActions(source.doc, [['BulkAddRecord', 'Contacts', Array(14).fill(null), { Nom: Array.from({ length: 14 }, (_, i) => `Plus${i}`) }]])).retValues[0];
   const syncRef2 = await tableRef(source.doc, 'Synchro');
   const noteColumn = async () => (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export' && c.parentId === syncRef2);
-  const rowsNote = async () => JSON.parse((await noteColumn()).description);
+  const rowsNote = async () => syncNoteOf(await noteColumn());
   // La référence d'une observation plus ancienne est vieillie : elle se renouvelle à l'ouverture (avec les 14 lignes de plus).
   const seenBefore = await rowsNote();
   if ((seenBefore.lignes || {})[signExport]) {
     seenBefore.lignes[signExport].at = 1;
-    await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', (await noteColumn()).id, { description: JSON.stringify(seenBefore) }]]);
+    await applyActions(source.doc, [syncNoteWrite(await noteColumn(), seenBefore)]);
   }
   await openWidget(source.url);
   await page.bringToFront(); // une page en arrière-plan ne se rattrape qu'une fois par minute
@@ -2429,9 +2434,9 @@ try {
   await dialogButton('Plus tard').click();
   // Une invitation vaut 7 jours : expirée, son code est refait d'un clic.
   const noteCol = (await records(source.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export' && c.parentId === syncRef);
-  const sourceNote = JSON.parse(noteCol.description);
+  const sourceNote = syncNoteOf(noteCol);
   sourceNote.invitations = sourceNote.invitations.map(i => ({ ...i, at: i.at - 8 * 86400 }));
-  await applyActions(source.doc, [['UpdateRecord', '_grist_Tables_column', noteCol.id, { description: JSON.stringify(sourceNote) }]]);
+  await applyActions(source.doc, [syncNoteWrite(noteCol, sourceNote)]);
   await openWidget(source.url);
   await widget().getByText('Expirée', { exact: true }).waitFor();
   await button('Refaire le code').click();
@@ -2524,6 +2529,24 @@ try {
   const anonColumns = (await (await fetch(`${TEAM}/api/docs/${source.doc}/tables/Synchro/columns`)).json()).columns;
   assert.ok(anonColumns.some(c => c.id === 'Synchro_Lot') && !anonColumns.some(c => c.id === 'Synchro_Export'), 'colonne de la note cachée au lien public');
   assert.ok(!anonColumns.some(c => /invitations|exports/.test(c.fields.description || '')), 'note de la SOURCE cachée au lien public');
+  // Les métadonnées du document (`_grist_Tables_column`) se lisent aussi en anonyme : Grist y vide les options d'une colonne qu'un
+  // lecteur ne lit pas, mais pas sa description. Les notes du widget sont dans les options (voir columnNote) : ni le courriel du
+  // propriétaire, ni la clé privée d'une invitation, ni le secret d'un journal, ni la clé de signature ne s'y lisent.
+  const metadata = async (doc) => {
+    const res = await fetch(`${TEAM}/api/docs/${doc}/tables/_grist_Tables_column/records`);
+    assert.equal(res.status, 200, 'les métadonnées sont lisibles en anonyme (sinon ce contrôle ne prouve rien)');
+    return (await res.json()).records.map(r => r.fields);
+  };
+  const noteLeaks = columns => columns.filter(c => /syncNote|"invitations"|"exports"|"signature"|"prive"|"secret"/.test(`${c.description || ''}${c.widgetOptions || ''}`));
+  assert.ok((await records(source.doc, '_grist_Tables_column')).some(c => c.colId === 'Synchro_Export' && syncNoteOf(c).exports), 'la note de la SOURCE existe (contrôle non vide)');
+  assert.deepEqual(noteLeaks(await metadata(source.doc)), [], 'la note de la SOURCE n\'est pas lisible dans les métadonnées, en anonyme');
+  // Même contrôle côté CIBLE : journal réservé et clé de signature de la table reçue (colonne id_sync cachée par une règle).
+  assert.ok((await records(target.doc, '_grist_Tables_column')).some(c => c.colId === 'id_sync' && syncNoteOf(c).signature), 'une clé de signature existe côté CIBLE (contrôle non vide)');
+  await openWidget(target.url);
+  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
+  assert.deepEqual(noteLeaks(await metadata(target.doc)), [], 'ni la note du journal, ni la clé de signature, ne sont lisibles dans les métadonnées de la CIBLE, en anonyme');
+  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': null } } });
+  step('Lien public : les notes du widget (SOURCE, journal, clé de signature) ne se lisent plus dans les métadonnées du document');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
   // Une règle d'accès posée après coup sur une table de l'export public est signalée sur sa carte.

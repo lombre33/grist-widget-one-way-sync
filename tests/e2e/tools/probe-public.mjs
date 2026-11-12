@@ -2,8 +2,10 @@
 // Les deux documents sont rendus publics, puis lus en anonyme : tables, lignes, descriptions de colonnes, tables de
 // métadonnées de Grist (`_grist_*`). Le rapport dit ce qui est caché et ce qui fuit (clé de signature, clé privée
 // d'une invitation en attente, secret, courriel, clé du formulaire). Fait le 12 novembre (Grist 1.7.22) : les lignes
-// des tables techniques sont cachées, mais leurs notes (descriptions de colonnes) se lisent dans `_grist_Tables_column`,
-// car Grist n'y vide pas `description` pour une colonne qu'un lecteur ne peut pas lire.
+// des tables techniques sont cachées, mais leurs notes (descriptions de colonnes) se lisaient dans `_grist_Tables_column`,
+// car Grist n'y vide pas `description` pour une colonne qu'un lecteur ne peut pas lire. Depuis le moteur 3.0.0 les notes
+// sont dans les options des colonnes (que Grist vide) et la clé de signature est cachée par une règle d'accès : la sonde
+// doit ne plus rien trouver, sauf le courriel du destinataire, que le widget écrit dans le mémo des webhooks (voir KNOWN).
 // Usage : tests/e2e/start-grist.sh, puis `node tests/e2e/tools/probe-public.mjs` (STRICT=1 : code de sortie 1 s'il y a une fuite).
 import { log } from '../harness.mjs';
 import { startProbe } from './probe.mjs';
@@ -34,6 +36,9 @@ const META = ['_grist_Tables', '_grist_Tables_column', '_grist_Triggers', '_gris
 const hook = (await h.webhooks(p.src.doc))[0].fields.url;
 const formKey = /\/api\/s\/([^/]+)\//.exec(hook)[1];
 const leaks = [];
+// Pas corrigé : le mémo d'un webhook (courriel · document · équipe/nom) est dans `_grist_Triggers`, lisible par tout lecteur ;
+// le widget le relit pour montrer qui reçoit (hookMemo, memoMatches).
+const KNOWN = new Set(['courriel du destinataire (mémo du webhook)']);
 for (const [label, doc] of [['SOURCE', p.src.doc], ['CIBLE', p.dst.doc]]) {
   const tables = (await anon(`/docs/${doc}/tables`)).json.tables.map(t => t.id);
   log(`${label} : tables listées au visiteur : ${tables.join(', ')}`);
@@ -57,11 +62,12 @@ for (const [label, doc] of [['SOURCE', p.src.doc], ['CIBLE', p.dst.doc]]) {
     'clé de signature': /"signature":\{"[0-9a-f]{16}":"[0-9a-f]{32}"/.test(all.replaceAll('\\"', '"')),
     'clé privée d’une invitation en attente': /\\"prive\\":\{\\"x\\"/.test(all),
     'secret d’invitation': /\\"secret\\":\\"[0-9a-f]{32}\\"/.test(all),
-    'courriel du propriétaire': all.includes(env.email),
+    'courriel du destinataire (mémo du webhook)': all.includes(env.email),
   };
   for (const [what, yes] of Object.entries(found)) {
-    log(`${label} : ${what} : ${yes ? 'LISIBLE' : 'caché'}`);
-    if (yes) leaks.push(`${label} : ${what}`);
+    const known = KNOWN.has(what);
+    log(`${label} : ${what} : ${yes ? `LISIBLE${known ? ' (connu, voir SECURITY.md)' : ''}` : 'caché'}`);
+    if (yes && !known) leaks.push(`${label} : ${what}`);
   }
 }
 log(leaks.length ? `Lisible par le lien public (${leaks.length}) : ${leaks.join(' ; ')}` : 'Rien de sensible lisible par le lien public');

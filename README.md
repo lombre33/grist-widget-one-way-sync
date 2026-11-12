@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.17.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.18.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -118,6 +118,12 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   propriétaire les lit une à une dans « Reprendre depuis la SOURCE » (celles qui citent un module
   système ou une colonne ou une table absente sont refusées d'office), puis les pose sur les colonnes
   créées par le widget. Voir `SECURITY.md` avant de proposer la case sur une instance sans bac à sable.
+- **Notes à l'abri des lecteurs** (0.18) : un lecteur du document, lien public compris, voit les métadonnées
+  des colonnes. Les notes du widget (courriel et documents des destinataires, clé privée d'une invitation en
+  attente, secret des journaux, clé de signature) sont donc dans les options des colonnes cachées, que Grist
+  vide pour qui ne les lit pas, et non plus dans leur description ; la colonne `id_sync` des tables reçues
+  est cachée aux lecteurs par une règle d'accès. Un document d'avant est déplacé à la prochaine ouverture
+  d'un propriétaire ou d'un éditeur. Voir `SECURITY.md`, « Ce que voit un lecteur ou le lien public ».
 - **Destinations au choix** : table nouvelle ou existante, colonnes mises en correspondance,
   lignes déjà présentes rattachées. Une table ajoutée plus tard à l'export est proposée dans une
   fenêtre.

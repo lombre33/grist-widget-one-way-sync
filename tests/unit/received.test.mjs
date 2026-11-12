@@ -25,7 +25,7 @@ test('journaux reçus : ceux dont la note dit l\'export et les tables, complét�
   assert.deepEqual(receivedDests(schema), [{ dest: 'Annuaire', table: 'Contacts', fromDocId: 'docA' }]);
   assert.equal(journalNote(schema, 'Journal_b').export, 'e2');
   assert.equal(journalNote(schema, 'Absente'), null);
-  assert.deepEqual(journalNoteAction(schema, 'Journal_b', { export: 'e2', tables: [] }), ['UpdateRecord', '_grist_Tables_column', 2, { description: '{"export":"e2","tables":[]}' }]);
+  assert.deepEqual(journalNoteAction(schema, 'Journal_b', { export: 'e2', tables: [] }), ['UpdateRecord', '_grist_Tables_column', 2, { widgetOptions: '{"syncNote":{"export":"e2","tables":[]}}', description: '' }]);
 });
 
 test('destination : colonnes manquantes ajoutées sous leur nom choisi, visibles, la clé cachée', () => {
@@ -54,8 +54,8 @@ test('clé de signature : à la place de l\'export, ou du journal pour un retour
   assert.equal(receivedKey(renamed, 'Journal_a', { export: 'e1', tables: [{ dest: 'Annuaire', refs: { table: 1 } }] }), K1);
   assert.equal(receivedKey(renamed, 'Journal_a', { export: 'e1', tables: [{ dest: 'Annuaire' }] }), '', 'sans numéro noté, l\'ancien nom ne mène nulle part');
   assert.deepEqual(storeKeyActions(schema, ['Annuaire', 'Villes', 'Pays', 'Absente'], 'e1', K2), [
-    ['UpdateRecord', '_grist_Tables_column', 1, { description: JSON.stringify({ signature: { e1: K2, Journal_r: 'pas une clé' } }) }],
-    ['UpdateRecord', '_grist_Tables_column', 2, { description: JSON.stringify({ signature: { e1: K2 } }) }],
+    ['UpdateRecord', '_grist_Tables_column', 1, { widgetOptions: JSON.stringify({ syncNote: { signature: { e1: K2, Journal_r: 'pas une clé' } } }), description: '' }],
+    ['UpdateRecord', '_grist_Tables_column', 2, { widgetOptions: JSON.stringify({ syncNote: { signature: { e1: K2 } } }), description: '' }],
   ]);
   assert.deepEqual(storeKeyActions(schema, ['Villes'], 'e1', K1), [], 'déjà notée');
   assert.deepEqual(storeKeyActions(schema, ['Villes'], 'e1', 'xyz'), [], 'clé invalide');

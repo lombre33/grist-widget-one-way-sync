@@ -1,7 +1,7 @@
 // CIBLE : ce que le schéma dit des exports reçus (journaux, destinations, clés de signature), en
 // fonctions pures sur le schéma lu (voir readSchema dans grist.js). Les écritures sont dans
 // target/journals.js.
-import { JOURNAL_PREFIX, KEY_COL, LIST_COL, SIG_KEY, columnNote, noteAction } from './common.js';
+import { JOURNAL_PREFIX, KEY_COL, LIST_COL, SIG_KEY, columnNote, isUserTable, noteAction } from './common.js';
 import { destColumns } from './journal.js';
 import { columnOptions, fillOptions, isChoice, ownsColumn, receivedChoices, replaceOptions, ruleStyle, ruleStyles, sentRules, withRuleStyles } from './options.js';
 import { parseRule, printRule } from './rules.js';
@@ -157,9 +157,10 @@ export function valueChoiceActions(schema, entry, columns, rows) {
   });
 }
 
-// Clé qui signe les envois d'un export reçu (voir trust.js) : dans la description de la colonne
-// id_sync de ses destinations ({ signature: { <place>: <clé> } }), pas dans la note du journal,
-// que la clé du formulaire peut lire. La place est l'export ; pour un journal de retour d'Échange,
+// Clé qui signe les envois d'un export reçu (voir trust.js) : dans la note (les options, voir columnNote)
+// de la colonne id_sync de ses destinations ({ signature: { <place>: <clé> } }), pas dans la note du
+// journal, que la clé du formulaire peut lire. Les options d'id_sync sont cachées aux lecteurs par une règle
+// d'accès (keyAclRules). La place est l'export ; pour un journal de retour d'Échange,
 // le journal lui-même : chaque participant signe avec sa propre clé, donnée dans sa réponse.
 export const keySlot = (journal, note) => (note.retour ? journal : note.export);
 const keyColumn = (schema, table) => (schema.columns(table) || []).find(c => c.colId === KEY_COL);
@@ -167,6 +168,9 @@ function keysOf(column) {
   const { signature } = columnNote(column) || {};
   return signature && typeof signature === 'object' ? signature : {};
 }
+// Tables d'ici dont la colonne id_sync porte une clé de signature : celles dont la colonne est cachée aux lecteurs.
+export const signedTables = schema => schema.tableIds.filter(isUserTable)
+  .filter(table => Object.keys(keysOf(keyColumn(schema, table))).length > 0).sort();
 // Nom actuel de la destination d'une table reçue : renommée ici, elle se retrouve par son numéro dans Grist (`refs`,
 // voir followRenames). Sans cela, renommer la seule table d'un export faisait perdre la clé (donc la réception).
 const destNow = (schema, tb) => {

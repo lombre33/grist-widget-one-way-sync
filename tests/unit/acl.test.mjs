@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  JOURNAL_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules,
+  JOURNAL_MEMO, KEY_MEMO, LOCK_MEMO, OWNER_MEMO, PUBLIC_MEMO, aclActions, currentRules, editorsEditStructure, hiddenTables, isPublicRule, isWidgetRule, journalAclRules, keyAclRules, lockAclRules, lockMirrors, lockedTables, ownerAclRules,
   publicAclRules, ruleText,
 } from '../../js/engine/logic/acl.js';
 
@@ -52,6 +52,21 @@ test('tables reçues en lecture seule : seuls les propriétaires écrivent, une 
   ]);
   assert.ok(rules.every(isWidgetRule));
   assert.deepEqual(lockAclRules([]), []);
+});
+
+test('clé de signature : id_sync des tables reçues cachée aux lecteurs, une règle par table', () => {
+  const rules = keyAclRules(['Villes', 'Annuaire', 'Villes']);
+  assert.deepEqual(rules.map(r => [r.tableId, r.colIds, r.aclFormula, r.permissionsText, r.memo]), [
+    ['Annuaire', 'id_sync', 'user.Access == VIEWER', '-R', KEY_MEMO], ['Villes', 'id_sync', 'user.Access == VIEWER', '-R', KEY_MEMO],
+  ]);
+  assert.ok(rules.every(isWidgetRule) && !rules.some(isPublicRule), 'une règle du widget, pas du lien public');
+  assert.deepEqual(keyAclRules([]), []);
+  // Posées une fois : le même ensemble ne change rien ; une table de plus ajoute sa règle sans toucher aux autres.
+  const resources = [{ id: 1, tableId: 'Annuaire', colIds: 'id_sync' }];
+  const placed = [{ id: 1, resource: 1, rulePos: -1, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: KEY_MEMO }];
+  assert.deepEqual(aclActions(resources, placed, keyAclRules(['Annuaire'])), []);
+  assert.notDeepEqual(aclActions(resources, placed, keyAclRules(['Annuaire', 'Villes'])), []);
+  assert.notDeepEqual(aclActions(resources, placed, []), [], 'plus de clé : la règle part');
 });
 
 test('lecture seule : la règle en place ne part pas avec la note, seul un propriétaire la lève', () => {

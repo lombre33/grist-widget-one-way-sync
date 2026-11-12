@@ -37,12 +37,23 @@ test('noms : identifiants Grist, conflits sans tenir compte des majuscules', () 
   assert.equal(journalId('', []), 'Journal_Export');
 });
 
-test('note dans la description d\'une colonne : objet lu, sinon null ; écrite ou effacée', () => {
-  assert.deepEqual(columnNote({ id: 3, description: '{"a":1}' }), { a: 1 });
+test('note d\'une colonne : dans ses options, sinon dans sa description d\'avant la 3.0.0 ; écrite ou effacée', () => {
+  assert.deepEqual(columnNote({ id: 3, widgetOptions: '{"syncNote":{"a":1}}' }), { a: 1 });
+  assert.deepEqual(columnNote({ id: 3, description: '{"a":1}' }), { a: 1 }, 'note d\'avant');
+  assert.deepEqual(columnNote({ id: 3, widgetOptions: '{"syncNote":{"a":2}}', description: '{"a":1}' }), { a: 2 }, 'les options font foi');
   for (const description of ['', 'texte libre', '[1]', '"x"', 'null']) assert.equal(columnNote({ id: 3, description }), null, description);
+  for (const widgetOptions of ['', 'pas du json', '[1]', '{"syncNote":[1]}', '{"syncNote":"x"}', '{"alignment":"left"}']) assert.equal(columnNote({ id: 3, widgetOptions }), null, widgetOptions);
   assert.equal(columnNote(undefined), null, 'colonne absente');
-  assert.deepEqual(noteAction({ id: 3 }, { a: 1 }), ['UpdateRecord', '_grist_Tables_column', 3, { description: '{"a":1}' }]);
-  assert.deepEqual(noteAction({ id: 3 }, null), ['UpdateRecord', '_grist_Tables_column', 3, { description: '' }]);
+  // Écriture : dans les options, qui gardent leurs autres clés ; la description d\'une note d\'avant est vidée, un texte libre reste.
+  assert.deepEqual(noteAction({ id: 3 }, { a: 1 }), ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '{"syncNote":{"a":1}}' }]);
+  assert.deepEqual(noteAction({ id: 3, widgetOptions: '{"alignment":"left","syncNote":{"a":1}}' }, { a: 2 }),
+    ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '{"alignment":"left","syncNote":{"a":2}}' }]);
+  assert.deepEqual(noteAction({ id: 3, description: '{"a":1}' }, { a: 2 }), ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '{"syncNote":{"a":2}}', description: '' }]);
+  assert.deepEqual(noteAction({ id: 3, description: 'texte libre' }, { a: 2 }), ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '{"syncNote":{"a":2}}' }]);
+  assert.deepEqual(noteAction({ id: 3, widgetOptions: '{"syncNote":{"a":1}}' }, null), ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '' }]);
+  assert.deepEqual(noteAction({ id: 3, widgetOptions: '{"alignment":"left","syncNote":{"a":1}}', description: '{"b":1}' }, null),
+    ['UpdateRecord', '_grist_Tables_column', 3, { widgetOptions: '{"alignment":"left"}', description: '' }]);
+  assert.equal(columnNote({ id: 3, widgetOptions: noteAction({ id: 3 }, { x: [1, 2] })[3].widgetOptions }).x[1], 2, 'ce qu\'on écrit se relit');
 });
 
 test('toRows : colonnes manquantes ou absentes', () => {

@@ -17,6 +17,7 @@ import { foreignSync, ownsSync, strayColumns } from '../logic/strays.js';
 import { addEvent, docNameOf, observeRows, setDocName } from '../logic/notes.js';
 import { apply, docIdentity, fetchRows, listWebhooks, readSchema, webhookConditions, withLock } from '../port.js';
 import { dropPages, isOnPage, removeTechnicalTables } from '../pages.js';
+import { moveNotes } from '../note-move.js';
 
 const SORT_COL = 'manualSort'; // colonne d'ordre que Grist donne à toute table (voir ensureSyncTable)
 
@@ -132,7 +133,8 @@ export async function ensureSyncTable(schema = null, rows = null) {
   if (watch.type !== 'Any') await apply([['ModifyColumn', SYNC_TABLE, TRACK_COL, { type: 'Any' }]]);
   if (depsChanged) await apply([['UpdateRecord', '_grist_Tables_column', watch.id, { recalcWhen: 0, recalcDeps: deps }]]);
   const formulasChanged = await refreshFormulas(schema, rows || await syncRows(schema));
-  return missing.length > 0 || sorted || depsChanged || formulasChanged;
+  const moved = await moveNotes(schema);
+  return missing.length > 0 || sorted || depsChanged || formulasChanged || moved;
 }
 
 // Retire de Synchro des colonnes qui ne sont pas au widget (voir strayColumns) ; `ids` : leurs

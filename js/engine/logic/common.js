@@ -141,14 +141,40 @@ export function parseJson(text, fallback = null) {
   try { return JSON.parse(text); } catch (e) { return fallback; }
 }
 
-// Notes du widget : un objet JSON dans la description d'une colonne (métadonnées, que le webhook
-// n'envoie pas). `columnNote` le rend (null si la colonne manque, ou si la note est vide ou
-// illisible) ; `noteAction` est l'action qui l'écrit (null l'efface).
-export function columnNote(column) {
+// Notes du widget : un objet JSON porté par une colonne (métadonnées, que le webhook n'envoie pas).
+// Il est dans les **options** de la colonne (`widgetOptions`, clé `NOTE_KEY`), pas dans sa
+// description : pour un lecteur qui n'a pas le droit de lire la colonne, Grist vide ses options
+// (`CensorshipInfo`, vérifié sur Grist 1.7.22) mais laisse sa description, que `_grist_Tables_column`
+// rendait en clair au lien public. Depuis le moteur 3.0.0. Une note d'avant (dans la description)
+// est encore lue tant qu'elle n'a pas été déplacée (voir legacyNoteActions, logic/note-store.js).
+// `columnNote` rend la note (null si la colonne manque, ou si la note est vide ou illisible) ;
+// `noteAction` est l'action qui l'écrit (null l'efface) : elle garde les autres clés des options et
+// vide la description si c'était une note d'avant.
+export const NOTE_KEY = 'syncNote';
+const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const optionsOf = column => {
+  const options = parseJson((column && column.widgetOptions) || 'null');
+  return isObject(options) ? options : {};
+};
+const legacyNoteOf = (column) => {
   const note = parseJson((column && column.description) || 'null');
-  return note && typeof note === 'object' && !Array.isArray(note) ? note : null;
+  return isObject(note) ? note : null;
+};
+export function columnNote(column) {
+  const note = optionsOf(column)[NOTE_KEY];
+  return isObject(note) ? note : legacyNoteOf(column);
 }
-export const noteAction = (column, note) => ['UpdateRecord', '_grist_Tables_column', column.id, { description: note == null ? '' : JSON.stringify(note) }];
+// Note d'avant la 3.0.0 d'une colonne (dans sa description), ou null.
+export const legacyNote = legacyNoteOf;
+export const hasNoteOption = column => isObject(optionsOf(column)[NOTE_KEY]);
+export function noteAction(column, note) {
+  const options = { ...optionsOf(column) };
+  if (note == null) delete options[NOTE_KEY];
+  else options[NOTE_KEY] = note;
+  const fields = { widgetOptions: Object.keys(options).length ? JSON.stringify(options) : '' };
+  if (legacyNoteOf(column)) fields.description = '';
+  return ['UpdateRecord', '_grist_Tables_column', column.id, fields];
+}
 
 // Horloge et attente, pour les modules qui lisent ou écrivent (la logique pure reçoit l'heure en
 // paramètre). Heure en secondes, comme Grist.

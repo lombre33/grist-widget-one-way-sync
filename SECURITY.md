@@ -147,14 +147,15 @@ forgées. Le reste passe par l'API des widgets (`grist.docApi`), avec les droits
   son propriétaire. Le widget pose d'abord des règles d'accès, de mémo « Synchro : lecture limitée
   aux exports publics », placées avant les autres, pour `user.Access == VIEWER` : lecture refusée
   sur tout le document sauf, dans `Synchro`, les lignes `complet` et `empreinte` des exports
-  publics, et sans la colonne `Synchro_Export`, dont la description porte la note de la SOURCE
+  publics, et sans la colonne `Synchro_Export`, dont les options portent la note de la SOURCE
   (sinon lisible par tous, vérifié). Conséquences : tout lecteur du document (pas seulement le lien
   public) ne voit plus que ces lignes, et les données des exports publics sont publiques. Les noms
   des tables des exports restent lisibles dans les formules de `Synchro`. Vérifié : sans
   identifiant, les tables d'origine répondent 403 et `Synchro` ne montre que les lignes de l'export
-  public. La note, elle, n'est cachée que de `GET /tables/Synchro/columns` : **elle reste lisible
-  par les tables de métadonnées de Grist** (vérifié le 12 novembre, voir « Ce que voit un lecteur
-  ou le lien public », dans « Qui peut quoi »). L'assistant liste en rouge les colonnes rendues
+  public. La note est dans les **options** de la colonne, que Grist vide pour qui ne la lit pas, y
+  compris dans ses tables de métadonnées (0.18, moteur 3.0.0 ; avant, dans la description, que
+  Grist laissait lire : voir « Ce que voit un lecteur ou le lien public », dans « Qui peut
+  quoi »). L'assistant liste en rouge les colonnes rendues
   publiques, refuse une table dont une règle d'accès (d'autrui) cache des lignes ou des colonnes
   (les formules de `Synchro` liraient sans elle) ; une règle sur toutes les tables compte, comme
   celle d'une table dont une colonne Référence de l'export affiche le texte. Ce contrôle est refait
@@ -267,12 +268,13 @@ onglets du même navigateur (`ONLY_TABS=1`).
 ## La clé du formulaire de réception
 
 - **Une clé par réception** : Grist donne une clé par page partagée, et cette clé lit aussi les
-  colonnes des tables de tous les formulaires de la page, descriptions comprises (vérifié). Chaque
+  colonnes des tables de tous les formulaires de la page, descriptions et options comprises (vérifié). Chaque
   journal a donc son formulaire sur sa propre page, à la racine de la liste des pages. Les formulaires
   publiés par une version d'avant la 0.5 sur une même page sont signalés (« Lien commun à
   d'autres formulaires ») avec un bouton qui les sépare.
 - **Ce qu'elle permet** (vérifié) : ajouter des lignes au journal de sa réception ; lire les
-  colonnes de ce journal et leurs descriptions (donc la note de la réception, dont le secret), et
+  colonnes de ce journal, leurs descriptions et leurs options (donc la note de la réception, dont
+  le secret : vérifié sur la 0.18, où la note est dans les options), et
   le nom et l'identifiant du document. Elle ne lit aucune ligne, ne modifie ni ne supprime rien,
   et n'atteint pas le journal d'une autre page (403 en écriture, 404 en lecture).
 - **Qui la connaît** : la personne qui l'a copiée, les propriétaires de la SOURCE (réglages du
@@ -282,8 +284,9 @@ onglets du même navigateur (`ONLY_TABS=1`).
 - **Signatures** : chaque destinataire a sa clé de signature (tirée des clés publiques des deux
   codes, voir plus haut). Côté SOURCE, elle est dans la ligne `signature` de `Synchro` (réservée
   aux propriétaires), rangée sous l'identifiant du webhook ; la CIBLE la garde dans la
-  description de la colonne `id_sync` de ses destinations, **pas** dans la note du journal, que
-  la clé du formulaire lit. Les formules de `Synchro` signent chaque liste de clés et chaque lot
+  note (les options) de la colonne `id_sync` de ses destinations, **pas** dans la note du journal,
+  que la clé du formulaire lit ; une règle d'accès cache cette colonne aux lecteurs (mémo « clé de
+  signature cachée aux lecteurs »). Les formules de `Synchro` signent chaque liste de clés et chaque lot
   pour chaque destinataire de l'export (HMAC-SHA256 de l'empreinte de l'export, de la table, du
   type, des colonnes et du contenu, rangé sous l'empreinte de sa clé) ; le widget signe la ligne
   « fin » pour le seul destinataire concerné. La CIBLE efface sans effet, et compte parmi les
@@ -386,29 +389,42 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   `_grist_Shares`) et la liste des webhooks sont réservés aux propriétaires : **la clé d'écriture
   d'un formulaire n'est lisible nulle part** (elle est dans la base de Grist et dans l'adresse du
   webhook). Le widget montre au lecteur l'accueil grisé, sans rien lire.
-- **Lisible quand même** : Grist vide, dans la table de métadonnées `_grist_Tables_column`, le nom,
-  le titre, la formule, le type et les options des colonnes qu'un lecteur ne peut pas lire, **mais
-  pas leur description** (`GET /api/docs/<id>/tables/_grist_Tables_column/records`, sans
-  identifiant). Or le widget range ses notes dans ces descriptions. Un visiteur lit donc :
-  - SOURCE (note de `Synchro_Export`) : noms et identifiants des exports, nombre de lignes de
-    chaque table, historique des envois avec, pour chaque destinataire, le **courriel du
-    propriétaire** et le document et l'équipe du destinataire, et, pour une invitation en attente
-    (7 jours au plus), **sa clé privée** et l'empreinte de son secret ;
-  - CIBLE (note du journal) : identifiant et **secret** de l'invitation, courriel et document de la
-    SOURCE, clés publiques, noms des tables et colonnes, comptes annoncés ; et, dans la description
-    de la colonne `id_sync` de chaque table reçue (colonne que le lecteur voit, sans règle), la
-    **clé de signature** de la réception ;
-  - le nom, le mémo (courriel du propriétaire, document du destinataire) et la condition (identifiant
-    de l'export) des webhooks, par `_grist_Triggers`, sans leur adresse.
-- **Ce que cela permet** : rien d'écrit. Pour forger un lot il faut la clé du formulaire, que le
-  lien public ne donne pas ; la clé de signature lue rend seulement inutile, pour un visiteur qui
-  aurait aussi cette clé par ailleurs, la défense « clé de formulaire seule » (voir « La clé du
-  formulaire de réception »). Ce qui fuit sûrement, c'est de l'information : courriel d'un
-  propriétaire, qui échange avec qui, combien de lignes. Tant que le widget range ses notes dans des
-  descriptions, un document SOURCE ou CIBLE ne devrait pas être public si ces informations ne
-  doivent pas l'être. Cause : Grist (1.7.22, `CensorshipInfo`), à signaler à grist-core ; la même
-  lecture sur DINUM est à faire (`…/api/docs/<id>/tables/_grist_Tables_column/records` dans une
-  fenêtre privée).
+- **Notes du widget, corrigé en 0.18 (moteur 3.0.0)** : Grist vide, dans la table de métadonnées
+  `_grist_Tables_column` (`GET /api/docs/<id>/tables/_grist_Tables_column/records`, sans identifiant),
+  le nom, le titre, la formule, le type et les options des colonnes qu'un lecteur ne peut pas lire,
+  **mais pas leur description**. Jusqu'à la 0.17 le widget rangeait ses notes dans ces
+  descriptions : un visiteur du lien public lisait, côté SOURCE, les exports, le nombre de lignes,
+  l'historique des envois (courriel, document et équipe de chaque destinataire) et la **clé privée**
+  d'une invitation en attente ; côté CIBLE, le **secret** de l'invitation, le courriel et le
+  document de la SOURCE, les clés publiques, les tables et colonnes, et, dans la description de
+  `id_sync` (colonne que le lecteur voit), la **clé de signature** de chaque réception. Depuis la
+  0.18 les notes sont dans les **options** des colonnes (clé `syncNote`, `columnNote` de
+  `logic/common.js`), que Grist vide quand la colonne est cachée (`Synchro_Export` pour tout
+  lecteur, `Synchro_Ids` d'un journal réservé), et la colonne `id_sync` des tables qui portent une
+  clé de signature est cachée aux lecteurs par une règle d'accès (`keyAclRules`, posée par un
+  propriétaire à l'ouverture d'un onglet). Vérifié : la sonde `tests/e2e/tools/probe-public.mjs`
+  (`STRICT=1`) ne trouve plus de clé de signature, de clé privée ni de secret, et le parcours de
+  bout en bout lit les métadonnées en anonyme sur la SOURCE et sur la CIBLE.
+- **Toujours lisible** (non corrigé) : le nom, le **mémo** (courriel du destinataire · document ·
+  équipe/nom du document) et la **condition** (identifiant de l'export) des webhooks, par
+  `_grist_Triggers`, sans leur adresse ; le widget relit ce mémo pour montrer qui reçoit
+  (`hookMemo`), le déplacer demanderait de refaire les webhooks. Aussi : le journal d'une réception
+  dont la case « réservé aux éditeurs » est décochée se lit en entier par tout lecteur, note
+  comprise (c'est ce que la case dit) ; les éditeurs et les propriétaires lisent tout, comme avant.
+- **Mise à niveau** : un document d'avant la 0.18 est lu tel quel (la note de la description est
+  encore lue), puis déplacé dans les options à la première ouverture d'un propriétaire (SOURCE) ou
+  d'une personne qui peut écrire (CIBLE, premier passage de recopie), sans rien perdre : la note
+  des options fait foi, la description d'avant est vidée. **Jusqu'à ce déplacement, et sans règle
+  posée, rien n'est caché**. Un onglet resté ouvert sur une version d'avant la 0.18 ne lit pas les
+  notes déplacées (il les croit vides et pourrait les réécrire) : recharger les onglets ouverts.
+- **Ce que cela permet** : rien d'écrit, même avant la correction. Pour forger un lot il faut la
+  clé du formulaire, que le lien public ne donne pas ; la clé de signature lue rendait seulement
+  inutile, pour un visiteur qui aurait aussi cette clé par ailleurs, la défense « clé de
+  formulaire seule » (voir « La clé du formulaire de réception »). Ce qui fuyait, c'était de
+  l'information : courriel d'un propriétaire, qui échange avec qui, combien de lignes. Cause :
+  Grist (1.7.22, `CensorshipInfo`), à signaler à grist-core. La même lecture sur DINUM reste à
+  faire (`…/api/docs/<id>/tables/_grist_Tables_column/records` dans une fenêtre privée) : une
+  note déplacée y apparaît vide de sa description et sans `syncNote`.
 
 ## Ce que le widget écrit et garde
 
@@ -418,14 +434,14 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   table `Synchro` (dont une ligne `signature` par export, qui garde la clé de chaque
   destinataire), une note (exports, invitations en attente avec l'empreinte de leur secret, leur
   date et leur paire de clés, pauses, empreintes abrégées des fichiers déjà envoyés) dans la
-  description de `Synchro_Export`, et ses règles d'accès, reconnues à leur mémo. En Échange, la
-  clé de retour de chaque participant est dans la description de la colonne `id_sync` des tables
-  envoyées, une par journal de retour.
-- CIBLE : les tables de destination (plus `id_sync`, masquée, dont la description garde la clé de
-  signature), les pièces jointes reçues, un journal par export reçu avec sa note (destinations,
+  les options de `Synchro_Export` (0.18 ; avant, sa description), et ses règles d'accès,
+  reconnues à leur mémo. En Échange, la clé de retour de chaque participant est dans les options
+  de la colonne `id_sync` des tables qui reçoivent le retour, une par journal de retour.
+- CIBLE : les tables de destination (plus `id_sync`, masquée de la page et cachée aux lecteurs,
+  dont les options gardent la clé de signature), les pièces jointes reçues, un journal par export reçu avec sa note (destinations,
   colonnes, tables refusées, fichiers attendus, secret, clés
-  publiques des deux côtés) dans la
-  description de `Synchro_Ids`, le formulaire de réception sur sa page, et la règle des journaux.
+  publiques des deux côtés) dans les
+  options de `Synchro_Ids`, le formulaire de réception sur sa page, et la règle des journaux.
 - **Actions de structure** (création, renommage, suppression de tables ou de colonnes ; toutes passent par
   `grist.docApi.applyUserActions`, donc avec les droits de la personne, et s'annulent par Ctrl+Z ou l'historique
   du document) :
@@ -442,8 +458,8 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
     seulement si cette réception vient de la créer, qu'elle est encore vide et que la personne revient en arrière
     dans l'assistant ; dans `Synchro`, la colonne `manualSort` et, après une fenêtre qui les liste (case « J'ai
     sauvegardé » s'il y a des valeurs), les colonnes en trop.
-  - *métadonnées* (tables `_grist_*`) : la description des colonnes qui portent ses notes, les options des colonnes
-    qu'il a créées, le nom et la place de la page d'un formulaire, la description du partage de ce formulaire, et ses
+  - *métadonnées* (tables `_grist_*`) : les options (et, pour une note d'avant la 0.18, la description) des colonnes
+    qui portent ses notes, les options des colonnes qu'il a créées, le nom et la place de la page d'un formulaire, la description du partage de ce formulaire, et ses
     règles d'accès, reconnues à leur mémo.
   Hors de ses propres tables et colonnes, le widget ne renomme et ne supprime rien de lui-même : les deux seuls cas
   qui touchent ce qu'une personne a fait (une table `Synchro` créée à la main, des colonnes ajoutées à la table
@@ -515,8 +531,8 @@ Pour un usage en production :
   pendant ce temps sont rejetés ; recharger la page, puis « Tout renvoyer » côté SOURCE.
 - La clé privée d'une invitation en attente est gardée dans la note de `Synchro` jusqu'à
   l'approbation : qui peut lire cette note (propriétaires, éditeurs qui ont le droit de
-  structure, **et tout lecteur du document, lien public compris** : voir « Ce que voit un lecteur
-  ou le lien public ») et voit la réponse pourrait tirer la clé de ce destinataire. Chaque destinataire voit
+  structure ; plus un lecteur du document depuis la 0.18, voir « Ce que voit un lecteur ou le lien
+  public ») et voit la réponse pourrait tirer la clé de ce destinataire. Chaque destinataire voit
   combien de signatures porte un lot, donc combien de destinataires a l'export.
 - Chaque passage de la CIBLE relit son journal en entier, morceaux de fichiers en attente compris
   (50 Mo au plus) ; une seconde fois seulement si la recopie y a écrit.
@@ -540,7 +556,7 @@ Pour un usage en production :
   règle dit (`lockMirrors`). Une règle dont la table n'est plus reçue est retirée. Reste qu'un
   éditeur écrit dans le journal de réception et lit la clé de signature des destinations : il peut y
   forger une version que la recopie d'un propriétaire écrira. Grist ne cache pas aux éditeurs les
-  descriptions de colonnes ni ne leur retire le droit de structure par défaut : aucune règle du
+  métadonnées de colonnes ni ne leur retire le droit de structure par défaut : aucune règle du
   widget n'arrête un éditeur malveillant. Les options d'une réception ne sont proposées ni en
   Échange ni en lien public.
 - **Règles de mise en forme conditionnelle (0.16)** : une règle est une formule Python évaluée par Grist, donc
