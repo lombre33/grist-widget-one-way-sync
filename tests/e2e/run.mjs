@@ -2013,6 +2013,26 @@ try {
   assert.ok(!(await widget().getByText('Arrivées suspectes').count()), 'la fin n\'est pas une arrivée suspecte');
   step('SOURCE : une seule personne révoquée, l\'autre reçoit toujours ; la carte du révoqué le dit');
 
+  // --- Lien public sur la CIBLE : sa note de journal (journal réservé aux éditeurs) et la clé de signature de la table reçue (colonne
+  // id_sync, cachée aux lecteurs par une règle) ne se lisent pas dans les métadonnées du document, en anonyme. Les notes sont dans les
+  // options des colonnes, que Grist vide pour qui ne les lit pas ; leur description, elle, se lirait.
+  await openWidget(target.url);
+  await waitFor(async () => (await records(target.doc, '_grist_ACLResources')).some(r => r.tableId === 'Contacts' && r.colIds === 'id_sync'), 'règle qui cache id_sync de Contacts aux lecteurs', 60000);
+  assert.ok((await records(target.doc, '_grist_Tables_column')).some(c => c.colId === 'id_sync' && syncNoteOf(c).signature), 'une clé de signature existe côté CIBLE (contrôle non vide)');
+  assert.ok((await records(target.doc, '_grist_Tables_column')).some(c => c.colId === 'Synchro_Ids' && syncNoteOf(c).secret), 'une note de journal existe côté CIBLE (contrôle non vide)');
+  const metadataOf = async (doc) => {
+    const res = await fetch(`${TEAM}/api/docs/${doc}/tables/_grist_Tables_column/records`);
+    return { status: res.status, columns: res.status === 200 ? (await res.json()).records.map(r => r.fields) : [] };
+  };
+  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
+  const onTarget = await metadataOf(target.doc);
+  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': null } } });
+  assert.equal(onTarget.status, 200, 'les métadonnées de la CIBLE sont lisibles en anonyme (sinon ce contrôle ne prouve rien)');
+  assert.ok(onTarget.columns.length > 10, 'des colonnes sont rendues');
+  assert.deepEqual(onTarget.columns.filter(c => /syncNote|"signature"|"secret"|"prive"/.test(`${c.description || ''}${c.widgetOptions || ''}`)), [],
+    'ni la note du journal, ni la clé de signature ne sont lisibles dans les métadonnées de la CIBLE, en anonyme');
+  step('Lien public sur la CIBLE : ni la note du journal, ni la clé de signature ne se lisent dans les métadonnées du document');
+
   // --- Modifier l'export : une table et une colonne de plus ; la CIBLE range la table (fenêtre).
   // D'abord un rechargement du document SOURCE : Grist recalcule RecalculLe de toutes les lignes, et
   // la petite table Contacts repart à l'heure du rechargement. Les renvois qui suivent (colonne
@@ -2537,24 +2557,20 @@ try {
   const anonColumns = (await (await fetch(`${TEAM}/api/docs/${source.doc}/tables/Synchro/columns`)).json()).columns;
   assert.ok(anonColumns.some(c => c.id === 'Synchro_Lot') && !anonColumns.some(c => c.id === 'Synchro_Export'), 'colonne de la note cachée au lien public');
   assert.ok(!anonColumns.some(c => /invitations|exports/.test(c.fields.description || '')), 'note de la SOURCE cachée au lien public');
-  // Les métadonnées du document (`_grist_Tables_column`) se lisent aussi en anonyme : Grist y vide les options d'une colonne qu'un
-  // lecteur ne lit pas, mais pas sa description. Les notes du widget sont dans les options (voir columnNote) : ni le courriel du
-  // propriétaire, ni la clé privée d'une invitation, ni le secret d'un journal, ni la clé de signature ne s'y lisent.
+  // Les métadonnées du document (`_grist_Tables_column`) se lisent en anonyme quand aucune règle générale ne les refuse : Grist y vide
+  // les options d'une colonne qu'un lecteur ne lit pas, mais pas sa description. Les notes du widget sont dans les options (voir
+  // columnNote) : ni le courriel d'un destinataire, ni la clé privée d'une invitation, ni le secret d'un journal, ni la clé de
+  // signature ne s'y lisent. Une SOURCE qui a un export public refuse même ces tables (la règle `*` → -R, vu : 403) ; la sonde
+  // tests/e2e/tools/probe-public.mjs couvre la SOURCE sans export public.
   const metadata = async (doc) => {
     const res = await fetch(`${TEAM}/api/docs/${doc}/tables/_grist_Tables_column/records`);
-    assert.equal(res.status, 200, 'les métadonnées sont lisibles en anonyme (sinon ce contrôle ne prouve rien)');
-    return (await res.json()).records.map(r => r.fields);
+    return { status: res.status, columns: res.status === 200 ? (await res.json()).records.map(r => r.fields) : [] };
   };
   const noteLeaks = columns => columns.filter(c => /syncNote|"invitations"|"exports"|"signature"|"prive"|"secret"/.test(`${c.description || ''}${c.widgetOptions || ''}`));
   assert.ok((await records(source.doc, '_grist_Tables_column')).some(c => c.colId === 'Synchro_Export' && syncNoteOf(c).exports), 'la note de la SOURCE existe (contrôle non vide)');
-  assert.deepEqual(noteLeaks(await metadata(source.doc)), [], 'la note de la SOURCE n\'est pas lisible dans les métadonnées, en anonyme');
-  // Même contrôle côté CIBLE : journal réservé et clé de signature de la table reçue (colonne id_sync cachée par une règle).
-  assert.ok((await records(target.doc, '_grist_Tables_column')).some(c => c.colId === 'id_sync' && syncNoteOf(c).signature), 'une clé de signature existe côté CIBLE (contrôle non vide)');
-  await openWidget(target.url);
-  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'viewers' } } });
-  assert.deepEqual(noteLeaks(await metadata(target.doc)), [], 'ni la note du journal, ni la clé de signature, ne sont lisibles dans les métadonnées de la CIBLE, en anonyme');
-  await api('PATCH', `/docs/${target.doc}/access`, { delta: { users: { 'everyone@getgrist.com': null } } });
-  step('Lien public : les notes du widget (SOURCE, journal, clé de signature) ne se lisent plus dans les métadonnées du document');
+  const onSource = await metadata(source.doc);
+  assert.ok(onSource.status === 403 || noteLeaks(onSource.columns).length === 0, 'la note de la SOURCE n\'est pas lisible dans les métadonnées, en anonyme');
+  step('Lien public sur une SOURCE qui a un export public : les métadonnées du document ne montrent pas sa note');
   await openWidget(source.url);
   await widget().getByText('Public', { exact: true }).waitFor();
   // Une règle d'accès posée après coup sur une table de l'export public est signalée sur sa carte.
