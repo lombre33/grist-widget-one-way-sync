@@ -40,7 +40,7 @@ comme avant.
 ## 0. Installer le widget (dans chaque document)
 
 **Ajouter**, **Ajouter une page**, vue **Personnalisée** (une table qui existe déjà, par exemple Table1, jamais une table qu'on crée et qu'on nomme Synchro), **Ajouter une
-page** ; choisir syncPlus dans la galerie de l'instance s'il y est, sinon **URL
+page** ; choisir Sync+ dans la galerie de l'instance s'il y est, sinon **URL
 personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
 ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
 **Ajouter un widget** (Grist peut demander de confirmer).
@@ -66,7 +66,7 @@ tables de destination et, pour un propriétaire, gère les webhooks et les règl
 Un accès en lecture ne le permet pas (voir [Accès au document](../README.md#accès-au-document)). Il
 ne parle qu'à l'instance Grist, jamais à un autre serveur.
 
-Renommer la page, par exemple « syncPlus ». Ne pas créer soi-même de table nommée Synchro :
+Renommer la page, par exemple « Sync+ ». Ne pas créer soi-même de table nommée Synchro :
 c'est le nom de la table technique que le widget crée seul. Les tables techniques n'ont pas de
 page : elles sont dans « Données source ».
 

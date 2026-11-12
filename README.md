@@ -11,16 +11,16 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.22.0 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.22.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
 ## À quoi ça sert
 
 Un service tient une table de référence dans Grist (contacts, établissements, nomenclature) et
-d'autres équipes en ont besoin dans leurs propres documents. syncPlus leur en envoie une copie
-qu'elles peuvent compléter, et la met à jour à chaque ajout, modification ou suppression dans
-l'original.
+d'autres équipes en ont besoin dans leurs propres documents. syncPlus (« Sync+ » à l'écran) leur
+en envoie une copie qu'elles peuvent compléter, et la met à jour à chaque ajout, modification ou
+suppression dans l'original.
 
 - **Rien à héberger** : c'est Grist qui transporte les changements, même quand personne n'a le
   document ouvert.
@@ -178,7 +178,7 @@ sa propre adresse », écrire à son administrateur pour faire ajouter l'adresse
 liste des domaines autorisés (réglage `ALLOWED_WEBHOOK_DOMAINS` de Grist).
 
 1. Dans chaque document : **Ajouter**, **Ajouter une page**, vue **Personnalisée**. Choisir
-   syncPlus dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
+   Sync+ dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
    l'adresse officielle, `https://grist-factory.github.io/grist-widget-syncPlus/`, jamais une
    adresse reçue par courriel. Puis **Ajouter un widget**.
 2. Dans le panneau de droite de Grist, section **Niveau d'accès**, cliquer **Accepter** (ou choisir

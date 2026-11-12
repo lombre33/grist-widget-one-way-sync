@@ -982,7 +982,7 @@ try {
       await plainInvitation();
       await rulesSettled(doc.doc);
       await openWidget(doc.url);
-      await widget().getByRole('heading', { name: 'syncPlus : les nouveautés' }).waitFor({ timeout: 30000 });
+      await widget().getByRole('heading', { name: 'Sync+ : les nouveautés' }).waitFor({ timeout: 30000 });
       await widget().getByRole('button', { name: 'Pièces jointes', exact: true }).click();
       await widget().getByText(/une seule fois par destinataire/).waitFor();
       await shot('35-nouveautes', 'modal');
