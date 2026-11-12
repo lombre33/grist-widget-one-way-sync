@@ -176,6 +176,9 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     await view.dialog().locator('textarea.code').first().fill(code);
     await view.dialogButton('Continuer').click();
     await view.dialog().getByText(`« ${exportName} » : table ${table}.`).waitFor({ timeout: 60000 });
+    // Depuis la 0.22 la réception demande l'accord pour les colonnes ajoutées (décochée d'emblée) : les essais les veulent appliquées seules.
+    await view.dialog().getByText('Options avancées').click();
+    await view.dialog().getByRole('checkbox', { name: 'Appliquer automatiquement les colonnes que la SOURCE ajoute à l’export' }).check();
     await view.dialogButton('Continuer').click();
     await view.dialog().getByText('Nouvelle table : le widget n’y sera pas').waitFor({ timeout: 30000 });
     await view.dialogButton('Continuer avec une nouvelle table').click();

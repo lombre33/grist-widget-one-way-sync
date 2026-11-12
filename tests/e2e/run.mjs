@@ -2322,6 +2322,9 @@ try {
   await dialog().getByText('« Annuaire » : table Contacts.').waitFor();
   await dialog().getByText(`Données de ${env.email}`).waitFor();
   await shot('08-cible-destinations', 'modal');
+  // Depuis la 0.22 la réception demande l'accord pour les colonnes ajoutées (case décochée d'emblée) : ce parcours les veut appliquées seules.
+  await dialog().getByText('Options avancées').click();
+  await dialog().getByRole('checkbox', { name: AUTO_BOX }).check();
   const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
   await widgetFrame.evaluate(() => { window.sameFrame = true; });
   await dialogButton('Continuer').click();
