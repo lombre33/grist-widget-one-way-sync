@@ -367,7 +367,25 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.19.0 (12 novembre 2026)
+## État : V0.19.1 (12 novembre 2026)
+
+V0.19.1 (Antoine, 12 novembre, après la carte sur la conservation du journal, réponse « Comme aujourd'hui » : « peut-être prévoir côté cible et source un bouton pour
+effacer manuellement l'historique et clean les journaux ? »). Moteur **4.1.0** (mineure, dite dans `GFS-ETAT.md`). Aucune purge automatique, tout est sur demande.
+- **CIBLE** : bouton « Effacer l'historique » sur la carte de chaque réception (propriétaires, hors « attente du lien »), confirmation qui dit que ça ne se défait pas
+  et que l'historique de Grist (Ctrl+Z, « Historique du document ») n'est pas touché. `cleanJournal` (`js/engine/target/clean.js`, `logic/clean.js`) vide `Sync_Avant`
+  (états ajout, modif, suppression : l'avant et le numéro des lignes supprimées) et `Synchro_Donnees` de la dernière version des clés `suppression` ou `partie`,
+  **rescelle** ces lignes (le sceau couvre les données : sans cela le passage suivant les efface comme forgées, contrôlé par un test qui retire le rescellage), note
+  `histo` dans la note du journal (l'historique de la carte ne montre que ce qui arrive après `max(dernière visite, histo)`, `tableResult`). **Rien n'est vidé en Échange**
+  (valeurs de comparaison) ni pour un `refus` (avant utile à la correction). Message : « Historique effacé (journal nettoyé : N valeurs d'avant, M lignes supprimées). »
+  Les lignes d'ici, les listes, les clés, les heures et les états ne changent pas ; une version en retard ne ressuscite pas une ligne supprimée (testé).
+- **SOURCE** : bouton « Effacer l'historique » dans le bloc « Historique des envois » de chaque export (`clearHistory` de `js/source/actions.js`, `clearExportHistory` de
+  `js/engine/source/history.js`) : `clearEvents` (`logic/notes.js`) vide la note ; des **repères** `cleared` (ajouts et retraits, sans nom ni nombre) restent parce que
+  `vanishedRecipients` (webhook supprimé à la main) et `unkeyedRecipients` (clé de signature perdue, via `hasJoin`) lisent l'historique (`eventsOf(note, id, { all: true })`,
+  `ledger` dans `loadState`). Les journaux de retour d'un Échange de cet export sont nettoyés aussi. Les avis de baisse de lignes (`shrink`) partent avec l'historique.
+- Testé : unit 415 (`engine-clean.test.mjs` : plan, repères, nettoyage avec recopie ensuite, SOURCE), e2e `ONLY_CLEAN=1` (`cleanSteps`, vrai Grist : annuler ne vide rien,
+  confirmer vide l'avant et les valeurs, carte à zéro, recopie suivante sans arrivée suspecte, note SOURCE sans nom).
+
+## État précédent : V0.19.0 (12 novembre 2026)
 
 V0.19.0 (Antoine, 12 novembre : « Peux-tu vérifier si d'autres edge cases comme ça sont possibles ? vérifier toutes les approches possibles qui seraient
 exploitées pour tenter d'accéder à la donnée en récupérant des infos mal protégées ? »). Moteur **4.0.0, majeure** (dite dans `GFS-ETAT.md`).

@@ -176,7 +176,7 @@ function flooded(journal, raw) {
 // fois notée, une clé introuvable (destination effacée, description vidée) arrête la recopie de ce
 // journal, au lieu de tout accepter. Sans clé jamais vue (réception d'avant la 0.8, lien public) :
 // rien n'est vérifié. Rend { key, seal, note }.
-async function sealing(schema, journal, note) {
+export async function sealing(schema, journal, note) {
   const key = note.mode === 'public' ? '' : receivedKey(schema, journal, note);
   if (!key) {
     if (note.sceau) throw failure('keyLost');
@@ -192,7 +192,7 @@ async function sealing(schema, journal, note) {
 }
 
 // Sceaux déjà vérifiés, par journal (voir checkSeals).
-const sealsSeen = new Map();
+export const sealsSeen = new Map();
 
 // Lignes du journal sans les lignes dépliées au sceau faux (`forged`, numéros) : ajoutées par la
 // clé du formulaire sans passer par le dépliage. Sans sceau (voir sealing) : toutes.
@@ -562,7 +562,7 @@ async function consolidate(schema, { journal, note: noteBefore }, owner) {
   if (unpacked.left) lastArrival = Date.now();
   const afterGroups = rowsByTable(expandRows(after));
   return {
-    rows: after.length, note, tables: tables.map(tb => tableResult(tb, afterGroups, state.lastVisit)),
+    rows: after.length, note, tables: tables.map(tb => tableResult(tb, afterGroups, Math.max(state.lastVisit || 0, note.histo || 0))),
     tally: tallyReport(journal, note, rowsByTable(after), unpacked.left > 0),
   };
 }

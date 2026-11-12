@@ -699,6 +699,68 @@ try {
     await shot('28-source-historique', 'card');
     step('Options d\'une réception : archive (ligne effacée à la SOURCE gardée, cochée, sans alerte), tables en lecture seule (règle posée puis retirée), archive décochée (la ligne archivée reste) ; historique des envois dans la SOURCE');
   }
+  // --- Effacer l'historique sur demande (CIBLE : l'avant des modifications et les valeurs des lignes supprimées du journal ; SOURCE :
+  // l'historique des envois). Rien ne se fait seul ; la recopie continue ensuite comme avant.
+  async function cleanSteps() {
+    const src = await fichesDoc('Effacer SOURCE');
+    const dst = await newDocWithWidget('Effacer CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.');
+    await approve(answer, { url: src.url });
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    const journalRows = async () => (await records(dst.doc, (await records(dst.doc, '_grist_Tables')).find(tb => tb.tableId.startsWith('Journal_')).tableId)).filter(r => r.id_sync);
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    // Une modification et une suppression : l'avant de la première et les valeurs de la seconde sont dans le journal.
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Ville: 'Marseille' }], ['RemoveRecord', 'Fiches', 3]]);
+    await waitFor(async () => (await fiches()).Anna?.Ville === 'Marseille' && !(await fiches()).Céline, 'modification et suppression reçues', 90000);
+    await waitFor(async () => (await journalRows()).some(r => r.Sync_Avant) && (await journalRows()).some(r => r.Sync_Etat === 'suppression' && r.Synchro_Donnees), 'avant et valeurs supprimées dans le journal', 60000);
+    await openWidgetTab(dst.url, 'Recevoir');
+    const history = widget().locator('details.history');
+    await history.waitFor();
+    assert.ok(await history.locator('.chg-item').count() >= 2, 'l\'historique montre les deux changements');
+    await shot('31-cible-effacer-historique', 'card');
+    // « Annuler » ne vide rien.
+    await button('Effacer l’historique').click();
+    await dialog().getByText(/L’historique de la carte repart de zéro/).waitFor();
+    await dialog().getByText(/Ce que Grist garde de son côté/).waitFor();
+    await dialogButton('Annuler').click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.ok((await journalRows()).some(r => r.Sync_Avant), 'annulé : l\'avant est toujours là');
+    // Confirmé : le journal est vidé de l'avant et des valeurs supprimées, la carte repart de zéro.
+    await button('Effacer l’historique').click();
+    await dialogButton('Effacer').click();
+    await widget().getByText(/Historique effacé \(journal nettoyé\s:\s2 valeurs d’avant, 1 ligne supprimée\)/).waitFor({ timeout: 60000 });
+    assert.ok((await journalRows()).every(r => !r.Sync_Avant), 'plus aucun avant dans le journal');
+    assert.ok(!(await journalRows()).find(r => r.Sync_Etat === 'suppression').Synchro_Donnees, 'valeurs de la ligne supprimée vidées');
+    assert.equal(await widget().locator('details.history .chg-item').count(), 0, 'l\'historique de la carte est vide');
+    const after = await fiches();
+    assert.deepEqual([after.Anna.Ville, after.Basile.Ville, Boolean(after.Céline)], ['Marseille', 'Paris', false], 'les lignes d\'ici ne changent pas');
+    // La recopie continue, sans arrivée suspecte : les versions vidées gardent leur sceau.
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Ville: 'Brest' }]]);
+    await waitFor(async () => (await fiches()).Basile?.Ville === 'Brest', 'modification reçue après l\'effacement', 90000);
+    await openWidgetTab(dst.url, 'Recevoir');
+    assert.equal(await widget().getByText('Arrivées suspectes').count(), 0, 'aucune arrivée suspecte');
+    await waitFor(async () => (await journalRows()).some(r => r.Sync_Avant), 'la nouvelle modification a son avant', 30000);
+    await widget().locator('details.history').waitFor();
+    assert.equal(await widget().locator('details.history .chg-item').count(), 1, 'seul le changement d\'après l\'effacement figure dans l\'historique');
+
+    // SOURCE : l'historique des envois est effacé de la note, le destinataire reste branché.
+    await openWidgetTab(src.url, 'Envoyer');
+    const sent = widget().locator('details.history', { hasText: 'Historique des envois' });
+    await sent.locator('summary').click();
+    await sent.getByText(/reçoit désormais cet export/).waitFor();
+    await sent.getByRole('button', { name: 'Effacer l’historique' }).click();
+    await dialog().getByText(/L’historique des envois de cet export est effacé/).waitFor();
+    await dialogButton('Effacer l’historique').click();
+    await widget().locator('details.history', { hasText: 'Historique des envois' }).waitFor({ state: 'detached', timeout: 60000 });
+    assert.equal((await api('GET', `/docs/${src.doc}/webhooks`)).webhooks.length, 1, 'le destinataire est toujours branché');
+    const sourceNote = JSON.stringify((await records(src.doc, '_grist_Tables_column')).filter(c => c.colId === 'Synchro_Export'));
+    assert.ok(!/reçoit|resend|cible@|\\"who\\"/.test(sourceNote), 'rien de nominatif ne reste dans la note de la SOURCE');
+    step('Effacer l\'historique : CIBLE (avant et valeurs supprimées du journal vidés, carte à zéro, recopie intacte) et SOURCE (historique des envois effacé, destinataire gardé)');
+  }
+
   // --- Export filtré : la liste des choix d'une colonne Choix ne part pas (elle montrerait des
   // valeurs de lignes que le filtre retient pas) ; la CIBLE n'apprend que les valeurs qu'elle reçoit.
   async function choicesSteps() {
@@ -1732,8 +1794,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -2749,6 +2811,7 @@ try {
   await straySteps();
   await docLinkSteps();
   await protectSteps();
+  await cleanSteps();
   await tabSteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');

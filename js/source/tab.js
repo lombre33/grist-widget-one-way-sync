@@ -23,7 +23,7 @@ import { checkHooks, hookCheck, personLabel } from '../engine/source/hook-check.
 import { invitationState } from '../engine/source/invite.js';
 import { confirmSend, flowView } from './flow.js';
 import { filesPending, resendFiles } from '../engine/source/files.js';
-import { cancelInvitation, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
+import { cancelInvitation, clearHistory, deleteExport, pause, resume, revoke, showPublicCode, stopPublic, unblockQueue } from './actions.js';
 import { exportWizard } from './export-wizard.js';
 import { foreignDialog, strayDialog } from './strays.js';
 import { checkKeys } from '../engine/source/keys.js';
@@ -103,8 +103,10 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
     structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
     events: eventsOf(note, id),
+    // Avec les repères d'un historique effacé (clearEvents) : ils comptent encore pour les destinataires disparus et les clés.
+    ledger: eventsOf(note, id, { all: true }),
     // Destinataires sans clé de signature (ligne 'signature' de Synchro perdue) : leur CIBLE rejette les envois.
-    unkeyed: new Set(unkeyedRecipients((mine.find(r => r[TYPE_COL] === KIND.sign) || {})[SCHEMA_COL], recipients.map(h => h.id), eventsOf(note, id).some(e => e.kind === 'join'))),
+    unkeyed: new Set(unkeyedRecipients((mine.find(r => r[TYPE_COL] === KIND.sign) || {})[SCHEMA_COL], recipients.map(h => h.id), eventsOf(note, id, { all: true }).some(e => e.kind === 'join'))),
     // Tables dont des lignes ou la liste des clés restent à envoyer (voir exportFlow).
     owed: recipients.length ? new Set(mine.filter(r => lotLate(r) || listDue(r)).map(r => r[TABLE_COL])).size : 0,
     // Lien public : tables dont l'instantané dépasse la taille permise (il reste vide).
@@ -313,7 +315,7 @@ function exportCard(exp, state, open, out) {
     exportNotes(exp),
     flowSlot(exp, state.charge),
     rows.length ? el('ul', { class: 'people' }, rows) : el('p', { class: 'small' }, t('send.export.nobody')),
-    eventsBlock(exp),
+    eventsBlock(exp, out, ownerOnly),
     el('div', { class: 'card-actions' },
       exp.retour ? null : wizardButton(t(exp.echange ? 'send.action.addParticipant' : 'send.action.addPerson'), 'plus', () => openRecipient(exp), { primary: !rows.length, ownerOnly }),
       exp.retour ? null : wizardButton(t('send.action.edit'), 'edit', () => exportWizard(exp, renderSource), { ownerOnly }),
@@ -332,7 +334,7 @@ function behindNotice(exp, { blocker }) {
 // Destinataires dont le webhook a disparu des réglages de Grist (supprimé à la main) : rien ne leur est plus envoyé,
 // et la carte n'en montre aucun.
 function vanishedNotice(exp) {
-  const n = exp.retour || exp.public ? 0 : vanishedRecipients(exp.events, exp.recipients.length);
+  const n = exp.retour || exp.public ? 0 : vanishedRecipients(exp.ledger, exp.recipients.length);
   return n ? message('warn', t('send.vanished', { n }), t('send.vanished.title', { n })) : null;
 }
 
@@ -353,10 +355,11 @@ const eventsOpen = new Set();
 const eventLine = e => el('li', { class: 'send-event' },
   el('time', { class: 'chg-time', datetime: new Date(e.at * 1000).toISOString() }, dateText(e.at * 1000)),
   el('span', {}, t(`send.history.${e.kind}`, { who: e.who || '—', n: e.n || 0 })));
-const eventsBlock = exp => (exp.events.length ? el('details', {
+const eventsBlock = (exp, out, ownerOnly) => (exp.events.length ? el('details', {
   class: 'history', open: eventsOpen.has(exp.id), ontoggle: e => (e.currentTarget.open ? eventsOpen.add(exp.id) : eventsOpen.delete(exp.id)),
 }, el('summary', {}, el('span', { class: 'history-title' }, t('send.history.title', { n: exp.events.length }))),
-  el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, exp.events.map(eventLine))) : null);
+  el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, exp.events.map(eventLine)),
+  actionButton(t('send.history.clear'), 'trash', () => clearHistory(exp), ownerOnly, out, { kind: 'btn-link' })) : null);
 
 // Ce que dit l'erreur d'un destinataire. Un journal qui refuse une colonne que Synchro porte sans
 // qu'elle soit au widget, ou qu'elle ne porte plus mais que la file garde, n'a rien à faire de son

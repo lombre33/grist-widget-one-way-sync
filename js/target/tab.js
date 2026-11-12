@@ -22,6 +22,7 @@ import { offerDialog } from './dest.js';
 import { rulesRefusedNotice } from '../rules-notice.js';
 import { wizardAsked } from '../prefs.js';
 import { protectMemos } from '../engine/source/synchro.js';
+import { cleanJournal } from '../engine/target/clean.js';
 import { ownsSync } from '../engine/logic/strays.js';
 import { optionsDialog } from './options.js';
 import { restyleDialog } from './restyle.js';
@@ -327,6 +328,7 @@ function syncCard(group) {
       group.public || note.retour ? null : linkButton(group),
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
       group.waiting || note.mode === 'echange' || !sentKinds(group).length ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
+      group.waiting || !group.owner ? null : button(t('recv.action.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), () => cleanReception(group))),
       group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
@@ -410,6 +412,18 @@ async function cutLink(group) {
   await updateJournalNote(group.journal, ({ suspect, ...note }) => note);
   await renewFormLink(group.journal);
   flash = { node: message('ok', t('recv.cut.done')), until: Date.now() + NOTICE_MS };
+  await renderTarget();
+}
+
+// Effacer l'historique de la réception et nettoyer son journal, sur demande seulement et après confirmation
+// (voir engine/target/clean.js : l'avant des modifications et les valeurs des lignes supprimées à la SOURCE sont vidés).
+async function cleanReception(group) {
+  const body = [el('p', {}, t('recv.clean.body')), el('p', { class: 'muted small' }, t('recv.clean.limits'))];
+  if (!(await confirmDialog({ title: t('recv.clean.title', { name: group.note.name }), body, confirmLabel: t('recv.clean.confirm') }))) return;
+  const done = await cleanJournal(group.journal);
+  state.results.clear();
+  await consolidateAll();
+  if (done) flash = { node: message('ok', t('recv.clean.done', done)), until: Date.now() + NOTICE_MS };
   await renderTarget();
 }
 

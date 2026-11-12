@@ -55,11 +55,20 @@ export function addEvent(note, exportId, { at, kind, who = '', n = 0 }) {
 // Événements lisibles d'un export. La note peut avoir été retouchée à la main ou écrite par une autre
 // version : un élément mal formé est écarté, jamais d'erreur à l'affichage.
 const readable = e => e && typeof e === 'object' && EVENT_KINDS.includes(e.kind) && Number.isFinite(e.at) && e.at > 0 && e.at < 4e9;
-export function eventsOf(note, exportId) {
+// `all` : aussi les repères d'un historique effacé (voir clearEvents), qui comptent encore sans rien montrer.
+export function eventsOf(note, exportId, { all = false } = {}) {
   const list = (note.historique || {})[exportId];
-  return (Array.isArray(list) ? list : []).filter(readable).map(({ at, kind, who, n }) => ({
-    at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(Number.isFinite(n) && n ? { n } : {}),
+  return (Array.isArray(list) ? list : []).filter(readable).filter(e => all || !e.cleared).map(({ at, kind, who, n, cleared }) => ({
+    at, kind, ...(who ? { who: String(who).slice(0, WHO_MAX) } : {}), ...(Number.isFinite(n) && n ? { n } : {}), ...(cleared ? { cleared: true } : {}),
   }));
+}
+
+// Historique des envois effacé sur demande (bouton de la SOURCE). Les ajouts et les retraits de destinataire restent comme
+// repères, sans nom ni nombre et sans rien montrer : ils servent à voir un destinataire dont le webhook a été supprimé à la main
+// (vanishedRecipients) et à dire qu'un export a des clés de signature (unkeyedRecipients). Tout le reste est oublié.
+export function clearEvents(note, exportId) {
+  const marks = eventsOf(note, exportId, { all: true }).filter(e => e.kind === 'join' || e.kind === 'revoke').map(({ at, kind }) => ({ at, kind, cleared: true }));
+  return { ...note, historique: { ...(note.historique || {}), [exportId]: marks } };
 }
 
 // Destinataires ajoutés par le widget (événement `join`) et ni révoqués par lui (`revoke`) ni présents parmi les

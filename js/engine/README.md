@@ -270,6 +270,26 @@ destinataire : un moteur 3.x y lit un nom, y écrit encore la fiche, et reposera
 - **Essais** : `tests/unit/engine-protect.test.mjs`, `engine-memo.test.mjs`, `acl.test.mjs` ; e2e `ONLY_PROTECT=1` (vrai Grist : règles avant
   la première ligne, refus d'une règle orpheline dit, Échange avec l'étape de protection, mémos opaques lus en anonyme).
 
+## Effacer l'historique sur demande (4.1.0)
+
+Antoine, après la carte « Combien de temps garder les valeurs d'une ligne supprimée dans le journal de la CIBLE ? » (réponse « Comme aujourd'hui ») :
+« un bouton pour effacer manuellement l'historique et nettoyer les journaux, côté CIBLE et SOURCE ». **Rien ne se fait seul** ; l'hôte appelle, après une confirmation.
+- **`cleanJournal(journal)`** (`target/clean.js`, sous le verrou `gristsync-consolidation`) rend `{ before, values }` (ou `null` si ce n'est pas une réception) :
+  vide `Sync_Avant` des versions d'ajout, de modification et de suppression (l'avant des modifications, le numéro des lignes supprimées), vide
+  `Synchro_Donnees` de la dernière version d'une clé supprimée ou partie (`cleanPlan` de `logic/clean.js`), **rescelle** ces lignes avec la clé de
+  signature de l'export (`sealing` de `target/loop.js`, sans quoi le passage suivant les prendrait pour forgées), et note `histo` (secondes) dans la note du
+  journal : `tableResult` ne montre dans l'historique que ce qui est arrivé après `max(dernière visite, histo)`. La clé, l'heure, la case Supprime et l'état
+  d'une version restent : elles décident encore de ce qui est recopié (une version en retard ne ressuscite pas une ligne). **Rien n'est vidé** en Échange
+  (les valeurs d'une ligne cochée Supprime servent à comparer) ni pour un changement `refus` (l'avant sert à le corriger).
+- **`clearExportHistory(exportId)`** (`source/history.js`) : `clearEvents` (`logic/notes.js`) efface l'historique des envois de la note SOURCE ; les ajouts
+  et retraits de destinataire restent comme repères (`cleared`, sans nom ni nombre, `eventsOf(note, id, { all: true })`) parce que `vanishedRecipients` (un
+  webhook supprimé à la main) et `unkeyedRecipients` (une clé de signature perdue) s'appuient sur eux ; le reste est oublié, les avis de baisse de lignes
+  compris. Puis il appelle `cleanJournal` pour les journaux de retour de cet export (Échange).
+- **Ce qui n'est pas touché** : les lignes des tables, les webhooks, `Synchro`, et l'historique propre à Grist (Ctrl+Z, « Historique du document »), auquel
+  le moteur n'a pas accès.
+- **Port** : inchangé. Essais : `tests/unit/engine-clean.test.mjs` (dont un contrôle que, sans le nouveau sceau, le passage suivant rejette la ligne), e2e
+  `ONLY_CLEAN=1` (vrai Grist, CIBLE et SOURCE).
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de

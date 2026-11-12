@@ -441,8 +441,8 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   clé d'un formulaire) sur une SOURCE et une CIBLE branchées. Constaté protégé : tables de données, enregistrements, SQL, CSV, XLSX,
   téléchargement et sqlite, historique, instantanés, webhooks, règles d'accès, partages (403) ; la clé d'écriture d'un formulaire
   n'est lisible nulle part (elle est dans l'adresse du webhook, réservée aux propriétaires) ; l'adresse de l'iframe du widget ne
-  contient pas l'identifiant du document ; `localStorage` du widget ne garde aucun secret (la préférence de reprise d'assistant ne
-  garde qu'une heure). La clé d'un formulaire n'écrit ni métadonnées, ni autre table, ni SQL, ni règles, et ne lit que les
+  contient pas l'identifiant du document ; `localStorage` du widget ne garde aucun secret (la reprise d'un assistant après le rechargement des règles ne note qu'une heure,
+  dans le stockage de l'onglet seulement). La clé d'un formulaire n'écrit ni métadonnées, ni autre table, ni SQL, ni règles, et ne lit que les
   colonnes, descriptions et options du journal (la note du journal, voulu : voir « La clé du formulaire de réception »).
 - **Mise à niveau** : un document d'avant la 0.18 est lu tel quel (la note de la description est
   encore lue), puis déplacé dans les options à la première ouverture d'un propriétaire (SOURCE) ou
@@ -582,6 +582,15 @@ Pour un usage en production :
   le signale et propose de débloquer la file.
 - Sans Redis, la file d'envoi de Grist vit en mémoire : un redémarrage du serveur la perd (le
   widget renvoie ce qui manque à la prochaine ouverture par un propriétaire).
+- **Ce que le journal garde, et le bouton « Effacer l'historique » (0.19.1)** : le journal d'une réception garde la dernière version de
+  chaque clé (copie de ce qui est dans la destination), l'avant de chaque modification et le numéro des lignes supprimées (`Sync_Avant`), et les
+  valeurs de la dernière version d'une clé supprimée à la SOURCE. Décision du porteur (12 novembre) : aucune purge automatique. Un
+  propriétaire peut les vider sur demande, depuis la carte de la réception (confirmation, ne se défait pas) : l'avant et les valeurs supprimées
+  sont vidés (la version, rescellée, garde sa clé, son heure et son état), l'historique de la carte repart de zéro (`histo`). En Échange rien n'est
+  vidé (les valeurs servent à comparer). Côté SOURCE, le bouton de l'historique des envois efface la note (noms, courriels, nombres) et nettoie les
+  journaux de retour d'un Échange ; des repères d'ajout et de retrait restent, sans nom, pour détecter un webhook supprimé à la main. **Limite** :
+  l'historique propre à Grist (« Historique du document », annuler) garde les valeurs ; le widget n'y accède pas. Qui lit le document avant
+  l'effacement a pu les lire.
 - **Fuites d'information, reste après l'audit de la 0.19** (voir « Ce que voit un lecteur ou le lien public ») :
   - le nom d'un webhook (nom de l'export) et sa condition (identifiant de l'export) se lisent par `_grist_Triggers` sur un
     document public : ils disent qu'un export existe, pas qui reçoit ni quoi ;

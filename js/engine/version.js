@@ -98,7 +98,17 @@
 //         mémo facultatif (`createRestPort`), `PORT_SHAPE` ne change pas. Ni nom de table, ni `CODE_FORMAT`, ni texte des formules de `Synchro` ne
 //         changent. Tous les onglets d'un même document doivent avoir le moteur 4 : un onglet 3.x resté ouvert repose les règles d'avant à
 //         chaque affichage (le document se recharge) et réécrit la fiche dans le mémo ; recharger les onglets.
-export const ENGINE_VERSION = '4.0.0';
+// 4.1.0 (12 novembre 2026, demande du porteur après la carte « Combien de temps garder les valeurs d'une ligne supprimée dans le journal de la CIBLE ? »,
+//         réponse « Comme aujourd'hui » : « un bouton pour effacer manuellement l'historique et nettoyer les journaux, côté CIBLE et SOURCE ») :
+//         deux fonctions de plus, sur demande seulement (aucun passage ne purge seul). `cleanJournal(journal)` (`target/clean.js`) vide dans un
+//         journal reçu l'avant des modifications et le numéro des lignes supprimées (`Sync_Avant`) ainsi que les valeurs de la dernière version
+//         d'une clé supprimée ou partie (`Synchro_Donnees`, rescellée avec la clé de signature de l'export), et note `histo` dans la note du
+//         journal : avant cette heure, l'historique de la carte ne montre plus rien (`tableResult`). Rien n'est vidé en Échange (les valeurs y
+//         servent à comparer) ni pour un changement refusé. `clearExportHistory(exportId)` (`source/history.js`) efface l'historique des envois de la
+//         note SOURCE (`clearEvents` de `logic/notes.js` : des repères d'ajout et de retrait restent, sans nom ni nombre, pour les destinataires
+//         disparus et les clés de signature) et nettoie les journaux de retour de cet export. Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte
+//         des formules de `Synchro` ne changent ; la note du journal gagne une clé facultative, ignorée d'un moteur plus ancien.
+export const ENGINE_VERSION = '4.1.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

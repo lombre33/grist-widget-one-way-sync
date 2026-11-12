@@ -5,6 +5,7 @@ import {
   cancelPendingInvitation, pauseRecipient, publicCode as makePublicCode, endExport, resumePlan, resumeRecipient, revokeRecipient, revokesOne, stopPublicShare,
 } from '../engine/source/actions.js';
 import { clearAndMark } from '../engine/source/resend.js';
+import { clearExportHistory } from '../engine/source/history.js';
 import { hookShown } from './shown.js';
 import { progressTo } from './flow.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
@@ -66,6 +67,14 @@ export async function deleteExport(exp) {
   const body = t('send.delete.body', { n: exp.recipients.length });
   if (!(await confirmDialog({ title: t('send.delete.title', { name: exp.name }), body, confirmLabel: t('send.action.delete') }))) return;
   await endExport(exp);
+}
+
+// Effacer l'historique des envois d'un export (et, en Échange, l'avant et les lignes supprimées de ses journaux de retour) :
+// sur demande seulement, après confirmation (voir engine/source/history.js).
+export async function clearHistory(exp) {
+  const body = [el('p', {}, t('send.history.clearBody')), exp.echange && !exp.retour ? el('p', {}, t('send.history.clearBack')) : null, el('p', { class: 'muted small' }, t('send.history.clearLimits'))];
+  if (!(await confirmDialog({ title: t('send.history.clearTitle', { name: exp.name }), body, confirmLabel: t('send.history.clear') }))) return;
+  await clearExportHistory(exp.id);
 }
 
 // ---------------------------------------------------------------------------------------------
