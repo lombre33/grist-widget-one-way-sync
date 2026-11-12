@@ -461,7 +461,10 @@ reste du naming de GFS » ; et sur le point 14 de l'audit de sécurité, « dema
   (variable ajoutée à `start-grist.sh`) : le message s'affiche à « Approuver et brancher », aucun webhook n'est créé.
 - Corrigé en passant dans `SECURITY.md` : le Renforcé ne fait plus valider les suppressions (retiré en 0.13.4), et le nombre de lignes
   de JavaScript (environ 13 500).
-- Testé : unit 416 (`rest-port` : refus de l'adresse contre manque de droits), sonde dans un vrai Grist, e2e complet.
+- Testé : unit 416 (`rest-port` : refus de l'adresse contre manque de droits), sonde dans un vrai Grist, e2e complet (70 étapes).
+- **Captures refaites** (`CAPTURES=1`, parcours complet vert) : les 41 images de `docs/images`, leurs 10 vignettes du README et les deux images d'aide de
+  `img/` montrent la barre « syncPlus » et l'écran d'aujourd'hui (elles dataient de la 0.12.2). Deux captures que le parcours faisait sans qu'elles
+  soient au dépôt y entrent : `13b-source-lignes-en-moins`, `31-cible-effacer-historique` (pas encore citées par le tutoriel).
 
 ## État précédent : V0.19.1 (12 novembre 2026)
 
