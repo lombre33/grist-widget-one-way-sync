@@ -439,10 +439,16 @@ try {
   async function accept(doc, url, code, tables = '« Annuaire » : table Contacts.', checks = [], { ask = false } = {}) {
     await pasteInvitation(url, code);
     await dialog().getByText(tables).waitFor();
-    await dialog().getByText('Options avancées').click();
-    const auto = dialog().getByRole('checkbox', { name: AUTO_BOX });
-    assert.ok(!(await auto.isChecked()), 'les colonnes ajoutées par la SOURCE attendent l\'accord, d\'emblée');
-    if (!ask) await auto.check();
+    // Un Échange et un lien public n'ont pas ce réglage (leurs options avancées ne sont pas offertes).
+    const more = dialog().getByText('Options avancées');
+    if (checks.length || await more.count()) {
+      await more.click();
+      const auto = dialog().getByRole('checkbox', { name: AUTO_BOX });
+      if (await auto.count()) {
+        assert.ok(!(await auto.isChecked()), 'les colonnes ajoutées par la SOURCE attendent l\'accord, d\'emblée');
+        if (!ask) await auto.check();
+      }
+    }
     for (const name of checks) await dialog().getByRole('checkbox', { name }).check();
     await dialogButton('Continuer').click();
     await confirmNewTable();
