@@ -1,6 +1,6 @@
 // Le seul branchement du moteur vers l'extérieur. Le moteur ne parle jamais à Grist, au navigateur ni
 // à la langue de la personne autrement que par l'objet `port` qu'on lui donne au démarrage
-// (startEngine, index.js). Sync+ seul le remplit avec `js/sync-port.js` ; une autre page (GFS) donne
+// (startEngine, index.js). syncPlus seul le remplit avec `js/sync-port.js` ; une autre page (GFS) donne
 // le sien. Les modules du moteur importent d'ici les mêmes noms que ceux de l'ancien `js/grist.js` :
 // chaque appel est rendu au port courant, au moment de l'appel (rien n'est lu à l'import).
 //

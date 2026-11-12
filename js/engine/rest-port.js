@@ -1,6 +1,6 @@
 // Les requêtes REST du moteur, écrites une seule fois : webhooks (création avec condition relue dans
 // _grist_Triggers, file vidée avant l'effacement, avis de fin), comparaison d'états, lecture SQL, envoi
-// direct de lignes, lecture publique, fiche d'un partage, pièces jointes. Un hôte (Sync+, GFS) donne
+// direct de lignes, lecture publique, fiche d'un partage, pièces jointes. Un hôte (syncPlus, GFS) donne
 // `http`, tout ce qui touche vraiment le réseau et le jeton, et en tire ces fonctions du port :
 //
 //   const rest = createRestPort({ docApi: { fetchRows }, http });
@@ -48,12 +48,19 @@ const answer = async (promise) => {
   }
 };
 
+// Grist refuse aussi par 403 un webhook dont l'adresse n'est pas dans la liste des domaines autorisés de l'instance
+// (réglage ALLOWED_WEBHOOK_DOMAINS, « Provided url is forbidden », vérifié sur Grist 1.7) : ce refus-là n'est pas une
+// question de droits, et seul l'administrateur de l'instance le lève.
+const URL_REFUSED = /url is forbidden/i;
+
 // Une requête REST du document avec les droits de la personne ; le corps rendu, ou 'ownerOnly' (403 : seul un
-// propriétaire lit les webhooks) ou une erreur qui cite le début de la réponse. Une erreur de Grist peut citer
-// l'adresse d'un webhook : sa clé n'est jamais montrée en entier.
+// propriétaire lit les webhooks), 'webhookForbidden' (403 : adresse de webhook que l'instance n'autorise pas) ou une
+// erreur qui cite le début de la réponse. Une erreur de Grist peut citer l'adresse d'un webhook : sa clé n'est jamais
+// montrée en entier.
 const restOf = http => async (method, path, body) => {
   const response = await answer(http.request(method, path, { body, full: true }));
-  if (response.status >= 300) throw new Error(response.status === 403 ? 'ownerOnly' : maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 200)}`));
+  if (response.status === 403) throw new Error(URL_REFUSED.test(response.message || '') ? 'webhookForbidden' : 'ownerOnly');
+  if (response.status >= 300) throw new Error(maskKey(`HTTP ${response.status} ${String(response.message || '').slice(0, 200)}`));
   return response.body;
 };
 

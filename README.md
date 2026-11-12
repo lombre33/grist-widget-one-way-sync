@@ -2,7 +2,7 @@
 
 <img src="img/grist-factory-logo.jpg" alt="" width="56" height="56">
 
-# Synchro Grist
+# syncPlus
 
 **Recopiez des tables d'un document Grist dans un autre, tenues à jour toutes seules.**<br>
 Sans serveur à héberger, sans dépendance, et seules les colonnes que vous choisissez sortent.
@@ -11,14 +11,14 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.19.1 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.19.2 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
 ## À quoi ça sert
 
 Un service tient une table de référence dans Grist (contacts, établissements, nomenclature) et
-d'autres équipes en ont besoin dans leurs propres documents. Synchro Grist leur en envoie une copie
+d'autres équipes en ont besoin dans leurs propres documents. syncPlus leur en envoie une copie
 qu'elles peuvent compléter, et la met à jour à chaque ajout, modification ou suppression dans
 l'original.
 
@@ -168,8 +168,15 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 espace d'équipe ; un propriétaire du document SOURCE, un éditeur du document CIBLE (propriétaire
 en Échange). **Aucune dépendance** : ni bibliothèque, ni étape de build, ni service tiers.
 
+**Webhooks de l'instance** : Grist n'envoie un webhook qu'aux adresses que l'administrateur de
+l'instance autorise. Sur `grist.numerique.gouv.fr`, rien à faire : les webhooks y sont limités à
+l'instance, ce qui suffit au widget (ses envois vont d'un document à l'autre de la même instance).
+Sur une autre instance, si le widget dit au branchement qu'elle « n'autorise pas les webhooks vers
+sa propre adresse », écrire à son administrateur pour faire ajouter l'adresse de l'instance à la
+liste des domaines autorisés (réglage `ALLOWED_WEBHOOK_DOMAINS` de Grist).
+
 1. Dans chaque document : **Ajouter**, **Ajouter une page**, vue **Personnalisée**. Choisir
-   Synchro Grist dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
+   syncPlus dans la **galerie** de l'instance s'il y est ; sinon **URL personnalisée** et
    l'adresse officielle, `https://grist-factory.github.io/grist-widget-syncPlus/`, jamais une
    adresse reçue par courriel. Puis **Ajouter un widget**.
 2. Dans le panneau de droite de Grist, section **Niveau d'accès**, cliquer **Accepter** (ou choisir

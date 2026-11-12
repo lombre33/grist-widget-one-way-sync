@@ -1,4 +1,4 @@
-// Le port de Sync+ : ce que le moteur (js/engine/) attend de l'extérieur, rempli avec la page du widget.
+// Le port de syncPlus : ce que le moteur (js/engine/) attend de l'extérieur, rempli avec la page du widget.
 // Grist, par `js/grist.js` (l'API des widgets, l'API REST et ses jetons) ; la langue, par `js/i18n.js` ;
 // la page, par le navigateur ; deux petites valeurs par navigateur, par `js/prefs.js`. Une autre page
 // (GFS) écrit le sien, avec la même forme (PORT_SHAPE, engine/port.js).

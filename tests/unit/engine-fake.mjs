@@ -2,7 +2,7 @@
 // colonnes et lignes, et les actions que le moteur envoie (AddTable, BulkAddRecord…). Il ne calcule
 // aucune formule (sauf `NOW()` et `user.Email` à l'ajout d'une ligne, que le journal utilise) : les
 // essais y posent eux-mêmes ce que Grist aurait calculé. `fakePort` en fait un port du moteur
-// (engine/port.js) qui n'a rien de commun avec celui de Sync+.
+// (engine/port.js) qui n'a rien de commun avec celui de syncPlus.
 import { schemaFrom } from '../../js/engine/logic/schema.js';
 import { parseWebhookUrl } from '../../js/engine/logic/codes.js';
 

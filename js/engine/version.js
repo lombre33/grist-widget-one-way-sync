@@ -1,8 +1,8 @@
-// Version du moteur. Elle ne suit pas celle de Sync+ : elle change quand le moteur change ce qu'il
+// Version du moteur. Elle ne suit pas celle de syncPlus : elle change quand le moteur change ce qu'il
 // attend du port, ce qu'il écrit dans les documents, ou le sens d'un champ des codes (CODE_FORMAT).
 // Mineure : une fonction ou un réglage de plus, sans rien casser. Majeure : un port, un nom de table
 // ou un format qui ne se lisent plus comme avant. Elle est dite dans GFS-ETAT.md avec le commit.
-// 1.0.0 : le moteur sort de l'écran de Sync+ 0.13.2 (port, préfixe de tables, dossier à part).
+// 1.0.0 : le moteur sort de l'écran de syncPlus 0.13.2 (port, préfixe de tables, dossier à part).
 // 2.0.0 (9 novembre 2026) : le port exige quatre fonctions de plus (`shareInfo`, `publicAccess`, `renameWebhook`, `journalStats`),
 //         donc un port écrit pour 1.0.0 est refusé par `setPort` tant qu'il ne les a pas : c'est une version
 //         majeure au sens ci-dessus. Elles sont toutes dans `createRestPort` (rest-port.js), qui écrit les
@@ -108,7 +108,13 @@
 //         note SOURCE (`clearEvents` de `logic/notes.js` : des repères d'ajout et de retrait restent, sans nom ni nombre, pour les destinataires
 //         disparus et les clés de signature) et nettoie les journaux de retour de cet export. Ni port, ni nom de table, ni `CODE_FORMAT`, ni texte
 //         des formules de `Synchro` ne changent ; la note du journal gagne une clé facultative, ignorée d'un moteur plus ancien.
-export const ENGINE_VERSION = '4.1.0';
+// 4.2.0 (12 novembre 2026, réponse du porteur au point 14 de l'audit de sécurité : sur DINUM les webhooks sont limités à l'instance ; ailleurs,
+//         il faut demander à l'administrateur d'être dans la liste autorisée) : un code d'erreur de plus. Grist refuse par 403 « Provided url is
+//         forbidden » un webhook dont l'adresse n'est pas dans la liste des domaines autorisés de l'instance (`ALLOWED_WEBHOOK_DOMAINS`, vérifié sur
+//         Grist 1.7) ; le moteur rendait `ownerOnly` pour tout 403, donc « réservé aux propriétaires » à un propriétaire. `restOf` (rest-port.js) rend
+//         maintenant `webhookForbidden` pour ce refus (reconnu au texte que l'`http` de l'hôte met dans `message`), `ownerOnly` pour les autres 403.
+//         Un hôte ajoute le texte `error.webhookForbidden` ; sans lui, la phrase générique cite le code. Ni port, ni table, ni code, ni formule ne changent.
+export const ENGINE_VERSION = '4.2.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

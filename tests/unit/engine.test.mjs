@@ -203,7 +203,7 @@ test('un port incomplet est refusé et dit ce qui manque', () => {
   assert.throws(() => engine.startEngine({}), /port incomplet/);
 });
 
-test('le port de Sync+ a la forme que le moteur demande', async () => {
+test('le port de syncPlus a la forme que le moteur demande', async () => {
   // js/sync-port.js ne se charge pas sans navigateur (il importe i18n et prefs) : on compare les noms.
   const text = readFileSync(join(ROOT, 'js/sync-port.js'), 'utf8');
   const shape = engine.PORT_SHAPE;

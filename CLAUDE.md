@@ -1,4 +1,4 @@
-# Synchro Grist : instructions pour Claude
+# syncPlus : instructions pour Claude
 
 ## Le projet
 
@@ -16,6 +16,11 @@ grist-core et tests réels) et `docs/02-procedure-test-dinum.md` (test réel ré
 ## Conventions d'Antoine
 
 - Répondre en français.
+- **Nom du produit : « syncPlus »** (Antoine, 12 novembre : « Le produit sera syncPlus pour être cohérent avec le reste du
+  naming de GFS »), écrit ainsi partout où une personne le lit (titre de l'écran en français et en anglais, README, tutoriel,
+  diagnostic, consignes à transmettre) et dans la doc de développement. Plus de « Synchro », « Sync », « Synchro Grist », « Grist
+  Sync » ni « Sync+ » comme nom de produit. **Ne changent pas** : la table technique `Synchro` et ses colonnes (formules,
+  webhooks, règles d'accès, codes), la marque `syncPlus` des partages (`MARK_KEY`), l'adresse publique (`WIDGET_URL`).
 - Toute question à choix (2 à 4 options) passe par une carte de décision dédiée quand l'outil
   existe dans la session, jamais par des options écrites dans le corps du texte.
 - Jamais la charte graphique DSFR (réservée aux services de l'État).
@@ -296,12 +301,12 @@ appeler `POST /api/docs/<source>/webhooks?auth=<jeton>` depuis GitHub Pages.
 
 ## Moteur 1.0.0 (7 novembre 2026, rien de visible : l'écran reste à la V0.13.2)
 
-Consignes de GFS (suite d'apps Grist Factory) : son explorateur lira **le moteur** de Sync+ pour partager un dossier ou un
+Consignes de GFS (suite d'apps Grist Factory) : son explorateur lira **le moteur** de syncPlus pour partager un dossier ou un
 fichier entre deux documents qui ont GFS (décision du porteur du 6 novembre, dépôt `lombre33/grist-widget-GFS`, `consignes/sync/`,
 001 et 002 ; la réponse est `GFS-ETAT.md` à la racine, **fichier de développement, jamais publié** ; ne rien pousser chez GFS).
 Antoine, 7 novembre : « tu peux travailler sur main [...] attention à ne pas créer des risques de sécurité ou modifier des
-comportements du standalone pour GFS ». Donc : aucun lien avec GFS dans le code de Sync+ (pas de `gfs.json`, pas d'entrée au
-catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode d'emploi : `js/engine/README.md`) :
+comportements du standalone pour GFS ». Donc : aucun lien avec GFS dans le code de syncPlus (pas de `gfs.json`, pas d'entrée au
+catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (mode d'emploi : `js/engine/README.md`) :
 - **`js/engine/`** : logique pure, pages, règles d'accès, Échange, et la part sans écran de la SOURCE et de la CIBLE (renvois,
   rattrapage, journaux, recopie, pièces jointes). Rien n'y lit `document`, `window`, `location`, `navigator`, `localStorage` ni
   `grist` ; les écrans appellent le moteur, jamais l'inverse (`tests/unit/engine.test.mjs`, avec le contrôle des imports).
@@ -312,7 +317,7 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `logic/common.js`, fixées par `setTablePrefix`) et `destTableId` ; les colonnes (`Synchro_*`, `id_sync`, `MajLe`) et les mémos
   de règles d'accès ne changent pas. Une valeur évaluée à l'import ne verrait pas le préfixe (d'où `filterLines()` et `readLines()`
   dans `formulas.js`). Lien public : les deux documents doivent avoir le même préfixe.
-- **`ENGINE_VERSION`** (`engine/version.js`) : 1.0.0, elle ne suit pas la version de Sync+ ; mineure pour un ajout, majeure pour
+- **`ENGINE_VERSION`** (`engine/version.js`) : 1.0.0, elle ne suit pas la version de syncPlus ; mineure pour un ajout, majeure pour
   un port, un nom de table ou un format qui ne se lisent plus pareil. À dire dans `GFS-ETAT.md` avec le commit.
 - Fichiers scindés en deux parties (écran / moteur) : `form-link.js` (le test du lien), `source/{actions,estimate,keys}.js`,
   `target/dest.js` (`checkDests`) ; `schemaFrom` (`logic/schema.js`) bâtit le schéma pour n'importe quel port ; `resendTables`
@@ -324,7 +329,7 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
     relue, file vidée avant l'effacement, avis de fin), `docChanges` (état perdu = inconnu), SQL, envois directs limités à
     l'instance, fiche d'un partage, document public, pièces jointes. L'hôte ne donne que `http` (`request`, `anonymous`,
     `download`, `upload`, `docBaseUrl` ; les refus **lèvent** une erreur à `status` et `message`, contrat dans
-    `engine/README.md`). `js/grist.js` n'est plus que l'`http` de Sync+ (jeton `auth=`, liste des instances) et la lecture
+    `engine/README.md`). `js/grist.js` n'est plus que l'`http` de syncPlus (jeton `auth=`, liste des instances) et la lecture
     des tables. Essai : `tests/unit/rest-port.test.mjs`, `doc-changes.test.mjs`.
   - **l'orchestration des assistants sans fenêtre** : `engine/source/export.js` (`saveChosenExport`, `finishEdit`),
     `engine/source/invite.js` (invitation, code, lien public, retour d'Échange, `checkReply`, `approveReply`, `loadPlan`,
@@ -344,7 +349,7 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
     et, pour un Échange renforcé, dans `checkDestinations` et `createReception` (`mustCompare`) ; la durée de vie d'une
     invitation (`invitationState`). Essai : `tests/unit/engine-links.test.mjs` (autre document, clé coupée, Grist muet, code
     non comparé, clé publique remplacée, invitation périmée ou d'une autre instance).
-  - `startEngine({ version })` (version de l'application écrite dans les codes). Le comportement de Sync+ seul n'a pas changé
+  - `startEngine({ version })` (version de l'application écrite dans les codes). Le comportement de syncPlus seul n'a pas changé
     (unit et e2e complets verts avant le commit).
 - **Moteur 2.6.0 (10 novembre, consigne 006 de GFS, sans changement visible)** : l'outil d'audit lit `js/engine/` quand il juge GFS ;
   cinq fonctions passaient ses seuils (80 lignes, complexité 15) : `createRestPort` (226 lignes), `lotFormula` (87), `journalFacts`
@@ -367,7 +372,31 @@ catalogue), Sync+ seul se comporte comme avant, tout est dans `js/engine/` (mode
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.19.1 (12 novembre 2026)
+## État : V0.19.2 (12 novembre 2026)
+
+V0.19.2 (Antoine, 12 novembre, carte de décision sur le nom du produit puis : « Le produit sera syncPlus pour être cohérent avec le
+reste du naming de GFS » ; et sur le point 14 de l'audit de sécurité, « demander à DINUM si les webhooks sont limités à l'instance » :
+« oui c'est le cas. sinon il faut écrire de demander à être whitelist »). Moteur **4.2.0** (mineure, dite dans `GFS-ETAT.md`).
+- **Nom** : « syncPlus » dans `index.html` (titre de l'onglet et de la barre), `app.title` et `diag.title` (fr et en), `guide.install`
+  (« Installer le widget syncPlus »), le tutoriel (`i18n/tutorial.json`, `docs/04`), les deux README ; « Sync+ » remplacé dans la doc de
+  développement et les commentaires (une citation d'Antoine gardée telle quelle). Barre du haut mesurée à 700, 420, 380 et 360 px en
+  français et en anglais : rien ne déborde. Voir « Conventions d'Antoine » pour ce qui ne change pas.
+- **Webhooks limités à l'instance (point 14, clos)** : fait donné par Antoine, DINUM n'est pas joignable depuis une session. Grist ne crée
+  un webhook que vers une adresse de la liste `ALLOWED_WEBHOOK_DOMAINS` de l'instance (**vérifié dans Grist 1.7** : `isUrlAllowed` de
+  `requestUtils`, liste vide par défaut donc aucun webhook, `*` pour tout autoriser, `http` pour `localhost` seulement) et répond sinon
+  `403 {"error":"Provided url is forbidden"}`. **Le widget disait alors « Seul un propriétaire du document peut faire cela » à un
+  propriétaire** (`restOf` rendait `ownerOnly` pour tout 403). Maintenant : erreur `webhookForbidden` (`URL_REFUSED` de
+  `js/engine/rest-port.js`), texte `error.webhookForbidden` (« cette instance n'autorise pas les webhooks vers sa propre adresse […]
+  demandez à l'administrateur de l'instance d'ajouter l'adresse de l'instance à la liste des domaines autorisés »), une ligne de
+  dépannage dans le tutoriel du widget et `docs/04`, un paragraphe « Webhooks de l'instance » dans les README, et dans `SECURITY.md`
+  (« En bref », « Chaîne d'approvisionnement ») la barrière contre l'exfiltration par webhook d'une copie piégée.
+- **Sonde rejouable** : `tests/e2e/tools/probe-webhook-refused.mjs`, sur un second Grist lancé avec `WEBHOOK_DOMAINS=example.com`
+  (variable ajoutée à `start-grist.sh`) : le message s'affiche à « Approuver et brancher », aucun webhook n'est créé.
+- Corrigé en passant dans `SECURITY.md` : le Renforcé ne fait plus valider les suppressions (retiré en 0.13.4), et le nombre de lignes
+  de JavaScript (environ 13 500).
+- Testé : unit 416 (`rest-port` : refus de l'adresse contre manque de droits), sonde dans un vrai Grist, e2e complet.
+
+## État précédent : V0.19.1 (12 novembre 2026)
 
 V0.19.1 (Antoine, 12 novembre, après la carte sur la conservation du journal, réponse « Comme aujourd'hui » : « peut-être prévoir côté cible et source un bouton pour
 effacer manuellement l'historique et clean les journaux ? »). Moteur **4.1.0** (mineure, dite dans `GFS-ETAT.md`). Aucune purge automatique, tout est sur demande.
@@ -690,7 +719,7 @@ message »). Moteur **2.4.0** (mineure, dit dans `GFS-ETAT.md`).
   partage, donc l'ancienne clé d'écriture. Un document sans autre réception ouvre sur Recevoir (`openFirstScreen`). **Limites** :
   pas de marque pour un lien public (pas de formulaire) ni pour le journal de retour d'un Échange ; seuls les partages lisibles par
   la personne comptent (un non-propriétaire peut ne rien voir).
-- **Option `arrange` de `createReception`** : faux par défaut dans le moteur (GFS garde sa mise en page) ; l'écran de Sync+ le pose.
+- **Option `arrange` de `createReception`** : faux par défaut dans le moteur (GFS garde sa mise en page) ; l'écran de syncPlus le pose.
 - Testé : unit `page-order` (placement, sous-pages, déjà dessous), `engine-lost` (arrange, marque sans secret, journal puis table
   supprimés, avis retiré, journal recréé, `markReceptions`) ; e2e : avertissement (texte, « Annuler » ne crée rien, confirmation),
   page du journal juste sous `Contacts`, partage marqué et toujours publié ; `betises.mjs` : `journalSupprime` et

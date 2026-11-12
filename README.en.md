@@ -2,7 +2,7 @@
 
 <img src="img/grist-factory-logo.jpg" alt="" width="56" height="56">
 
-# Grist Sync
+# syncPlus
 
 **Copy tables from one Grist document into another, and keep them up to date on their own.**<br>
 No server to host, no dependencies, and only the columns you pick leave the document.
@@ -11,14 +11,14 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.19.1 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.19.2 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
 ## What it does
 
 A team keeps a reference table in Grist (contacts, sites, a classification) and other teams need
-it in their own documents. Grist Sync sends them a copy they can build on, and updates it whenever
+it in their own documents. syncPlus sends them a copy they can build on, and updates it whenever
 a row is added, changed or deleted in the original.
 
 - **Nothing to host**: Grist itself carries the changes, even when nobody has the document open.
@@ -163,7 +163,14 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
 site; an owner of the SOURCE document and an editor of the TARGET document (an owner for
 Exchange). **No dependencies**: no library, no build step, no third-party service.
 
-1. In each document: **Add New**, **Add Page**, **Custom** widget. Pick Synchro Grist from the
+**Instance webhooks**: Grist only sends a webhook to addresses the instance administrator allows.
+On `grist.numerique.gouv.fr` there is nothing to do: webhooks there are limited to the instance,
+which is all the widget needs (it sends from one document to another on the same instance). On
+another instance, if the widget says on connecting that it "does not allow webhooks to its own
+address", write to its administrator and ask for the instance's address to be added to the list of
+allowed webhook domains (Grist's `ALLOWED_WEBHOOK_DOMAINS` setting).
+
+1. In each document: **Add New**, **Add Page**, **Custom** widget. Pick syncPlus from the
    instance's **gallery** if it is there; otherwise **Custom URL** and the official address,
    `https://grist-factory.github.io/grist-widget-syncPlus/`, never an address received by email.
    Then **Add Widget**.

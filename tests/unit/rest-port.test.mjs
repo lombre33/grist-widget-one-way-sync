@@ -1,5 +1,5 @@
 // Les requêtes REST du moteur (js/engine/rest-port.js), essayées sur un `http` en mémoire : aucun réseau, aucun
-// Grist, aucun navigateur. C'est ce que fait un hôte (Sync+, GFS) : donner `http` et recevoir les fonctions du
+// Grist, aucun navigateur. C'est ce que fait un hôte (syncPlus, GFS) : donner `http` et recevoir les fonctions du
 // port. L'`http` du test garde la liste des appels pour vérifier l'ordre et ce qui n'est pas parti.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,6 +72,14 @@ test('createWebhook : un Grist qui refuse le champ « condition » est dit trop 
   await assert.rejects(rest.createWebhook({ name: 'n', memo: 'm', url: HOOK_URL, tableId: 'Synchro', condition: 'x' }), /gristTooOld/);
   const other = port(() => refusal(500, 'boum')).rest;
   await assert.rejects(other.createWebhook({ name: 'n', memo: 'm', url: HOOK_URL, tableId: 'Synchro', condition: 'x' }), /HTTP 500/);
+});
+
+test('createWebhook : une adresse que l\'instance n\'autorise pas (ALLOWED_WEBHOOK_DOMAINS) n\'est pas prise pour un manque de droits', async () => {
+  const forbidden = port(() => refusal(403, '{"error":"Provided url is forbidden"}'));
+  await assert.rejects(forbidden.rest.createWebhook({ name: 'n', memo: 'm', url: HOOK_URL, tableId: 'Synchro', condition: 'x' }), /^Error: webhookForbidden$/);
+  assert.equal(forbidden.http.calls.length, 1, 'rien d\'autre n\'est tenté');
+  const notOwner = port(() => refusal(403, '{"error":"No owner access"}'));
+  await assert.rejects(notOwner.rest.createWebhook({ name: 'n', memo: 'm', url: HOOK_URL, tableId: 'Synchro', condition: 'x' }), /^Error: ownerOnly$/);
 });
 
 test('deleteWebhook : la file de ce webhook est vidée avant, et un échec de la file ne retient pas l\'effacement', async () => {

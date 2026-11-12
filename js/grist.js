@@ -60,7 +60,7 @@ export const isReadOnly = () => new URLSearchParams(location.search).get('readon
 export const withLock = (name, fn) => (navigator.locks ? navigator.locks.request(name, fn) : fn());
 
 // ---------------------------------------------------------------------------------------------
-// `http` du moteur (voir engine/rest-port.js pour le contrat) : ce que Sync+ ajoute aux requêtes REST.
+// `http` du moteur (voir engine/rest-port.js pour le contrat) : ce que syncPlus ajoute aux requêtes REST.
 
 // Une réponse de Grist en `{ status, body }` : le corps est lu en JSON (null s'il est vide ou illisible). Un
 // refus (hors 2xx) devient une erreur portant `status` et le début du texte (`message`).

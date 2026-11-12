@@ -28,8 +28,10 @@ Ne pas ouvrir de ticket public. Utiliser la VDP de l'État
   recopier des données, et un destinataire ne peut pas signer pour un autre.
 - Règles d'accès posées par le widget : `Synchro` réservée aux propriétaires de la SOURCE, journaux
   de la CIBLE réservés à ses éditeurs (case cochée par défaut).
-- Niveau **Renforcé**, au choix à l'invitation : code de contrôle à comparer obligatoirement,
-  toute suppression reçue à valider, pas de lien public.
+- Niveau **Renforcé**, au choix à l'invitation : code de contrôle à comparer obligatoirement, pas
+  de lien public.
+- Sur `grist.numerique.gouv.fr`, les webhooks sont **limités à l'instance** : aucun webhook ne peut
+  faire sortir des données vers un autre serveur (voir « Chaîne d'approvisionnement »).
 
 ## Surface
 
@@ -537,7 +539,25 @@ Pour un usage en production :
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et
   la politique de `index.html` que les instances Grist utilisées ;
-- relire le code à chaque mise à jour : environ 7 200 lignes de JavaScript commenté, sans dépendance.
+- relire le code à chaque mise à jour : environ 13 500 lignes de JavaScript commenté, sans dépendance.
+
+**Webhooks limités à l'instance.** Un webhook part du serveur Grist, page fermée : une copie piégée
+du widget, ouverte par un propriétaire, pourrait en créer un vers n'importe quelle adresse que le
+serveur accepte. La barrière est un réglage de l'instance, la liste des domaines autorisés pour les
+webhooks (`ALLOWED_WEBHOOK_DOMAINS` de Grist), qui vaut pour ce widget comme pour tout propriétaire
+d'un document :
+
+- sur `grist.numerique.gouv.fr`, les webhooks sont limités à l'instance (réponse du porteur du
+  projet, 12 novembre 2026 ; point 14 de l'audit de sécurité du 16 octobre) : un webhook vers un
+  autre serveur est refusé, et qui en a besoin doit écrire aux administrateurs pour demander l'ajout
+  de son adresse à la liste. Le widget n'en a pas besoin : ses envois vont d'un document à l'autre
+  de la même instance ;
+- sur une autre instance, vérifier ce réglage auprès de son administrateur. S'il n'autorise pas
+  l'instance elle-même, Grist refuse de créer le webhook (403 « Provided url is forbidden », vérifié
+  sur Grist 1.7) : le widget le dit au branchement (`error.webhookForbidden`) et rien n'est branché ;
+  il faut alors demander l'ajout de l'adresse de l'instance à la liste. S'il autorise tout (`*`),
+  cette barrière n'existe pas : raison de plus pour n'installer que la copie officielle ou une
+  copie figée.
 
 ## Ce que le widget ne fait pas
 

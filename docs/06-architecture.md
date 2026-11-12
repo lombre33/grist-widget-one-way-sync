@@ -110,13 +110,13 @@ Le code est coupé en deux : le **moteur** (`js/engine/`), qui crée, lit, écri
 **écrans** (le reste de `js/`), qui appellent le moteur, jamais l'inverse. Le moteur n'utilise ni `document`, ni
 `window`, ni `location`, ni `navigator`, ni le global `grist` (`tests/unit/engine.test.mjs` le vérifie). Il ne parle
 au monde que par un objet `port`, rempli au démarrage par `startEngine({ port, prefix })` : `js/sync-port.js`
-est le port de Sync+ seul. Contrat du port, préfixe et version : `js/engine/README.md`.
+est le port de syncPlus seul. Contrat du port, préfixe et version : `js/engine/README.md`.
 
 | Fichier | Rôle |
 |---|---|
 | `index.html`, `css/style.css` | Page du widget, politique de sécurité du contenu, charte graphique |
 | `js/main.js`, `js/config.js` | Démarrage, onglets, Réglages ; instances Grist autorisées, version |
-| `js/grist.js`, `js/sync-port.js` | Accès au document (API des widgets) et l'`http` de Sync+ (jeton `auth=`, liste des instances) ; `gristFetch`, seule porte vers le réseau. Les requêtes REST elles-mêmes sont dans le moteur (`engine/rest-port.js`). `sync-port.js` en fait le `port` du moteur (avec les textes `i18n`, la visibilité de la page, `localStorage`) |
+| `js/grist.js`, `js/sync-port.js` | Accès au document (API des widgets) et l'`http` de syncPlus (jeton `auth=`, liste des instances) ; `gristFetch`, seule porte vers le réseau. Les requêtes REST elles-mêmes sont dans le moteur (`engine/rest-port.js`). `sync-port.js` en fait le `port` du moteur (avec les textes `i18n`, la visibilité de la page, `localStorage`) |
 | `js/tab-link.js`, `js/tab-link-ui.js` | Canal entre onglets du même navigateur (`BroadcastChannel`, 0.15) : l'invitation et la réponse passent d'un document à l'autre sans copier-coller. Transport de texte côté écran (pas dans le moteur) : le moteur juge le code reçu comme un code collé ; `tab-link-ui.js` : bloc « envoyer à l'autre onglet » et avis d'invitation reçue |
 | `js/form-link.js` | Lien du formulaire : où le trouver, images d'aide (le test du lien est dans le moteur) |
 | `js/diagnostic.js` | Diagnostic à copier (Réglages) : donne au moteur (`engine/diagnostic.js`) la version, l'origine du widget, la lecture seule et le navigateur ; `logic/diagnostic.js` écrit le texte |

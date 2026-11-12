@@ -53,7 +53,7 @@ test('texte : exports, réceptions, erreurs, sans secret, clé, courriel ni docu
     errors: [{ at: 1760000000000, text: 'Lien refusé' }], t,
   });
   for (const secret of [KEY.slice(4), 'ana@', 'bob@', 'chut', 'docXYZ', 'doc123', 'B'.repeat(20), 'abcd1234']) assert.ok(!text.includes(secret), secret);
-  for (const said of ['Diagnostic Synchro Grist 0.12.0 (bêta)', 'Instance : https://g.fr', 'Export 01234567 « Annuaire » (echange, renforcé)',
+  for (const said of ['Diagnostic syncPlus 0.12.0 (bêta)', 'Instance : https://g.fr', 'Export 01234567 « Annuaire » (echange, renforcé)',
     'tables : Contacts (2 col., filtre)', 'tables introuvables : Villes', 'colonnes changées : Contacts.Tel', 'lots coupés : Contacts',
     'destinataire f00dcafe : actif, retrying, file 3', 'HTTP 400, 4 essais, « Invalid column', 'Export e2 « Vide » (public)', 'aucun destinataire',
     'Webhooks sur Synchro sans filtre reconnu : 1', 'Lignes de Synchro : cles 1, lot 1', 'rythme lent',
@@ -103,7 +103,7 @@ test('texte en anglais : mêmes lignes, aucun mot de français laissé, mêmes s
     target: { compare: true, visible: true, journals: [journalFacts({ journal: 'Journal_annuaire', note, signed: 'k', offers: 0, stats: { n: 5, last: 0, raw: 1 }, t: en })] },
     errors: [], t: en,
   });
-  for (const said of ['Synchro Grist diagnostic 0.12.0 (beta)', 'Access: editor', '== Send', '== Receive', '== Recent errors', 'Export 01234567 “Annuaire” (exchange, reinforced)',
+  for (const said of ['syncPlus diagnostic 0.12.0 (beta)', 'Access: editor', '== Send', '== Receive', '== Recent errors', 'Export 01234567 “Annuaire” (exchange, reinforced)',
     'tables: Contacts (2 cols, filter)', 'changed columns: Contacts.Tel', 'recipient f00dcafe: active, retrying, queue 3', '5 rows, no arrival date, 1 raw sends not copied yet',
     'Reception Journal_annuaire (export fedcba98, exchange, reinforced)', 'signed: yes, seal: yes, reserved for editors: waiting', 'Page visible: yes', 'None.']) assert.ok(text.includes(said), said);
   for (const french of ['destinataire', 'Aucun', 'colonnes', 'réservée', 'Droits', 'Navigateur']) assert.ok(!text.includes(french), french);

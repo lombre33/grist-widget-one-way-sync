@@ -178,7 +178,7 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
     const leaks = ['source@fake.local', 'cible@fake.local', key, story.exp.id, story.entry.id, 'sourcedoc0001x', 'targetdoc0002x'];
     withText(source, 'fr');
     const sent = await diagnostic({ version: '9.9.9', served: 'essai', readOnly: false, agent: 'Node' });
-    assert.match(sent, /^Diagnostic Synchro Grist 9\.9\.9 \(essai\)/);
+    assert.match(sent, /^Diagnostic syncPlus 9\.9\.9 \(essai\)/);
     assert.match(sent, /Instance : https:\/\/fake\.example/);
     assert.match(sent, /Droits : propriétaire/);
     assert.match(sent, new RegExp(`Export ${story.exp.id.slice(0, 8)} « Annuaire » \\(sens unique\\)`));
@@ -186,7 +186,7 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
     assert.match(sent, /destinataire [0-9a-z-]+ : actif/);
     withText(target, 'en');
     const received = await diagnostic({ version: '9.9.9', served: 'essai', readOnly: true, agent: 'Node' });
-    assert.match(received, /^Synchro Grist diagnostic 9\.9\.9 \(essai\)/);
+    assert.match(received, /^syncPlus diagnostic 9\.9\.9 \(essai\)/);
     assert.match(received, /Access: reader/);
     assert.match(received, /Reception Journal_Annuaire \(export /);
     assert.match(received, /tables: Contacts → Annuaire_recu/);

@@ -94,7 +94,7 @@ test('CIBLE : une destination donnée par l\'hôte reste intacte, sans y remettr
   const journal = journalId('Dossiers', (await readSchema()).tableIds);
   assert.equal(journal, 'GFS_Journal_Dossiers');
   // L'hôte (un écran de GFS) a choisi l'identifiant exact de la destination : `dest` n'est pas préfixé,
-  // le moteur ne le préfixe pas (seul le nom que l'écran de Sync+ propose passe par destTableId).
+  // le moteur ne le préfixe pas (seul le nom que l'écran de syncPlus propose passe par destTableId).
   await receive(journal, 'Dossiers', 'Dossiers_recus');
   assert.ok(doc.has('Dossiers_recus'), 'la destination porte exactement l\'identifiant donné');
   assert.ok(!doc.has('GFS_Dossiers_recus'));

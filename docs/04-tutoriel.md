@@ -40,7 +40,7 @@ comme avant.
 ## 0. Installer le widget (dans chaque document)
 
 **Ajouter**, **Ajouter une page**, vue **Personnalisée** (une table qui existe déjà, par exemple Table1, jamais une table qu'on crée et qu'on nomme Synchro), **Ajouter une
-page** ; choisir Synchro Grist dans la galerie de l'instance s'il y est, sinon **URL
+page** ; choisir syncPlus dans la galerie de l'instance s'il y est, sinon **URL
 personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
 ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
 **Ajouter un widget** (Grist peut demander de confirmer).
@@ -66,7 +66,7 @@ tables de destination et, pour un propriétaire, gère les webhooks et les règl
 Un accès en lecture ne le permet pas (voir [Accès au document](../README.md#accès-au-document)). Il
 ne parle qu'à l'instance Grist, jamais à un autre serveur.
 
-Renommer la page, par exemple « Synchro Grist ». Ne pas créer soi-même de table nommée Synchro :
+Renommer la page, par exemple « syncPlus ». Ne pas créer soi-même de table nommée Synchro :
 c'est le nom de la table technique que le widget crée seul. Les tables techniques n'ont pas de
 page : elles sont dans « Données source ».
 
@@ -602,6 +602,7 @@ une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Éch
 | « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
+| « Cette instance n'autorise pas les webhooks vers sa propre adresse » au branchement | Grist n'envoie un webhook qu'aux adresses que l'administrateur de l'instance autorise (réglage `ALLOWED_WEBHOOK_DOMAINS`) | Sur grist.numerique.gouv.fr, rien à faire : les webhooks y sont limités à l'instance. Sur une autre instance, écrire à son administrateur pour faire ajouter l'adresse de l'instance à la liste des domaines autorisés |
 | Le widget affiche « besoin de l'accès complet » | Grist ne lui a pas accordé l'accès complet | Panneau de droite de Grist, clic sur le widget, **Niveau d'accès** : **Accepter** ou **Accès complet au document** |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 

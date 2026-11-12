@@ -1,9 +1,9 @@
-# Le moteur de Sync+ (`js/engine/`)
+# Le moteur de syncPlus (`js/engine/`)
 
 Ce dossier crée, lit, écrit et décide ; il ne dessine rien. Les écrans (`js/source/`, `js/target/`, `js/ui.js`…)
 appellent le moteur, jamais l'inverse. Modules ES, sans bibliothèque ni étape de build.
 
-**Version du moteur : `ENGINE_VERSION` dans `version.js`** (l'historique des versions y est aussi). Elle ne suit pas la version de Sync+ : elle
+**Version du moteur : `ENGINE_VERSION` dans `version.js`** (l'historique des versions y est aussi). Elle ne suit pas la version de syncPlus : elle
 change quand le moteur change ce qu'il attend du port, ce qu'il écrit dans les documents ou le sens d'un champ des
 codes (`CODE_FORMAT`). Majeure : un port, un nom de table ou un format qui ne se lisent plus comme avant.
 
@@ -66,7 +66,7 @@ d'état de départ, état que Grist ne connaît plus, table renommée, Grist mue
 Un hôte écrit `fetchRows`, `apply`, `readSchema`, `docIdentity`, `withLock`, `text`, `page`, `prefs`, et donne `http` à
 `createRestPort` pour le reste.
 
-Sync+ seul remplit ce port avec `js/sync-port.js`. `tests/unit/engine-fake.mjs` en est un autre : un Grist en mémoire.
+syncPlus seul remplit ce port avec `js/sync-port.js`. `tests/unit/engine-fake.mjs` en est un autre : un Grist en mémoire.
 `readSchema` rend un schéma bâti par `logic/schema.js` (`schemaFrom(lignes de _grist_Tables, lignes de _grist_Tables_column)`).
 
 ## Les requêtes REST : `createRestPort({ docApi, http })` (`rest-port.js`)
@@ -79,7 +79,8 @@ startEngine({ port: { fetchRows, apply, readSchema, docIdentity, withLock, text,
 
 `docApi.fetchRows(tableId)` : les lignes d'une table du document (celles de `_grist_Triggers` y sont lues pour la condition
 des webhooks). Ce que le moteur écrit lui-même, une fois pour tous les hôtes : la condition d'un webhook relue après sa
-création (webhook effacé et erreur `gristTooOld` si elle manque), la file d'un webhook vidée avant son effacement, l'avis de
+création (webhook effacé et erreur `gristTooOld` si elle manque), l'adresse de webhook que l'instance n'autorise pas (erreur
+`webhookForbidden`, voir « Erreurs »), la file d'un webhook vidée avant son effacement, l'avis de
 fin envoyé avant d'effacer (un lien mort ne retient rien), l'envoi direct limité à l'instance du document (`otherInstance`),
 les clés abrégées dans les messages d'erreur, la comparaison d'états de `docChanges` (état perdu = inconnu, jamais « rien »),
 le SQL de `selectRows` et `journalStats`.
@@ -98,12 +99,16 @@ le SQL de `selectRows` et `journalStats`.
 `status` (nombre) et `message` (le début du texte de la réponse, 200 caractères au plus) ; sans réponse (réseau muet,
 délai dépassé), une erreur **sans** `status`. Le moteur distingue les deux : un refus devient une réponse `{ status }` qu'il
 interprète (403 = pas propriétaire, 404 = clé inconnue…), un réseau muet remonte ou vaut « inconnu » selon la fonction.
-`tests/unit/rest-port.test.mjs` joue ces cas sur un `http` en mémoire ; `js/grist.js` est l'`http` de Sync+ (jeton `auth=`,
+Depuis la 4.2.0, un 403 dont le `message` contient « url is forbidden » (Grist : « Provided url is forbidden », l'adresse du
+webhook n'est pas dans la liste `ALLOWED_WEBHOOK_DOMAINS` de l'instance) devient l'erreur `webhookForbidden`, pas `ownerOnly` :
+l'`http` de l'hôte doit donc bien mettre le texte de la réponse dans `message`, et l'hôte fournir le texte `error.webhookForbidden`
+(« demandez à l'administrateur de l'instance d'ajouter son adresse à la liste des domaines autorisés pour les webhooks »).
+`tests/unit/rest-port.test.mjs` joue ces cas sur un `http` en mémoire ; `js/grist.js` est l'`http` de syncPlus (jeton `auth=`,
 liste des instances).
 
 ## Les enchaînements des assistants, sans fenêtre
 
-Un assistant de l'écran de Sync+ est une suite d'étapes ; ce que chaque étape fait quand la personne la valide est dans
+Un assistant de l'écran de syncPlus est une suite d'étapes ; ce que chaque étape fait quand la personne la valide est dans
 le moteur, en fonctions qui prennent des données simples et rendent des données (aucun nœud, aucun texte d'écran :
 la personne ne lit que `port.text` ou une erreur prévue, `failure('<code>')`). L'écran (ou GFS) garde les fenêtres,
 les boutons et l'ordre des écrans. `tests/unit/engine-flow.test.mjs` joue tout le parcours (SOURCE, CIBLE, un lot
@@ -249,13 +254,13 @@ Audit offensif du 12 novembre (415 routes de lecture, visiteur du lien public, l
 destinataire : un moteur 3.x y lit un nom, y écrit encore la fiche, et reposerait des règles d'accès d'avant.
 - **`protectSync()`** (`acl.js`) : crée la table `<préfixe>Synchro` vide (`createSyncTable`), pose les règles d'accès même si un assistant est
   ouvert (`syncRules({ force: true, strict: true })`) et rend vrai si le document va se recharger. L'hôte l'appelle **avant** d'ouvrir l'assistant
-  d'export (Sync+ : `newExport` de `js/source/tab.js`, qui note la demande avec `askWizard` AVANT l'appel, la page étant rechargée avant qu'il
+  d'export (syncPlus : `newExport` de `js/source/tab.js`, qui note la demande avec `askWizard` AVANT l'appel, la page étant rechargée avant qu'il
   ne rende, puis rouvre l'assistant avec `wizardAsked`). Il lève `rulesRefused` si Grist refuse les règles, `syncTableForeign` si une table
   nommée `Synchro` n'est pas celle du moteur. **`syncUnprotected()`** dit, sans rien écrire, si un Échange reçu écrirait dans une `Synchro` sans
   règles : l'hôte passe alors par `protectSync` avant (`showProtect` de `js/target/wizard.js`). Un hôte qui crée un export sans `protectSync`
   garde la fenêtre d'avant : la première ligne d'export, copie des colonnes envoyées, est lisible jusqu'à la pose des règles.
 - **`ruleRefusal()`** : texte du dernier refus de Grist à poser les règles (une règle d'une personne nomme une colonne effacée : « Invalid
-  columns in rules for table X: Y »), `null` sinon. L'hôte le montre aux propriétaires (`rulesRefusedNotice` dans Sync+) et bloque le nouvel export.
+  columns in rules for table X: Y »), `null` sinon. L'hôte le montre aux propriétaires (`rulesRefusedNotice` dans syncPlus) et bloque le nouvel export.
   Le moteur ne touche jamais aux règles d'autrui.
 - **Mémo = jeton** : `MEMO_TOKEN` (`r-` et douze chiffres hexadécimaux, `isMemoToken` de `logic/notes.js`). La fiche (courriel, document,
   équipe/nom) est dans la note de la SOURCE (`dest`, `putDest`, `destOf`, `staleDest`, `dropDest`) ; `rememberDest(memo)` la range et rend le
