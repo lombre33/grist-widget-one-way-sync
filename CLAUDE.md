@@ -400,7 +400,9 @@ Moteur **4.3.0** (mineure, dite dans `GFS-ETAT.md`).
 - **Limites** : une table sans page n'a pas de bouton (`noPageForTable` si l'appel est forcé) ; la page qui montre la table est la sienne (`destPageViews`) ; un document dont la
   personne ne peut pas lire les métadonnées n'a pas de bouton. SECURITY.md (« Actions de structure ») : une section du widget lui-même, sur clic confirmé, sans accès accordé.
 - Testé : unit 427+ (`page-widget`, `engine-widget-page` : ajout sans accès, deuxième clic sans effet, widget d'une autre page, adresse de la personne reprise, refus sans écriture ; le fake de
-  Grist gère `CreateViewSection` `'custom'`) ; e2e `ONLY_WIDGETPAGE=1` (`widgetPageSteps`, dans le parcours complet après `cleanSteps`).
+  Grist gère `CreateViewSection` `'custom'`) ; e2e `ONLY_WIDGETPAGE=1` (`widgetPageSteps`, dans le parcours complet après `cleanSteps`) : une table (bouton, fenêtre, « Annuler » sans effet, section sans accès accordé, widget
+  non rechargé, accord dans le panneau de droite, recopie par ce widget), puis une réception de deux tables (la fenêtre demande laquelle, la section arrive sur la page choisie, le bouton
+  disparaît). Parcours complet vert (71 étapes) sur le premier commit de la 0.20.0.
 
 ## État précédent : V0.19.2 (12 novembre 2026)
 

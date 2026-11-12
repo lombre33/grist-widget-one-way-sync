@@ -818,6 +818,43 @@ try {
     await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Ville: 'Marseille' }]]);
     await waitFor(async () => (await fiches()).Anna?.Ville === 'Marseille', 'modification reçue par le widget de la page de la table', 90000);
     step('Ajouter le widget à la page de la table reçue : bouton sur la carte, fenêtre (annuler n\'ajoute rien), section sans accès accordé, widget non rechargé, accès accepté dans Grist puis recopie par ce widget');
+
+    // Une réception de deux tables : la fenêtre demande laquelle, et la section arrive sur la page choisie (un seul widget suffit,
+    // le bouton disparaît ensuite).
+    const src2 = await newDocWithWidget('Pages SOURCE 2', [
+      ['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }]], ['BulkAddRecord', 'Fiches', [null, null], { Nom: ['Anna', 'Basile'] }],
+      ['AddTable', 'Dossiers', [{ id: 'Titre', type: 'Text' }]], ['AddRecord', 'Dossiers', null, { Titre: 'Un' }],
+    ]);
+    const dst2 = await newDocWithWidget('Pages CIBLE 2');
+    await openWidget(src2.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Fiches' }).check();
+    await dialog().getByRole('checkbox', { name: 'Dossiers' }).check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Deux tables');
+    await dialogButton('Créer l’export').click();
+    const answer2 = await accept(dst2.doc, dst2.url, await plainInvitation(), '« Deux tables » : tables');
+    await approve(answer2, { url: src2.url });
+    await openWidgetTab(dst2.url, 'Recevoir');
+    await waitFor(async () => (await records(dst2.doc, 'Fiches')).length === 2 && (await records(dst2.doc, 'Dossiers')).length === 1, 'deux tables reçues', 60000);
+    const customs2 = async () => (await records(dst2.doc, '_grist_Views_section')).filter(sc => sc.parentKey === 'custom');
+    const viewOf = async tableId => (await records(dst2.doc, '_grist_Tables')).find(tb => tb.tableId === tableId).primaryViewId;
+    await button('Ajouter le widget à la page d’une table reçue').click();
+    await dialog().getByText(/Une section du widget est ajoutée à la page de la table choisie ci-dessous/).waitFor();
+    const picker = dialog().locator('.pick-button');
+    const first = (await picker.textContent()).trim();
+    assert.ok(['Fiches', 'Dossiers'].includes(first), `la première table est proposée : ${first}`);
+    const other = first === 'Fiches' ? 'Dossiers' : 'Fiches';
+    await picker.click();
+    await dialog().getByRole('option', { name: other, exact: true }).click();
+    await dialogButton('Ajouter le widget').click();
+    await widget().getByText(new RegExp(`Widget ajouté à la page de ${other}\\. Ouvrez cette page`)).waitFor({ timeout: 30000 });
+    const onPages = (await customs2()).map(sc => sc.parentId);
+    assert.ok(onPages.includes(await viewOf(other)) && !onPages.includes(await viewOf(first)), `la section est sur la page de ${other}, pas sur celle de ${first}`);
+    assert.equal(await widget().getByRole('button', { name: /Ajouter le widget à la page/ }).count(), 0, 'le widget est sur la page d\'une table de la réception : plus de bouton');
+    step('Ajouter le widget : réception de deux tables, la fenêtre demande laquelle, la section arrive sur la page choisie, le bouton disparaît');
   }
 
   // --- Export filtré : la liste des choix d'une colonne Choix ne part pas (elle montrerait des
