@@ -205,7 +205,10 @@ fenêtre demande laquelle). Grist demande ensuite l'accès complet pour cette se
 page, puis le panneau de droite (icône tout en haut à droite) et cliquer sur « Accepter ». Un seul
 widget ouvert suffit pour toutes les réceptions du document, tables et Références comprises (leur
 état est dans le document, pas dans une copie du widget) : le bouton sert à le poser là où vous
-travaillez. Le bouton disparaît dès que le widget est sur la page d'une table de la réception.
+travaillez. Tant que le widget n'est sur la page d'aucune table de la réception, sa carte est
+**orange** (« Widget à ajouter », à la place de « À jour ») et un avis l'explique, avec le bouton dedans :
+le widget n'est pas ajouté tout seul. Le bouton et l'avis disparaissent dès que le widget est sur la page
+d'une table de la réception.
 
 **Réception supprimée.** Si le journal est supprimé (avec ou sans la table qui reçoit), l'onglet
 Recevoir le dit : « Réception supprimée : <export> », ce qui reste des tables, ce que fait la SOURCE

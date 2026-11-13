@@ -188,7 +188,9 @@ function cardStatus(group) {
   // Changements d'un Échange à valider, colonnes ou table déjà remplie qui attendent l'accord de la personne (voir structure.js).
   if (tables.some(r => r.pendingCount || (r.structure && (r.structure.adoption || r.structure.held.length)))) return ['review', 'pending'];
   const incomplete = Object.keys({ ...note.missing, ...note.big, ...(state.results.get(journal) || {}).tally }).length || tables.some(r => r.files && (r.files.waiting || r.files.held));
-  return incomplete ? ['incomplete', 'pending'] : ['ok', 'ok'];
+  if (incomplete) return ['incomplete', 'pending'];
+  // Les données sont à jour, mais le widget n'est sur la page d'aucune table reçue : il s'arrête dès qu'on les ouvre (voir widgetNotice).
+  return widgetCandidates(group).length ? ['widget', 'pending'] : ['ok', 'ok'];
 }
 
 // Pièces jointes d'une table reçue : fichiers attendus (ils partent quand un propriétaire de la
@@ -331,6 +333,7 @@ function syncCard(group) {
     el('div', { class: 'card-head' }, el('strong', {}, note.name), pill(t(`recv.status.${status}`), tone)),
     cardOrigin(group),
     note.tables.map(entry => tableLine(group, entry)),
+    widgetNotice(group),
     cardNotes(group),
     note.tables.map(entry => filesNotes(group, entry)),
     uploadErrors(group.journal).map(e => message('warn', t('recv.files.refused', { name: e.name, error: e.error }))),
@@ -342,14 +345,15 @@ function syncCard(group) {
       group.public || note.mode === 'echange' ? null : button(t('recv.action.options'), 'settings', () => optionsDialog(group, group.owner, renderTarget)),
       group.waiting || note.mode === 'echange' || !sentKinds(group).length ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
       group.waiting || !group.owner ? null : button(t('recv.action.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), () => cleanReception(group))),
-      widgetButton(group),
       group.waiting ? null : reportButton(),
       button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
 }
 
-// « Ajouter le widget à la page de la table reçue » (voir widget-page.js) : absent quand le widget est déjà sur la page d'une
-// table de cette réception. Avis de la dernière action gardé une minute, comme les autres.
-function widgetButton(group) {
+// Le widget n'est sur la page d'aucune table de cette réception (voir widget-page.js) : la recopie s'arrête dès que la personne
+// ouvre une de ces tables. Avis orange (l'état de la carte aussi, voir cardStatus) avec le bouton « Ajouter le widget à la page de
+// la table reçue », qui disparaît avec l'avis dès que le widget est sur la page d'une table de la réception. Le résultat de la
+// dernière action est gardé une minute, comme les autres (`flash`).
+function widgetNotice(group) {
   const candidates = widgetCandidates(group);
   if (!candidates.length) return null;
   const add = async () => {
@@ -358,7 +362,11 @@ function widgetButton(group) {
     flash = { node: message(done.added ? 'ok' : 'info', t(done.added ? 'recv.widget.done' : 'recv.widget.already', { table: done.dest })), until: Date.now() + NOTICE_MS };
     await renderTarget();
   };
-  return button(widgetLabel(candidates), 'plus', e => run(e.currentTarget, container.querySelector('.out'), add));
+  return notice({
+    tone: 'warn', title: t('recv.widget.missing.title'), 'data-widget-missing': '',
+    lines: [candidates.length === 1 ? t('recv.widget.missing.one', { table: candidates[0] }) : t('recv.widget.missing.some'), t('recv.widget.missing.next')],
+    actions: [button(widgetLabel(candidates), 'plus', e => run(e.currentTarget, container.querySelector('.out'), add), 'btn-primary')],
+  });
 }
 
 // D'où vient la réception : la personne et son document (en lien, voir sourceLine), lien public, sens de l'Échange.

@@ -375,7 +375,27 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.28.2 (13 novembre 2026)
+## État : V0.28.3 (13 novembre 2026)
+
+V0.28.3 (Antoine, 13 novembre, sur la Bêta : « j'ai ajouté le widget dans une table A, et j'ai dit de créer une nouvelle table B pour la donnée importée côté cible. Le widget m'a indiqué dans
+une pop-up qu'il mettrait lui-même le widget dans la bonne table mais rien dans la table B ? », puis, ayant trouvé le bouton : « rien n'indique que c'est nécessaire, il faut que le partage soit en
+orange quand le widget n'est pas au moins dans l'une des tables du partage »). **Moteur inchangé (5.0.0)**, écran seul. Antoine a levé l'interdiction de pousser pendant ses essais (« c'est une
+version de dev, c'est fait pour ça ») : le travail part sur `main` une fois vert.
+- **Cause** : pas un défaut de code. Le bouton de la 0.20.0 était un bouton parmi d'autres sur la carte, l'état disait « À jour » et le texte de la fenêtre « Nouvelle table » se lisait comme une pose
+  automatique. Une table créée par le widget a sa propre page, sans le widget : rester dessus ne recopie rien (Grist détruit l'iframe quand on change de page).
+- **La carte est orange** (`cardStatus` de `js/target/tab.js` : `['widget', 'pending']`, texte `recv.status.widget` « Widget à ajouter ») dès que `widgetCandidates(group)` n'est pas vide, donc quand
+  les données sont à jour mais que le widget n'est sur la page d'aucune table de la réception (et seulement alors : jamais en attente du lien, pour un retour d'Échange, quand les emplacements sont
+  inconnus ou qu'aucune destination n'a de page). Les états plus graves (erreur, « À valider », « incomplet ») passent avant.
+- **Avis dans la carte** (`widgetNotice`, remplace `widgetButton` ; `data-widget-missing`, ton `warn`) : titre « Le widget n'est sur la page d'aucune table reçue », la raison (il s'arrête quand on
+  ouvre la page de la table, un seul widget suffit pour tout le document) et le bouton « Ajouter le widget à la page de … » **dans l'avis**, plus dans la rangée des actions. Avis et état orange
+  disparaissent dès que le widget est sur une page d'une table reçue (testé). Textes `recv.widget.missing.*`.
+- **Fenêtre « Nouvelle table »** (`recv.new.body`, `recv.new.after`) : dit que le widget n'est **pas** ajouté tout seul et que la carte restera orange (« Widget à ajouter ») jusqu'au clic sur le bouton ;
+  le titre (« Nouvelle table : le widget n'y sera pas ») est inchangé (l'e2e l'attend). Tutoriel (`i18n/tutorial.json`) et `docs/04` mis à jour.
+- **Piège de l'essai** : dans l'e2e, toute réception dont la table reçue a une page sans le widget (le cas courant) est maintenant « Widget à ajouter » au lieu de « À jour » : `adoptSteps` accepte
+  les deux ; ne pas écrire de nouvelle attente de `.pill-ok` sans y penser.
+- Testé : unit 516 ; e2e `ONLY_WIDGETPAGE=1` (carte orange avant le clic, avis avec le bouton, retour à « À jour » après l'ajout, capture `widget-a-ajouter.png` avec `SHOTS=<dossier>`).
+
+## État précédent : V0.28.2 (13 novembre 2026)
 
 V0.28.2 (Antoine, 13 novembre, avant la sortie de la Bêta : « oui s'il te plaît » à « relever `CODE_FORMAT`, comme le fil des références entre tables l'avait annoncé »).
 Moteur **5.0.0, majeure** (règle de `version.js` : un format de code que le moteur d'avant ne lit plus ; dite dans `GFS-ETAT.md`). **Rien n'est publié** (Alpha gelée).

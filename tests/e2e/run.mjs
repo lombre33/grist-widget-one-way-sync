@@ -793,6 +793,18 @@ try {
     assert.equal((await customs()).length, 1, 'un seul widget au départ, sur la page Synchro');
     const add = button('Ajouter le widget à la page de Fiches');
     await add.waitFor({ timeout: 30000 });
+    // Rien ne dit sinon que le bouton est nécessaire : la carte est orange (« Widget à ajouter », pas « À jour ») et un avis
+    // l'explique, avec le bouton dedans.
+    const card = widget().locator('article.card', { hasText: 'Annuaire' });
+    const missing = card.locator('[data-widget-missing]');
+    await missing.waitFor({ timeout: 30000 });
+    await card.locator('.pill-pending', { hasText: 'Widget à ajouter' }).waitFor();
+    assert.equal(await card.locator('.pill-ok').count(), 0, 'pas « À jour » tant que le widget n’est sur aucune table reçue');
+    assert.ok(await missing.evaluate(node => node.classList.contains('msg-warn')), 'avis orange');
+    await missing.getByText('Le widget n’est sur la page d’aucune table reçue').waitFor();
+    await missing.getByText(/Si vous ouvrez la page de Fiches, il s’arrête et rien de nouveau n’y arrive/).waitFor();
+    assert.equal(await missing.getByRole('button', { name: 'Ajouter le widget à la page de Fiches' }).count(), 1, 'le bouton est dans l’avis');
+    if (process.env.SHOTS) await card.screenshot({ path: join(process.env.SHOTS, 'widget-a-ajouter.png') });
     await widget().locator('.card-actions').first().scrollIntoViewIfNeeded();
     const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
     await widgetFrame.evaluate(() => { window.sameFrame = true; });
@@ -814,6 +826,9 @@ try {
     const def = JSON.parse(JSON.parse(placed[0].options).customView);
     assert.deepEqual([def.mode, def.url, def.access], ['url', WIDGET_URL, 'none'], 'même widget, accès non accordé');
     assert.equal(await add.count(), 0, 'le bouton disparaît une fois le widget sur la page');
+    assert.equal(await missing.count(), 0, 'l’avis disparaît avec lui');
+    await card.locator('.pill-ok', { hasText: 'À jour' }).waitFor();
+    assert.equal(await card.locator('.pill-pending').count(), 0, 'la carte n’est plus orange');
     assert.ok(await widgetFrame.evaluate(() => window.sameFrame), 'ajouter une section à une autre page ne recharge pas le widget');
     assert.equal((await customs()).length, 2);
 
@@ -1227,7 +1242,8 @@ try {
     assert.ok(after.find(r => r.Nom === 'Anna').id_sync, 'la ligne d\'ici rattachée a pris la clé');
     assert.ok(!after.find(r => r.Nom === 'Zoé').id_sync, 'la ligne d\'ici sans pendant ne bouge pas');
     await waitFor(async () => (await preview.count()) === 0, 'aperçu retiré', 30000);
-    assert.match(await widget().locator('article.card').first().innerText(), /À jour/);
+    // La table reçue a sa page sans le widget : la carte est à jour mais orange (« Widget à ajouter », voir widgetPageSteps).
+    assert.match(await widget().locator('article.card').first().innerText(), /À jour|Widget à ajouter/);
     await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Ville: 'Metz' }]]);
     await waitFor(async () => (await records(dst.doc, 'Annuaire')).some(r => r.Nom === 'Basile' && r.Ville === 'Metz'), 'modification reçue sans nouvel aperçu', 90000);
     assert.equal(await widget().locator('[data-structure="adopt"]').count(), 0, 'plus d\'aperçu');
@@ -2647,7 +2663,8 @@ try {
   // Nouvelle table : l'avertissement dit que le widget n'y sera pas et ce qu'il faut faire ; « Annuler » ne crée rien.
   const warning = dialog().last(); // la fenêtre d'avertissement est posée sur l'assistant
   await warning.getByText('Nouvelle table : le widget n’y sera pas').waitFor();
-  await warning.getByText(/ne recopie les données reçues que lorsque sa page est ouverte/).waitFor();
+  await warning.getByText(/n’est pas ajouté tout seul à cette page/).waitFor();
+  await warning.getByText(/la carte de la réception passera en orange/).waitFor();
   await warning.getByText(/Pour sécuriser la réception\s:\scréez d’abord la table vous-même, ajoutez-y le widget/).waitFor();
   await warning.getByRole('button', { name: 'Annuler', exact: true }).click();
   assert.ok(!(await records(target.doc, '_grist_Tables')).some(tb => tb.tableId.startsWith('Journal_')), 'rien de créé tant que la personne ne confirme pas');
