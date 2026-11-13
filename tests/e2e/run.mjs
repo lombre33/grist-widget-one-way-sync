@@ -1546,7 +1546,7 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
-    const elements = dialog().locator('details', { hasText: 'Envoyé avec les colonnes' });
+    const elements = dialog().locator('details:not(.tuto-step)', { hasText: 'Envoyé avec les colonnes' });
     assert.ok(!/ordre et colonnes cachées/.test(await elements.locator('summary').innerText()), 'la mise en page ne part pas sans accord');
     await elements.locator('summary').click();
     const send = dialog().getByRole('checkbox', { name: 'Envoyer l’ordre et les colonnes cachées de la page' });
@@ -1632,7 +1632,7 @@ try {
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
     // Les éléments envoyés avec les colonnes sont repliés derrière une ligne qui dit ce qui part ; chacun a sa case, cochée d'emblée.
-    const elements = dialog().locator('details', { hasText: 'Envoyé avec les colonnes' });
+    const elements = dialog().locator('details:not(.tuto-step)', { hasText: 'Envoyé avec les colonnes' });
     assert.match(await elements.locator('summary').innerText(), /mise en forme, descriptions des colonnes, descriptions des tables/);
     await elements.locator('summary').click();
     const send = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
@@ -1734,7 +1734,7 @@ try {
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    await dialog().locator('summary', { hasText: 'Envoyé avec les colonnes' }).click();
+    await dialog().locator('details:not(.tuto-step) > summary', { hasText: 'Envoyé avec les colonnes' }).click();
     for (const name of ['Envoyer la mise en forme des colonnes', 'Envoyer les descriptions des colonnes', 'Envoyer la description des tables']) {
       const again = dialog().getByRole('checkbox', { name });
       assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
