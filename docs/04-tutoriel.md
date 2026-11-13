@@ -210,6 +210,12 @@ travaillez. Tant que le widget n'est sur la page d'aucune table de la réception
 le widget n'est pas ajouté tout seul. Le bouton et l'avis disparaissent dès que le widget est sur la page
 d'une table de la réception.
 
+![Carte orange : Widget à ajouter, avec l'avis et le bouton](images/44-cible-ajouter-widget.png)
+
+![Fenêtre du bouton : ce qui va se passer](images/45-cible-ajouter-widget-fenetre.png)
+
+![Widget ajouté : la carte repasse à jour](images/46-cible-widget-ajoute.png)
+
 **Réception supprimée.** Si le journal est supprimé (avec ou sans la table qui reçoit), l'onglet
 Recevoir le dit : « Réception supprimée : <export> », ce qui reste des tables, ce que fait la SOURCE
 (son prochain envoi échoue, elle met la personne en pause d'office) et comment s'en sortir

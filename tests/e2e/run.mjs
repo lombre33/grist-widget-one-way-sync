@@ -805,6 +805,7 @@ try {
     await missing.getByText(/Si vous ouvrez la page de Fiches, il s’arrête et rien de nouveau n’y arrive/).waitFor();
     assert.equal(await missing.getByRole('button', { name: 'Ajouter le widget à la page de Fiches' }).count(), 1, 'le bouton est dans l’avis');
     if (process.env.SHOTS) await card.screenshot({ path: join(process.env.SHOTS, 'widget-a-ajouter.png') });
+    await shot('44-cible-ajouter-widget', 'card');
     await widget().locator('.card-actions').first().scrollIntoViewIfNeeded();
     const widgetFrame = page.frames().find(f => f.url().startsWith(WIDGET_URL));
     await widgetFrame.evaluate(() => { window.sameFrame = true; });
@@ -813,6 +814,7 @@ try {
     await dialog().getByText('Ajouter le widget à la page d’une table reçue').waitFor();
     await dialog().getByText(/Un seul widget ouvert suffit pour tout le document/).waitFor();
     await dialog().getByText(/Grist demandera ensuite l’accès complet pour cette nouvelle section/).waitFor();
+    await shot('45-cible-ajouter-widget-fenetre', 'modal');
     await dialogButton('Annuler').click();
     await dialog().waitFor({ state: 'detached' });
     assert.equal((await customs()).length, 1, 'annulé : rien n’est ajouté');
@@ -820,6 +822,7 @@ try {
     await add.click();
     await dialogButton('Ajouter le widget').click();
     await widget().getByText(/Widget ajouté à la page de Fiches\. Ouvrez cette page/).waitFor({ timeout: 30000 });
+    await shot('46-cible-widget-ajoute', 'card');
     const view = await fichesView();
     const placed = (await customs()).filter(sc => sc.parentId === view);
     assert.equal(placed.length, 1, 'une section du widget sur la page de la table reçue');
@@ -2833,6 +2836,15 @@ try {
   await drift.getByText(/Contacts\s:\s1 modification faite à la main ici/).waitFor({ timeout: 30000 });
   const driftRows = () => drift.locator('tbody tr').evaluateAll(rows => rows.map(r => [...r.children].map(c => c.textContent)));
   assert.deepEqual(await driftRows(), [[String(destOrder.indexOf('Bob') + 1), 'Bob', 'Ville', 'retouche', 'Paris']], 'écart : ligne, nom, colonne, ici, SOURCE');
+  if (process.env.CAPTURES) {
+    // Captures du tutoriel : la personne a fait l'étape « Ajouter le widget à la page de la table reçue » (sans elle la carte est orange,
+    // « Widget à ajouter », et un avis l'explique : voir 44-cible-ajouter-widget). Le message du résultat s'efface au bout d'une minute.
+    await button('Ajouter le widget à la page de Contacts').click();
+    await dialogButton('Ajouter le widget').click();
+    await widget().getByText(/Widget ajouté à la page de Contacts/).waitFor({ timeout: 30000 });
+    await widget().getByText(/Widget ajouté à la page de Contacts/).waitFor({ state: 'detached', timeout: 120000 });
+    await widget().locator('.card .pill-ok').first().waitFor({ timeout: 30000 });
+  }
   await shot('14-cible-historique');
   await waitFor(async () => {
     const rows = await records(target.doc, 'Journal_Annuaire');

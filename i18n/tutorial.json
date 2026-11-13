@@ -169,7 +169,7 @@
         "New table: the widget creates it with its own page, without the widget on it, and it only copies while its page is open. To make reception safe, first create the table yourself, add the widget to it (full access), then redo the procedure from that page and pick the existing table; or continue: the reception’s card stays orange (“Widget to add”) as long as the widget is on the page of no received table, then click “Add the widget to the page of the table” (Grist then asks for full access for that section). A single open widget is enough for all the receptions of the document."
       ]
     },
-    "images": ["08-cible-destinations", "08b-cible-colonnes", "38-cible-apercu-adoption"]
+    "images": ["08-cible-destinations", "08b-cible-colonnes", "38-cible-apercu-adoption", "44-cible-ajouter-widget", "45-cible-ajouter-widget-fenetre", "46-cible-widget-ajoute"]
   },
   {
     "id": "t-link",
