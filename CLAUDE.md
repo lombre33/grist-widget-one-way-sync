@@ -375,7 +375,27 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.28.1 (13 novembre 2026)
+## État : V0.28.2 (13 novembre 2026)
+
+V0.28.2 (Antoine, 13 novembre, avant la sortie de la Bêta : « oui s'il te plaît » à « relever `CODE_FORMAT`, comme le fil des références entre tables l'avait annoncé »).
+Moteur **5.0.0, majeure** (règle de `version.js` : un format de code que le moteur d'avant ne lit plus ; dite dans `GFS-ETAT.md`). **Rien n'est publié** (Alpha gelée).
+- **`CODE_FORMAT` passe de 1 à 2** (`js/engine/logic/codes.js`, maintenant exporté), seule la valeur de `f` change : aucun champ des codes n'a changé de sens, ni port,
+  ni nom de table, ni texte des formules (`formulas-golden` inchangé). **Pourquoi** : une CIBLE d'avant la 4.11.0 ferait d'une colonne `list` une Référence simple sans
+  le dire ; la lecture d'un code est le seul endroit où un moteur plus ancien est arrêté avant d'écrire.
+- **Ce qui arrive à une CIBLE trop ancienne** : l'invitation d'une SOURCE en 0.28.2 est refusée par `codeNewer` (versions du code et d'ici), **essayé contre le vrai lecteur de
+  la 0.27.0** (archive du commit d'avant, hors dépôt ; les 0.28.0 et 0.28.1 qui se sont intercalées (moteur 4.11.0 puis 4.12.0) lisent la forme 1 comme elle) : refus des deux côtés. Le texte que montre cette CIBLE-là est le sien, celui d'avant. **Dans l'autre sens** : une SOURCE
+  d'avant refuse aussi la réponse d'une CIBLE en forme 2 (même message, côté SOURCE) : le couple « SOURCE ancienne, CIBLE nouvelle » est donc bloqué à la réponse alors qu'il
+  marcherait ; voulu (« les deux documents utilisent le widget à la même adresse »), et aucun couple n'est en service puisque la Bêta n'est pas publiée. Les codes de forme 1
+  déjà faits restent lus. Une liaison déjà branchée n'est pas touchée (les lots se lisent dans le journal). Un widget d'avant la 0.12 (Alpha 0.5.9) ne contrôle pas `f` : hors d'atteinte.
+- **Texte `error.codeNewer`** (fr et en) : dit que **le widget de ce document est en retard**, que rien n'est à refaire dans l'autre document, de recharger la page pour prendre la
+  dernière version (avant : seulement « même adresse, rechargez »). C'est le texte des **prochaines** montées de `CODE_FORMAT` : une CIBLE ne montre jamais que son propre texte.
+- **Règle pour la suite** (`js/engine/README.md`, « Forme des codes relevée ») : un changement qui peut faire mal lire un journal à un moteur plus ancien sans que le code change relève
+  `CODE_FORMAT` dans la même version, et le moteur passe à la majeure suivante.
+- Testé : unit 512 (`codes.test.mjs` : forme 2 écrite, formes 1 lues, forme suivante refusée ; `engine-links.test.mjs` : refus des deux côtés par `readInvitation` et `checkReply`, texte
+  français et anglais, rien d'écrit chez celui qui refuse) ; **parcours e2e complet vert d'un seul tenant, 86 étapes** (vrai Grist 1.7, sur le commit de la 0.27.1, avant que les 0.28.0 et 0.28.1 ne s'y ajoutent, étapes « Protection »
+  comprises, environ 30 minutes), lancé depuis un worktree propre sur un conteneur sans autre charge.
+
+## État précédent : V0.28.1 (13 novembre 2026)
 
 V0.28.1 (Antoine, 13 novembre : « pour le nom du document, tu n'as aucun moyen de le récupérer ? il apparait dans l'url de la page », puis carte de décision « Oui, champ facultatif
 d'adresse » ; « tu peux push pendant mes tests tkt c'est une version de dev c'est fait pour ça » : pousser sur `main` pendant ses vérifications de la Bêta est permis). Moteur **4.12.0** (mineure,
@@ -456,7 +476,7 @@ refasse les références fonctionnelles » ; maquette de trois options (Artifact
   une table hors de l'export, ajout de `Services` avec sa seule colonne `Libelle`, Liste de références reçue, ville renommée suivie, « Valeurs seulement » rend le texte, lien
   redonné sur une colonne remplie : avis puis « Refaire les références »). Captures : `docs/images/29-source-liens.png`, `29b-source-liens-tables-ajoutees.png`,
   `29c-cible-liens-refaire.png` (`CAPTURES=1 ONLY_LINKS=1`).
-- **CODE_FORMAT inchangé** (Bêta non publiée) : après la publication, relever `CODE_FORMAT` : une CIBLE d'avant la 4.11 ferait d'une colonne `list` une Référence simple.
+- **CODE_FORMAT inchangé dans cette version** : relevé de 1 à 2 dans la V0.28.2 (moteur 5.0.0), voir plus haut : une CIBLE d'avant la 4.11 ferait d'une colonne `list` une Référence simple.
 - **Pas fait, dit à Antoine** : une Liste de références vers plusieurs tables ou une Référence « générique » (`Any`) ; l'historique et les retouches montrent toujours les
   numéros de ligne d'une Référence (pas le texte affiché).
 

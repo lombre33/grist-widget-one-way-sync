@@ -1,7 +1,7 @@
 // Codes d'invitation et de réponse, adresses : aller-retour, puis codes abîmés ou forgés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docNameFrom, docSlug, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parsePageAddress, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
+import { CODE_FORMAT, buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docNameFrom, docSlug, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parsePageAddress, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
 import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
@@ -209,10 +209,23 @@ test('version : portée par les codes, un code d\'une forme plus récente refus�
   const reply = buildReply({ pub: PUB, id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, version: '0.12.1' });
   assert.equal(parseReply(reply, 'https://g.fr', '0.12.0').version, '0.12.1', 'une autre version de même forme est lue');
   const raw = JSON.parse(Buffer.from(invitation({ version: '0.12.0' }).slice('GRISTSYNC2.'.length), 'base64url').toString());
-  assert.equal(raw.f, 1);
-  assert.throws(() => parseInvitation(forge({ ...raw, f: 2, v: '0.14.0' }), '0.12.0'), e => e.message === 'codeNewer' && e.vars.theirs === '0.14.0' && e.vars.mine === '0.12.0');
+  assert.equal(raw.f, CODE_FORMAT);
+  assert.throws(() => parseInvitation(forge({ ...raw, f: CODE_FORMAT + 1, v: '0.14.0' }), '0.12.0'), e => e.message === 'codeNewer' && e.vars.theirs === '0.14.0' && e.vars.mine === '0.12.0');
   assert.throws(() => parseReply(forge({ kind: 'reponse', f: 9, v: 'bizarre' }), 'https://g.fr'), e => e.message === 'codeNewer' && e.vars.theirs === '?' && e.vars.mine === '?');
-  assert.throws(() => decodeCode(forge({ ...raw, f: 2 }), 'reponse'), /codeNewer/, 'la forme est lue avant le type');
+  assert.throws(() => decodeCode(forge({ ...raw, f: CODE_FORMAT + 1 }), 'reponse'), /codeNewer/, 'la forme est lue avant le type');
+});
+
+test('forme 2 (moteur 5.0.0) : les codes d\'avant restent lus, ceux d\'aujourd\'hui portent la forme 2', () => {
+  assert.equal(CODE_FORMAT, 2, 'relevée avec les références entre tables par colonne (moteur 4.11.0)');
+  const url = 'https://g.fr/api/s/Abc123/tables/Journal_A/records?flat=1';
+  const fresh = JSON.parse(Buffer.from(invitation({ version: '0.28.2' }).slice('GRISTSYNC2.'.length), 'base64url').toString());
+  assert.equal(fresh.f, 2);
+  assert.equal(JSON.parse(Buffer.from(buildReply({ pub: PUB, id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, version: '0.28.2' }).slice('GRISTSYNC2.'.length), 'base64url').toString()).f, 2);
+  // Un code fait par la forme 1 (Bêta jusqu'à la 0.28.1) : lu tel quel, invitation comme réponse.
+  const old = { ...fresh, f: 1, v: '0.28.1' };
+  assert.equal(parseInvitation(forge(old), '0.28.2').version, '0.28.1');
+  const oldReply = { kind: 'reponse', f: 1, v: '0.28.1', id: ID, secret: SECRET, recipient: { email: 'a@b.fr' }, url, pub: PUB };
+  assert.equal(parseReply(forge(oldReply), 'https://g.fr', '0.28.2').version, '0.28.1');
 });
 
 test('document de la SOURCE dans l\'invitation : équipe et nom lus avec méfiance', () => {

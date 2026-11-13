@@ -339,6 +339,17 @@ on refasse les références fonctionnelles » ; choix sur la carte : « Par colo
 - **Port** : inchangé. Essais : `tests/unit/links.test.mjs`, `engine-refs.test.mjs` (SOURCE puis CIBLE sur deux Grist en mémoire, liste incomplète
   puis complétée, `relink`), e2e `ONLY_LINKS=1` (vrai Grist).
 
+## Forme des codes relevée (5.0.0)
+
+`CODE_FORMAT` (`logic/codes.js`, exporté) passe de 1 à 2. **Pourquoi** : une CIBLE d'avant la 4.11.0 ferait d'une colonne `list` (Liste de références) une
+Référence simple ; le seul endroit où un moteur plus ancien peut être arrêté avant d'écrire quoi que ce soit est la lecture d'un code. **Ce qui change** :
+la valeur de `f` dans les invitations et les réponses, rien d'autre (aucun champ n'a changé de sens). **Effets** : une CIBLE dont le moteur est plus ancien
+refuse l'invitation avec `codeNewer` (valeurs `theirs` = version du code, `mine` = version d'ici, texte `error.codeNewer` à montrer tel quel) ; une
+SOURCE plus ancienne refuse de même la réponse d'une CIBLE à la forme 2 ; les codes de forme 1 déjà faits sont lus. Une liaison déjà branchée n'est pas
+touchée (les lots se lisent dans le journal). **Règle pour la suite** : un changement qui peut faire mal lire un journal à un moteur plus ancien, sans que
+le code change, relève `CODE_FORMAT` dans la même version, et le moteur passe à la majeure suivante. Essais : `tests/unit/codes.test.mjs`,
+`engine-links.test.mjs` (refus des deux côtés, texte français et anglais, rien d'écrit chez celui qui refuse).
+
 ## Ce que le moteur écrit dans un document
 
 - SOURCE : la table `<préfixe>Synchro` (une seule table technique), les colonnes `id_sync`, `MajLe`, `RecalculLe` de

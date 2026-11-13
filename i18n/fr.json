@@ -781,7 +781,7 @@
   "recv.offer.refusedList": "Tables refusées (leurs lignes sont effacées à l’arrivée) : {tables}.",
   "error.codeFormat": "Ce texte n’est pas un code de synchro. Recopiez tout le code, de « GRISTSYNC2. » jusqu’à la fin.",
   "error.codeOld": "Ce code vient d’une version précédente du widget. Demandez une nouvelle invitation.",
-  "error.codeNewer": "Ce code vient de la version {theirs} du widget, plus récente que celle de ce document ({mine}). Les deux documents doivent utiliser le widget à la même adresse : vérifiez-la dans les réglages du widget (panneau de droite de Grist), rechargez la page, puis recollez le code.",
+  "error.codeNewer": "Ce code vient de la version {theirs} du widget, plus récente que celle de ce document ({mine}) : le widget de ce document est en retard, rien n'est à refaire du côté de l'autre document. Les deux documents doivent utiliser le widget à la même adresse : vérifiez-la dans les réglages du widget (panneau de droite de Grist), rechargez la page pour prendre la dernière version, puis recollez le code.",
   "error.inviteOld": "Cette réponse vient d’une invitation faite par une version précédente du widget. Refaites le code (« Retour », puis « Refaire le code ») et transmettez le nouveau.",
   "error.notInvitation": "Ce code est une réponse, pas une invitation.",
   "error.notReply": "Ce code est une invitation, pas une réponse.",

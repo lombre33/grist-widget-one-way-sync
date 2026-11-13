@@ -781,7 +781,7 @@
   "recv.offer.refusedList": "Refused tables (their rows are deleted on arrival): {tables}.",
   "error.codeFormat": "This text is not a sync code. Copy the whole code, from “GRISTSYNC2.” to the end.",
   "error.codeOld": "This code comes from a previous version of the widget. Ask for a new invitation.",
-  "error.codeNewer": "This code comes from version {theirs} of the widget, newer than the one in this document ({mine}). Both documents must use the widget from the same address: check it in the widget settings (Grist’s right panel), reload the page, then paste the code again.",
+  "error.codeNewer": "This code comes from version {theirs} of the widget, newer than the one in this document ({mine}): the widget in this document is out of date, nothing needs to be redone in the other document. Both documents must use the widget from the same address: check it in the widget settings (Grist’s right panel), reload the page to get the latest version, then paste the code again.",
   "error.inviteOld": "This reply comes from an invitation made by a previous version of the widget. Make a new code (“Back”, then “Make a new code”) and send the new one.",
   "error.notInvitation": "This code is a reply, not an invitation.",
   "error.notReply": "This code is an invitation, not a reply.",

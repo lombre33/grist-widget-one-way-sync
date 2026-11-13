@@ -5,7 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PORT_SHAPE, startEngine } from '../../js/engine/index.js';
-import { buildReply, buildWebhookUrl } from '../../js/engine/logic/codes.js';
+import { CODE_FORMAT, buildReply, buildWebhookUrl } from '../../js/engine/logic/codes.js';
+import { errorText } from '../../js/engine/errors.js';
+import { format } from '../../js/i18n.js';
 import { newKeyPair } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
@@ -154,6 +156,27 @@ test('une invitation périmée ou d\'une autre instance est refusée à la lectu
   assert.equal((await readInvitation(publicCode)).mode, 'public');
   const elsewhere = tamper(publicCode, (p) => { p.base = p.base.replace('fake.example', 'autre.example'); });
   await assert.rejects(readInvitation(elsewhere), /otherInstance/);
+});
+
+test('un code d\'une forme plus récente est refusé des deux côtés, avec les deux versions dites à la personne', async () => {
+  const h = await handshake();
+  const newer = code => tamper(code, (p) => { p.f = CODE_FORMAT + 1; p.v = '9.9.0'; });
+  const withText = (doc, lang) => h.as(doc, { text: (key, values) => format(lang, key, values) });
+  // CIBLE trop ancienne : l'invitation d'une SOURCE à la forme suivante est refusée avant toute écriture.
+  withText(h.other, 'fr');
+  const journals = [...h.other.tables.keys()];
+  let refused;
+  await assert.rejects(readInvitation(newer(h.code)), (e) => { refused = e; return e.message === 'codeNewer'; });
+  assert.deepEqual(refused.vars, { theirs: '9.9.0', mine: '9.9.9' }, 'les deux versions : celle du code et celle de ce document');
+  assert.match(errorText(refused), /version\s9\.9\.0.*plus récente.*\(9\.9\.9\).*en retard.*même adresse.*recollez le code/s);
+  withText(h.other, 'en');
+  assert.match(errorText(refused), /version 9\.9\.0.*newer.*\(9\.9\.9\).*out of date.*same address.*paste the code again/s);
+  assert.deepEqual([...h.other.tables.keys()], journals, 'rien n\'est créé dans le document qui refuse');
+  // SOURCE trop ancienne : la réponse d'une CIBLE à la forme suivante est refusée de même, sans toucher à l'invitation.
+  h.as(h.source);
+  await assert.rejects(checkReply(h.exp, h.entry, newer(h.reply)), e => e.message === 'codeNewer' && e.vars.theirs === '9.9.0');
+  const ok = await checkReply(h.exp, h.entry, h.reply);
+  assert.ok(ok.code, 'la même réponse à la forme d\'ici est lue');
 });
 
 test('état d\'une invitation en attente : lien attendu, périmée, valable', () => {

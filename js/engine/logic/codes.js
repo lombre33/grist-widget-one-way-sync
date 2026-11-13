@@ -33,7 +33,14 @@ function fromBase64Url(text) {
 // change la forme des codes augmente CODE_FORMAT : une version plus ancienne refuse alors ses codes
 // en nommant les deux versions, au lieu d'une erreur vague ou d'un envoi qui échoue plus tard. Un
 // code sans forme vient d'avant la 0.12 (même forme depuis la 0.10, contrôlée plus loin).
-const CODE_FORMAT = 1;
+// 1 : forme des codes jusqu'à la 0.28.1 (moteur 4.12.0 compris).
+// 2 : relevée avec le moteur 5.0.0 (syncPlus 0.28.2), pour que la CIBLE d'avant les références entre tables par colonne
+//     (moteur 4.11.0 : Liste de références, `list` dans la description des colonnes) ne reçoive pas d'invitation d'une
+//     SOURCE plus récente : elle ferait d'une colonne `list` une Référence simple, sans rien dire. Le contenu des codes
+//     n'a pas changé : le relèvement fait de l'invitation la porte d'entrée (la CIBLE trop ancienne dit `codeNewer`
+//     avec les deux versions). Il joue dans les deux sens : une SOURCE d'avant refuse aussi la réponse d'une CIBLE à
+//     la forme 2, avec le même message ; les codes de forme 1 déjà faits restent lus.
+export const CODE_FORMAT = 2;
 const VERSION = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 const encodeCode = (payload, version) => CODE_PREFIX + toBase64Url(JSON.stringify({ ...payload, f: CODE_FORMAT, ...(version ? { v: version } : {}) }));
 

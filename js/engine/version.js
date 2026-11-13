@@ -205,7 +205,18 @@
 //         nom que Grist écrit dans l'adresse (« Donnees-Ministere-2026-v2 » : sans accent ni ponctuation) et refusent une adresse d'une autre
 //         instance ou d'un autre document (`otherSite`, `otherDoc`) : seul le nom en sort, jamais l'adresse. Ni port, ni nom de table, ni
 //         `CODE_FORMAT` ne changent ; l'hôte qui a un champ « nom du document » peut s'en servir avant `rememberDocName`.
-export const ENGINE_VERSION = '4.12.0';
+// 5.0.0 (13 novembre 2026, syncPlus 0.28.2, avant la sortie de la Bêta ; demande du porteur : relever `CODE_FORMAT` comme la 4.11.0 l'annonçait) :
+//         **majeure**, par la règle ci-dessus (un format de code que le moteur d'avant ne lit plus). `CODE_FORMAT` passe de 1 à 2
+//         (`logic/codes.js`, désormais exporté) : une CIBLE d'avant la 4.11.0 (Liste de références, `list` dans la description des colonnes)
+//         recevrait sinon une invitation d'une SOURCE plus récente et ferait d'une colonne `list` une Référence simple sans rien dire. Elle
+//         refuse maintenant le code : `codeNewer`, avec la version du code et la sienne (essayé contre le vrai lecteur de la 4.11.0 : refus des deux
+//         côtés, invitation et réponse). **Aucun champ des codes n'a changé de sens ni de contenu** : seule la valeur de `f` change. Les codes de
+//         forme 1 déjà faits (invitation en attente, réponse) sont lus tels quels ; une SOURCE d'avant refuse la réponse d'une CIBLE à la forme 2
+//         (même message, du côté de la SOURCE). Texte `error.codeNewer` (fr et en) : dit que le widget de ce document est en retard, que rien
+//         n'est à refaire dans l'autre document, et de recharger la page. Ni port, ni nom de table, ni texte des formules de `Synchro` ne
+//         changent. Une liaison déjà branchée n'est pas concernée (les lots se lisent dans le journal, pas dans un code) : deux documents qui
+//         veulent se lier de nouveau doivent avoir la même version du widget, comme toujours.
+export const ENGINE_VERSION = '5.0.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir
