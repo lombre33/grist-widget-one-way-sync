@@ -32,6 +32,7 @@ import { exportWizard } from './export-wizard.js';
 import { foreignDialog, strayDialog } from './strays.js';
 import { checkKeys } from '../engine/source/keys.js';
 import { keysBlock } from './keys.js';
+import { lastSend } from './last-send.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { hookDoc, hookShown } from './shown.js';
@@ -168,6 +169,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // « Nouvel export » demandé juste avant le rechargement que les règles d'accès ont causé : l'assistant s'ouvre.
   if (!periodic && wizardAsked('export', { consume: true }) && !state.ownerOnly && !state.foreign && !blocksNew(state.lost)) run(null, container.querySelector('.out'), newExport);
   if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
+  else if (state.exports.some(exp => exp.recipients.length)) watchFlows(IDLE_MS);
   if (state.ownerOnly) return;
   resumeExchange(state);
   if (!periodic) askAboutSync(state);
@@ -392,16 +394,37 @@ function keyNotice(exp, state) {
 }
 
 // Historique des envois (voir addEvent), replié par défaut ; ce qu'on ouvre le reste d'un dessin à
-// l'autre.
+// l'autre. En tête de liste, le dernier envoi ordinaire d'après Grist (voir last-send.js) : une ligne ajoutée ou modifiée part par
+// le webhook, sans le widget, donc sans événement ici. Cette ligne n'est pas un événement de la note (elle n'est pas comptée dans le
+// titre) : elle est relue toutes les 30 s page ouverte (voir tickFlows) et se met à jour sur place.
 const eventsOpen = new Set();
 const eventLine = e => el('li', { class: 'send-event' },
   el('time', { class: 'chg-time', datetime: new Date(e.at * 1000).toISOString() }, dateText(e.at * 1000)),
   el('span', {}, t(`send.history.${e.kind}`, { who: e.who || '—', n: e.n || 0 })));
-const eventsBlock = (exp, out, ownerOnly) => (exp.events.length ? el('details', {
+
+// Remplit (ou cache) la ligne du dernier envoi ordinaire d'un export, à partir de l'état de ses destinataires.
+function fillLast(row, recipients) {
+  const last = lastSend(recipients);
+  row.hidden = !last;
+  if (!last) return;
+  const text = [t('send.history.last')];
+  // Plusieurs destinataires : celui qui a reçu le plus récent, les autres ont leur propre heure sur leur fiche.
+  if (last.of > 1) text.push(' ', t('send.history.lastWho', { who: personShown(last.hook), n: last.n, of: last.of }));
+  row.replaceChildren(
+    el('time', { class: 'chg-time', datetime: new Date(last.at).toISOString() }, dateText(last.at)),
+    el('span', {}, ...text));
+}
+
+const lastRow = exp => {
+  const row = el('li', { class: 'send-event send-last', 'data-last-send': exp.id });
+  fillLast(row, exp.recipients);
+  return row;
+};
+const eventsBlock = (exp, out, ownerOnly) => (exp.events.length || lastSend(exp.recipients) ? el('details', {
   class: 'history', open: eventsOpen.has(exp.id), ontoggle: e => (e.currentTarget.open ? eventsOpen.add(exp.id) : eventsOpen.delete(exp.id)),
-}, el('summary', {}, el('span', { class: 'history-title' }, t('send.history.title', { n: exp.events.length }))),
-  el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, exp.events.map(eventLine)),
-  actionButton(t('send.history.clear'), 'trash', () => clearHistory(exp), ownerOnly, out, { kind: 'btn-link' })) : null);
+}, el('summary', {}, el('span', { class: 'history-title' }, t(exp.events.length ? 'send.history.title' : 'send.history.title.none', { n: exp.events.length }))),
+  el('p', { class: 'muted small' }, t('send.history.help')), el('ul', { class: 'history-rows' }, [lastRow(exp), ...exp.events.map(eventLine)]),
+  exp.events.length ? actionButton(t('send.history.clear'), 'trash', () => clearHistory(exp), ownerOnly, out, { kind: 'btn-link' }) : null) : null);
 
 // Ce que dit l'erreur d'un destinataire. Un journal qui refuse une colonne que Synchro porte sans
 // qu'elle soit au widget, ou qu'elle ne porte plus mais que la file garde, n'a rien à faire de son
@@ -465,9 +488,13 @@ function fillPerson(slot, h) {
 // de ses destinataires, tant qu'un envoi bouge ; une page qui change d'état se redessine en entier.
 // Une lecture légère toutes les 10 s (ligne 'charge', webhooks), jamais la table Synchro.
 const FLOW_MS = 10000;
+// Au repos (rien n'est en route), la page relit l'état des destinataires plus rarement : un envoi ordinaire, parti de Grist sans le
+// widget, s'y montre alors tout seul (dernier envoi de la fiche et de l'historique, voir last-send.js).
+const IDLE_MS = 30000;
 const flowSlots = new Map(); // export -> { node, exp, moving }
 const personSlots = new Map(); // webhook -> { pill, lines, syncCols, status }
 let flowTimer = 0;
+let flowDue = 0;
 let loading = 0; // envois lancés depuis cette page par « Tout renvoyer »
 
 function flowSlot(exp, charge) {
@@ -479,8 +506,13 @@ function flowSlot(exp, charge) {
   return node;
 }
 
-function watchFlows() {
-  if (!flowTimer) flowTimer = setTimeout(tickFlows, FLOW_MS);
+// Relecture suivante dans `ms` : la plus proche l'emporte (un envoi qui bouge ne attend pas la relecture lente du repos).
+function watchFlows(ms = FLOW_MS) {
+  const due = Date.now() + ms;
+  if (flowTimer && flowDue <= due) return;
+  clearTimeout(flowTimer);
+  flowDue = due;
+  flowTimer = setTimeout(tickFlows, ms);
 }
 
 // Redessine l'avancement de chaque export affiché ; rend { moving (un envoi est en route), changed (un envoi vient de finir) }.
@@ -495,6 +527,11 @@ function refreshFlows(charge, hooks, conditions, moving) {
     const flow = flowOf(slot.exp, charge);
     const view = flowView(flow);
     slot.node.replaceChildren(...(view ? [view] : []));
+    // Dernier envoi ordinaire de l'historique : mis à jour sur place ; l'historique n'était pas affiché (aucun envoi ni événement
+    // jusque-là) et un envoi vient d'arriver : la carte se redessine.
+    const row = slot.node.parentElement && slot.node.parentElement.querySelector('[data-last-send]');
+    if (row) fillLast(row, slot.exp.recipients);
+    else changed ||= Boolean(lastSend(slot.exp.recipients));
     changed ||= slot.moving && !flowMoves(flow);
     slot.moving = flowMoves(flow);
     moving ||= slot.moving;
@@ -518,6 +555,11 @@ function refreshPeople(hooks, state) {
 async function tickFlows() {
   flowTimer = 0;
   if (!container || !container.isConnected) return;
+  // Au repos et page cachée : rien à lire, la relecture reprend à son rythme (le rattrapage, lui, a le sien).
+  if (document.visibilityState === 'hidden' && !loading && ![...flowSlots.values()].some(slot => slot.moving)) {
+    watchFlows(IDLE_MS);
+    return;
+  }
   let charge;
   let hooks;
   let conditions;
@@ -526,12 +568,12 @@ async function tickFlows() {
     [charge, read] = await Promise.all([currentCharge(), readHooks()]);
     ({ hooks, conditions } = read);
   } catch (e) {
-    if (loading) watchFlows();
+    watchFlows(loading ? FLOW_MS : IDLE_MS);
     return;
   }
   const { moving, changed } = refreshPeople(hooks, refreshFlows(charge, hooks, conditions, loading > 0));
   if (changed && !document.querySelector('.scrim')) await refreshSource();
-  else if (moving || changed) watchFlows();
+  else watchFlows(moving || changed ? FLOW_MS : IDLE_MS);
 }
 
 // Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et

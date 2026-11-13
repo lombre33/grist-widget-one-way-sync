@@ -428,12 +428,12 @@
     },
     "text": {
       "fr": [
-        "Historique des envois : sur la carte de l’export (replié), les destinataires ajoutés, les envois et renvois, rattrapages, pauses, révocations et modifications. Les envois ordinaires partent de Grist sans le widget : l’état de chaque destinataire dit s’ils réussissent.",
+        "Historique des envois : sur la carte de l’export (replié), les destinataires ajoutés, les envois et renvois, rattrapages, pauses, révocations et modifications. Les envois ordinaires (une ligne ajoutée ou modifiée) partent de Grist sans le widget : ils ne sont pas listés un par un. La première ligne donne l’heure du dernier d’entre eux, d’après Grist, et se met à jour toute seule page ouverte ; l’état de chaque destinataire dit s’ils réussissent.",
         "Effacer l’historique : un bouton sur la carte de chaque export (SOURCE) et de chaque réception (CIBLE, propriétaires), après confirmation. Côté CIBLE, il vide du journal l’avant des modifications et les valeurs des lignes supprimées dans la SOURCE, et l’historique de la carte repart de zéro ; vos lignes ne changent pas et la synchronisation continue. Cela ne se défait pas, mais l’historique de Grist (Ctrl+Z, « Historique du document ») n’est pas touché.",
         "Réglages, Copier le diagnostic : version, état des exports et des réceptions, erreurs récentes, sans donnée de vos tables, courriel, code ni lien, à joindre à un message d’aide."
       ],
       "en": [
-        "Send history: on the export card (collapsed), recipients added, sends and resends, catch-ups, pauses, revocations and edits. Ordinary sends leave Grist without the widget: each recipient’s status says whether they succeed.",
+        "Send history: on the export card (collapsed), recipients added, sends and resends, catch-ups, pauses, revocations and edits. Ordinary sends (a row added or changed) leave Grist without the widget: they are not listed one by one. The first line gives the time of the last one, according to Grist, and updates by itself while the page is open; each recipient’s status says whether they succeed.",
         "Clear the history: a button on each export’s card (SOURCE) and each reception’s card (TARGET, owners), after confirmation. On the TARGET side, it empties from the journal the before-values of changes and the values of rows deleted in the SOURCE, and the card’s history starts again from zero; your rows do not change and syncing goes on. It cannot be undone, but Grist’s own history (Ctrl+Z, “Document history”) is not touched.",
         "Settings, Copy the diagnostic: version, state of the exports and receptions, recent errors, with no table data, email, code or link, to attach to a help message."
       ]

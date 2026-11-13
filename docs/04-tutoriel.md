@@ -539,8 +539,10 @@ lui-même.
 ajouté dans la SOURCE s'ajoute ici, et une mise en forme retouchée ici reste.
 
 **Historique des envois**, sur la carte de l'export (replié) : destinataires ajoutés, envois et
-renvois, rattrapages, pauses, révocations, modifications. Les envois ordinaires partent de Grist
-sans le widget : l'état de chaque destinataire dit s'ils réussissent.
+renvois, rattrapages, pauses, révocations, modifications. Les envois ordinaires (une ligne ajoutée
+ou modifiée) partent de Grist sans le widget : ils ne sont pas listés un par un. La première ligne
+donne l'heure du dernier d'entre eux, d'après Grist, et se met à jour toute seule page ouverte ;
+l'état de chaque destinataire dit s'ils réussissent.
 
 ![Historique des envois](images/28-source-historique.png)
 

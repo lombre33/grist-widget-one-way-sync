@@ -768,11 +768,72 @@ try {
     await sent.getByRole('button', { name: 'Effacer l’historique' }).click();
     await dialog().getByText(/L’historique des envois de cet export est effacé/).waitFor();
     await dialogButton('Effacer l’historique').click();
-    await widget().locator('details.history', { hasText: 'Historique des envois' }).waitFor({ state: 'detached', timeout: 60000 });
+    // Depuis la 0.28.2 le bloc reste tant que Grist donne l'heure d'un dernier envoi ordinaire (état du webhook, pas une ligne de la note) :
+    // plus aucun événement du widget, et le bouton d'effacement n'a plus rien à effacer.
+    await waitFor(async () => (await widget().locator('details.history li.send-event:not([data-last-send])').count()) === 0, 'événements du widget effacés', 60000);
+    assert.equal(await widget().getByRole('button', { name: 'Effacer l’historique' }).count(), 0, 'plus rien à effacer');
     assert.equal((await api('GET', `/docs/${src.doc}/webhooks`)).webhooks.length, 1, 'le destinataire est toujours branché');
     const sourceNote = JSON.stringify((await records(src.doc, '_grist_Tables_column')).filter(c => c.colId === 'Synchro_Export'));
     assert.ok(!/reçoit|resend|cible@|\\"who\\"/.test(sourceNote), 'rien de nominatif ne reste dans la note de la SOURCE');
     step('Effacer l\'historique : CIBLE (avant et valeurs supprimées du journal vidés, carte à zéro, recopie intacte) et SOURCE (historique des envois effacé, destinataire gardé)');
+  }
+
+  // --- Historique des envois (SOURCE) : une ligne modifiée part par le webhook de Grist, sans le widget, donc sans événement dans
+  // l'historique conduit par le widget. L'historique montre en tête le dernier envoi ordinaire, d'après Grist (état du webhook), et
+  // se met à jour tout seul, page ouverte et au repos (relue toutes les 30 s), sans clic ni redessin.
+  async function historySteps() {
+    const src = await fichesDoc('Envois SOURCE');
+    const dst = await newDocWithWidget('Envois CIBLE');
+    await startExport(src, 'Fiches', 'Annuaire');
+    const code = await plainInvitation();
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.');
+    await approve(answer, { url: src.url });
+    const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => Object.keys(await fiches()).length === 3, 'fiches reçues', 60000);
+    const usage = async () => ((await api('GET', `/docs/${src.doc}/webhooks`)).webhooks[0] || {}).usage || {};
+    // Page SOURCE ouverte sur l'onglet Envoyer, historique ouvert ; l'envoi de l'existant (renvoi) y figure déjà.
+    await openWidgetTab(src.url, 'Envoyer');
+    const history = widget().locator('details.history', { hasText: 'Historique des envois' });
+    await history.waitFor();
+    await history.locator('summary').click();
+    await history.getByText(/Envoi de 3 lignes à tous les destinataires actifs/).waitFor();
+    const last = history.locator('[data-last-send]');
+    const lastTime = async () => new Date(await last.locator('time').getAttribute('datetime')).getTime();
+    // L'envoi de l'existant (envoi direct du widget, reçu par le webhook de la CIBLE) a déjà une heure chez Grist : elle ouvre la liste.
+    await last.waitFor({ timeout: 60000 });
+    await last.getByText(/Dernier envoi ordinaire/).waitFor();
+    assert.equal(await history.locator('li.send-event').first().getAttribute('data-last-send') !== null, true, 'le dernier envoi est en tête de liste');
+    // Une ligne modifiée à la SOURCE : le webhook de Grist l'envoie, le widget n'y est pour rien (aucun événement de plus).
+    const events = await history.locator('li.send-event:not([data-last-send])').count();
+    const before = Date.now();
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Ville: 'Marseille' }]]);
+    await waitFor(async () => (await usage()).lastSuccessTime > before, 'envoi ordinaire déposé (état du webhook)', 60000);
+    const first = (await usage()).lastSuccessTime;
+    // Sans clic ni rechargement : la ligne prend l'heure donnée par Grist (relue toutes les 30 s au repos).
+    await waitFor(async () => Math.abs(await lastTime() - first) <= 1000, 'dernier envoi de l\'historique mis à jour sans clic', 90000)
+      .catch(async (e) => { console.log('historique à ce moment :', JSON.stringify((await history.innerText()).slice(0, 800))); throw e; });
+    assert.equal(await history.locator('li.send-event:not([data-last-send])').count(), events, 'aucun événement de plus : un envoi ordinaire n\'est pas un événement du widget');
+    // Un second envoi, plus tard : la même ligne se met à jour sur place.
+    await page.waitForTimeout(2000);
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Ville: 'Brest' }]]);
+    await waitFor(async () => (await usage()).lastSuccessTime > first, 'second envoi ordinaire déposé', 60000);
+    const second = (await usage()).lastSuccessTime;
+    await waitFor(async () => Math.abs(await lastTime() - second) <= 1000, 'ligne du dernier envoi mise à jour sans clic', 90000);
+    assert.equal(await history.locator('[data-last-send]').count(), 1, 'une seule ligne de dernier envoi');
+    // L'état du destinataire dit la même chose (même source : Grist).
+    await widget().getByText(/Dernier envoi déposé chez le destinataire/).first().waitFor();
+    // Effacer l'historique : les événements du widget partent, le dernier envoi ordinaire (état de Grist) reste visible.
+    await history.getByRole('button', { name: 'Effacer l’historique' }).click();
+    await dialogButton('Effacer l’historique').click();
+    await waitFor(async () => (await widget().locator('details.history li.send-event:not([data-last-send])').count()) === 0, 'événements du widget effacés', 60000);
+    await widget().locator('details.history [data-last-send]').waitFor();
+    assert.equal(await widget().locator('details.history [data-last-send]').isVisible(), true, 'le dernier envoi (état de Grist) reste visible');
+    assert.equal(await widget().getByRole('button', { name: 'Effacer l’historique' }).count(), 0, 'rien de plus à effacer');
+    // L'envoi de la ligne est bien arrivé chez le destinataire (le widget de la CIBLE la recopie page ouverte).
+    await openWidgetTab(dst.url, 'Recevoir');
+    await waitFor(async () => (await fiches()).Basile?.Ville === 'Brest' && (await fiches()).Anna?.Ville === 'Marseille', 'modifications reçues', 90000);
+    step('Historique des envois (SOURCE) : le dernier envoi ordinaire (état de Grist) en tête, mis à jour sans clic au repos, gardé après « Effacer l\'historique »');
   }
 
   // --- « Ajouter le widget à la page de la table reçue » (carte d'une réception). La table que la réception a créée a sa propre page,
@@ -2556,8 +2617,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3592,6 +3653,7 @@ try {
   await docLinkSteps();
   await protectSteps();
   await cleanSteps();
+  await historySteps();
   await widgetPageSteps();
   await renfSteps();
   await newsSteps();

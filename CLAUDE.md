@@ -375,7 +375,27 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.28.3 (13 novembre 2026)
+## État : V0.28.4 (13 novembre 2026)
+
+V0.28.4 (Antoine, 13 novembre, en testant la Bêta : « l'historique des envois côté source ne semble pas se mettre à jour après l'ajout d'une ligne […] vers 6h35 j'ai rajouté une valeur,
+s'est bien sync mais pas dans l'historique »). **Moteur inchangé (5.0.0)** : tout est à l’écran (`js/source/last-send.js`, `js/source/tab.js`).
+- **Cause (reproduite dans un vrai Grist, `ONLY_HISTORY=1` sur le code d'avant : la ligne modifiée arrive bien, l'historique ne montre rien de plus)** : ce n'est ni l'écriture ni
+  l'affichage, c'est le choix de la 0.12.0 (F8) : l'historique ne garde que ce que le widget **conduit** (renvois, rattrapages, pauses, destinataires), et un envoi ordinaire part
+  par le webhook de Grist sans que le widget ne tourne. Le texte d'aide le disait mais Antoine s'attendait à y voir chaque envoi. **Pas corrigé en écrivant chaque envoi dans la
+  note** : il ne serait vu que page ouverte, il noierait les repères `join` et `revoke` que `vanishedRecipients` relit dans les `EVENTS_KEPT` (30) derniers événements, et il ajouterait
+  une écriture de la note à chaque envoi.
+- **Ce qui est montré maintenant** : en tête de l'historique, une ligne **« Dernier envoi ordinaire (ligne ajoutée ou modifiée), d'après Grist »** avec l'heure, prise dans l'état
+  d'envoi des webhooks (`usage.lastSuccessTime`, le plus récent des destinataires ; avec plusieurs destinataires la ligne dit chez qui). Ce n'est pas un événement de la note : elle n'est
+  pas comptée dans le titre, elle reste après « Effacer l'historique » (le bloc se montre dès qu'il y a un événement **ou** un dernier envoi ; « Historique des envois » sans compte quand
+  la note n'a rien), elle est cachée quand Grist ne dit rien (webhook rallumé : l'état est remis à zéro). Texte d'aide, tutoriel et `docs/04` disent la même chose.
+- **Rafraîchissement** (second défaut vu en cherchant) : une page SOURCE au repos ne relisait jamais l'état des destinataires (`tickFlows` ne repartait que si un envoi bougeait), donc le
+  « Dernier envoi déposé » de la fiche d'un destinataire restait celui du dessin précédent. `tickFlows` relit maintenant **toutes les 30 s au repos** (`IDLE_MS`, 10 s quand un envoi
+  bouge ; `watchFlows(ms)` garde l'échéance la plus proche) : fiches et ligne du dernier envoi se mettent à jour sur place, sans clic ; page cachée sans envoi en route : rien n'est lu.
+  Même lecture légère que l'avancement des envois (`currentCharge`, `readHooks`).
+- Testé : unit 4 de plus (`last-send.test.mjs`) ; e2e `ONLY_HISTORY=1` (`historySteps`, dans le parcours complet après `cleanSteps`) : la ligne est en tête, prend l'heure de Grist sans clic après
+  une modification puis une seconde, aucun événement de plus dans la note, reste après « Effacer l'historique » ; `docs/images/28-source-historique.png` refaite.
+
+## État précédent : V0.28.3 (13 novembre 2026)
 
 V0.28.3 (Antoine, 13 novembre, sur la Bêta : « j'ai ajouté le widget dans une table A, et j'ai dit de créer une nouvelle table B pour la donnée importée côté cible. Le widget m'a indiqué dans
 une pop-up qu'il mettrait lui-même le widget dans la bonne table mais rien dans la table B ? », puis, ayant trouvé le bouton : « rien n'indique que c'est nécessaire, il faut que le partage soit en

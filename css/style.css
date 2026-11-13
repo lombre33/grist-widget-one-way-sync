@@ -345,6 +345,10 @@ summary.chg-row:hover { background: var(--surface-sunken); }
 .chg-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .send-event { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 4px 8px; font-size: 12.5px; }
 .send-event + .send-event { border-top: 1px solid var(--border); }
+/* Dernier envoi ordinaire (d'après Grist, voir last-send.js) : en tête de l'historique, sans être un événement de la note ; caché quand Grist n'en dit aucun. */
+.send-event[hidden] { display: none; }
+.send-event[hidden] + .send-event { border-top: 0; }
+.send-last { background: var(--surface-sunken); }
 .history > .small { margin: 6px 0; }
 
 /* Petit tableau de valeurs (avant/après de l'historique, valeurs retouchées), comme une vue Grist. */
