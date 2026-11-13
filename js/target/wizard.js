@@ -9,7 +9,7 @@ import { canRelink, checkDestinations, isUnsignedReception, createReception, kno
 import { sourceLine } from './source-line.js';
 import { confirmFit, confirmNewTables, confirmOutgoing, destField, mappingBlock } from './dest.js';
 import {
-  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote,
+  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, el, laterButton, message, openWizard, run, versionNote, withHelp,
 } from '../ui.js';
 import { handoffButton, roleGuide } from '../guide.js';
 import { receptionOptions } from './options.js';
@@ -137,9 +137,10 @@ async function showDest(ctx, invitation) {
     el('p', {}, t('recv.dest')),
     el('div', { class: 'dest-grid' }, el('span', { class: 'dest-head' }, t('recv.dest.from')), el('span', { class: 'dest-head' }, t('recv.dest.to')),
       ...rows.flatMap(r => [el('span', { class: 'dest-from' }, r.tb.table), r.pick.node])),
-    invitation.mode === 'echange' ? message('info', t('recv.consent.echange')) : null,
-    el('p', { class: 'muted small' }, t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
-    el('label', { class: 'check' }, reserveBox, t('recv.reserve')),
+    invitation.mode === 'echange' ? withHelp(message('info', t('recv.consent.echange')), t('recv.consent.echange.help'), t('recv.consent.echange.name')) : null,
+    withHelp(el('p', { class: 'muted small' }, t(invitation.mode === 'public' ? 'recv.consent.public' : 'recv.consent')),
+      t(invitation.mode === 'public' ? 'recv.consent.public.help' : 'recv.consent.help'), t('recv.consent.name')),
+    withHelp(el('label', { class: 'check' }, reserveBox, t('recv.reserve')), t('recv.reserve.help'), t('recv.reserve')),
     options ? el('details', { class: 'guide options-more' }, el('summary', {}, t('recv.options.advanced')), options.node) : null,
     askCompared ? el('label', { class: 'check' }, compared, t('recv.backCompared')) : null,
     report, stepHelp(['t-dest']), roleGuide({ you: 'target', mode: invitation.mode, current: 1 }),

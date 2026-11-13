@@ -225,7 +225,12 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
    sauter sous la souris (centré, le haut de la fenêtre montait et descendait de plus de 100 px). */
 .scrim:has(> .modal-720) { --top: clamp(12px, 4vh, 32px); align-items: start; padding-top: var(--top); }
 .scrim:has(> .modal-720) > .modal-720 { max-height: calc(100vh - var(--top) - 12px); }
-.modal-title { font-size: 15px; padding: 12px 14px 8px; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.modal-title { font-size: 15px; padding: 12px 14px 8px; flex: 1 1 auto; min-width: 0; }
+/* Croix de fermeture : Échap fait la même chose (ui.js, openModal) */
+.modal-x { flex: none; width: 28px; height: 28px; margin: 8px 10px 0 0; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text-muted); font-size: 20px; line-height: 1; cursor: pointer; }
+.modal-x:hover { background: var(--surface-sunken); color: var(--text); }
 .modal-body { flex: 1 1 auto; min-height: 0; padding: 0 14px 8px; overflow: auto; overflow-wrap: anywhere; }
 .steps { display: flex; gap: 4px; margin: 0 0 10px; padding: 0; list-style: none; font-size: 12px; flex-wrap: wrap; }
 .steps li { display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
@@ -235,8 +240,19 @@ main { padding: 12px; max-width: 760px; margin: 0 auto; }
 .steps .current { color: var(--text); font-weight: 600; }
 .steps .current .step-num { background: var(--accent-solid); border-color: var(--accent-solid); color: #fff; }
 .steps .done .step-num { border-color: var(--good); color: var(--good); }
-.modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.modal-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
 .modal-footer .btn-back { margin-right: auto; }
+/* Explication d'une option : « ? » à côté du libellé, texte dessous à la demande (ui.js : helpButton, withHelp) */
+.help-row { display: flex; align-items: flex-start; gap: 8px; }
+.help-row > :first-child { flex: 1 1 auto; min-width: 0; }
+.help-btn { flex: none; width: 24px; height: 24px; padding: 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface);
+  color: var(--accent-ink); font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer; }
+.help-btn:hover { border-color: var(--accent); }
+.help-btn[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.help-panel { margin: 2px 0 8px; padding: 6px 10px; border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--surface-sunken);
+  font-size: 12.5px; }
+.help-panel p { margin: 0; }
+.help-panel p + p { margin-top: 4px; }
 /* Aides d'une étape : discrètes, en bas, repliées */
 .modal-body .guide { border: 0; background: none; padding: 0; margin-top: 10px; }
 .modal-body .guide summary { font-weight: 400; font-size: 13px; }

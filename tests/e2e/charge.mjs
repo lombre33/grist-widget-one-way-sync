@@ -377,7 +377,7 @@ const scenarios = {
     });
     await p.sv.openTab(p.src.url, 'Envoyer');
     await p.sv.button('Tout renvoyer').click();
-    await p.sv.widget().getByText(/Renvoi terminé|Un autre renvoi est en cours/).waitFor({ timeout: 300000 }).catch(() => {});
+    await p.sv.widget().getByText(/Renvoi terminé|Un autre envoi est déjà en cours/).waitFor({ timeout: 300000 }).catch(() => {});
     await sleep(20000);
     await p.dv.open(p.dst.url);
     await sleep(15000);
@@ -538,7 +538,7 @@ const scenarios = {
     await other.openTab(p.src.url, 'Envoyer');
     await p.sv.openTab(p.src.url, 'Envoyer');
     // Depuis la 0.12.3, « Tout renvoyer » part sans fenêtre (sauf un envoi long, qui se confirme) et se suit sur la carte :
-    // « Renvoi terminé » quand cette page a envoyé, « Un autre renvoi est en cours » quand une autre page a la main
+    // « Renvoi terminé » quand cette page a envoyé, « Un autre envoi est déjà en cours » quand une autre page a la main
     // (le lot est alors noté et partira seul). Les deux réponses sont bonnes, le test relève laquelle vient.
     const again = async (view) => {
       await view.button('Tout renvoyer').click();
@@ -546,7 +546,7 @@ const scenarios = {
       const which = await Promise.race([
         confirm.waitFor({ timeout: 180000 }).then(() => 'confirmation'),
         view.widget().getByText('Renvoi terminé').waitFor({ timeout: 180000 }).then(() => 'terminé'),
-        view.widget().getByText('Un autre renvoi est en cours pour ce document').waitFor({ timeout: 180000 }).then(() => 'attente'),
+        view.widget().getByText('Un autre envoi est déjà en cours pour ce document').waitFor({ timeout: 180000 }).then(() => 'attente'),
       ]).catch(() => 'rien');
       log(`« Tout renvoyer » : ${which}`);
       if (which === 'confirmation') await confirm.click();

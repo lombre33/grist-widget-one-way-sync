@@ -22,7 +22,7 @@ import {
 import { docNameField } from './doc-name.js';
 import { estimateLines, progressTo } from './flow.js';
 import {
-  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, docLink, el, laterButton, message, openWizard, run,
+  backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, docLink, el, laterButton, message, openWizard, run, withHelp,
   versionNote,
 } from '../ui.js';
 import { handoffButton, roleGuide } from '../guide.js';
@@ -69,16 +69,17 @@ async function showOptions(ctx) {
   const docName = await docNameField(await sourceDocName());
   const more = (exp.echange && !exp.retour) || exp.invitations.some(inv => inv.journal);
   const strongBox = el('input', { type: 'checkbox', checked: Boolean(exp.renforce) });
-  const strongPart = el('div', { class: 'form' }, el('label', { class: 'check' }, strongBox, t('send.renforce')), el('p', { class: 'muted small' }, t('send.renforce.help')));
+  const strongPart = el('div', { class: 'form' }, withHelp(el('label', { class: 'check' }, strongBox, t('send.renforce')), t('send.renforce.help'), t('send.renforce')));
   const parts = {
     public: el('div', { class: 'hidden' }, message('err', t('send.public.columns', { list: publicList(exp) })), message('warn', t('send.public.warn'))),
     echange: el('div', { class: more ? '' : 'hidden' }, message('info', t(more ? 'send.mode.echange.moreHelp' : 'send.mode.echange.help'))),
   };
-  const radio = (value, label, checked, disabled) => el('label', { class: 'check' },
+  // Un mode : son nom, et son explication derrière un « ? » (avec la raison quand il est grisé).
+  const radio = (value, label, checked, disabled, help) => withHelp(el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'gristsync-mode', value, checked, disabled, onchange: () => {
       strongBox.disabled = value === 'public';
       for (const [key, part] of Object.entries(parts)) part.classList.toggle('hidden', value !== key);
-    } }), label);
+    } }), label), help, label);
   const report = el('div', { class: 'report' });
   const mode = () => (document.querySelector('input[name="gristsync-mode"]:checked') || {}).value;
   const exchangeOk = more || (!exp.recipients.length && !exp.invitations.length && !exp.public);
@@ -87,10 +88,12 @@ async function showOptions(ctx) {
     el('p', { class: 'muted small' }, t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
     el('p', { class: 'field-title', id: 'gristsync-mode-title' }, t('send.mode')),
     el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-mode-title' },
-      radio('reponse', t('send.mode.reply'), !more, more),
+      radio('reponse', t('send.mode.reply'), !more, more, t('send.mode.reply.help')),
       el('p', { class: 'muted small' }, t('send.mode.others')),
-      radio('echange', more ? t('send.mode.echange.more') : exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), more, !exchangeOk),
-      radio('public', exp.public ? t('send.mode.publicDone') : exp.renforce ? t('send.mode.publicStrong') : t('send.mode.public'), false, exp.public || more || exp.renforce)),
+      radio('echange', more ? t('send.mode.echange.more') : t('send.mode.echange'), more, !exchangeOk,
+        t(more ? 'send.mode.echange.more.help' : exchangeOk ? 'send.mode.echange.what' : 'send.mode.echange.off')),
+      radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public || more || exp.renforce,
+        t(exp.public ? 'send.mode.publicDone.help' : exp.renforce ? 'send.mode.publicStrong' : more ? 'send.mode.public.off' : 'send.mode.public.help'))),
     strongPart, docName.node, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
   ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
     await rememberDocName(docName.value());

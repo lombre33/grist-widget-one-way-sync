@@ -498,6 +498,7 @@ try {
     await startExport(a, 'Fiches', 'Partage');
     await dialogButton('Ajouter un destinataire').click();
     await dialog().getByRole('radio', { name: /Échange/ }).check();
+    await dialog().getByRole('button', { name: /^Aide : Dans les deux sens/ }).click(); // l'explication est derrière le « ? »
     await dialog().getByText('la plus récente l’emporte', { exact: false }).first().waitFor();
     await shot('20-echange-mode', 'modal');
     await dialogButton('Créer l’invitation').click();
@@ -657,7 +658,7 @@ try {
     const dst = await newDocWithWidget('Options CIBLE');
     await startExport(src, 'Fiches', 'Annuaire');
     const code = await plainInvitation();
-    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.', [/^Archive/, /lecture seule/]);
+    const answer = await accept(dst.doc, dst.url, code, '« Annuaire » : table Fiches.', [/^Garder ici les lignes supprimées/, /lecture seule/]);
     await approve(answer, { url: src.url });
     const fiches = async () => Object.fromEntries((await records(dst.doc, 'Fiches')).map(r => [r.Nom, r]));
     await openWidget(dst.url);
@@ -690,12 +691,38 @@ try {
     await waitFor(async () => (await journalNote()).note.verrou === true, 'note remise d\'accord avec la règle de lecture seule', 60000);
     assert.equal((await lockRules()).length, 1, 'la règle reste en place');
     await widget().getByRole('tab', { name: 'Recevoir' }).click();
-    // Options de la carte : archive et verrou retirés, la règle part (seul un propriétaire la lève).
+    // Sortir d'une fenêtre de réglages : sans changement, Échap ferme tout de suite ; après un changement, Échap et la croix demandent
+    // quoi faire (rien n'est écrit tant qu'on n'a pas répondu) ; « Abandonner » laisse tout comme avant.
+    const stay = () => dialog().last().getByRole('button', { name: 'Continuer à modifier', exact: true });
+    const discard = () => dialog().last().getByRole('button', { name: 'Abandonner les modifications', exact: true });
+    await button('Options').click();
+    await page.keyboard.press('Escape');
+    await dialog().waitFor({ state: 'detached' });
     await button('Options').click();
     await dialog().getByRole('checkbox', { name: /lecture seule/ }).uncheck();
-    await dialog().getByRole('checkbox', { name: /^Archive/ }).uncheck();
-    await dialog().getByText(/ne supprime pas les lignes déjà archivées/).waitFor();
-    await dialogButton('Enregistrer').click();
+    await page.keyboard.press('Escape');
+    await stay().waitFor();
+    await stay().click();
+    assert.equal(await dialog().count(), 1, '« Continuer à modifier » revient à la fenêtre');
+    assert.equal(await dialog().getByRole('checkbox', { name: /lecture seule/ }).isChecked(), false, 'le changement est encore là');
+    await dialog().getByRole('button', { name: 'Fermer la fenêtre', exact: true }).click();
+    await discard().waitFor();
+    await discard().click();
+    await dialog().waitFor({ state: 'detached' });
+    assert.equal((await lockRules()).length, 1, 'abandonné : la règle de lecture seule est toujours là');
+    // Options de la carte : archive et verrou retirés, la règle part (seul un propriétaire la lève). Échap referme d'abord l'explication
+    // ouverte, puis la fenêtre ; « Enregistrer » de la fenêtre « Quitter ? » enregistre.
+    await button('Options').click();
+    await dialog().getByRole('checkbox', { name: /lecture seule/ }).uncheck();
+    await dialog().getByRole('checkbox', { name: /^Garder ici les lignes supprimées/ }).uncheck();
+    await dialog().getByRole('button', { name: /^Aide : Garder ici les lignes supprimées/ }).click(); // l'explication est derrière le « ? »
+    await dialog().getByText(/les lignes déjà gardées restent dans la table/).waitFor();
+    await page.keyboard.press('Escape');
+    await dialog().getByText(/les lignes déjà gardées restent dans la table/).waitFor({ state: 'hidden' });
+    assert.equal(await dialog().count(), 1, 'Échap n\'a refermé que l\'explication');
+    await page.keyboard.press('Escape');
+    await dialog().last().getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await dialog().waitFor({ state: 'detached' });
     await waitFor(async () => (await lockRules()).length === 0, 'règle de lecture seule retirée', 60000);
     // Archive décochée : la ligne déjà archivée reste, la suivante est effacée.
     await applyActions(src.doc, [['RemoveRecord', 'Fiches', 3]]);
@@ -711,6 +738,33 @@ try {
     await history.getByText(/reçoit désormais cet export/).waitFor();
     await history.getByText(/Envoi de 3 lignes à tous les destinataires actifs/).waitFor();
     await shot('28-source-historique', 'card');
+    // Modifier l'export : on peut en sortir à chaque étape (Annuler, croix, Échap) sans aller jusqu'au bout. Après un changement,
+    // la fenêtre « Quitter ? » propose d'abandonner ou d'enregistrer tel quel.
+    const autoCols = () => dialog().getByRole('checkbox', { name: 'Envoyer aussi les colonnes que j’ajouterai à ces tables' });
+    const editColumns = async () => { await button('Modifier').click(); await dialogButton('Continuer').click(); await autoCols().waitFor(); };
+    await editColumns();
+    await page.keyboard.press('Escape');
+    await dialog().waitFor({ state: 'detached' });
+    await editColumns();
+    await autoCols().check();
+    await page.keyboard.press('Escape');
+    await stay().click();
+    assert.equal(await autoCols().isChecked(), true, 'l\'assistant est resté ouvert, le changement aussi');
+    await dialog().getByRole('button', { name: 'Fermer la fenêtre', exact: true }).click();
+    await discard().click();
+    await dialog().waitFor({ state: 'detached' });
+    await editColumns();
+    assert.equal(await autoCols().isChecked(), false, 'abandonné : rien n\'a été enregistré');
+    await autoCols().check();
+    await page.keyboard.press('Escape');
+    await dialog().last().getByRole('button', { name: 'Enregistrer', exact: true }).click();
+    await dialog().getByText('Enregistré.').waitFor();
+    await dialogButton('Fermer').click();
+    await openWidget(src.url); // l'état enregistré, relu (la carte se redessine à la fermeture, un clic donné avant verrait l'ancien)
+    await editColumns();
+    assert.equal(await autoCols().isChecked(), true, 'enregistré depuis la fenêtre « Quitter ? » : le choix est gardé');
+    await dialogButton('Annuler').click(); // un bouton Annuler à chaque étape, sans demande
+    await dialog().waitFor({ state: 'detached' });
     step('Options d\'une réception : archive (ligne effacée à la SOURCE gardée, cochée, sans alerte), tables en lecture seule (règle posée puis retirée), archive décochée (la ligne archivée reste) ; historique des envois dans la SOURCE');
   }
   // --- Effacer l'historique sur demande (CIBLE : l'avant des modifications et les valeurs des lignes supprimées du journal ; SOURCE :
@@ -737,8 +791,8 @@ try {
     await shot('31-cible-effacer-historique', 'card');
     // « Annuler » ne vide rien.
     await button('Effacer l’historique').click();
-    await dialog().getByText(/L’historique de la carte repart de zéro/).waitFor();
-    await dialog().getByText(/Ce que Grist garde de son côté/).waitFor();
+    await dialog().getByText(/L’historique affiché sur la carte repart de zéro/).waitFor();
+    await dialog().getByText(/L’historique propre à Grist/).waitFor();
     await dialogButton('Annuler').click();
     await dialog().waitFor({ state: 'detached' });
     assert.ok((await journalRows()).some(r => r.Sync_Avant), 'annulé : l\'avant est toujours là');
@@ -766,7 +820,7 @@ try {
     await sent.locator('summary').click();
     await sent.getByText(/reçoit désormais cet export/).waitFor();
     await sent.getByRole('button', { name: 'Effacer l’historique' }).click();
-    await dialog().getByText(/L’historique des envois de cet export est effacé/).waitFor();
+    await dialog().getByText(/La liste des événements de cet export/).waitFor();
     await dialogButton('Effacer l’historique').click();
     // Depuis la 0.28.2 le bloc reste tant que Grist donne l'heure d'un dernier envoi ordinaire (état du webhook, pas une ligne de la note) :
     // plus aucun événement du widget, et le bouton d'effacement n'a plus rien à effacer.
@@ -1270,7 +1324,7 @@ try {
     assert.ok(!(await dialog().getByRole('checkbox', { name: AUTO_BOX }).isChecked()), 'la réception demande l\'accord, d\'emblée');
     await pick('Fiches', 'Annuaire');
     await dialogButton('Continuer').click();
-    await dialog().getByText(/Choisissez la colonne qui reçoit chaque colonne envoyée/).waitFor();
+    await dialog().getByText(/choisissez la colonne de votre table qui la reçoit/).waitFor();
     await dialog().getByText(/Ville\s→\sVille\s:\sla SOURCE envoie le type Texte, la colonne d’ici est de type Numérique/).waitFor();
     await pick('Rattacher les lignes déjà là par la colonne', 'Nom');
     if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'adopte-1-types.png') });
@@ -1984,7 +2038,7 @@ try {
     const ids = [await upload(src.doc, 'bonjour.txt', small), await upload(src.doc, 'gros.bin', big), await upload(src.doc, 'copie.txt', small)];
     await applyActions(src.doc, [['BulkUpdateRecord', 'Dossiers', [1, 2, 3], { Piece: ids.map(id => ['L', id]) }]]);
     await startExport(src, 'Dossiers', 'Dossiers', async () => {
-      await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
+      await dialog().getByText(/Pièces jointes \(Piece\)\s:\scochez-les pour les envoyer/).waitFor();
       await dialog().getByRole('checkbox', { name: /Piece/ }).check();
       await shot('25-source-pieces-jointes', 'modal');
     });
@@ -2065,7 +2119,7 @@ try {
     const ids = [await upload(a.doc, 'bonjour.txt', hello), await upload(a.doc, 'moyen.bin', medium)];
     await applyActions(a.doc, [['BulkUpdateRecord', 'Dossiers', [1, 2], { Piece: ids.map(id => ['L', id]) }]]);
     await startExport(a, 'Dossiers', 'Partage', async () => {
-      await dialog().getByText(/Pièces jointes \(Piece\)\s:\sà cocher pour les envoyer/).waitFor();
+      await dialog().getByText(/Pièces jointes \(Piece\)\s:\scochez-les pour les envoyer/).waitFor();
       await dialog().getByRole('checkbox', { name: /Piece/ }).check();
     });
     await dialogButton('Ajouter un destinataire').click();
@@ -2332,9 +2386,10 @@ try {
     };
     await startExport(src, 'Fiches', 'Annuaire');
     await dialogButton('Ajouter un destinataire').click();
-    const nameField = dialog().getByLabel('Nom de ce document');
+    const nameField = dialog().getByLabel('Nom de ce document', { exact: true });
     assert.equal(await nameField.inputValue(), '', 'rien à lire : le nom du document n\'est pas donné au widget, le champ attend la saisie');
-    await dialog().locator('p.muted.small', { hasText: 'Grist ne permet pas au widget de lire le nom du document' }).waitFor(); // l'aide du tutoriel le redit : une seule phrase du champ
+    await dialog().getByRole('button', { name: /^Aide : Nom de ce document/ }).click(); // l'explication est derrière le « ? »
+    await dialog().locator('.help-panel p', { hasText: 'Le widget ne peut pas lire le nom de votre document' }).waitFor(); // l'aide du tutoriel le redit : une seule phrase du champ
     await nameField.fill('Lien SOURCE <i>saisi</i> & co');
     await keep('28-source-nom-du-document', dialog());
     await dialogButton('Créer l’invitation').click();
@@ -2345,7 +2400,7 @@ try {
     await rulesSettled(src.doc);
     // Le nom est gardé pour l'invitation suivante, et se corrige.
     await button('Ajouter un destinataire').click();
-    assert.equal(await dialog().getByLabel('Nom de ce document').inputValue(), 'Lien SOURCE <i>saisi</i> & co', 'nom retenu, proposé de nouveau');
+    assert.equal(await dialog().getByLabel('Nom de ce document', { exact: true }).inputValue(), 'Lien SOURCE <i>saisi</i> & co', 'nom retenu, proposé de nouveau');
     await dialogButton('Annuler').click();
 
     // CIBLE : la fiche de l'invitation montre le document en lien, avant toute écriture.
@@ -2394,7 +2449,7 @@ try {
     const pageAddress = page.url();
     assert.ok(pageAddress.startsWith(`${TEAM}/${shortId(src.doc)}/Lien-SOURCE`), `l'adresse de la page de la SOURCE (${pageAddress})`);
     await button('Ajouter un destinataire').click();
-    const pasteField = dialog().getByLabel('Nom de ce document');
+    const pasteField = dialog().getByLabel('Nom de ce document', { exact: true });
     const pasted = async (text) => { await pasteField.fill(text); return pasteField.inputValue(); };
     assert.equal(await pasted(pageAddress), 'Lien SOURCE', 'adresse collée : le nom est lu à sa place');
     await dialog().getByText('Nom lu dans l’adresse de la page').waitFor();
@@ -2749,7 +2804,7 @@ try {
   assert.notEqual(formPage.id, widgetPage.id, 'formulaire sur sa propre page');
   assert.equal(formPage.indentation, 0, 'page du formulaire à la racine');
   await dialog().getByText(/sur la page\s+«\s+Journal_Annuaire\s+»/).waitFor();
-  await dialog().getByText(/il sert pour toutes les tables de l’export/).waitFor();
+  await dialog().getByText(/un seul lien sert pour toutes les tables de l’export/).waitFor();
   await dialog().evaluate(d => d.querySelectorAll('*').forEach(e => { e.scrollTop = 0; }));
   await shot('09-cible-lien');
   if (process.env.CAPTURES) await helpShots(`${TEAM}/doc/${target.doc}/p/${formPage.viewRef}`, target.url);
@@ -2798,7 +2853,7 @@ try {
   await widget().getByText(/Un envoi est en cours depuis une autre page ou une autre personne\s:\s2 sur 4 lignes \(50\s%\), lot 2 sur environ 2\./).waitFor();
   assert.equal(await widget().locator('[data-flow="runningOther"] progress').getAttribute('value'), '2', 'barre d\'avancement');
   await button('Tout renvoyer').click();
-  await widget().getByText('Un autre renvoi est en cours pour ce document').waitFor();
+  await widget().getByText('Un autre envoi est déjà en cours pour ce document').waitFor();
   const lotOf = async () => (await records(source.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot');
   assert.equal((await lotOf()).Sync_Etat, 1, 'lot noté à renvoyer en entier');
   await holdCharge('');
@@ -3402,6 +3457,7 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByText('Table reçue d’un autre document').waitFor();
   await page.keyboard.press('Escape');
+  await dialog().last().getByRole('button', { name: 'Abandonner les modifications', exact: true }).click(); // une création n'a rien d'enregistré : seulement l'abandon
   await dialog().waitFor({ state: 'detached' });
   // La table Synchro, vide et protégée, est posée avant l'assistant (0.19) : aucune ligne n'est écrite.
   const syncAfter = (await records(target.doc, '_grist_Tables')).some(tb => tb.tableId === 'Synchro') ? (await records(target.doc, 'Synchro')).length : 0;
@@ -3549,7 +3605,7 @@ try {
   await newExport('Contacts', 'Annuaire');
   await dialogButton('Ajouter un destinataire').click();
   await dialog().getByRole('radio', { name: /Lien public/ }).check();
-  await dialog().getByText(/Toute personne qui a le lien du document pourra lire ces colonnes\s:\sContacts \(/).waitFor();
+  await dialog().getByText(/Toute personne qui a le lien pourra lire ces colonnes\s:\sContacts \(/).waitFor();
   await dialogButton('Créer l’invitation').click();
   await dialog().getByText(/Lien public refusé\s:\sune règle d’accès cache une partie de Contacts/).waitFor();
   await dialogButton('Annuler').click();

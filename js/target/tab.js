@@ -738,9 +738,13 @@ function labelDialog(group) {
     state.results.clear();
     await consolidateAll();
   };
+  const chosen = () => JSON.stringify(pickers.map(p => p.field.value()));
+  const initial = chosen();
+  const saveHere = m => run(null, report, () => save(m));
   openModal({
     title: t('recv.label.title'), width: 400,
     body: [el('p', { class: 'small' }, t('recv.label.help')), ...pickers.map(p => el('div', { class: 'dest-row' }, el('span', {}, p.entry.dest), p.field)), report],
-    buttons: [cancelButton(), { label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, () => save(m)) }],
+    guard: { save: saveHere, changed: () => chosen() !== initial },
+    buttons: [cancelButton(), { label: t('common.save'), kind: 'btn-primary', onClick: saveHere }],
   });
 }

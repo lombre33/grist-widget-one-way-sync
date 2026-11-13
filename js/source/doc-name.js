@@ -4,7 +4,7 @@
 // Une adresse collée est remplacée à l'instant par le nom lu, ou par rien avec la raison : l'adresse elle-même n'est jamais gardée.
 import { docNameFrom } from '../engine/logic/codes.js';
 import { docIdentity } from '../grist.js';
-import { el } from '../ui.js';
+import { el, withHelp } from '../ui.js';
 import { t } from '../i18n.js';
 
 const NOTES = {
@@ -35,7 +35,6 @@ export async function docNameField(initial) {
     if (docNameFrom(input.value, here).kind !== 'typed') read();
     else note.hidden = true;
   });
-  const node = el('div', { class: 'form' }, el('label', { for: 'gristsync-doc-name' }, t('send.docName')), input,
-    el('p', { class: 'muted small' }, t('send.docName.help')), note);
+  const node = el('div', { class: 'form' }, withHelp(el('label', { for: 'gristsync-doc-name' }, t('send.docName')), t('send.docName.help')), input, note);
   return { node, value: () => docNameFrom(input.value, here).name };
 }

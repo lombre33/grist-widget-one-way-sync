@@ -56,6 +56,40 @@ export function notice({ tone = 'info', title = '', lines = [], body = [], actio
     actions.length ? el('div', { class: 'card-actions' }, actions) : null);
 }
 
+// Explication d'une option, à la demande : un petit bouton « ? » à côté du libellé montre ou cache le texte juste dessous, sans
+// quitter la fenêtre. Le texte reste dans la page (un lecteur d'écran l'atteint dès que le bouton le déplie) ; le bouton annonce
+// s'il est ouvert (`aria-expanded`), nomme l'option qu'il explique et se manie au clavier (Entrée, Espace ; Échap le referme sans
+// fermer la fenêtre). `text` : une phrase, ou une liste de paragraphes. À réserver aux assistants et fenêtres : l'état ouvert ne
+// survit pas à un redessin, et les onglets se redessinent toutes les 10 secondes.
+let helpCount = 0;
+export function helpButton(text, name) {
+  const id = `gristsync-help-${++helpCount}`;
+  const panel = el('div', { class: 'help-panel hidden', id, role: 'note' }, [text].flat().map(paragraph => el('p', {}, paragraph)));
+  const button = el('button', {
+    class: 'help-btn', type: 'button', 'aria-expanded': 'false', 'aria-controls': id,
+    'aria-label': t('common.help', { name }), title: t('common.helpShow'),
+  }, '?');
+  const open = (on) => {
+    panel.classList.toggle('hidden', !on);
+    button.setAttribute('aria-expanded', String(on));
+  };
+  button.addEventListener('click', () => open(button.getAttribute('aria-expanded') !== 'true'));
+  button.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || button.getAttribute('aria-expanded') !== 'true') return;
+    event.stopPropagation(); // la fenêtre reste ouverte : Échap ne ferme que l'explication
+    event.preventDefault();
+    open(false);
+  });
+  return { button, panel };
+}
+
+// Un contrôle (case, bouton radio, champ avec son libellé) suivi de son « ? » et de son explication.
+// `name` : l'option expliquée, pour le lecteur d'écran (par défaut le texte du contrôle, sans compteur).
+export function withHelp(control, text, name = '') {
+  const { button, panel } = helpButton(text, name || control.textContent.replace(/\s+/g, ' ').trim().slice(0, 90));
+  return el('div', { class: 'has-help' }, el('div', { class: 'help-row' }, control, button), panel);
+}
+
 // Une phrase, ou un titre et sa phrase quand `title` est donné.
 export function message(kind, text, title = '') {
   return title ? notice({ tone: kind, title, lines: [text] }) : el('p', { class: `msg msg-${kind}`, role: kind === 'err' ? 'alert' : 'status' }, text);
@@ -93,19 +127,36 @@ export function redraw(root, nodes) {
   restoreFocus(root, spot);
 }
 
-export function openModal({ title, body, buttons = [], width = 480, onClose }) {
+export function openModal({ title, body, buttons = [], width = 480, onClose, guard = null }) {
   const opener = document.activeElement;
   const main = document.getElementById('main');
   const spot = main ? focusSpot(main, opener) : null;
   const titleId = `modal-title-${stack.length}`;
   const footer = el('div', { class: 'modal-footer' });
+  const closer = el('button', { class: 'modal-x', type: 'button', 'aria-label': t('common.closeWindow'), title: t('common.closeWindow'),
+    onclick: () => modal.requestClose() }, el('span', { 'aria-hidden': 'true' }, '×'));
   const frame = el('div', { class: `modal modal-${width}`, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
-    el('h2', { class: 'modal-title', id: titleId }, title),
+    el('div', { class: 'modal-head' }, el('h2', { class: 'modal-title', id: titleId }, title), closer),
     el('div', { class: 'modal-body' }, body),
     footer);
   const scrim = el('div', { class: 'scrim' }, frame);
+  // Fenêtre de réglages (`guard`) : ce que la personne a touché depuis l'ouverture. Un champ de recherche, une zone de
+  // texte (code collé) ou un « ? » ne comptent pas ; `guard.changed()` précise quand on peut comparer à l'état d'ouverture.
+  let touched = false;
+  const touch = (event) => { if (!(event.target.matches && event.target.matches('input[type="search"], textarea, .help-btn'))) touched = true; };
+  if (guard) for (const kind of ['input', 'change', EDITED]) frame.addEventListener(kind, touch);
   const modal = {
     frame, footer,
+    isDirty: () => Boolean(guard) && touched && (!guard.changed || guard.changed()),
+    clean() { touched = false; },
+    touch() { touched = true; },
+    // Échap, la croix : quitter tout de suite, ou demander quoi faire des changements non enregistrés.
+    async requestClose(result) {
+      if (!modal.isDirty()) return modal.close(result);
+      const answer = await leaveDialog(Boolean(guard.save));
+      if (answer === 'discard') modal.close(result);
+      else if (answer === 'save') await guard.save(modal);
+    },
     close(result) {
       scrim.remove();
       stack.splice(stack.indexOf(modal), 1);
@@ -144,7 +195,7 @@ export function openModal({ title, body, buttons = [], width = 480, onClose }) {
 document.addEventListener('keydown', (event) => {
   const modal = stack[stack.length - 1];
   if (!modal) return;
-  if (event.key === 'Escape') { event.preventDefault(); modal.close(false); return; }
+  if (event.key === 'Escape') { event.preventDefault(); modal.requestClose(false); return; }
   if (event.key !== 'Tab') return;
   const focusable = [...modal.frame.querySelectorAll('button, input, textarea, select, summary, [tabindex="0"]')]
     .filter(n => !n.disabled && n.getClientRects().length);
@@ -155,18 +206,46 @@ document.addEventListener('keydown', (event) => {
   else if (!event.shiftKey && (document.activeElement === last || !inside)) { event.preventDefault(); first.focus(); }
 });
 
+// Un réglage choisi dans une liste ou une liste de cases (pas des champs natifs, qui disent déjà « change ») prévient la
+// fenêtre qui le contient.
+const EDITED = 'gristsync-edited';
+export const edited = node => node.dispatchEvent(new Event(EDITED, { bubbles: true }));
+
+// « Quitter ? » : ce qu'on demande à qui sort d'une fenêtre de réglages après un changement. Avec `canSave`, trois
+// issues (continuer, abandonner, enregistrer) ; sans, deux (rien n'est encore enregistré : une création). Échap revient
+// à la fenêtre. Rend 'stay', 'discard' ou 'save'.
+function leaveDialog(canSave) {
+  return new Promise((resolve) => {
+    let answer = 'stay';
+    const pick = (value, m) => { answer = value; m.close(); };
+    const modal = openModal({
+      title: t(canSave ? 'common.leave.title' : 'common.leave.titleNew'), width: 560,
+      body: el('p', {}, t(canSave ? 'common.leave.body' : 'common.leave.bodyNew')),
+      onClose: () => resolve(answer),
+      buttons: [
+        { label: t(canSave ? 'common.leave.stay' : 'common.leave.stayNew'), kind: canSave ? '' : 'btn-primary', onClick: m => pick('stay', m) },
+        { label: t('common.leave.discard'), kind: 'btn-danger', onClick: m => pick('discard', m) },
+        ...(canSave ? [{ label: t('common.save'), kind: 'btn-primary', onClick: m => pick('save', m) }] : []),
+      ],
+    });
+    (modal.footer.querySelector('.btn-primary') || modal.footer.querySelector('button')).focus();
+  });
+}
+
 // Assistant : une seule fenêtre, des étapes numérotées qui se débloquent l'une après l'autre.
 // `show(index, body, buttons)` affiche une étape ; les précédentes sont marquées faites.
 // `buttons(list)` change les boutons seuls ; `setSteps(labels)` raccourcit le parcours (lien public).
-export function openWizard({ title, steps, onClose }) {
+export function openWizard({ title, steps, onClose, guard = null }) {
   const stepList = el('ol', { class: 'steps' });
   const content = el('div', { class: 'form' });
   // `onClose` ne reçoit rien : Échap ferme avec `false`, qui ne doit pas arriver aux fonctions de
   // dessin (`renderSource(root = container)` dessinerait dans `false`).
-  const modal = openModal({ title, body: [stepList, content], onClose: () => onClose && onClose(), width: 720 });
+  const modal = openModal({ title, body: [stepList, content], onClose: () => onClose && onClose(), width: 720, guard });
   let shown = -1;
   return {
     close: () => modal.close(),
+    clean: () => modal.clean(),
+    touch: () => modal.touch(),
     buttons: list => modal.setButtons(list),
     setSteps(labels) { steps = labels; },
     show(index, body, buttons) {
@@ -266,6 +345,7 @@ export function checkList({ items, checked = [], label = '', onChange, wide = fa
   const found = () => items.filter(it => matches(`${it.label} ${it.keywords || ''}`, filter.value));
   const changed = () => {
     count.textContent = t('common.checkedCount', { n: chosen.size, total: items.length });
+    edited(list);
     onChange(items.map(i => i.value).filter(v => chosen.has(v)));
   };
   const render = () => {
@@ -326,7 +406,7 @@ export function pickField({ items, value, label, onChange = () => {} }) {
     button.setAttribute('aria-expanded', String(open));
     if (open) { filter.value = ''; render(); filter.focus(); } else button.focus();
   };
-  const choose = (v) => { current = v; showChoice(); toggle(false); onChange(v); };
+  const choose = (v) => { current = v; showChoice(); toggle(false); edited(field); onChange(v); };
   function render() {
     const found = items.filter(it => matches(it.label, filter.value));
     list.replaceChildren(...(found.length ? found.map(it => el('button', {

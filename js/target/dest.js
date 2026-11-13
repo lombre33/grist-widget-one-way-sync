@@ -12,7 +12,7 @@ import { checkDests } from '../engine/target/dest.js';
 import { prepareDest, storeKey, updateJournalNote } from '../engine/target/journals.js';
 import { keySlot, missingColumns, receivedDests, receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { consolidateAll } from '../engine/target/loop.js';
-import { backButton, confirmDialog, el, laterButton, message, openModal, pickField, run } from '../ui.js';
+import { backButton, confirmDialog, el, laterButton, message, openModal, pickField, run, withHelp } from '../ui.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
 
@@ -63,8 +63,7 @@ export function mappingBlock(schema, table, dest, columns) {
     el('h3', {}, `${table} → ${dest}`),
     ...maps.map(m => el('div', { class: 'dest-row' }, el('span', {}, `${m.id} →`), m.field)),
     notes,
-    el('label', {}, t('recv.match')), match,
-    el('p', { class: 'muted small' }, t('recv.match.help')));
+    withHelp(el('label', {}, t('recv.match')), t('recv.match.help')), match);
   const read = () => {
     const map = mapNow();
     const targets = Object.values(map);

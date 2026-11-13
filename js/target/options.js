@@ -12,7 +12,7 @@
 import { syncRules } from '../engine/acl.js';
 import { updateJournalNote } from '../engine/target/journals.js';
 import { optionsNote } from '../engine/logic/received.js';
-import { cancelButton, el, openModal, run } from '../ui.js';
+import { cancelButton, el, openModal, run, withHelp } from '../ui.js';
 import { t } from '../i18n.js';
 
 // Les cases, cochées selon `current` ; `lockable` : la personne peut changer le verrou ;
@@ -22,13 +22,10 @@ export function receptionOptions(current, { lockable = true, change = false } = 
   const verrou = el('input', { type: 'checkbox', checked: Boolean(current.verrou), disabled: !lockable });
   const auto = el('input', { type: 'checkbox', checked: !current.ask });
   return {
-    node: el('div', {},
-      el('label', { class: 'check' }, auto, t('recv.structure.auto.option')),
-      el('p', { class: 'muted small' }, t('recv.structure.auto.help')),
-      el('label', { class: 'check' }, archive, t('recv.archive')),
-      change ? el('p', { class: 'muted small' }, t('recv.archive.off')) : null,
-      el('label', { class: 'check' }, verrou, t('recv.lock')),
-      el('p', { class: 'muted small' }, t('recv.lock.limit')),
+    node: el('div', { class: 'form' },
+      withHelp(el('label', { class: 'check' }, auto, t('recv.structure.auto.option')), t('recv.structure.auto.help'), t('recv.structure.auto.option')),
+      withHelp(el('label', { class: 'check' }, archive, t('recv.archive')), [t('recv.archive.help'), change ? t('recv.archive.off') : null].filter(Boolean), t('recv.archive')),
+      withHelp(el('label', { class: 'check' }, verrou, t('recv.lock')), [t('recv.lock.help'), t('recv.lock.limit')], t('recv.lock')),
       lockable ? null : el('p', { class: 'muted small' }, t('recv.lock.ownerOnly'))),
     read: () => ({ archive: archive.checked, verrou: verrou.checked, ask: !auto.checked }),
   };
@@ -50,9 +47,13 @@ export function optionsDialog(group, owner, render) {
     if (release.length) await syncRules({ release });
     await render();
   };
+  const initial = JSON.stringify(options.read());
+  const saveHere = m => run(null, report, () => save(m));
   openModal({
     title: t('recv.options.title', { name: note.name }), width: 480,
     body: [options.node, report],
-    buttons: [cancelButton(), { label: t('common.save'), kind: 'btn-primary', onClick: m => run(null, report, () => save(m)) }],
+    // Échap ou la croix après un changement : enregistrer ou abandonner (voir openModal).
+    guard: { save: saveHere, changed: () => JSON.stringify(options.read()) !== initial },
+    buttons: [cancelButton(), { label: t('common.save'), kind: 'btn-primary', onClick: saveHere }],
   });
 }

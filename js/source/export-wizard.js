@@ -16,7 +16,7 @@ import { finishEdit, saveChosenExport } from '../engine/source/export.js';
 import { receivedDests } from '../engine/logic/received.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
-import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, notice, openWizard, pickField, run } from '../ui.js';
+import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, notice, openWizard, pickField, run, withHelp } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
 import { PULL_MODES, extrasFor, pullColumns, pullLeftOut } from './pull.js';
 import { roleGuide } from '../guide.js';
@@ -26,15 +26,12 @@ import { t, typeName } from '../i18n.js';
 const cancel = cancelButton();
 const columnLabel = c => (c.label === c.id ? c.id : `${c.label} (${c.id})`);
 
-// `onClose` : appelé à la fermeture (l'onglet se redessine).
+// `onClose` : appelé à la fermeture (l'onglet se redessine). Échap et la croix demandent quoi faire de ce qui a été changé :
+// un export modifié peut s'enregistrer tel quel sans passer par les étapes qui restent (`quickSave`) ; un export qu'on crée
+// n'a rien d'enregistré, on peut seulement l'abandonner.
 export function exportWizard(exp, onClose) {
-  const wizard = openWizard({
-    title: exp ? t('send.edit.title', { name: exp.name }) : t('send.new'),
-    steps: ['send.step.tables', 'send.step.columns', 'send.step.name'].map(k => t(k)),
-    onClose,
-  });
-  wizard.start(() => showTables({
-    exp, wizard, onClose,
+  const ctx = {
+    exp, onClose,
     chosen: exp ? exp.tables.map(tb => tb.table) : [],
     selected: new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []), // table -> colonnes cochées
     filters: new Map(exp ? exp.tables.map(tb => [tb.table, tb.filter]) : []), // table -> filtre de lignes, ou null
@@ -42,7 +39,14 @@ export function exportWizard(exp, onClose) {
     extras: new Map(), // table ajoutée pour un lien -> colonnes cochées en plus de celle que le lien affiche (choix « Choisir les colonnes »)
     pulls: new Map(), // table ajoutée pour un lien -> ce qu'elle envoie : 'shown' (d'emblée), 'all' ou 'pick' (voir pull.js)
     saved: savedLinks(exp), // refKey -> la colonne de l'export enregistré gardait son lien
-  }));
+  };
+  ctx.wizard = openWizard({
+    title: exp ? t('send.edit.title', { name: exp.name }) : t('send.new'),
+    steps: ['send.step.tables', 'send.step.columns', 'send.step.name'].map(k => t(k)),
+    onClose,
+    guard: { save: exp ? () => quickSave(ctx) : null },
+  });
+  ctx.wizard.start(() => showTables(ctx));
 }
 
 // Les liens de l'export enregistré, colonne par colonne (voir linkOffers). Rien pour un nouvel export ni un Échange.
@@ -53,7 +57,7 @@ const savedLinks = exp => (exp && !exp.echange
 async function showTables(ctx) {
   const tables = (await readSchema()).tableIds.filter(isUserTable);
   ctx.chosen = ctx.chosen.filter(table => tables.includes(table));
-  const report = el('div', { class: 'report' });
+  const report = ctx.report = el('div', { class: 'report' });
   const next = { label: t('common.next'), kind: 'btn-primary', disabled: !ctx.chosen.length, onClick: () => run(null, report, () => showColumns(ctx)) };
   const list = checkList({
     items: tables.map(id => ({ value: id, label: id })), checked: ctx.chosen, label: t('send.step.tables'),
@@ -231,7 +235,7 @@ function linkSection(ctx, schema, onTables) {
     state.rows = new Map(offers.rows.map(r => [r.key, refRow(ctx, r, refresh)]));
     const n = offers.rows.length;
     refsSlot.replaceChildren(...(n ? [el('div', { class: 'form table-block' }, el('h3', {}, t('send.refs.title')),
-      notice({ tone: 'info', title: t('send.refs.found', { n }), lines: [t('send.refs.found.help')] }),
+      withHelp(el('p', { class: 'field-title' }, t('send.refs.found', { n })), t('send.refs.found.help'), t('send.refs.title')),
       ...[...state.rows.values()].map(row => row.node), state.summary)] : []));
   };
   function refresh() {
@@ -262,7 +266,7 @@ function autoColsBlock(ctx) {
   }
   if (ctx.autoCols === undefined) ctx.autoCols = Boolean(ctx.exp?.autoCols);
   const box = el('input', { type: 'checkbox', checked: ctx.autoCols, onchange: () => { ctx.autoCols = box.checked; } });
-  return el('div', { class: 'form auto-cols' }, el('label', { class: 'check' }, box, t('send.autoCols')), el('p', { class: 'muted small' }, t('send.autoCols.help')));
+  return el('div', { class: 'form auto-cols' }, withHelp(el('label', { class: 'check' }, box, t('send.autoCols')), t('send.autoCols.help'), t('send.autoCols')));
 }
 
 // Éléments des colonnes envoyés en plus des données, chacun sa case (`ctx.elements`) : la mise en forme (voir options.js,
@@ -291,7 +295,7 @@ async function elementsBlock(ctx, schema) {
   const refresh = () => { summary.textContent = t('send.elements', { items: names().join(', ') || t('send.elements.none') }); };
   const boxes = ELEMENTS.map(([key, name, count]) => {
     const box = el('input', { type: 'checkbox', checked: ctx.elements[key], onchange: () => { ctx.elements[key] = box.checked; refresh(); } });
-    return el('div', { class: 'form' }, el('label', { class: 'check' }, box, t(name), el('span', { class: 'muted small' }, ` · ${t(count, { n: counts[key] })}`)), el('p', { class: 'muted small' }, t(`${name}.help`)));
+    return el('div', { class: 'form' }, withHelp(el('label', { class: 'check' }, box, t(name), el('span', { class: 'muted small' }, ` · ${t(count, { n: counts[key] })}`)), t(`${name}.help`), t(name)));
   });
   refresh();
   return el('div', {}, el('details', { class: 'guide options-more' }, summary, ...boxes), formulasBox(ctx, counts.formulas));
@@ -308,8 +312,7 @@ function formulasBox(ctx, count) {
     },
   });
   return el('div', { class: 'form formulas-box' },
-    el('label', { class: 'check' }, box, t('send.el.formulas'), el('span', { class: 'muted small' }, ` · ${t('send.el.formulas.count', { n: count })}`)),
-    el('p', { class: 'muted small' }, t('send.el.formulas.help')));
+    withHelp(el('label', { class: 'check' }, box, t('send.el.formulas'), el('span', { class: 'muted small' }, ` · ${t('send.el.formulas.count', { n: count })}`)), t('send.el.formulas.help'), t('send.el.formulas')));
 }
 
 // Le message avant d'envoyer des formules : du Python, que seul un propriétaire du document destinataire peut poser, après les
@@ -323,7 +326,7 @@ const formulasWarning = () => confirmDialog({
 async function showColumns(ctx) {
   const schema = await readSchema();
   const relays = receivedDests(schema).map(d => d.dest);
-  const report = el('div', { class: 'report' });
+  const report = ctx.report = el('div', { class: 'report' });
   ctx.refresh = null;
   const blocks = ctx.chosen.map(table => columnsBlock(ctx, schema, table, relays.includes(table)));
   // Ce que le widget ajoute aux tables de l'export, celles ajoutées pour un lien comprises (la ligne suit les choix).
@@ -344,7 +347,7 @@ async function showColumns(ctx) {
   ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
     removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
     ...blocks, ...(links || []), elementsNode, autoColsBlock(ctx), addsNode, report, stepHelp(['s-columns'])], [
-    backButton(() => showTables(ctx)),
+    backButton(() => showTables(ctx)), cancel,
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }
 
@@ -355,29 +358,28 @@ function rulesBlock(ctx) {
   const rules = exchangeRules(ctx.exp) || { ajout: RULES[0], modif: RULES[0], suppression: RULES[0], refus: REFUSALS[0] };
   ctx.rules = { ...rules, ...ctx.rules };
   const refusal = el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-refusal-title' },
-    el('p', { class: 'field-title', id: 'gristsync-refusal-title' }, t('send.refusal.title')),
+    withHelp(el('p', { class: 'field-title', id: 'gristsync-refusal-title' }, t('send.refusal.title')), t('send.refusal.help')),
     REFUSALS.map(value => el('label', { class: 'check' },
       el('input', { type: 'radio', name: 'gristsync-refusal', value, checked: ctx.rules.refus === value, onchange: () => { ctx.rules.refus = value; } }),
-      t(`send.refusal.${value}`))),
-    el('p', { class: 'muted small' }, t('send.refusal.help')));
+      t(`send.refusal.${value}`))));
   const showRefusal = () => refusal.classList.toggle('hidden', STATES.every(st => ctx.rules[st] === RULES[0]));
   const pickers = el('div', { class: 'rules-grid' }, STATES.map(st => [el('span', {}, t(`send.rules.${st}`)), pickField({
     items: RULES.map(value => ({ value, label: t(`send.rules.${value}`) })), value: ctx.rules[st], label: t(`send.rules.${st}`),
     onChange: (value) => { ctx.rules[st] = value; showRefusal(); },
   })]));
   showRefusal();
-  return el('div', { class: 'form table-block' }, el('h3', {}, t('send.rules.title')), el('p', { class: 'small' }, t('send.rules.help')), pickers, refusal);
+  return el('div', { class: 'form table-block' }, withHelp(el('h3', {}, t('send.rules.title')), t('send.rules.help')), pickers, refusal);
 }
 
 // 3. Nom, puis création (ou enregistrement) : c'est ici seulement que le widget écrit.
 function showName(ctx) {
   const fallback = ctx.chosen.join(' + ');
-  const nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-export-name', value: ctx.exp ? ctx.exp.name : fallback });
-  const report = el('div', { class: 'report' });
+  const nameInput = ctx.nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-export-name', value: ctx.exp ? ctx.exp.name : fallback });
+  const report = ctx.report = el('div', { class: 'report' });
   const hub = ctx.exp && ctx.exp.echange && !ctx.exp.retour;
   ctx.wizard.show(2, [el('label', { for: 'gristsync-export-name' }, t('send.name')), nameInput, el('p', { class: 'muted small' }, t('send.name.help')),
     hub ? rulesBlock(ctx) : null, report], [
-    backButton(() => run(null, report, () => showColumns(ctx))),
+    backButton(() => run(null, report, () => showColumns(ctx))), cancel,
     { label: ctx.exp ? t('common.save') : t('send.create'), kind: 'btn-primary', onClick: () => run(null, report, () => save(ctx, nameInput.value.trim() || fallback, report)) }]);
 }
 
@@ -391,10 +393,22 @@ async function choicesOf(ctx) {
   return { selection: [...explicit, ...added], links: new Set(offers ? offers.rows.filter(r => r.link).map(r => r.key) : []) };
 }
 
+// « Enregistrer » de la fenêtre « Quitter ? » : ce qui est choisi à cet instant, sans passer par les étapes qui restent. Les choix
+// des étapes jamais ouvertes sont ceux de l'export enregistré (`showColumns` les pose). Une erreur reste affichée dans la fenêtre,
+// qui reste « à enregistrer ».
+async function quickSave(ctx) {
+  await run(null, ctx.report, async () => {
+    if (!ctx.elements) await showColumns(ctx);
+    if (!ctx.chosen.length || ctx.chosen.some(table => !(ctx.selected.get(table) || []).length)) throw new Error('noColumn');
+    await save(ctx, (ctx.nameInput && ctx.nameInput.value.trim()) || ctx.exp.name, ctx.report);
+  });
+}
+
 async function save(ctx, name, report) {
   const { exp } = ctx;
   const { selection, links } = await choicesOf(ctx);
   const saved = await saveChosenExport({ exp, name, selection, links, ...ctx.elements, rules: ctx.rules, autoCols: Boolean(ctx.autoCols) });
+  ctx.wizard.clean(); // enregistré : plus rien à perdre en fermant
   return exp ? showEdited(ctx, { name, changed: saved.changed, report }) : showCreated(ctx, { name, created: saved.created });
 }
 

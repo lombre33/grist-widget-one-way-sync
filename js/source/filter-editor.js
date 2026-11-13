@@ -4,7 +4,7 @@
 // à la première ouverture (`load`), pour proposer les valeurs et dire combien de lignes partiront.
 import { OPERATORS, columnValues, filterKind, filterTester, operandOf, rowFilter } from '../engine/logic/filters.js';
 import { fetchRows } from '../grist.js';
-import { checkList, el, icon, message, pickField } from '../ui.js';
+import { checkList, el, icon, message, pickField, withHelp } from '../ui.js';
 import { LANG, t } from '../i18n.js';
 
 // Libellé d'un opérateur : propre au type s'il en a un (« contient l'une de » pour une liste, « avant
@@ -211,7 +211,7 @@ export function filterEditor({ table, columns, current, labelOf, onChange }) {
   }
 
   render();
-  const node = el('div', { class: 'filter-field' }, el('p', { class: 'field-title' }, t('send.filter.title', { table })),
-    conds, add, mode, count, el('p', { class: 'muted small' }, t('send.filter.help')));
+  const node = el('div', { class: 'filter-field' }, withHelp(el('p', { class: 'field-title' }, t('send.filter.title', { table })), t('send.filter.help')),
+    conds, add, mode, count);
   return { node, load };
 }

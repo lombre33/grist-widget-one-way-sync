@@ -375,7 +375,32 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.28.4 (13 novembre 2026)
+## État : V0.29.0 (13 novembre 2026)
+
+V0.29.0 (Antoine, 13 novembre : « peux-tu faire une passe sur toutes les textes de chaque modale ? […] un ton plus adapté à un user français courant qui ne connaît pas le widget […] et peut-être une petite
+audit UI, pour que les informations qui expliquent les options soient en info bulle ou autre ? car l'interface reste très verbeuse » ; puis « quand on est dans la modale de modification du partage côté source
+(et pareil côté cible) il faut un moyen de sortir […] pouvoir échap et si changement depuis l'ouverture un pop-up qui demande si on abandonne ou si on save »). Textes et écran seulement, **moteur inchangé
+(5.0.0)**. Rapport d'audit : captures avant et après, français et anglais, dans `/mnt/project-files/notes/audit-textes/{avant,apres}/{fr,en}` (36 fenêtres, outil `tests/e2e/tools/audit-ui.mjs`).
+- **Textes** : 108 clés réécrites ou ajoutées (fr et en, `i18n/fr.json`, `en.json`). Règles suivies : parler à quelqu'un qui ne connaît ni le widget ni son vocabulaire (« supprimée à la source, et n'est plus suivie » ne
+  veut rien dire : on dit ce que la personne verra et ce qu'elle doit faire), un libellé court sur la case et l'explication derrière un « ? », jamais de promesse que le code ne tient plus (une phrase sur
+  « une grosse suppression attend leur accord » a été retirée : c'est la 0.13.4). Noms de libellés changés (le tutoriel les cite) : `recv.archive`, `recv.lock`, `recv.reserve`, `recv.options.advanced`
+  (« Options avancées »), `send.mode.reply` (« Dans un seul sens (recommandé) »), `send.mode.echange` (« Dans les deux sens (Échange) »), `send.mode.public` (« Lien public »), `send.mode.publicDone`.
+- **« ? » accessible** (`helpButton`, `withHelp` de `js/ui.js`, styles `.help-row`, `.help-btn`, `.help-panel`) : un bouton rond à côté du libellé, `aria-expanded`, `aria-controls`, `aria-label` « Aide : <nom> »
+  (`common.help`), panneau `role="note"` sous la ligne ; Échap dans le panneau ne ferme que l'explication. **Posé seulement dans les fenêtres et assistants** (les onglets se redessinent toutes les 10 s : un panneau
+  ouvert s'y refermerait). Posé sur : options de l'export (colonnes, éléments envoyés, formules, références, règles, filtre, colonnes ajoutées), modes d'un destinataire, nom du document, sécurité renforcée,
+  acceptation d'une invitation (modes, réservation du journal, correspondance des colonnes), options d'une réception.
+- **Sortie des fenêtres de réglages** (option `guard` de `openModal` et `openWizard`, `leaveDialog`, `requestClose`) : une croix « Fermer la fenêtre » (`modal-x`) et Échap passent par `requestClose` ; sans
+  changement depuis l'ouverture la fenêtre se ferme, avec un changement une fenêtre demande « Quitter sans enregistrer ? » (Continuer à modifier, Abandonner les modifications, **Enregistrer** quand la fenêtre sait
+  enregistrer, `guard.save`) ou « Quitter cette fenêtre ? » (Revenir à la fenêtre, Abandonner : un nouvel export n'a rien à enregistrer). Un changement = un événement `input` ou `change` dans la fenêtre,
+  ou `edited(noeud)` (`gristsync-edited`) pour les listes à cocher et les choix (`checkList`, `pickField`), hors champs de recherche, zones de texte et boutons « ? » ; `guard.changed()` compare à l'état
+  d'ouverture quand l'état est simple (options d'une réception). **Les boutons « Annuler » et « Plus tard » ferment toujours sans demander** (la personne a déjà dit non) ; l'assistant d'export a un « Annuler »
+  à chaque étape (il n'y en avait pas aux étapes 2 et 3). Couvert : assistant d'export (nouveau et « Modifier » : l'enregistrement rapide `quickSave` garde ce qui est choisi), options d'une réception, fenêtre du nom
+  de la réception. Les assistants de destinataire et de réception n'ont que la croix et Échap (rien de réglé à garder avant d'avoir le code).
+- **Piège de l'essai** : Playwright `getByText` attend la **visibilité** : un texte derrière un « ? » se lit après avoir cliqué `Aide : <nom>` ; `getByLabel('Nom de ce document')` trouve aussi le bouton « ? »
+  (son `aria-label` contient le texte) : `{ exact: true }`. Après « Fermer » d'une fenêtre, la carte se redessine : rouvrir la page avant de recliquer « Modifier » (sinon un clic sur l'ancienne carte).
+- Testé : unit 518 ; e2e complet, avec `optionsSteps` étendu (Échap sans changement ferme, avec changement la fenêtre demande, rester garde le changement, Abandonner défait, Enregistrer garde, « Annuler » à chaque étape).
+
+## État précédent : V0.28.4 (13 novembre 2026)
 
 V0.28.4 (Antoine, 13 novembre, en testant la Bêta : « l'historique des envois côté source ne semble pas se mettre à jour après l'ajout d'une ligne […] vers 6h35 j'ai rajouté une valeur,
 s'est bien sync mais pas dans l'historique »). **Moteur inchangé (5.0.0)** : tout est à l’écran (`js/source/last-send.js`, `js/source/tab.js`).
