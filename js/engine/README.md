@@ -324,7 +324,8 @@ on refasse les références fonctionnelles » ; choix sur la carte : « Par colo
   références (`RefList:T`) cochée, `{ key, table, id, label, list, target, shown, inside, ok, why, link }` et `pulled` (table à ajouter -> colonnes affichées
   requises, en cascade). Par défaut le lien est gardé quand la table visée est cochée, sinon les valeurs seules partent (rien ne s'ajoute sans le choix) ;
   `ok` est faux sans colonne affichée (`numbers`) ou si cette colonne ne part pas (`hidden`). L'hôte ajoute les tables de `pulled` à la `selection`
-  (colonnes affichées seulement, plus ce que la personne y coche) et passe à `saveChosenExport({ links })` un `Set` de `refKey` (`Table.Colonne`) ; `true`
+  (colonnes affichées seulement, plus ce que la personne y prend : syncPlus lui offre depuis la 0.28 la colonne affichée seule, toute la table ou des colonnes
+  au choix, `js/source/pull.js`, sans rien changer au moteur) et passe à `saveChosenExport({ links })` un `Set` de `refKey` (`Table.Colonne`) ; `true`
   garde l'ancien sens (les Références seules, pas les listes). Une liste qui garde son lien porte `link` et `list: true` dans la description signée des
   colonnes (`schemaText`, `exportSchema`) ; le lot porte les clés des lignes visées (`Synchro_Cle_<colonne>`, une liste pour une liste : le texte des formules
   de `Synchro` ne change pas, `.id_sync` d'un ensemble de lignes rend la liste).

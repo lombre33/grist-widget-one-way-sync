@@ -375,7 +375,32 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.27.0 (12 novembre 2026)
+## État : V0.28.0 (13 novembre 2026)
+
+V0.28.0 (Antoine, 13 novembre, devant le bloc « Références entre tables » de la 0.27 : « peut-on proposer de prendre soit uniquement la colonne référencée, ou alors toute la
+table, ou alors un choix des colonnes à prendre ? »). **Moteur inchangé (4.11.0)** : tout est à l'écran, la `selection` de `saveChosenExport` portait déjà des colonnes quelconques par
+table ajoutée. Rien n'est poussé sur `main` avant le feu vert d'Antoine (il fait ses dernières vérifications à la main sur la Bêta, dont les Pages suivent `main`) : le travail est sur la
+branche du fil.
+- **Trois choix par table ajoutée pour un lien** (bloc « Ajoutée pour un lien », `pulledBlock` de `js/source/export-wizard.js`, titre « Que prendre de la table X ? ») : **Seulement la colonne
+  affichée (Libelle)** (d'emblée, comme avant), **Toute la table (N colonnes)** et **Choisir les colonnes** (la liste de cases `checkList` s'ouvre, la colonne affichée reste verrouillée ; de
+  « toute la table » à « choisir », ce qui partait reste coché pour pouvoir y retirer). Le bouton « Choisir les colonnes » du bloc est remplacé par ce choix ; « Filtrer les lignes » reste.
+  Résumé du bloc et ligne « Part en plus des tables cochées : Services (toute la table) » suivent le choix. Une explication est dans la note de la colonne (`send.refs.note.pull`) et l'aide du bloc.
+- **Logique pure** `js/source/pull.js` (testée, `tests/unit/pull.test.mjs`) : `pullColumns({ mode, usable, required, extras })` (colonnes exigées d'abord ; `all` = toutes les colonnes
+  envoyables **sauf les Pièces jointes**, qui ne partent que cochées : fichiers lourds, partis page ouverte, `pullLeftOut` les liste et le bloc le dit), `extrasFor`. État de l'écran :
+  `ctx.pulls` (table -> `'shown' | 'all' | 'pick'`) à côté de `ctx.extras` (colonnes cochées du choix `pick`) ; vidé avec elle quand la table n'est plus ajoutée ou que la personne la coche à
+  l'étape Tables. `offersOf` et `choicesOf` passent par `pulledColumns` (une seule règle).
+- **Cascade** : les Références d'une table prise en entier deviennent des choix de plus dans « Références entre tables » (valeurs seules d'emblée si leur table n'est pas cochée ; lien gardé d'emblée
+  si elle l'est) : garder l'une d'elles ajoute sa table visée à son tour (testé : `Services.Direction` -> `Directions`). Aucune table ne s'ajoute sans choix.
+- **Sécurité** : envoyer plus de colonnes est un choix explicite de la personne qui envoie, avec les mêmes garde-fous que pour une table cochée (lien public refusé si une règle d'autrui cache
+  lignes ou colonnes, filtre de lignes, colonnes cachées par la page : rien de plus ne part). SECURITY.md, bullet « Références entre tables » complété.
+- Testé : unit 516 (`pull.test.mjs` : trois choix, Pièces jointes, bascule `all` -> `pick`, Références d'une table prise en entier ; `engine-refs.test.mjs` : trois exports enregistrés, schéma du
+  lot de `Services` = Libelle seule / Libelle et Budget) ; e2e `ONLY_LINKS=1` (`linksSteps` : choix d'emblée sur la colonne affichée, « Toute la table » (2 colonnes sur 2), « Choisir les colonnes » avec
+  Budget gardé et Libelle verrouillée, retour à la colonne seule ; un second export « Annuaire complet » prend Services en entier, un second document CIBLE reçoit Budget et la Liste de références).
+  Captures refaites : `docs/images/29-source-liens.png`, `29b-source-liens-tables-ajoutees.png` (le bloc avec ses trois choix), `29c`.
+- **Pas fait, dit** : le choix se fait par table ajoutée, pas par colonne qui la demande (une table citée par deux Références a un seul bloc) ; « toute la table » ne reprend pas ses colonnes de Pièces
+  jointes ; une table déjà dans l'export (cochée à l'étape Tables) garde son bloc de colonnes habituel.
+
+## État précédent : V0.27.0 (12 novembre 2026)
 
 V0.27.0 (Antoine, 12 novembre : « lorsqu'il y a des références dans les table envoyées, côté source, peut-on l'indiquer ? et demander si l'user veut envoyer le
 contenu uniquement en valeur ou s'il veut ajouter la table/colonne(s) utilisées pour conserver les relations/références ? et dans ce cas il faut que côté cible on

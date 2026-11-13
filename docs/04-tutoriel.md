@@ -444,9 +444,11 @@ Référence ou Liste de références de l'export, avec la table qu'elle vise et 
 Pour chacune, deux choix : **Valeurs seulement** (le destinataire reçoit le texte affiché) ou **Garder le
 lien** (il reçoit une vraie Référence, ou Liste de références, vers la table reçue, qui affiche la même
 colonne). Quand la table visée est déjà cochée, le lien est gardé d'emblée ; sinon ce sont les valeurs
-seules qui partent, et garder le lien **ajoute la table visée à l'export** avec sa seule colonne
-affichée (un bloc « Ajoutée pour un lien » le dit, on peut y filtrer les lignes ou cocher d'autres
-colonnes ; la ligne « Part en plus des tables cochées » fait le compte).
+seules qui partent, et garder le lien **ajoute la table visée à l'export** (un bloc « Ajoutée pour
+un lien » le dit ; la ligne « Part en plus des tables cochées » fait le compte). Trois choix dans ce
+bloc, sous « Que prendre de la table ? » : **Seulement la colonne affichée** (d'emblée), **Toute la
+table** (ses Pièces jointes restent à cocher) ou **Choisir les colonnes** (la colonne affichée est
+toujours envoyée, on coche les autres). On peut aussi y filtrer les lignes.
 
 ![Bloc « Références entre tables »](images/29-source-liens.png)
 

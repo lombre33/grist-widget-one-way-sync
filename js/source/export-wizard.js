@@ -18,6 +18,7 @@ import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
 import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, notice, openWizard, pickField, run } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
+import { PULL_MODES, extrasFor, pullColumns, pullLeftOut } from './pull.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
@@ -38,7 +39,8 @@ export function exportWizard(exp, onClose) {
     selected: new Map(exp ? exp.tables.map(tb => [tb.table, tb.columns.map(c => c.id)]) : []), // table -> colonnes cochées
     filters: new Map(exp ? exp.tables.map(tb => [tb.table, tb.filter]) : []), // table -> filtre de lignes, ou null
     choices: new Map(), // colonne Référence (refKey) -> garder son lien ? (choix fait dans cette fenêtre)
-    extras: new Map(), // table ajoutée pour un lien -> colonnes cochées en plus de celle que le lien affiche
+    extras: new Map(), // table ajoutée pour un lien -> colonnes cochées en plus de celle que le lien affiche (choix « Choisir les colonnes »)
+    pulls: new Map(), // table ajoutée pour un lien -> ce qu'elle envoie : 'shown' (d'emblée), 'all' ou 'pick' (voir pull.js)
     saved: savedLinks(exp), // refKey -> la colonne de l'export enregistré gardait son lien
   }));
 }
@@ -57,7 +59,7 @@ async function showTables(ctx) {
     items: tables.map(id => ({ value: id, label: id })), checked: ctx.chosen, label: t('send.step.tables'),
     onChange: (values) => {
       // Une table cochée ici n'est plus « ajoutée pour un lien » : elle repart de ses colonnes et de son filtre habituels.
-      for (const table of values.filter(v => !ctx.chosen.includes(v))) for (const map of [ctx.extras, ctx.selected, ctx.filters]) map.delete(table);
+      for (const table of values.filter(v => !ctx.chosen.includes(v))) for (const map of [ctx.extras, ctx.pulls, ctx.selected, ctx.filters]) map.delete(table);
       ctx.chosen = values; next.disabled = !values.length; ctx.wizard.buttons([cancel, next]);
     },
   });
@@ -116,38 +118,71 @@ function togglePart(part, label, open, onOpen = () => {}) {
 
 // Ce que la personne décide pour chaque colonne Référence ou Liste de références cochée (voir linkOffers), à
 // l'état de la fenêtre : les choix faits, ceux de l'export enregistré, sinon le lien est gardé quand la table visée est
-// cochée. Les colonnes d'une table ajoutée pour un lien sont celles que le lien affiche et celles que la personne y coche.
+// cochée. Les colonnes d'une table ajoutée pour un lien sont celles que le lien affiche et celles que la personne y prend
+// (toute la table, ou celles qu'elle y coche : voir pull.js).
+const pullMode = (ctx, table) => ctx.pulls.get(table) || 'shown';
+const pulledColumns = (ctx, schema, table, required = []) => pullColumns({
+  mode: pullMode(ctx, table), usable: exportableColumns(schema.columns(table) || []), required, extras: [...(ctx.extras.get(table) || [])],
+});
 const offersOf = (ctx, schema) => linkOffers({
   chosen: ctx.chosen, columnsOf: table => exportableColumns(schema.columns(table) || []),
-  picked: table => (ctx.chosen.includes(table) ? ctx.selected.get(table) : [...(ctx.extras.get(table) || [])]),
+  picked: table => (ctx.chosen.includes(table) ? ctx.selected.get(table) : pulledColumns(ctx, schema, table)),
   choices: ctx.choices, saved: ctx.saved,
 });
 
-// Bloc d'une table ajoutée pour un lien : elle ne part qu'avec la colonne que la Référence affiche (verrouillée) et celles
-// que la personne coche en plus ; ses lignes peuvent se filtrer comme celles des autres tables.
+// Bloc d'une table ajoutée pour un lien. Trois choix (voir pull.js) : la seule colonne que la Référence affiche (d'emblée), toute la
+// table, ou les colonnes que la personne coche (la colonne affichée reste verrouillée). Ses lignes peuvent se filtrer comme celles
+// des autres tables.
 function pulledBlock(ctx, schema, { table, required, because, onChange }) {
   const usable = exportableColumns(schema.columns(table) || []);
-  const picked = () => [...new Set([...required, ...(ctx.extras.get(table) || [])])];
+  const mode = () => pullMode(ctx, table);
+  const picked = () => pulledColumns(ctx, schema, table, required);
+  const labels = ids => usable.filter(c => ids.includes(c.id)).map(c => c.label);
   const summary = el('p', { class: 'small' });
+  const leftOut = el('p', { class: 'muted small' });
   const describe = () => {
-    const names = usable.filter(c => picked().includes(c.id)).map(c => c.label).join(', ');
     const rows = filterSummary(ctx.filters.get(table));
+    const names = mode() === 'all' ? t('send.refs.summary.whole') : labels(picked()).join(', ');
     summary.textContent = `${t('send.columns.some', { n: picked().length, total: usable.length })} (${names}) · ${rows ? t('send.rows.filtered', { filter: rows }) : t('send.rows.all')}`;
+    const files = pullLeftOut({ mode: mode(), usable }).map(c => c.label);
+    leftOut.textContent = files.length ? t('send.refs.mode.files', { cols: files.join(', ') }) : '';
+    leftOut.classList.toggle('hidden', !files.length);
   };
-  const columns = el('div', { class: 'form' }, checkList({
-    items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source), locked: required.includes(c.id) })), wide: true,
-    checked: picked(), label: table, onChange: (values) => { ctx.extras.set(table, values.filter(v => !required.includes(v))); describe(); onChange(); },
-  }));
+  const columns = el('div', { class: 'form' });
+  const drawColumns = () => {
+    columns.replaceChildren(checkList({
+      items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source), locked: required.includes(c.id) })), wide: true,
+      checked: picked(), label: table, onChange: (values) => { ctx.extras.set(table, values.filter(v => !required.includes(v))); describe(); onChange(); },
+    }));
+    columns.classList.toggle('hidden', mode() !== 'pick');
+  };
+  const choose = (next) => {
+    // De « toute la table » à « choisir » : ce qui partait reste coché, pour pouvoir y retirer des colonnes.
+    if (next === 'pick' && mode() !== 'pick') ctx.extras.set(table, extrasFor({ usable, required, columns: picked() }));
+    ctx.pulls.set(table, next);
+    drawColumns();
+    describe();
+    onChange();
+  };
+  const name = `gristsync-pull-${table}`;
+  const texts = {
+    shown: t('send.refs.mode.shown', { cols: labels(required).join(', ') }),
+    all: t('send.refs.mode.all', { n: usable.filter(c => !pullLeftOut({ mode: 'all', usable }).includes(c)).length }),
+    pick: t('send.refs.mode.pick'),
+  };
+  const modes = el('div', { class: 'radios pull-modes', role: 'radiogroup', 'aria-label': t('send.refs.mode', { table }) },
+    PULL_MODES.map(value => el('label', { class: 'check' },
+      el('input', { type: 'radio', name, value, checked: mode() === value, onchange: () => choose(value) }), el('span', {}, texts[value]))));
   const editor = filterEditor({ table, columns: usable, current: ctx.filters.get(table), labelOf: columnLabel, onChange: (filter) => { ctx.filters.set(table, filter); describe(); } });
   const filtered = Boolean(filterSummary(ctx.filters.get(table)));
   if (filtered) editor.load();
+  drawColumns();
   describe();
-  return el('div', { class: 'form table-block table-added' },
-    el('div', { class: 'added-head' }, el('h3', {}, table), el('span', { class: 'pill pill-ok' }, t('send.refs.added'))), summary,
+  return el('div', { class: 'form table-block table-added', 'data-pulled': table },
+    el('div', { class: 'added-head' }, el('h3', {}, table), el('span', { class: 'pill pill-ok' }, t('send.refs.added'))),
     el('p', { class: 'muted small' }, t('send.refs.added.because', { cols: because.join(', ') })),
-    el('div', { class: 'block-actions' },
-      togglePart(columns, t('send.columns.pick'), (ctx.extras.get(table) || []).length > 0),
-      togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
+    el('p', { class: 'field-title' }, t('send.refs.mode', { table })), modes, summary, leftOut,
+    el('div', { class: 'block-actions' }, togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
     columns, editor.node);
 }
 
@@ -181,7 +216,7 @@ function refRow(ctx, offer, onPick) {
 }
 
 // Colonnes Référence et Liste de références (voir links.js) : pour chacune, n'envoyer que le texte affiché ou garder le lien (la table
-// visée s'ajoute alors à l'export avec sa seule colonne affichée). Hors Échange, où les colonnes vont dans les deux sens par leur
+// visée s'ajoute alors à l'export : sa colonne affichée seule, toute la table ou des colonnes au choix). Hors Échange, où les colonnes vont dans les deux sens par leur
 // nom. `onTables` reçoit les tables de l'export à chaque changement. Rend les nœuds (tables ajoutées, puis bloc des choix).
 function linkSection(ctx, schema, onTables) {
   if (ctx.exp?.echange) return null;
@@ -201,12 +236,15 @@ function linkSection(ctx, schema, onTables) {
   };
   function refresh() {
     const offers = offersOf(ctx, schema);
-    for (const table of [...ctx.extras.keys()]) if (!offers.pulled.has(table)) ctx.extras.delete(table);
+    for (const map of [ctx.extras, ctx.pulls]) for (const table of [...map.keys()]) if (!offers.pulled.has(table)) map.delete(table);
     const rowsSig = JSON.stringify(offers.rows.map(r => [r.key, r.ok, r.why]));
     if (rowsSig !== state.shown) { state.shown = rowsSig; redrawRefs(offers); } else offers.rows.forEach(r => state.rows.get(r.key).update(r));
     const pulledSig = JSON.stringify([[...offers.pulled], offers.rows.filter(r => r.link).map(r => [r.key, r.target])]);
     if (pulledSig !== state.pulled) { state.pulled = pulledSig; redrawPulled(offers); }
-    const items = [...offers.pulled].map(([table, required]) => `${table} (${required.map(id => (exportableColumns(schema.columns(table) || []).find(c => c.id === id) || { label: id }).label).join(', ')})`);
+    const items = [...offers.pulled].map(([table, required]) => {
+      const names = pullMode(ctx, table) === 'all' ? [t('send.refs.summary.whole')] : pulledColumns(ctx, schema, table, required).map(id => (exportableColumns(schema.columns(table) || []).find(c => c.id === id) || { label: id }).label);
+      return `${table} (${names.join(', ')})`;
+    });
     state.summary.textContent = items.length ? t('send.refs.summary.some', { items: items.join(', ') }) : t('send.refs.summary.none');
     onTables([...ctx.chosen, ...offers.pulled.keys()]);
   }
@@ -344,10 +382,11 @@ function showName(ctx) {
 }
 
 // Les choix de la personne : par table, ses colonnes cochées et son filtre (saveChosenExport les écrit), les tables ajoutées
-// pour un lien (avec leur seule colonne affichée et ce que la personne y a coché) et les colonnes qui gardent leur lien.
+// pour un lien (avec ce que la personne y prend : la colonne affichée seule, toute la table ou ses colonnes cochées) et les colonnes qui gardent leur lien.
 async function choicesOf(ctx) {
-  const offers = ctx.exp?.echange ? null : offersOf(ctx, await readSchema());
-  const added = offers ? [...offers.pulled].map(([table, required]) => ({ table, columns: [...new Set([...required, ...(ctx.extras.get(table) || [])])], filter: ctx.filters.get(table) || null })) : [];
+  const schema = await readSchema();
+  const offers = ctx.exp?.echange ? null : offersOf(ctx, schema);
+  const added = offers ? [...offers.pulled].map(([table, required]) => ({ table, columns: pulledColumns(ctx, schema, table, required), filter: ctx.filters.get(table) || null })) : [];
   const explicit = ctx.chosen.map(table => ({ table, columns: ctx.selected.get(table), filter: ctx.filters.get(table) || null }));
   return { selection: [...explicit, ...added], links: new Set(offers ? offers.rows.filter(r => r.link).map(r => r.key) : []) };
 }

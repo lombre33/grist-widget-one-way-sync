@@ -617,9 +617,11 @@ d'un document :
   comme tout envoi non signé (la carte le dit : « Renforcement interrompu »). « Revenir à l'ancien fonctionnement » retire la clé préparée.
   Un Échange d'avant les clés ne passe pas par là (sa reprise tire déjà de nouvelles clés).
 - **Références entre tables (0.27)** : garder le lien d'une colonne Référence ou Liste de références est un choix de la personne qui envoie,
-  colonne par colonne ; quand la table visée n'est pas dans l'export, la garder l'**ajoute** avec la seule colonne que la Référence affiche
-  (le bloc « Ajoutée pour un lien » et la ligne « Part en plus des tables cochées » le disent avant l'enregistrement, aucune table ne
-  s'ajoute sans ce choix). Sont envoyés en plus : la clé (UUID) de la ligne visée, ou la liste des clés des lignes visées, dans le lot signé
+  colonne par colonne ; quand la table visée n'est pas dans l'export, la garder l'**ajoute**, d'emblée avec la seule colonne que la Référence affiche ;
+  depuis la 0.28 la personne peut y prendre **toute la table** (sauf ses Pièces jointes, qui ne partent que cochées) ou les colonnes qu'elle coche
+  (le bloc « Ajoutée pour un lien » et la ligne « Part en plus des tables cochées » le disent avant l'enregistrement, aucune table ne s'ajoute
+  sans ce choix, et ses lignes se filtrent comme celles des autres tables : même effet que cocher la table à l'étape Tables, donc même droit
+  d'envoyer ses colonnes ; une Référence de la table prise en entier est un choix de plus, valeurs seules d'emblée). Sont envoyés en plus : la clé (UUID) de la ligne visée, ou la liste des clés des lignes visées, dans le lot signé
   et scellé comme le reste ; rien d'autre de la table visée. Un export en lien public vérifie, comme avant, qu'aucune règle d'accès d'autrui
   ne cache de lignes ou de colonnes des tables lues (`hiddenTables`, refus `publicHiddenEdit`), tables visées comprises. À la CIBLE, la
   conversion d'une colonne en Référence ne touche que les colonnes créées par le widget ; une colonne remplie de texte n'est refaite que sur le

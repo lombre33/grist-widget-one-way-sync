@@ -1354,10 +1354,28 @@ try {
     // Garder le lien de la Liste de références ajoute la table Services, avec sa seule colonne affichée.
     await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
     await dialog().locator('.table-added', { hasText: 'Services' }).waitFor();
-    assert.match(await dialog().locator('.table-added').innerText(), /1 colonne sur 2 \(Libelle\)/);
-    assert.match(await dialog().locator('.table-block', { hasText: 'Références entre tables' }).innerText(), /Part en plus des tables cochées\s:\sServices \(Libelle\)/);
-    await dialog().locator('.table-added').evaluate(node => node.scrollIntoView({ block: 'end' }));
+    const added = dialog().locator('.table-added', { hasText: 'Services' });
+    const summary = () => dialog().locator('.table-block', { hasText: 'Références entre tables' }).innerText();
+    assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/);
+    assert.ok(await added.getByLabel(/Seulement la colonne affichée \(Libelle\)/).isChecked(), 'd\'emblée : la colonne affichée seule');
+    assert.match(await summary(), /Part en plus des tables cochées\s:\sServices \(Libelle\)/);
+    // Trois choix pour la table ajoutée : la colonne affichée seule, toute la table, ou des colonnes au choix (0.28).
+    assert.ok(!(await added.getByText('Budget').isVisible()), 'la liste des colonnes est repliée tant qu\'on ne choisit pas les colonnes');
+    await added.getByLabel(/Toute la table \(2 colonnes\)/).check();
+    assert.match(await added.innerText(), /2 colonnes sur 2 \(toute la table\)/);
+    assert.match(await summary(), /Part en plus des tables cochées\s:\sServices \(toute la table\)/);
+    await added.getByLabel('Choisir les colonnes').check();
+    await added.getByRole('checkbox', { name: /Budget/ }).waitFor();
+    assert.ok(await added.getByRole('checkbox', { name: /Budget/ }).isChecked(), 'de « toute la table » à « choisir » : Budget reste coché');
+    assert.ok(await added.getByRole('checkbox', { name: /Libelle/ }).isDisabled(), 'la colonne que le lien affiche est verrouillée');
+    await added.getByRole('checkbox', { name: /Budget/ }).uncheck();
+    assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/);
+    await added.getByRole('checkbox', { name: /Budget/ }).check();
+    assert.match(await added.innerText(), /2 colonnes sur 2 \(Libelle, Budget\)/);
+    await added.evaluate(node => node.scrollIntoView({ block: 'end' }));
     await shot('29b-source-liens-tables-ajoutees', 'modal');
+    await added.getByLabel(/Seulement la colonne affichée/).check();
+    assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/, 'retour à la colonne affichée seule');
     // Reprise d'avis : revenir aux valeurs retire la table ajoutée, puis la rajouter.
     await refRow('Gens.Equipes').getByLabel('Valeurs seulement').check();
     await dialog().locator('.table-added').waitFor({ state: 'detached' });
@@ -1464,6 +1482,30 @@ try {
     }, 'cellules refaites d\'après le lien de la SOURCE', 90000);
     assert.equal(await widget().locator('.links-text').count(), 0, 'plus rien à refaire');
     step('Références conservées : une colonne remplie de texte reste du texte, « Refaire les références » la convertit et reprend le lien de la SOURCE');
+
+    // Toute la table (0.28) : un second export prend Services en entier avec le lien de Equipes ; un second destinataire reçoit aussi Budget.
+    await openWidget(src.url);
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: 'Gens' }).check();
+    await dialogButton('Continuer').click();
+    await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
+    await dialog().locator('.table-added', { hasText: 'Services' }).getByLabel(/Toute la table \(2 colonnes\)/).check();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Annuaire complet');
+    await dialogButton('Créer l’export').click();
+    const wholeCode = await plainInvitation();
+    const dst2 = await newDocWithWidget('Liens CIBLE 2');
+    const wholeAnswer = await accept(dst2.doc, dst2.url, wholeCode, /Annuaire complet\s»\s:\stables/);
+    await approve(wholeAnswer, { url: src.url });
+    await openWidget(dst2.url);
+    await waitFor(async () => {
+      const rows = await records(dst2.doc, 'Services');
+      return rows.length === 3 && rows.every(r => r.Budget) && rows;
+    }, 'Services reçue en entier (Libelle et Budget)', 90000);
+    const budgets = Object.fromEntries((await records(dst2.doc, 'Services')).map(r => [r.Libelle, r.Budget]));
+    assert.deepEqual(budgets, { Compta: 1, RH: 2, IT: 3 }, 'la colonne Budget de la table prise en entier arrive');
+    assert.equal((await column(dst2.doc, 'Gens', 'Equipes')).type, 'RefList:Services', 'le lien est refait chez le second destinataire');
+    step('Références conservées : « Toute la table » envoie aussi les autres colonnes de la table ajoutée (Budget) et le lien est refait chez le destinataire');
   }
   // --- Mise en forme des colonnes : une SOURCE en français (fr-FR) avec une colonne Montant (monnaie sans devise
   // propre, en-tête coloré, règle « négatif en rouge » et une règle qui sort de la grammaire) envoie sa mise en forme

@@ -14,6 +14,7 @@ import { checkDestinations, createReception, readInvitation, receptionReply } fr
 import { consolidateAll, relink, state, tableKey } from '../../js/engine/target/loop.js';
 import { linkOffers } from '../../js/engine/logic/links.js';
 import { exportableColumns } from '../../js/engine/logic/exports.js';
+import { pullColumns } from '../../js/source/pull.js';
 import { readSchema } from '../../js/engine/port.js';
 import { fakeDoc, fakeWorld } from './engine-fake.mjs';
 
@@ -51,6 +52,21 @@ test('références entre tables : SOURCE puis CIBLE', async (t) => {
     assert.deepEqual(columns.map(c => [c.id, c.link || null, c.source]), [['Nom', null, 'Text'], ['Ville', 'Villes', 'Ref:Villes'], ['Services', 'Services', 'RefList:Services']]);
     assert.deepEqual(JSON.parse((await lotOf('Villes'))[SCHEMA_COL]).map(c => c.id), ['Nom'], 'Pays ne part pas');
     assert.deepEqual(JSON.parse((await lotOf('Services'))[SCHEMA_COL]).map(c => c.id), ['Libelle']);
+  });
+
+  await t.test('SOURCE : la table ajoutée pour un lien peut partir en entier (toute la table) ou avec des colonnes au choix', async () => {
+    as(source);
+    const schema = await readSchema();
+    const columnsOf = table => exportableColumns(schema.columns(table));
+    const picked = mode => table => (table === 'Contacts' ? ['Nom', 'Services'] : pullColumns({ mode, usable: columnsOf(table), extras: ['Budget'] }));
+    for (const [mode, expected] of [['all', ['Libelle', 'Budget']], ['pick', ['Libelle', 'Budget']], ['shown', ['Libelle']]]) {
+      const offers = linkOffers({ chosen: ['Contacts'], columnsOf, picked: picked(mode), choices: new Map([['Contacts.Services', true]]) });
+      const selection = [{ table: 'Contacts', columns: ['Nom', 'Services'], filter: null },
+        ...[...offers.pulled].map(([table, required]) => ({ table, columns: pullColumns({ mode, usable: columnsOf(table), required, extras: ['Budget'] }), filter: null }))];
+      const saved = await saveChosenExport({ name: `Services ${mode}`, selection, links: new Set(offers.rows.filter(r => r.link).map(r => r.key)) });
+      assert.deepEqual(JSON.parse((await lotOf('Services', saved.created))[SCHEMA_COL]).map(c => c.id), expected, `Services : ${mode}`);
+      assert.deepEqual(JSON.parse((await lotOf('Contacts', saved.created))[SCHEMA_COL]).map(c => [c.id, c.link || null]), [['Nom', null], ['Services', 'Services']], `le lien est gardé : ${mode}`);
+    }
   });
 
   await t.test('SOURCE : sans choix, aucune table ne s\'ajoute et aucun lien ne part', async () => {
