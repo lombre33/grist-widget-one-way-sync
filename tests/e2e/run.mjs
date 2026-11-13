@@ -1131,6 +1131,7 @@ try {
     assert.match(await ficheNotice().innerText(), /Fiches → Fiches\s:\sla colonne\s«\sPays\s»\s\(Texte\) serait créée sous le nom\s«\sPays\s»/);
     assert.deepEqual(await columnsHere(), ['Nom', 'Ville', 'id_sync'].sort(), 'rien n\'est créé sans accord');
     if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'structure-1-propose.png') });
+    await shot('37-cible-colonnes-proposees', 'card');
     // Une ligne de la SOURCE continue d'arriver pendant l'attente.
     await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom: 'Denis', Ville: 'Metz', Pays: 'France' }]]);
     await waitFor(async () => (await records(dst.doc, 'Fiches')).some(r => r.Nom === 'Denis'), 'ligne reçue pendant l\'attente', 90000);
@@ -1216,6 +1217,7 @@ try {
     assert.deepEqual(rows.map(r => `${r.Nom}:${r.Ville}`).sort(), ['Anna:12', 'Zoé:7'], 'rien n\'est écrit avant l\'accord');
     assert.ok(rows.every(r => !r.id_sync), 'aucune clé posée');
     if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'adopte-2-apercu.png') });
+    await shot('38-cible-apercu-adoption', 'card');
     step('Table déjà remplie : le type qui ne convient pas est dit et confirmé ; rien n\'est écrit avant l\'accord, l\'aperçu dit lignes ajoutées, rattachées, valeurs remplacées, lignes qui ne bougent pas');
     await preview.getByRole('button', { name: 'Appliquer', exact: true }).click();
     await waitFor(async () => (await records(dst.doc, 'Annuaire')).length === 4, 'lignes ajoutées après l\'accord', 90000);
@@ -1255,6 +1257,7 @@ try {
     await fresh().getByText(/1 colonne ne part pas/).waitFor({ timeout: 30000 });
     assert.match(await fresh().innerText(), /Fiches\s:\sPopulation/);
     if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'colonnes-1-avis.png') });
+    await shot('39-source-colonnes-ajoutees', 'card');
     await page.waitForTimeout(3000);
     assert.deepEqual(await columnsHere(), ['Nom', 'Ville', 'id_sync'].sort(), 'rien n\'est parti');
     // « Ne pas les envoyer » : connue, plus rien n'est dit, même après un rechargement.
@@ -1551,6 +1554,7 @@ try {
     assert.match(await elements.innerText(), /1\stable concernée/);
     await send.check();
     if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'mise-en-page-1-case.png') });
+    await shot('40-source-ordre-colonnes', 'modal');
     await dialogButton('Continuer').click();
     await dialog().getByLabel('Nom de l’export').fill('Budget');
     await dialogButton('Créer l’export').click();
@@ -1580,6 +1584,7 @@ try {
     await button('Reprendre depuis la SOURCE').click();
     assert.ok(await dialog().getByRole('checkbox', { name: 'Ordre et colonnes cachées de la page de la table' }).isChecked());
     if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'mise-en-page-2-reprendre.png') });
+    await shot('41-cible-reprendre', 'modal');
     await dialogButton('Reprendre').click();
     await waitFor(async () => (await pageOrder(dst.doc, 'Budget')).join() === 'Reel,Code,Libelle,Montant', 'ordre de la SOURCE repris', 90000);
     assert.deepEqual((await records(dst.doc, 'Budget')).map(r => r.Note).sort(), ['n1', 'n2', 'n3'], 'cacher une colonne ne touche pas à ses données');
@@ -1782,6 +1787,7 @@ try {
     assert.match(await warning.innerText(), /code Python/);
     assert.match(await warning.innerText(), /seul un propriétaire du document destinataire/);
     if (process.env.SHOTS) await warning.screenshot({ path: join(process.env.SHOTS, 'formules-1-source-message.png') }); // SHOTS=<dossier> : captures de contrôle
+    await shot('42-source-formules-message', 'modal');
     await warning.getByRole('button', { name: 'Annuler', exact: true }).click();
     assert.ok(!(await box.isChecked()), '« Annuler » : la case reste décochée');
     await box.click();
@@ -1818,6 +1824,7 @@ try {
     assert.match(await panel.innerText(), /ne sera pas posée/);
     assert.ok(await dialogButton('Reprendre').isDisabled(), 'grisé tant que « J\'ai lu » n\'est pas coché');
     if (process.env.SHOTS) await dialog().screenshot({ path: join(process.env.SHOTS, 'formules-2-cible-liste.png') });
+    await shot('43-cible-formules-liste', 'modal');
     await dialog().getByRole('checkbox', { name: /J’ai lu ces formules/ }).check();
     await dialogButton('Reprendre').click();
     await waitFor(async () => (await column(dst.doc, 'Budget', 'TVA')).isFormula === true, 'formule posée', 90000);

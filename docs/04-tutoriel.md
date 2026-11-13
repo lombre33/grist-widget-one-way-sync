@@ -87,8 +87,10 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 
 Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher : voir
 [Pièces jointes](#pièces-jointes)). Le reste ne sort jamais du document. Une
-Référence part comme le texte qu'elle affiche. Les colonnes
-valent pour toutes les personnes qui reçoivent l'export. **Tous** et **Aucun** cochent ou décochent
+Référence part comme le texte qu'elle affiche, ou garde son lien (bloc **Références entre tables**,
+voir [Options d'une réception, liens entre tables](#options-dune-réception-liens-entre-tables-historique-des-envois)). Une
+colonne **Binaire (Blob)** ne part pas : Grist ne permet pas à un autre document d'en recevoir les octets,
+et l'assistant le dit. Les colonnes valent pour toutes les personnes qui reçoivent l'export. **Tous** et **Aucun** cochent ou décochent
 d'un coup les colonnes que la recherche affiche, et la liste s'agrandit par son coin (la fenêtre
 aussi).
 
@@ -514,6 +516,15 @@ sans le widget : l'état de chaque destinataire dit s'ils réussissent.
 
 ![Historique des envois](images/28-source-historique.png)
 
+**Effacer l'historique.** Un bouton **Effacer l'historique** est sur la carte de chaque export (SOURCE) et de
+chaque réception (CIBLE, propriétaires), après une confirmation. Côté CIBLE, il vide du journal l'avant des
+modifications et les valeurs des lignes supprimées dans la SOURCE, et l'historique de la carte repart de zéro :
+vos lignes ne changent pas et la synchronisation continue. Côté SOURCE, il efface l'historique des envois (rien
+n'est retiré aux destinataires). Cela ne se défait pas, mais l'historique de Grist (Ctrl+Z, « Historique du
+document ») n'est pas touché.
+
+![Effacer l'historique d'une réception](images/31-cible-effacer-historique.png)
+
 **Diagnostic** (Réglages, **Copier le diagnostic**) : version, état des exports et des réceptions,
 erreurs récentes. Il ne contient aucune donnée de vos tables, ni courriel, code ou lien : on peut le
 joindre à un message d'aide.
@@ -656,6 +667,11 @@ protégé comme les nouveaux, chaque partage se renforce une fois, personne par 
 Si le délai de 7 jours se termine avant la fin, la carte de la CIBLE dit « Renforcement interrompu » : renvoyer la réponse à la SOURCE, ou revenir à
 l'ancien fonctionnement. Les destinataires en pause se reprennent d'abord ; un Échange d'avant les clés se reprend par une nouvelle invitation.
 
+À la première ouverture d'un document après une mise à jour, une fenêtre **Nouveautés** (une fois par version et par navigateur, jamais dans un
+document en lecture seule) présente les nouveautés, puis, sur un second écran, les chiffres de votre document : exports, destinataires à renforcer, réceptions à renforcer.
+
+![Fenêtre des nouveautés](images/35-nouveautes.png)
+
 ## Si quelque chose coince
 
 | Symptôme | Cause probable | Que faire |
@@ -674,6 +690,7 @@ l'ancien fonctionnement. Les destinataires en pause se reprennent d'abord ; un �
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |
 | « Cette instance n'autorise pas les webhooks vers sa propre adresse » au branchement | Grist n'envoie un webhook qu'aux adresses que l'administrateur de l'instance autorise (réglage `ALLOWED_WEBHOOK_DOMAINS`) | Sur grist.numerique.gouv.fr, rien à faire : les webhooks y sont limités à l'instance. Sur une autre instance, écrire à son administrateur pour faire ajouter l'adresse de l'instance à la liste des domaines autorisés |
+| Un code est refusé : « Ce code vient de la version … du widget, plus récente que celle de ce document » | Les deux documents n'utilisent pas le widget à la même adresse, ou une page est restée ouverte sur une ancienne version | Vérifier l'adresse du widget (panneau de droite de Grist), recharger la page, recoller le code ; rien à refaire dans l'autre document |
 | Le widget affiche « besoin de l'accès complet » | Grist ne lui a pas accordé l'accès complet | Panneau de droite de Grist, clic sur le widget, **Niveau d'accès** : **Accepter** ou **Accès complet au document** |
 | Lien public : « n'est plus lisible » | Le lien public de la SOURCE est désactivé ou coupé | Voir avec la SOURCE |
 

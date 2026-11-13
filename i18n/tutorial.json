@@ -83,11 +83,13 @@
     },
     "text": {
       "fr": [
-        "Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher ; Tous et Aucun cochent d’un coup ce que la recherche affiche). Le reste ne sort jamais du document. Les colonnes valent pour tous les destinataires de l’export. En option, Filtrer les lignes : des conditions par colonne (valeurs à cocher, contient, nombres, dates, Références par fiche), avec le nombre de lignes qui partiront.",
+        "Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher ; Tous et Aucun cochent d’un coup ce que la recherche affiche). Le reste ne sort jamais du document. Une colonne Binaire (Blob) ne part pas : Grist ne permet pas à un autre document d’en recevoir les octets, et l’assistant le dit. Les colonnes valent pour tous les destinataires de l’export. En option, Filtrer les lignes : des conditions par colonne (valeurs à cocher, contient, nombres, dates, Références par fiche), avec le nombre de lignes qui partiront.",
+        "Une colonne Référence ou Liste de références a son bloc « Références entre tables » (valeurs seulement, ou lien gardé : voir « Liens entre tables »), et la ligne repliée « Envoyé avec les colonnes » donne les autres éléments : mise en forme, descriptions, ordre des colonnes, formules.",
         "À la création, le widget ajoute id_sync (identifiant stable) et MajLe (date de modification) aux tables, et la table technique Synchro, une seule pour tout le document. Une colonne Supprime déjà présente est prise en compte : une ligne cochée est retirée de la CIBLE."
       ],
       "en": [
-        "Tick the columns to send (all by default, except attachments, to tick; All and None tick at once what the search shows). The rest never leaves the document. Columns apply to all recipients of the export. Optionally, Filter rows: conditions per column (values to tick, contains, numbers, dates, References by record), with the number of rows that will be sent.",
+        "Tick the columns to send (all by default, except attachments, to tick; All and None tick at once what the search shows). The rest never leaves the document. A Binary (Blob) column is not sent: Grist does not let another document receive its bytes, and the wizard says so. Columns apply to all recipients of the export. Optionally, Filter rows: conditions per column (values to tick, contains, numbers, dates, References by record), with the number of rows that will be sent.",
+        "A Reference or Reference list column has its “References between tables” block (values only, or keep the link: see “Links between tables”), and the collapsed line “Sent with the columns” offers the other elements: formatting, descriptions, column order, formulas.",
         "On creation, the widget adds id_sync (stable key) and MajLe (last change) to the tables, and the Synchro technical table, one for the whole document. An existing Supprime column is honoured: a ticked row is removed from the TARGET."
       ]
     },
@@ -347,35 +349,121 @@
     "images": ["25-source-pieces-jointes", "26-cible-fichiers-attendus"]
   },
   {
-    "id": "options",
-    "role": "both",
+    "id": "t-options",
+    "role": "target",
     "title": {
-      "fr": "Options, liens entre tables et historique des envois",
-      "en": "Options, links between tables and send history"
+      "fr": "Options d’une réception et colonnes ajoutées par la SOURCE",
+      "en": "Reception options and columns added by the SOURCE"
     },
     "text": {
       "fr": [
-        "Options d’une réception (hors Échange), à l’acceptation ou par le bouton Options de la carte. Archive : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et n’est plus suivie. Tables en lecture seule : seuls les propriétaires du document écrivent dans les tables reçues (la recopie attend qu’un propriétaire ouvre la page).",
-        "Colonnes ajoutées par la SOURCE : une réception nouvelle demande votre accord (case « Appliquer automatiquement les colonnes que la SOURCE ajoute à l’export » décochée, dans « Options avancées » à l’acceptation). La carte propose alors les colonnes ajoutées avec leur détail, sans rien créer, pendant que les lignes continuent d’arriver ; « Appliquer » les crée et les remplit d’un coup, « Appliquer, puis traiter automatiquement » ne demande plus ensuite. La carte dit aussi, sans rien changer, une colonne que la SOURCE n’envoie plus ou dont le type a changé. Une réception d’avant crée les colonnes toute seule, comme avant ; le réglage est dans « Options ».",
-        "Liens entre tables : à l’étape Colonnes, le bloc « Références entre tables » demande, pour chaque colonne Référence ou Liste de références, « Valeurs seulement » (le destinataire reçoit le texte affiché) ou « Garder le lien » (une vraie Référence chez le destinataire, qui affiche la même colonne ; la table visée s’ajoute à l’export si elle n’y était pas : sa seule colonne affichée d’emblée, ou toute la table, ou des colonnes au choix). Une colonne déjà remplie là-bas reste du texte jusqu’à ce qu’un propriétaire clique « Refaire les références » ; « Valeurs seulement » rend le texte.",
-        "Les listes de choix et les formats (dates, nombres) suivent les colonnes : un choix ajouté dans la SOURCE s’ajoute ici, une mise en forme retouchée ici reste.",
-        "Mise en forme : « Envoyer la mise en forme des colonnes » (cochée d’emblée, à l’étape Colonnes) envoie aussi les couleurs, le style des en-têtes, la devise et les règles de mise en forme conditionnelle simples. Une règle n’est jamais copiée telle quelle : elle est relue puis réécrite avec les colonnes du destinataire, et une règle trop complexe n’est pas envoyée. La langue du document décide de l’écriture des nombres et de la devise par défaut : si elle diffère, la carte de réception le dit, et un propriétaire peut régler son document comme la SOURCE d’un clic. Les descriptions des colonnes et des tables ont leurs propres cases, sous la ligne « Envoyé avec les colonnes » : elles partent telles quelles, lisibles par chaque destinataire. L’ordre des colonnes et celles que la page de la table cache ont leur case (décochée d’emblée) : les colonnes créées par le widget les reçoivent une fois, les autres ne bougent pas. Le bouton « Reprendre depuis la SOURCE » remet les éléments cochés d’accord avec la SOURCE.",
-        "Formules : « Envoyer aussi les formules des colonnes (Python) » est une case à part (décochée d’emblée, à l’étape Colonnes), avec un message qui rappelle qu’une formule est du code Python que Grist exécute. Rien n’est posé tout seul chez le destinataire : un propriétaire ouvre « Reprendre depuis la SOURCE », coche « Formules », lit chaque formule (celles qui citent un module système, une colonne ou une table absentes sont refusées d’office), puis coche « J’ai lu ces formules ». Seules les colonnes créées par le widget deviennent des colonnes de formule ; elles ne reçoivent alors plus de valeurs de la SOURCE : Grist les calcule. La formule par défaut d’une colonne de données (déclenchement sur les nouvelles lignes seulement) part aussi : la colonne reste de données, la formule ne sert qu’aux lignes ajoutées ici à la main.",
+        "Les options se choisissent à l’acceptation (sous « Options avancées »), puis se changent avec le bouton Options de la carte. Elles ne s’appliquent pas à un Échange.",
+        "Archive : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et n’est plus suivie. Tables en lecture seule : seuls les propriétaires du document écrivent dans les tables reçues (la recopie attend qu’un propriétaire ouvre la page).",
+        "Colonnes ajoutées par la SOURCE : une réception nouvelle vous demande votre accord (la case « Appliquer automatiquement les colonnes que la SOURCE ajoute à l’export » est décochée d’emblée). La carte propose alors les colonnes ajoutées avec leur détail, sans rien créer, pendant que les lignes continuent d’arriver. « Appliquer » les crée et les remplit d’un coup avec les valeurs déjà reçues ; « Appliquer, puis traiter automatiquement » ne demande plus ensuite. Une réception faite avant cette version crée les colonnes toute seule, comme avant ; le réglage est dans « Options ».",
+        "La carte dit aussi, sans rien changer, une colonne que la SOURCE n’envoie plus (elle reste ici, ses valeurs ne bougent plus) ou dont le type a changé (la colonne d’ici garde le sien) ; « Compris » ne la répète plus."
+      ],
+      "en": [
+        "Options are chosen when accepting (under “Advanced options”), then changed with the Options button on the card. They do not apply to an Exchange.",
+        "Archive: a row deleted in the SOURCE stays here, ticked “Deleted at the source”, and is no longer followed. Read-only tables: only the document owners write in the received tables (copying waits for an owner to open the page).",
+        "Columns added by the SOURCE: a new reception asks for your agreement (the “Apply automatically the columns the SOURCE adds to the export” box is unticked by default). The card then offers the added columns with their detail, creating nothing while rows keep arriving. “Apply” creates and fills them at once with the values already received; “Apply, then process automatically” stops asking afterwards. A reception made before this version keeps creating columns by itself, as before; the setting is in “Options”.",
+        "The card also says, without changing anything, a column the SOURCE no longer sends (it stays here, its values no longer move) or whose type changed (the column here keeps its own); “Got it” stops repeating it."
+      ]
+    },
+    "images": ["08-cible-destinations", "27-cible-archive"]
+  },
+  {
+    "id": "links",
+    "role": "both",
+    "title": {
+      "fr": "Liens entre tables (Références)",
+      "en": "Links between tables (References)"
+    },
+    "text": {
+      "fr": [
+        "SOURCE, à l’étape Colonnes : le bloc « Références entre tables » liste chaque colonne Référence ou Liste de références cochée. Pour chacune : « Valeurs seulement » (le destinataire reçoit le texte affiché, sans lien) ou « Garder le lien » (il reçoit une vraie Référence, qui affiche la même colonne). Quand la table visée est déjà cochée, le lien est gardé d’emblée ; sinon, ce sont les valeurs seules qui partent.",
+        "Garder le lien d’une table qui n’est pas dans l’export l’ajoute à l’export : un bloc « Ajoutée pour un lien » demande alors « Que prendre de la table ? » : seulement la colonne affichée (d’emblée), toute la table (ses Pièces jointes restent à cocher) ou les colonnes de votre choix. On peut aussi y filtrer les lignes. Aucune table ne s’ajoute sans ce choix.",
+        "CIBLE : la colonne devient une vraie Référence (ou Liste de références) vers la table reçue. Une ligne qui arrive avant celles qu’elle vise est complétée à leur arrivée. Une colonne que vous aviez déjà remplie de texte reste du texte : la carte le dit (« … reste du texte ») et un propriétaire clique « Refaire les références » pour la convertir. « Valeurs seulement », dans « Modifier », rend le texte."
+      ],
+      "en": [
+        "SOURCE, at the Columns step: the “References between tables” block lists each ticked Reference or Reference list column. For each one: “Values only” (the recipient gets the text shown, without a link) or “Keep the link” (a real Reference that shows the same column). When the table it points at is already ticked, the link is kept by default; otherwise only the values are sent.",
+        "Keeping the link to a table that is not in the export adds it to the export: an “Added for a link” block then asks “What to take from the table?”: only the column it shows (by default), the whole table (its Attachments stay to be ticked) or the columns of your choice. You can also filter its rows there. No table is added without this choice.",
+        "TARGET: the column becomes a real Reference (or Reference list) to the received table. A row that arrives before the rows it points at is completed when they arrive. A column you had already filled with text stays text: the card says so (“… stays text”) and an owner clicks “Rebuild the references” to convert it. “Values only”, in “Edit”, gives the text back."
+      ]
+    },
+    "images": ["29-source-liens", "29b-source-liens-tables-ajoutees", "29c-cible-liens-refaire"]
+  },
+  {
+    "id": "elements",
+    "role": "both",
+    "title": {
+      "fr": "Mise en forme, descriptions, ordre des colonnes et formules",
+      "en": "Formatting, descriptions, column order and formulas"
+    },
+    "text": {
+      "fr": [
+        "À l’étape Colonnes, la ligne repliée « Envoyé avec les colonnes » ouvre une case par élément qui peut partir en plus des valeurs ; chaque case dit combien de colonnes ou de tables elle concerne. Chez le destinataire, seules les colonnes créées par le widget reçoivent ces éléments, une fois : ce qui est retouché ici reste. Le bouton « Reprendre depuis la SOURCE » de la carte remet d’accord, élément par élément, ce que vous cochez.",
+        "Mise en forme : « Envoyer la mise en forme des colonnes » (cochée d’emblée) envoie les couleurs, le style des en-têtes, la devise et les règles de mise en forme conditionnelle simples. Une règle n’est jamais copiée telle quelle : elle est relue, puis réécrite avec les colonnes du destinataire, et une règle trop complexe n’est pas envoyée. La langue du document décide de l’écriture des nombres et de la devise par défaut : si elle diffère, la carte de réception le dit, et un propriétaire peut régler son document comme la SOURCE d’un clic.",
+        "Descriptions : les cases « descriptions des colonnes » et « descriptions des tables » envoient les textes tels quels, lisibles par chaque destinataire : ne les cochez pas si vos descriptions portent des notes internes.",
+        "Ordre et colonnes cachées : la case « Envoyer l’ordre et les colonnes cachées de la page » (décochée d’emblée, car elle change l’affichage chez le destinataire) envoie le rang des colonnes dans la page de la table et celles que la page cache. Seul l’affichage change : les données d’une colonne cachée arrivent comme les autres. Les tris, filtres et graphiques ne partent pas.",
+        "Listes de choix et formats (dates, nombres) suivent les colonnes : un choix ajouté dans la SOURCE s’ajoute ici, une mise en forme retouchée ici reste.",
+        "Formules : « Envoyer aussi les formules des colonnes (Python) » est une case à part (décochée d’emblée), avec un message qui rappelle qu’une formule est du code Python que Grist exécute. Rien n’est posé tout seul chez le destinataire : un propriétaire ouvre « Reprendre depuis la SOURCE », coche « Formules », lit chaque formule (celles qui citent un module système, une colonne ou une table absentes sont refusées d’office), puis coche « J’ai lu ces formules ». Seules les colonnes créées par le widget deviennent des colonnes de formule ; elles ne reçoivent alors plus de valeurs de la SOURCE : Grist les calcule. La formule par défaut d’une colonne de données (déclenchement sur les nouvelles lignes seulement) part aussi : la colonne reste de données, la formule ne sert qu’aux lignes ajoutées ici à la main."
+      ],
+      "en": [
+        "At the Columns step, the collapsed line “Sent with the columns” opens one box per element that can be sent in addition to the values; each box says how many columns or tables it concerns. On the receiving side, only the columns created by the widget receive these elements, once: what is changed here stays. The “Take again from the SOURCE” button on the card puts back in line, element by element, what you tick.",
+        "Formatting: “Send the column formatting” (ticked by default) sends colors, header style, currency and simple conditional formatting rules. A rule is never copied as it is: it is read, then rewritten with the receiver’s columns, and a rule that is too complex is not sent. The document language decides how numbers are written and the default currency: if it differs, the reception card says so, and an owner can set the document like the SOURCE with one click.",
+        "Descriptions: the “column descriptions” and “table descriptions” boxes send the texts as they are, readable by each recipient: do not tick them if your descriptions hold internal notes.",
+        "Order and hidden columns: the “Send the order and hidden columns of the page” box (unticked by default, because it changes the display on the receiving side) sends the rank of the columns in the table’s page and those the page hides. Only the display changes: the data of a hidden column arrives like the others. Sorts, filters and charts are not sent.",
+        "Choice lists and formats (dates, numbers) follow the columns: a choice added in the SOURCE is added here, a format changed here stays.",
+        "Formulas: “Also send the formulas of the columns (Python)” is a separate box (unticked by default), with a message reminding that a formula is Python code that Grist runs. Nothing is applied by itself on the receiving side: an owner opens “Take again from the SOURCE”, ticks “Formulas”, reads each formula (those that name a system module, or a column or table that is missing, are refused outright), then ticks “I have read these formulas”. Only the columns created by the widget become formula columns; they then no longer receive values from the SOURCE: Grist computes them. The default formula of a data column (trigger on new rows only) is sent too: the column stays a data column, the formula only serves rows added here by hand."
+      ]
+    },
+    "images": ["03-source-colonnes"]
+  },
+  {
+    "id": "history",
+    "role": "both",
+    "title": {
+      "fr": "Historique, effacer l’historique, diagnostic",
+      "en": "History, clearing the history, diagnostic"
+    },
+    "text": {
+      "fr": [
         "Historique des envois : sur la carte de l’export (replié), les destinataires ajoutés, les envois et renvois, rattrapages, pauses, révocations et modifications. Les envois ordinaires partent de Grist sans le widget : l’état de chaque destinataire dit s’ils réussissent.",
+        "Effacer l’historique : un bouton sur la carte de chaque export (SOURCE) et de chaque réception (CIBLE, propriétaires), après confirmation. Côté CIBLE, il vide du journal l’avant des modifications et les valeurs des lignes supprimées dans la SOURCE, et l’historique de la carte repart de zéro ; vos lignes ne changent pas et la synchronisation continue. Cela ne se défait pas, mais l’historique de Grist (Ctrl+Z, « Historique du document ») n’est pas touché.",
         "Réglages, Copier le diagnostic : version, état des exports et des réceptions, erreurs récentes, sans donnée de vos tables, courriel, code ni lien, à joindre à un message d’aide."
       ],
       "en": [
-        "Reception options (not for Exchange), when accepting or with the Options button on the card. Archive: a row deleted in the SOURCE stays here, ticked “Deleted at the source”, and is no longer followed. Read-only tables: only the document owners write in the received tables (copying waits for an owner to open the page).",
-        "Columns added by the SOURCE: a new reception asks for your agreement (the “Apply automatically the columns the SOURCE adds to the export” box is unticked, under “Advanced options” when accepting). The card then offers the added columns with their detail, creating nothing while rows keep arriving; “Apply” creates and fills them at once, “Apply, then process automatically” stops asking afterwards. The card also says, without changing anything, a column the SOURCE no longer sends or whose type changed. A reception made before keeps creating columns by itself, as before; the setting is in “Options”.",
-        "Links between tables: at the Columns step, the “References between tables” block asks, for each Reference or Reference list column, “Values only” (the recipient gets the text shown) or “Keep the link” (a real Reference on the receiving side, showing the same column; the table it points at is added to the export if it was not there: only the column it shows by default, or the whole table, or columns of your choice). A column that already holds data there stays text until an owner clicks “Rebuild the references”; “Values only” gives the text back.",
-        "Choice lists and formats (dates, numbers) follow the columns: a choice added in the SOURCE is added here, a format changed here stays.",
-        "Formatting: “Send the column formatting” (ticked by default, at the Columns step) also sends colors, header style, currency and simple conditional formatting rules. A rule is never copied as it is: it is read, then rewritten with the receiver's columns, and a rule that is too complex is not sent. The document language decides how numbers are written and the default currency: if it differs, the reception card says so, and an owner can set the document like the SOURCE with one click. The “Take the formatting again” button puts the received columns back in line with the SOURCE.",
-        "Formulas: “Also send the formulas of the columns (Python)” is a separate box (unticked by default, on the Columns step), with a message reminding that a formula is Python code that Grist runs. Nothing is applied by itself on the receiving side: an owner opens “Take again from the SOURCE”, ticks “Formulas”, reads each formula (those that name a system module, or a column or table that is missing, are refused outright), then ticks “I have read these formulas”. Only the columns created by the widget become formula columns; they then no longer receive values from the SOURCE: Grist computes them. The default formula of a data column (trigger on new rows only) is sent too: the column stays a data column, the formula only serves rows added here by hand.",
-        "Send history: on the export card (collapsed), recipients added, sends and resends, catch-ups, pauses, revocations and edits. Ordinary sends leave Grist without the widget: each recipient's status says whether they succeed.",
+        "Send history: on the export card (collapsed), recipients added, sends and resends, catch-ups, pauses, revocations and edits. Ordinary sends leave Grist without the widget: each recipient’s status says whether they succeed.",
+        "Clear the history: a button on each export’s card (SOURCE) and each reception’s card (TARGET, owners), after confirmation. On the TARGET side, it empties from the journal the before-values of changes and the values of rows deleted in the SOURCE, and the card’s history starts again from zero; your rows do not change and syncing goes on. It cannot be undone, but Grist’s own history (Ctrl+Z, “Document history”) is not touched.",
         "Settings, Copy the diagnostic: version, state of the exports and receptions, recent errors, with no table data, email, code or link, to attach to a help message."
       ]
     },
-    "images": ["08-cible-destinations", "29-source-liens", "28-source-historique", "27-cible-archive"]
+    "images": ["28-source-historique", "31-cible-effacer-historique"]
+  },
+  {
+    "id": "reinforce",
+    "role": "both",
+    "title": {
+      "fr": "Renforcer la sécurité d’un partage plus ancien",
+      "en": "Strengthen security of an older share"
+    },
+    "text": {
+      "fr": [
+        "Un partage branché avec une version d’avant les clés de signature (l’Alpha) continue de fonctionner, rien n’est obligatoire. Pour le protéger comme les nouveaux, chaque partage se renforce une fois, personne par personne. À la première ouverture du document après une mise à jour, une fenêtre « Nouveautés » le propose, avec le nombre de partages concernés.",
+        "1. SOURCE : onglet Envoyer, sur la ligne du destinataire, « Renforcer la sécurité ». Le widget prépare un nouveau code (valable 7 jours) à lui transmettre.",
+        "2. CIBLE : onglet Recevoir, « Accepter une invitation », coller ce code. La même réception reprend, avec ses tables et ses données ; copier le lien du formulaire, puis renvoyer la réponse à la SOURCE. En attendant, l’ancien envoi continue d’arriver (7 jours au plus) et « Revenir à l’ancien fonctionnement » reste possible.",
+        "3. SOURCE : « Coller la réponse », comparer le code de contrôle, « Approuver et brancher ». Le nouvel envoi remplace l’ancien ; à sa première livraison signée, la carte de la CIBLE dit « Partage renforcé ».",
+        "Si les 7 jours passent avant la fin, la carte de la CIBLE dit « Renforcement interrompu » : renvoyer la réponse à la SOURCE, ou revenir à l’ancien fonctionnement. Un destinataire en pause se reprend d’abord."
+      ],
+      "en": [
+        "A share connected with a version from before the signing keys (the Alpha) keeps working, nothing is compulsory. To protect it like the new ones, each share is strengthened once, person by person. The first time you open the document after an update, a “What’s new” window offers it, with the number of shares concerned.",
+        "1. SOURCE: Send tab, on the recipient’s line, “Strengthen security”. The widget prepares a new code (valid for 7 days) to send to them.",
+        "2. TARGET: Receive tab, “Accept an invitation”, paste that code. The same reception resumes, with its tables and its data; copy the form link, then send the reply back to the SOURCE. Meanwhile, the old delivery keeps arriving (7 days at most) and “Go back to the old way” remains possible.",
+        "3. SOURCE: “Paste the reply”, compare the control code, “Approve and connect”. The new delivery replaces the old one; at its first signed delivery, the TARGET card says “Share strengthened”.",
+        "If the 7 days pass before the end, the TARGET card says “Strengthening interrupted”: send the reply back to the SOURCE, or go back to the old way. A paused recipient is resumed first."
+      ]
+    },
+    "images": ["32-renforcer-cible-suggestion", "34-renforcer-source-approuver", "33-renforcer-cible-en-cours", "35-nouveautes"]
   },
   {
     "id": "exchange",
@@ -460,7 +548,9 @@
         "Au branchement, « cette instance n’autorise pas les webhooks vers sa propre adresse » : Grist n’envoie un webhook qu’aux adresses que l’administrateur de l’instance autorise. Sur grist.numerique.gouv.fr, rien à faire : les webhooks y sont limités à l’instance. Sur une autre instance, écrire à son administrateur pour faire ajouter l’adresse de l’instance à la liste des domaines autorisés (réglage ALLOWED_WEBHOOK_DOMAINS).",
         "Envoi en erreur « Invalid column » : la table Synchro de la SOURCE a une colonne qui n’est pas au widget (A, B et C d’une table faite à la main, par exemple). La carte « Colonnes en trop dans la table Synchro » les liste et les retire après votre accord (sauvegardez d’abord ce qu’elles contiennent), puis le widget débloque la file.",
         "« Une table nommée Synchro existe déjà » : le widget ne reprend pas la table de quelqu’un d’autre. Renommer cette table (le widget le propose, elle garde tout son contenu) : il crée ensuite la sienne.",
-        "Le widget affiche « besoin de l’accès complet » : ouvrir le panneau de droite de Grist, cliquer sur le widget, puis « Accepter » (ou « Accès complet au document ») dans « Niveau d’accès »."
+        "Le widget affiche « besoin de l’accès complet » : ouvrir le panneau de droite de Grist, cliquer sur le widget, puis « Accepter » (ou « Accès complet au document ») dans « Niveau d’accès ».",
+        "Carte « Réception supprimée » dans Recevoir : le journal de la réception n’existe plus dans ce document. Si la suppression est récente, l’annuler (Ctrl+Z, ou « Historique du document ») ; sinon demander à la SOURCE de révoquer cette réception puis de vous inviter de nouveau. « Retirer cet avis » efface la carte.",
+        "Un code est refusé avec « Ce code vient de la version … du widget, plus récente que celle de ce document » : les deux documents doivent utiliser le widget à la même adresse. Recharger la page du widget, puis recoller le code ; rien à refaire dans l’autre document."
       ],
       "en": [
         "Nothing reaches the TARGET table: open the widget page in the TARGET, versions were waiting in the journal.",
@@ -472,7 +562,9 @@
         "On connecting, “this instance does not allow webhooks to its own address”: Grist only sends a webhook to addresses the instance administrator allows. On grist.numerique.gouv.fr, nothing to do: webhooks there are limited to the instance. On another instance, write to its administrator and ask for the instance’s address to be added to the list of allowed webhook domains (ALLOWED_WEBHOOK_DOMAINS setting).",
         "Delivery fails with “Invalid column”: the SOURCE’s Synchro table has a column that does not belong to the widget (A, B and C of a hand-made table, for example). The card “Extra columns in the Synchro table” lists and removes them with your agreement (save what they hold first), then the widget unblocks the queue.",
         "“A table named Synchro already exists”: the widget does not take over someone else’s table. Rename that table (the widget offers to; it keeps all its content): it then creates its own.",
-        "The widget shows “needs full access”: open Grist’s right panel, click the widget, then “Accept” (or “Full document access”) under “Access level”."
+        "The widget shows “needs full access”: open Grist’s right panel, click the widget, then “Accept” (or “Full document access”) under “Access level”.",
+        "“Reception deleted” card in Receive: the reception’s journal no longer exists in this document. If the deletion is recent, undo it (Ctrl+Z, or “Document history”); otherwise ask the SOURCE to revoke this reception and invite you again. “Remove this notice” clears the card.",
+        "A code is refused with “This code comes from version … of the widget, newer than the one in this document”: both documents must use the widget from the same address. Reload the widget page, then paste the code again; nothing to redo in the other document."
       ]
     },
     "images": []

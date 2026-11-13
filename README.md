@@ -159,7 +159,11 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   avant et après, et colonnes ajoutées à l'export.
 - **Diagnostic à copier** (Réglages) : version, état des envois et des réceptions, erreurs
   récentes, sans aucune donnée des tables, adresse ni code ; et **historique des envois** sur
-  chaque export (renvois, rattrapages, pauses, destinataires).
+  chaque export (renvois, rattrapages, pauses, destinataires). Un bouton **Effacer l'historique**
+  (export côté SOURCE, réception côté CIBLE) le remet à zéro, après confirmation.
+- **Partages plus anciens** (0.21) : un partage branché avant les clés de signature (l'Alpha) continue
+  de fonctionner, rien n'est obligatoire ; « Renforcer la sécurité » le protège comme les nouveaux,
+  personne par personne, et une fenêtre « Nouveautés » le propose une fois par version.
 - **Aide intégrée** : tutoriel en images, « Qui fait quoi ? », consignes prêtes à envoyer par
   courriel. Français et anglais, thème clair ou sombre.
 

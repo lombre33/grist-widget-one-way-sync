@@ -151,7 +151,11 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   and columns added to the export.
 - **Copyable diagnostic** (Settings): version, state of sends and receptions, recent errors,
   with no table data, address or code; and a **send history** on each export (resends, catch-ups,
-  pauses, recipients).
+  pauses, recipients). A **Clear the history** button (export on the SOURCE side, reception on the
+  TARGET side) resets it, after confirmation.
+- **Older shares** (0.21): a share connected before the signing keys (the Alpha) keeps working, nothing
+  is compulsory; “Strengthen security” protects it like the new ones, person by person, and a
+  “What's new” window offers it once per version.
 - **Built-in help**: picture tutorial, “Who does what?”, instructions ready to send by email.
   French and English, light or dark theme.
 
