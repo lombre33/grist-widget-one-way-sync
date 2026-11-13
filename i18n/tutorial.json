@@ -169,7 +169,7 @@
         "New table: the widget creates it with its own page, without the widget on it, and it only copies while its page is open. To make reception safe, first create the table yourself, add the widget to it (full access), then redo the procedure from that page and pick the existing table; or continue, then click “Add the widget to the page of the table” on the reception’s card (Grist then asks for full access for that section). A single open widget is enough for all the receptions of the document."
       ]
     },
-    "images": ["08-cible-destinations", "08b-cible-colonnes"]
+    "images": ["08-cible-destinations", "08b-cible-colonnes", "38-cible-apercu-adoption"]
   },
   {
     "id": "t-link",
@@ -266,7 +266,7 @@
         "A long send is announced and followed: before “Resend all” (or “Send” when adding a recipient), the widget says what it will cost (rows, size, batches, time). While it runs, the export card shows where it stands (rows and batches, time left), the pause that spares Grist’s server (20 MB per 10 minutes, all recipients combined) with the time it resumes, and, if a recipient is failing, why nothing leaves. Keep a widget page open until it is done."
       ]
     },
-    "images": ["13-source-actif", "18-source-modifier", "13b-source-reprendre"]
+    "images": ["13-source-actif", "18-source-modifier", "13b-source-reprendre", "39-source-colonnes-ajoutees"]
   },
   {
     "id": "t-daily",
@@ -369,7 +369,7 @@
         "The card also says, without changing anything, a column the SOURCE no longer sends (it stays here, its values no longer move) or whose type changed (the column here keeps its own); “Got it” stops repeating it."
       ]
     },
-    "images": ["08-cible-destinations", "27-cible-archive"]
+    "images": ["08-cible-destinations", "27-cible-archive", "37-cible-colonnes-proposees"]
   },
   {
     "id": "links",
@@ -417,7 +417,7 @@
         "Formulas: “Also send the formulas of the columns (Python)” is a separate box (unticked by default), with a message reminding that a formula is Python code that Grist runs. Nothing is applied by itself on the receiving side: an owner opens “Take again from the SOURCE”, ticks “Formulas”, reads each formula (those that name a system module, or a column or table that is missing, are refused outright), then ticks “I have read these formulas”. Only the columns created by the widget become formula columns; they then no longer receive values from the SOURCE: Grist computes them. The default formula of a data column (trigger on new rows only) is sent too: the column stays a data column, the formula only serves rows added here by hand."
       ]
     },
-    "images": ["03-source-colonnes"]
+    "images": ["03-source-colonnes", "40-source-ordre-colonnes", "41-cible-reprendre", "42-source-formules-message", "43-cible-formules-liste"]
   },
   {
     "id": "history",

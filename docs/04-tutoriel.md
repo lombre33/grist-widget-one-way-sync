@@ -186,6 +186,8 @@ bougent pas, avec quelques exemples. **Appliquer** fait la première recopie ; l
 suivantes passent seules. Sans colonne commune choisie, l'aperçu prévient que des lignes déjà là
 risquent d'être en double.
 
+![Aperçu avant la première écriture dans une table déjà remplie](images/38-cible-apercu-adoption.png)
+
 ![Destinations](images/08-cible-destinations.png)
 
 Le widget crée un journal pour l'export, `Journal_<export>` (dans « Données source »), et publie
@@ -282,6 +284,8 @@ les range (la carte n'en parle plus). Une colonne renommée ou d'un autre type e
 renommée ») : **Modifier** remet l'export d'accord. À l'étape Colonnes, la case « Envoyer aussi les
 colonnes que j'ajouterai à ces tables » (décochée d'emblée) les envoie seules quand un propriétaire
 ouvre la page du widget.
+
+![Colonnes ajoutées à une table de l'export, qui ne partent pas](images/39-source-colonnes-ajoutees.png)
 
 Pour une personne :
 
@@ -441,6 +445,9 @@ carte :
   reste ici, ses valeurs ne bougent plus) ou dont le type a changé (la colonne d'ici garde le sien) ;
   **Compris** ne la répète plus. Une réception faite avant cette version crée les colonnes toute
   seule, comme avant.
+
+  ![La SOURCE a ajouté une colonne à l'export : Appliquer](images/37-cible-colonnes-proposees.png)
+
 - **Tables en lecture seule** : seuls les propriétaires du document écrivent dans les tables
   reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
   personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.
@@ -490,6 +497,10 @@ les données d'une colonne cachée arrivent comme les autres. Chez le destinatai
 reçoivent une fois (celles qui existaient déjà ne bougent pas) ; une retouche faite ici reste, et **Reprendre depuis la
 SOURCE** range de nouveau la page comme celle de la SOURCE. Les tris, filtres, graphiques et autres vues ne sont pas envoyés.
 
+![Ordre et colonnes cachées, dans la fenêtre d'export](images/40-source-ordre-colonnes.png)
+
+![Reprendre des éléments depuis la SOURCE](images/41-cible-reprendre.png)
+
 **Formules.** Une case à part, **Envoyer aussi les formules des colonnes (Python)**, décochée d'emblée,
 envoie le texte de chaque colonne de formule, et celui de la **formule par défaut** d'une colonne de
 données (une formule de déclenchement qui ne joue que sur les nouvelles lignes ; pas celle qui se
@@ -503,6 +514,10 @@ alors plus de valeurs de la SOURCE (Grist les calcule). Une formule par défaut 
 données : elle ne sert qu'aux lignes ajoutées ici à la main et ne change aucune valeur reçue. L'Historique
 du document permet de revenir en arrière. Sur une instance dont les formules tournent sans bac à sable, demandez d'abord à son administrateur
 (voir `SECURITY.md`).
+
+![Message affiché en cochant l'envoi des formules](images/42-source-formules-message.png)
+
+![Formules à poser chez le destinataire, avec leurs objections](images/43-cible-formules-liste.png)
 
 **Langue du document.** Grist écrit les séparateurs des nombres et la devise par défaut d'après la
 langue du document, pas d'après la colonne : un budget copié d'un document français dans un document
