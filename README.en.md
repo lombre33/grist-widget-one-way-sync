@@ -140,6 +140,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   detail, one click creates and fills them; an "automatic" setting is in the options).
 - **Reception options** (not for Exchange): *archive* (a row deleted in the SOURCE stays here,
   ticked “Deleted at the source”) and *read-only* (only owners write in the received tables).
+- **Readable windows**: an option fits on one line and its explanation is behind a small “?”;
+  Cancel, the cross or Esc closes a window, and the widget asks whether to save or discard when
+  something changed.
 - **Large tables**: no row limit (tested with 21,000), big imports sent in batches, a stuck
   delivery queue is cleared and resent.
 - **Long sends announced and followed**: before a full send, what it will cost (rows, size,

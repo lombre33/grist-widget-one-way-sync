@@ -77,6 +77,11 @@ Au premier lancement, le widget demande le rôle du document. Ensuite il ouvre d
 
 ## Côté SOURCE : créer un export
 
+Dans les fenêtres et les assistants du widget, une option tient en une ligne ; son explication est derrière
+un petit **?** rond placé à côté (un clic l'ouvre, un second la referme). Pour sortir d'une fenêtre :
+**Annuler** (ou **Plus tard**), la croix en haut à droite ou la touche Échap. Si vous avez changé
+quelque chose, le widget demande s'il faut **enregistrer** ou **abandonner** ces changements.
+
 ### 1. Choisir les tables
 
 **Envoyer**, **Nouvel export**, cocher les tables de l'export.
@@ -133,7 +138,7 @@ Choisir le mode. L'invitation porte toujours un secret, qui garantit que la rép
 quelqu'un qui l'a reçue, et vaut 7 jours. La case **Sécurité renforcée** rend obligatoire la
 comparaison du code de contrôle (étape 10) et interdit le lien public pour cet export : à cocher pour
 des données sensibles. La CIBLE applique les suppressions de la SOURCE telles quelles (elle peut
-garder ses lignes avec l'option Archive) ; c'est la SOURCE qui est avertie quand beaucoup de lignes disparaissent.
+garder ses lignes avec l'option « Garder ici les lignes supprimées ») ; c'est la SOURCE qui est avertie quand beaucoup de lignes disparaissent.
 
 Le champ **Nom de ce document** (facultatif) est montré à la CIBLE, avec un lien vers ce document
 qui s'ouvre dans un nouvel onglet (le lien suffit à ceux qui ont accès au document ; les autres
@@ -439,8 +444,9 @@ carte :
 
 ![Options choisies à l'acceptation](images/08-cible-destinations.png)
 
-- **Archive** : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et
-  n'est plus suivie ni signalée comme retouche. Une nouvelle version de la ligne la décoche.
+- **Garder ici les lignes supprimées dans la SOURCE** (l'archive) : une ligne effacée dans la SOURCE
+  reste ici, cochée « Supprimée à la source », et n'est plus suivie ni signalée comme retouche. Une
+  nouvelle version de la ligne la décoche.
 
   ![Ligne gardée en archive](images/27-cible-archive.png)
 
@@ -457,7 +463,7 @@ carte :
 
   ![La SOURCE a ajouté une colonne à l'export : Appliquer](images/37-cible-colonnes-proposees.png)
 
-- **Tables en lecture seule** : seuls les propriétaires du document écrivent dans les tables
+- **Mettre les tables reçues en lecture seule** : seuls les propriétaires du document écrivent dans les tables
   reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
   personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.
 
@@ -575,8 +581,9 @@ la carte le signale (**Lien commun à d'autres formulaires**), et **Couper le li
 
 La CIBLE est passive : une ligne supprimée dans la SOURCE (ou sortie du filtre de l'export) est
 supprimée ici aussi, quel qu'en soit le nombre. La SOURCE répond de ses données ; la décision ne
-vous est pas demandée. Pour garder chez vous ce qu'elle retire, cochez **Archive** (dans
-« Options avancées » à l'acceptation, ou dans **Options** de la carte) : la ligne reste, cochée.
+vous est pas demandée. Pour garder chez vous ce qu'elle retire, cochez **Garder ici les lignes supprimées
+dans la SOURCE** (dans « Options avancées » à l'acceptation, ou dans **Options** de la carte) : la ligne
+reste, cochée.
 
 Côté SOURCE, quand plus de 10 lignes et plus d'une sur cinq d'une table ont disparu de l'export
 d'un coup, la carte de l'export le dit (avis pendant 24 heures, et ligne dans l'historique des

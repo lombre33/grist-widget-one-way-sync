@@ -399,6 +399,12 @@ audit UI, pour que les informations qui expliquent les options soient en info bu
 - **Piège de l'essai** : Playwright `getByText` attend la **visibilité** : un texte derrière un « ? » se lit après avoir cliqué `Aide : <nom>` ; `getByLabel('Nom de ce document')` trouve aussi le bouton « ? »
   (son `aria-label` contient le texte) : `{ exact: true }`. Après « Fermer » d'une fenêtre, la carte se redessine : rouvrir la page avant de recliquer « Modifier » (sinon un clic sur l'ancienne carte).
 - Testé : unit 518 ; e2e complet, avec `optionsSteps` étendu (Échap sans changement ferme, avec changement la fenêtre demande, rester garde le changement, Abandonner défait, Enregistrer garde, « Annuler » à chaque étape).
+- **Tutoriels remis à jour (13 novembre, textes et images seulement, aucun code du widget)** (Antoine : « est-ce que le tutoriel est à jour ? »). Tutoriel intégré (`i18n/tutorial.json`), `docs/04`, README :
+  structure, références, « Widget à ajouter » (0.28.3) et les libellés de la 0.29 (archive, lecture seule, « ? », sortie des fenêtres). Toutes les captures de `docs/images` et de `img/aide-*.png` sont refaites sur la
+  0.29.0 (`CAPTURES=1`, 89 étapes). **Les vignettes `docs/images/readme/37` à `46` ne sont pas au dépôt** (aucun README ne les cite). Tutoriel du forum : `/mnt/project-files/forum/` (texte, `images/`, zip).
+  **Pièges de la capture** : depuis la 0.28.3 toute carte dont la table reçue a une page sans le widget est orange (« Widget à ajouter ») et son avis repousse les autres ; `shot(nom, part, hide)` masque
+  `[data-widget-missing]` pour `37` et `38` (l'avis montré y est celui de la structure ou de l'adoption), les autres captures montrent l'état réel ; `helpShots` fait défiler la bannière dans la vue
+  avant de la mesurer ; la capture du widget ajouté (`44` à `46`) attend la minute de l'avis puis « Synchroniser » (le message n'est retiré qu'au redessin suivant).
 
 ## État précédent : V0.28.4 (13 novembre 2026)
 

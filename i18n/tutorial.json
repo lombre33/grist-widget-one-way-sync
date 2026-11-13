@@ -66,10 +66,12 @@
     },
     "text": {
       "fr": [
-        "Un export a un nom, des tables et leurs colonnes ; on y ajoute ensuite les personnes qui le reçoivent. Envoyer, Nouvel export, cocher les tables."
+        "Un export a un nom, des tables et leurs colonnes ; on y ajoute ensuite les personnes qui le reçoivent. Envoyer, Nouvel export, cocher les tables.",
+        "Dans les fenêtres du widget, un petit « ? » rond à côté d’une option ouvre son explication. Pour sortir d’une fenêtre : Annuler, la croix en haut à droite ou la touche Échap ; si vous avez changé quelque chose, le widget demande d’enregistrer ou d’abandonner."
       ],
       "en": [
-        "An export has a name, tables and their columns; you then add the people who receive it. Send, New export, tick the tables."
+        "An export has a name, tables and their columns; you then add the people who receive it. Send, New export, tick the tables.",
+        "In the widget’s windows, a small round “?” next to an option opens its explanation. To leave a window: Cancel, the cross at the top right or the Esc key; if you changed something, the widget asks whether to save or discard."
       ]
     },
     "images": ["02-source-tables"]
@@ -358,13 +360,13 @@
     "text": {
       "fr": [
         "Les options se choisissent à l’acceptation (sous « Options avancées »), puis se changent avec le bouton Options de la carte. Elles ne s’appliquent pas à un Échange.",
-        "Archive : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et n’est plus suivie. Tables en lecture seule : seuls les propriétaires du document écrivent dans les tables reçues (la recopie attend qu’un propriétaire ouvre la page).",
+        "« Garder ici les lignes supprimées dans la SOURCE » (l’archive) : une ligne effacée dans la SOURCE reste ici, cochée « Supprimée à la source », et n’est plus suivie. « Mettre les tables reçues en lecture seule » : seuls les propriétaires du document écrivent dans les tables reçues (la recopie attend qu’un propriétaire ouvre la page). Le « ? » de chaque option explique ses conséquences.",
         "Colonnes ajoutées par la SOURCE : une réception nouvelle vous demande votre accord (la case « Appliquer automatiquement les colonnes que la SOURCE ajoute à l’export » est décochée d’emblée). La carte propose alors les colonnes ajoutées avec leur détail, sans rien créer, pendant que les lignes continuent d’arriver. « Appliquer » les crée et les remplit d’un coup avec les valeurs déjà reçues ; « Appliquer, puis traiter automatiquement » ne demande plus ensuite. Une réception faite avant cette version crée les colonnes toute seule, comme avant ; le réglage est dans « Options ».",
         "La carte dit aussi, sans rien changer, une colonne que la SOURCE n’envoie plus (elle reste ici, ses valeurs ne bougent plus) ou dont le type a changé (la colonne d’ici garde le sien) ; « Compris » ne la répète plus."
       ],
       "en": [
         "Options are chosen when accepting (under “Advanced options”), then changed with the Options button on the card. They do not apply to an Exchange.",
-        "Archive: a row deleted in the SOURCE stays here, ticked “Deleted at the source”, and is no longer followed. Read-only tables: only the document owners write in the received tables (copying waits for an owner to open the page).",
+        "“Keep the rows that the SOURCE deleted” (the archive): a row deleted in the SOURCE stays here, ticked “Deleted at the source”, and is no longer followed. “Make the received tables read-only”: only the document owners write in the received tables (copying waits for an owner to open the page). The “?” next to each option explains its consequences.",
         "Columns added by the SOURCE: a new reception asks for your agreement (the “Apply automatically the columns the SOURCE adds to the export” box is unticked by default). The card then offers the added columns with their detail, creating nothing while rows keep arriving. “Apply” creates and fills them at once with the values already received; “Apply, then process automatically” stops asking afterwards. A reception made before this version keeps creating columns by itself, as before; the setting is in “Options”.",
         "The card also says, without changing anything, a column the SOURCE no longer sends (it stays here, its values no longer move) or whose type changed (the column here keeps its own); “Got it” stops repeating it."
       ]

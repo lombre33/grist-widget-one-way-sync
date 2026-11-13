@@ -148,6 +148,9 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 - **Options d'une réception** (hors Échange) : *archive* (une ligne effacée dans la SOURCE reste
   ici, cochée « Supprimée à la source ») et *lecture seule* (seuls les propriétaires écrivent dans
   les tables reçues).
+- **Fenêtres lisibles** : une option tient en une ligne, son explication est derrière un petit « ? » ;
+  Annuler, la croix ou Échap ferment une fenêtre, et le widget demande d'enregistrer ou d'abandonner
+  quand quelque chose a changé.
 - **Grandes tables** : pas de limite de lignes (testé avec 21 000), gros imports envoyés par
   tranches, file d'envoi bloquée vidée puis renvoyée.
 - **Envois longs prévus et suivis** : avant un envoi complet, ce qu'il va coûter (lignes, taille,

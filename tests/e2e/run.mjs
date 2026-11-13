@@ -109,6 +109,8 @@ async function helpShots(formUrl, back) {
   const share = page.getByRole('button', { name: 'Partager', exact: true }).first();
   const banner = share.locator('xpath=ancestor::div[.//button[normalize-space()="Dépublier"]][1]');
   // Seuls les trois boutons (Vue, Partager, Dépublier) : la bannière entière, large et vide, devenait illisible en vignette.
+  // La barre peut être sous le pli (formulaire long) : un clip hors de l'écran donnerait « Clipped area is either empty or outside ».
+  await banner.scrollIntoViewIfNeeded();
   const grouped = await banner.boundingBox();
   const shareBox = await share.boundingBox();
   const left = shareBox.x - 70 - 12;
@@ -236,10 +238,13 @@ async function accessSteps() {
 const clean = () => page.addStyleTag({ content: '.dev_warning, .test-notifier-toast-wrapper { display: none !important; }' });
 // Avec `part`, la même capture recadrée sur la fenêtre ouverte (`modal`, sans le voile derrière)
 // ou sur la première carte (`card`), pour le README (docs/images/readme) : lisible en vignette.
-const shot = async (name, part) => {
+// `hide` : sélecteur d'un avis qui n'est pas le sujet de la capture (l'avis « Widget à ajouter » repousse
+// vers le bas l'avis que le tutoriel montre, et la capture le coupe). L'état de la carte reste celui du parcours.
+const shot = async (name, part, hide) => {
   if (!process.env.CAPTURES) return;
   await page.waitForTimeout(400); // transitions finies (chevrons des parties repliables)
   await clean();
+  if (hide) await widget().locator('body').evaluate((b, sel) => b.querySelectorAll(sel).forEach((n) => { n.style.display = 'none'; }), hide);
   await page.screenshot({ path: join(ROOT, 'docs/images', `${name}.png`) });
   if (!part) return;
   const target = part === 'modal' ? widget().locator('[role=dialog]').last() : widget().locator('.card').first();
@@ -1264,7 +1269,7 @@ try {
     assert.match(await ficheNotice().innerText(), /Fiches → Fiches\s:\sla colonne\s«\sPays\s»\s\(Texte\) serait créée sous le nom\s«\sPays\s»/);
     assert.deepEqual(await columnsHere(), ['Nom', 'Ville', 'id_sync'].sort(), 'rien n\'est créé sans accord');
     if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'structure-1-propose.png') });
-    await shot('37-cible-colonnes-proposees', 'card');
+    await shot('37-cible-colonnes-proposees', 'card', '[data-widget-missing]');
     // Une ligne de la SOURCE continue d'arriver pendant l'attente.
     await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom: 'Denis', Ville: 'Metz', Pays: 'France' }]]);
     await waitFor(async () => (await records(dst.doc, 'Fiches')).some(r => r.Nom === 'Denis'), 'ligne reçue pendant l\'attente', 90000);
@@ -1350,7 +1355,7 @@ try {
     assert.deepEqual(rows.map(r => `${r.Nom}:${r.Ville}`).sort(), ['Anna:12', 'Zoé:7'], 'rien n\'est écrit avant l\'accord');
     assert.ok(rows.every(r => !r.id_sync), 'aucune clé posée');
     if (process.env.SHOTS) await widget().locator('article.card').first().screenshot({ path: join(process.env.SHOTS, 'adopte-2-apercu.png') });
-    await shot('38-cible-apercu-adoption', 'card');
+    await shot('38-cible-apercu-adoption', 'card', '[data-widget-missing]');
     step('Table déjà remplie : le type qui ne convient pas est dit et confirmé ; rien n\'est écrit avant l\'accord, l\'aperçu dit lignes ajoutées, rattachées, valeurs remplacées, lignes qui ne bougent pas');
     await preview.getByRole('button', { name: 'Appliquer', exact: true }).click();
     await waitFor(async () => (await records(dst.doc, 'Annuaire')).length === 4, 'lignes ajoutées après l\'accord', 90000);
@@ -2958,7 +2963,10 @@ try {
     await button('Ajouter le widget à la page de Contacts').click();
     await dialogButton('Ajouter le widget').click();
     await widget().getByText(/Widget ajouté à la page de Contacts/).waitFor({ timeout: 30000 });
-    await widget().getByText(/Widget ajouté à la page de Contacts/).waitFor({ state: 'detached', timeout: 120000 });
+    // Le message n'est retiré qu'au redessin qui suit sa minute : on attend la minute, puis « Synchroniser » redessine la carte.
+    await page.waitForTimeout(62000);
+    await button('Synchroniser').click();
+    await widget().getByText(/Widget ajouté à la page de Contacts/).waitFor({ state: 'detached', timeout: 60000 });
     await widget().locator('.card .pill-ok').first().waitFor({ timeout: 30000 });
   }
   await shot('14-cible-historique');
