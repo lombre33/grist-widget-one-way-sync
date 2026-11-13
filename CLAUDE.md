@@ -413,7 +413,10 @@ Moteur **5.0.0, majeure** (règle de `version.js` : un format de code que le mot
   `CODE_FORMAT` dans la même version, et le moteur passe à la majeure suivante.
 - Testé : unit 512 (`codes.test.mjs` : forme 2 écrite, formes 1 lues, forme suivante refusée ; `engine-links.test.mjs` : refus des deux côtés par `readInvitation` et `checkReply`, texte
   français et anglais, rien d'écrit chez celui qui refuse) ; **parcours e2e complet vert d'un seul tenant, 86 étapes** (vrai Grist 1.7, sur le commit de la 0.27.1, avant que les 0.28.0 et 0.28.1 ne s'y ajoutent, étapes « Protection »
-  comprises, environ 30 minutes), lancé depuis un worktree propre sur un conteneur sans autre charge.
+  comprises, environ 30 minutes), lancé depuis un worktree propre sur un conteneur sans autre charge ; **puis un second parcours complet vert, 88 étapes, sur la tête de `main`
+  poussée** (0ba5b48, avec les 0.28.0 et 0.28.1 des autres fils, 28 minutes). **Piège de l'essai** : `ONLY_PROTECT=1` lancé juste après un autre parcours lourd sur le même Grist a échoué
+  trois fois (attente de 60 s de l'avis « règles d'accès… n'ont pas pu être posées », deuxième partie ; l'écran montre l'accueil), sur trois commits dont `main` sans ce changement, puis
+  réussi en 20 s six fois de suite : c'est l'état du serveur, pas le code ; laisser le Grist se calmer (ou le relancer) entre deux séries.
 
 ## État précédent : V0.28.1 (13 novembre 2026)
 
