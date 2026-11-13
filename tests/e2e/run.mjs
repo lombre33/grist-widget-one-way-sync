@@ -2308,6 +2308,36 @@ try {
     await keep('31-source-document-destinataire', widget().locator('.card').first());
     await opensDoc(personLink, dst.doc, 'Lien CIBLE');
     step('Document de l\'autre côté : nom saisi côté SOURCE (retenu, corrigeable), lien dans un nouvel onglet des deux côtés, jamais de HTML');
+
+    // Coller l'adresse de la page (barre d'adresse du navigateur) à la place du nom : le nom y est lu, tel que Grist l'écrit (sans
+    // accents ni ponctuation), et refusé si l'adresse n'est pas celle de ce document ; l'adresse elle-même n'est jamais gardée.
+    const pageAddress = page.url();
+    assert.ok(pageAddress.startsWith(`${TEAM}/${shortId(src.doc)}/Lien-SOURCE`), `l'adresse de la page de la SOURCE (${pageAddress})`);
+    await button('Ajouter un destinataire').click();
+    const pasteField = dialog().getByLabel('Nom de ce document');
+    const pasted = async (text) => { await pasteField.fill(text); return pasteField.inputValue(); };
+    assert.equal(await pasted(pageAddress), 'Lien SOURCE', 'adresse collée : le nom est lu à sa place');
+    await dialog().getByText('Nom lu dans l’adresse de la page').waitFor();
+    await keep('28b-source-nom-lu-dans-adresse', dialog());
+    assert.equal(await pasted(`${TEAM}/${shortId(dst.doc)}/Lien-CIBLE`), '', 'l\'adresse d\'un autre document ne donne pas son nom');
+    await dialog().getByText('Cette adresse n’est pas celle de ce document').waitFor();
+    assert.equal(await pasted(`https://example.org/o/${env.team}/${shortId(src.doc)}/Lien-SOURCE`), '', 'ni celle d\'un autre site');
+    await dialog().getByText('Cette adresse est celle d’un autre site Grist').waitFor();
+    assert.equal(await pasted(`${TEAM}/doc/${shortId(src.doc)}`), '', 'une adresse sans nom (forme /doc/)');
+    await dialog().getByText('Cette adresse ne contient pas le nom du document').waitFor();
+    assert.equal(await pasted(TEAM), '', 'ni une adresse sans document');
+    await dialog().getByText('Adresse non reconnue').waitFor();
+    assert.equal(await pasted('Un nom tapé <b>tel quel</b>'), 'Un nom tapé <b>tel quel</b>', 'un nom tapé reste intact');
+    assert.equal(await dialog().getByText('Adresse non reconnue').isVisible(), false, 'et l\'avis disparaît');
+    assert.equal(await pasted(pageAddress), 'Lien SOURCE');
+    await dialogButton('Créer l’invitation').click();
+    await dialog().getByText('Transmettez ce code').waitFor();
+    const readCode = await dialog().locator('textarea.code').first().inputValue();
+    const readFrom = JSON.parse(Buffer.from(readCode.slice('GRISTSYNC2.'.length), 'base64url')).from;
+    assert.equal(readFrom.docName, 'Lien SOURCE', 'le nom lu dans l\'adresse part dans l\'invitation');
+    assert.ok(!JSON.stringify(readFrom).includes('http'), 'jamais l\'adresse de la page');
+    await dialogButton('Plus tard').click();
+    step('Nom du document : l\'adresse de la page collée donne le nom (sans accents), refusée pour un autre document, un autre site ou sans nom, jamais gardée');
   }
 
   // --- Deux documents ouverts dans deux onglets du même navigateur : l'invitation et la réponse passent d'un

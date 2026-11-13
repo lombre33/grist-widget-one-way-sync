@@ -1,7 +1,7 @@
 // Codes d'invitation et de réponse, adresses : aller-retour, puis codes abîmés ou forgés.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docSlug, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
+import { buildInvitation, buildReply, buildWebhookUrl, cleanLabel, decodeCode, docNameFrom, docSlug, docUrl, loopingTables, maskKey, parseDocBaseUrl, parseFormLink, parseInvitation, parsePageAddress, parseReply, parseWebhookUrl } from '../../js/engine/logic/codes.js';
 import { SECRET, ID, EXPORT, COLUMNS, PUB, invitation, forge } from './fixtures.mjs';
 
 test('Échange : invitation avec adresse de retour, réponse avec les tables de la CIBLE', () => {
@@ -263,4 +263,41 @@ test('docSlug : le nom d\'un document comme Grist l\'écrit dans une adresse', (
   assert.equal(docSlug(null), '');
   assert.equal(docSlug('x'.repeat(200)).length, 80);
   assert.ok(!docSlug('a'.repeat(79) + ' b').endsWith('-'), 'coupé sans tiret final');
+});
+
+test('parsePageAddress : ce que dit l\'adresse d\'une page de document (formes réelles de Grist, relevées dans un Grist 1.7)', () => {
+  const page = (address, name = '') => ({ origin: 'https://g.fr', team: 'dinum', docId: 'fcLELfFeTQ1x', name, ...address });
+  assert.deepEqual(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/Donnees-Ministere-2026-v2'), page({}, 'Donnees Ministere 2026 v2'), 'équipe, identifiant, nom');
+  assert.deepEqual(parsePageAddress('  https://g.fr/o/dinum/fcLELfFeTQ1x/Suivi-des-contacts/p/3?compare=a#frag '), page({}, 'Suivi des contacts'), 'page, requête et ancre ignorées, espaces autour');
+  assert.deepEqual(parsePageAddress('https://g.fr/fcLELfFeTQ1x/Suivi'), page({ team: '' }, 'Suivi'), 'sans équipe');
+  assert.deepEqual(parsePageAddress('https://g.fr/o/dinum/doc/hzarkQz3bxWc'), page({ docId: 'hzarkQz3bxWc' }), 'forme /doc/ : un nom sans lettre latine n\'a pas de nom dans l\'adresse');
+  assert.deepEqual(parsePageAddress('https://g.fr/o/dinum/doc/hzarkQz3bxWc/p/2'), page({ docId: 'hzarkQz3bxWc' }), '/doc/ avec une page');
+  assert.equal(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/p/4').name, '', 'sans nom, la page n\'est pas prise pour un nom');
+  assert.equal(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/p/p/4').name, 'p', 'un document nommé « p »');
+  assert.equal(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/document').name, '', '« document » est le nom neutre de nos liens : aucun nom');
+  assert.equal(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/Ete-Ca-va-OEuvre-and-co').name, 'Ete Ca va OEuvre and co');
+  assert.equal(parsePageAddress('http://localhost:8484/o/synctest/oyvXvwNTnh4Q/Lien').origin, 'http://localhost:8484', 'Grist local d\'essai');
+  assert.equal(parsePageAddress('https://g.fr/o/dinum/fcLELfFeTQ1x/%3Ci%3Ex%3C%2Fi%3E%0A').name, '<i>x</i>', 'décodé puis nettoyé comme tout nom (du texte, montré comme tel)');
+  for (const bad of ['', 'Suivi RH', 'ftp://g.fr/o/dinum/fcLELfFeTQ1x/x', 'javascript:alert(1)', 'https://g.fr/', 'https://g.fr/o/dinum', 'https://g.fr/o/dinum/doc', 'https://g.fr/o/di num/fcLELfFeTQ1x/x', 'https://g.fr/fcLELfFeTQ1x~fork/x', 'https://g.fr/%E0%A4%A/x']) {
+    assert.equal(parsePageAddress(bad), null, `refusé : ${bad}`);
+  }
+});
+
+test('docNameFrom : le champ « Nom de ce document », nom tapé ou adresse de la page collée, jamais une adresse gardée', () => {
+  const here = { origin: 'https://g.fr', docId: 'fcLELfFeTQ1x' };
+  assert.deepEqual(docNameFrom('  Suivi   RH  ', here), { kind: 'typed', name: 'Suivi RH' }, 'nom tapé : nettoyé');
+  assert.deepEqual(docNameFrom('', here), { kind: 'typed', name: '' });
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/fcLELfFeTQ1x/Suivi-RH-2027/p/1', here), { kind: 'address', name: 'Suivi RH 2027' }, 'nom lu dans l\'adresse');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/fcLELfFeTQ1xABCDEFGHIJ/Suivi', here), { kind: 'address', name: 'Suivi' }, 'identifiant complet de 22 caractères : même document');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/doc/fcLELfFeTQ1x', here), { kind: 'noName', name: '' }, 'adresse de ce document sans nom');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/iStdbZSjRjut/Autre', here), { kind: 'otherDoc', name: '' }, 'un autre document : pas son nom');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/fcLELfFeT/Court', here), { kind: 'otherDoc', name: '' }, 'identifiant tronqué de moins de 12 caractères : pas le même');
+  assert.deepEqual(docNameFrom('https://autre.fr/o/dinum/fcLELfFeTQ1x/Suivi', here), { kind: 'otherSite', name: '' }, 'une autre instance');
+  assert.deepEqual(docNameFrom('http://g.fr/o/dinum/fcLELfFeTQ1x/Suivi', here), { kind: 'otherSite', name: '' }, 'http n\'est pas l\'origine de ce document');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum', here), { kind: 'invalid', name: '' });
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/fcLELfFeTQ1x/Suivi', null), { kind: 'otherSite', name: '' }, 'document inconnu : rien n\'est lu');
+  assert.deepEqual(docNameFrom('https://g.fr/o/dinum/abc/Suivi', { origin: 'https://g.fr', docId: 'abc' }), { kind: 'address', name: 'Suivi' }, 'identifiant choisi à la main (moins de 12 caractères) : identique');
+  for (const text of ['https://g.fr/o/dinum/iStdbZSjRjut/X', 'https://g.fr/', 'https://autre.fr/fcLELfFeTQ1x/x', 'http://x']) {
+    assert.equal(docNameFrom(text, here).name.includes('/'), false, `jamais une adresse : ${text}`);
+  }
 });

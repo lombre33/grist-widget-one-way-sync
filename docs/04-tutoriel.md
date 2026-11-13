@@ -139,7 +139,11 @@ Le champ **Nom de ce document** (facultatif) est montré à la CIBLE, avec un li
 qui s'ouvre dans un nouvel onglet (le lien suffit à ceux qui ont accès au document ; les autres
 tombent sur le message d'erreur de Grist). Grist ne permet pas au widget de lire le nom du
 document : il se saisit une fois, tel qu'il s'affiche en haut de la page, le widget le retient pour
-les invitations suivantes et il se corrige à chaque fois. Sans nom, la CIBLE voit seulement un lien
+les invitations suivantes et il se corrige à chaque fois. On peut aussi y **coller l'adresse de la page**
+(barre d'adresse du navigateur) : le nom y est lu à la place, tel que Grist l'écrit dans l'adresse, donc
+sans accents ni ponctuation (« Donnees-Ministere-2026-v2 » pour « Données Ministère 2026 (v2) »), à
+corriger si besoin ; le widget refuse l'adresse d'un autre document ou d'un autre site, et n'en garde jamais
+que le nom. Sans nom, la CIBLE voit seulement un lien
 « Document source ». De son côté, la SOURCE voit le nom du document du destinataire (lu chez Grist,
 donc vérifié) en lien sur sa ligne.
 

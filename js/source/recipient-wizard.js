@@ -19,6 +19,7 @@ import { rememberDocName, sourceDocName } from '../engine/source/synchro.js';
 import {
   approveReply, checkReply, controlResend, enablePublicLink, invitationCode, invitationState, linkReturn, loadPlan, renewInvitation, sendExisting, startInvitation, startReturn,
 } from '../engine/source/invite.js';
+import { docNameField } from './doc-name.js';
 import { estimateLines, progressTo } from './flow.js';
 import {
   backButton, cancelButton, closeButtons, codeField, confirmDialog, controlLine, copyField, docLink, el, laterButton, message, openWizard, run,
@@ -65,8 +66,7 @@ async function showOptions(ctx) {
   const { exp } = ctx;
   // Le widget ne peut pas lire le nom de son document : la personne le donne une fois (gardé dans la note), il part
   // dans les invitations, que la CIBLE montre à côté du lien vers ce document.
-  const nameInput = el('input', { type: 'text', class: 'input', id: 'gristsync-doc-name', maxlength: 200, autocomplete: 'off', value: await sourceDocName() });
-  const namePart = el('div', { class: 'form' }, el('label', { for: 'gristsync-doc-name' }, t('send.docName')), nameInput, el('p', { class: 'muted small' }, t('send.docName.help')));
+  const docName = await docNameField(await sourceDocName());
   const more = (exp.echange && !exp.retour) || exp.invitations.some(inv => inv.journal);
   const strongBox = el('input', { type: 'checkbox', checked: Boolean(exp.renforce) });
   const strongPart = el('div', { class: 'form' }, el('label', { class: 'check' }, strongBox, t('send.renforce')), el('p', { class: 'muted small' }, t('send.renforce.help')));
@@ -91,9 +91,9 @@ async function showOptions(ctx) {
       el('p', { class: 'muted small' }, t('send.mode.others')),
       radio('echange', more ? t('send.mode.echange.more') : exchangeOk ? t('send.mode.echange') : t('send.mode.echange.off'), more, !exchangeOk),
       radio('public', exp.public ? t('send.mode.publicDone') : exp.renforce ? t('send.mode.publicStrong') : t('send.mode.public'), false, exp.public || more || exp.renforce)),
-    strongPart, namePart, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
+    strongPart, docName.node, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
   ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
-    await rememberDocName(nameInput.value);
+    await rememberDocName(docName.value());
     return invite(ctx, mode(), mode() !== 'public' && strongBox.checked);
   }) }]);
 }

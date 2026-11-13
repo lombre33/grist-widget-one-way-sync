@@ -123,6 +123,7 @@ SOURCE (`source/export.js`, `source/invite.js`, plus `source/actions.js` pour r�
 | `startInvitation(exp, { renforce? })` | l'export | `{ exp, entry, secret }` : `secret` n'est gardé nulle part |
 | `invitationCode(exp, entry, secret, retour?)` | | `{ code, expire, backCode }` (le code à transmettre ; `from` porte l'équipe du document et le nom retenu par `rememberDocName`) |
 | `rememberDocName(nom)`, `sourceDocName()` (`source/synchro.js`) | le nom que la personne donne à ce document (un widget ne peut pas lire le sien) ; vide : effacé | rien, puis le nom retenu dans la note SOURCE (`nomDoc`) |
+| `docNameFrom(saisie, { origin, docId })`, `parsePageAddress(adresse)` (`logic/codes.js`, 4.12.0) | ce que la personne a tapé ou collé dans le champ du nom : un nom, ou l'adresse de la page de CE document (le nom y est lu, sans accent ni ponctuation) | `{ kind, name }` : `typed`, `address`, ou un nom vide avec `noName`, `otherDoc`, `otherSite`, `invalid` (jamais l'adresse) |
 | `renewInvitation(inv)` | l'invitation en attente | `{ entry, secret }`, ou `null` pour un Échange |
 | `enablePublicLink(exp)` | | le code du lien public |
 | `startReturn(exp, …)` puis `linkReturn(inv, lien)` | Échange : le lien du formulaire de retour | `{ entry, secret, retour }` |

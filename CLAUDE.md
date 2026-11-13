@@ -375,7 +375,28 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.28.0 (13 novembre 2026)
+## État : V0.28.1 (13 novembre 2026)
+
+V0.28.1 (Antoine, 13 novembre : « pour le nom du document, tu n'as aucun moyen de le récupérer ? il apparait dans l'url de la page », puis carte de décision « Oui, champ facultatif
+d'adresse » ; « tu peux push pendant mes tests tkt c'est une version de dev c'est fait pour ça » : pousser sur `main` pendant ses vérifications de la Bêta est permis). Moteur **4.12.0** (mineure,
+dite dans `GFS-ETAT.md`).
+- **Revérifié le 13 novembre dans un Grist 1.7 réel, widget en accès complet : aucun moyen de lire le nom ni l'adresse de la page.** `document.referrer` = `<origine>/` seule
+  (`ancestorOrigins` aussi), l'adresse de l'iframe ne porte que accès, langue, fuseau, devise ; `getDocName()` rend l'identifiant ; avec le jeton du widget, la fiche du document,
+  `/download*` et `usersForViewAs` sont refusés (403) ; `tables`, `states`, `snapshots`, `compare`, `sql` et les tables internes (`_grist_DocInfo` dont `docId` est vide, `_grist_Views`,
+  `_grist_Pages`, `_grist_Shares`) répondent (200) mais aucune ne contient le nom. Restent la saisie et la clé d'un formulaire publié (écartée côté SOURCE : une clé d'écriture de plus).
+- **Coller l'adresse de la page dans « Nom de ce document »** (`docNameField`, `js/source/doc-name.js` ; logique pure `docNameFrom` et `parsePageAddress`, `logic/codes.js`) : une valeur qui
+  commence par `http(s)://` est remplacée à l'instant par le nom lu dans le chemin (`/<identifiant>/<nom>`, avec ou sans `/p/<page>`, requête et ancre ignorées), ou par rien avec
+  l'avis qui dit pourquoi : `noName` (forme `/doc/<id>`, ou « document » : Grist l'écrit pour un nom sans lettre latine, **vérifié** : « 日本語 文書 » donne `/doc/<id>`), `otherDoc`
+  (l'identifiant n'est pas celui de ce document, comparé par préfixe de 12 caractères au moins), `otherSite` (autre origine, http compris), `invalid`. **Le nom lu est celui que Grist écrit
+  dans l'adresse** (vérifié sur 7 noms) : majuscules gardées, accents ôtés, `&` devient `and`, `_` et `.` retirés (« Budget_2026-final.v3 » donne `Budget2026-finalv3`), mots séparés
+  par des tirets : « Donnees Ministere 2026 v2 » pour « Données Ministère 2026 (v2) ». Il vaut donc un nom approximatif, que la personne corrige. L'adresse n'est jamais gardée, envoyée
+  ni requêtée : seul le nom (`cleanLabel`) sort ; `value()` ne rend jamais une adresse.
+- **Ce que l'adresse ne change pas** : l'équipe et l'identifiant de la SOURCE sont déjà connus du widget (`getAccessToken().baseUrl`), le lien de la CIBLE vers la SOURCE (0.15.2) n'en est
+  pas amélioré : le gain est le nom, sans le retaper. Un nom avec accents se corrige à la main. `docSlug` (nos liens) garde sa règle (`_` devient `-`) : Grist réécrit le nom de toute façon.
+- Testé : unit (`parsePageAddress` : formes de Grist, page, `/doc/`, nom « p », nom neutre, adresses refusées ; `docNameFrom` : tous les cas), e2e `ONLY_DOCLINK=1` (adresse de la page
+  réelle copiée de `page.url()`, avis de chaque refus, nom tapé intact, invitation créée avec le nom lu et sans adresse ; capture `28b` avec `SHOTS=<dossier>`).
+
+## État précédent : V0.28.0 (13 novembre 2026)
 
 V0.28.0 (Antoine, 13 novembre, devant le bloc « Références entre tables » de la 0.27 : « peut-on proposer de prendre soit uniquement la colonne référencée, ou alors toute la
 table, ou alors un choix des colonnes à prendre ? »). **Moteur inchangé (4.11.0)** : tout est à l'écran, la `selection` de `saveChosenExport` portait déjà des colonnes quelconques par

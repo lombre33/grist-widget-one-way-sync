@@ -232,7 +232,12 @@ IA, ni dans un ticket, ni dans un salon de discussion.
   dits vérifiés. Côté SOURCE, le nom du document du destinataire est celui que Grist donne pour la clé de
   sa réponse, et le lien se refait de l'identifiant et de l'équipe de la fiche : sans lien quand le contrôle
   horaire a vu un autre document ou une adresse qui n'est plus celle d'un formulaire. Les noms lus chez
-  Grist sont nettoyés de même (`readShare`). Un code d'avant (sans `team`) n'a pas de lien.
+  Grist sont nettoyés de même (`readShare`). Un code d'avant (sans `team`) n'a pas de lien. **Adresse de page
+  collée (0.28.1)** : la personne peut coller l'adresse de la page à la place du nom (`docNameFrom`,
+  `parsePageAddress`, `logic/codes.js`) ; le nom est lu dans le chemin (`/<identifiant>/<nom>`), seulement si
+  l'instance (origine exacte) et l'identifiant (préfixe d'au moins 12 caractères) sont ceux de ce document,
+  sinon rien n'est lu et l'avis le dit. Seul le nom en sort (nettoyé comme tout nom) : l'adresse n'est ni
+  gardée ni envoyée, aucune requête n'est faite avec elle. Le nom lu reste un dire, au même titre qu'un nom tapé.
 - Contrôles à la lecture (`js/engine/logic/codes.js`) : préfixe et version, identifiants, secret,
   colonnes (noms Grist, types connus, 400 au plus), textes coupés à 200 caractères, adresses de la
   forme exacte `/api/s/<clé>/tables/<table>/records?flat=1` sur la **même instance**, sans

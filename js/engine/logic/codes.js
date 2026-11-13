@@ -270,6 +270,56 @@ export function docUrl(origin, team, docId, name = '') {
   return docId.length >= 12 ? `${where}/${docId}/${docSlug(name) || 'document'}` : `${where}/doc/${docId}`;
 }
 
+// Ce que dit l'adresse d'une page de document, collée de la barre d'adresse du navigateur : `<instance>[/o/<équipe>]/<identifiant>[/<nom>[/p/<page>]]`
+// ou `<instance>[/o/<équipe>]/doc/<identifiant>` (voir docUrl). Rend `{ origin, team, docId, name }`, ou null si ce n'en est pas une (ni
+// http ni https, pas d'identifiant de la forme voulue). Le nom est celui que Grist écrit dans l'adresse : sans accent ni ponctuation, les mots
+// séparés par des tirets (« Donnees-Ministere-2026-v2 » pour « Données Ministère 2026 (v2) »), absent pour un nom sans lettre latine
+// (forme `/doc/`) ; « document » est le nom neutre de nos propres liens (docUrl), donc aucun nom.
+export function parsePageAddress(text) {
+  let url;
+  try {
+    url = new URL(String(text ?? '').trim());
+  } catch (e) {
+    return null;
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) return null;
+  const parts = url.pathname.split('/').filter(Boolean).map((part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch (e) {
+      return '';
+    }
+  });
+  const team = parts[0] === 'o' ? parts[1] || '' : '';
+  const rest = parts.slice(parts[0] === 'o' ? 2 : 0);
+  const plain = rest[0] === 'doc';
+  const docId = (plain ? rest[1] : rest[0]) || '';
+  const after = rest.slice(plain ? 2 : 1);
+  const slug = plain || (after[0] === 'p' && /^\d+$/.test(after[1] || '')) ? '' : after[0] || '';
+  if (!TEAM_ID.test(docId) || (team && !TEAM_ID.test(team))) return null;
+  const name = slug === 'document' ? '' : cleanLabel(slug.replace(/-+/g, ' '));
+  return { origin: url.origin, team, docId, name };
+}
+
+// Deux identifiants du même document : l'adresse d'une page porte l'identifiant court (au moins 12 caractères, règle de Grist) ou
+// complet, l'API celui de son adresse REST ; un identifiant plus court que 12 caractères (choisi à la main) doit être identique.
+const sameId = (a, b) => a === b || (a.length >= 12 && b.length >= 12 && (a.startsWith(b) || b.startsWith(a)));
+
+// Le champ « Nom de ce document » de la SOURCE (un widget ne peut pas lire le nom de son document, voir rememberDocName) : un nom tapé tel
+// quel, ou l'adresse de la page collée, dont on lit le nom (`parsePageAddress`). `here` : `{ origin, docId }` de CE document. Rend
+// `{ kind, name }` : `typed` (le nom tapé, nettoyé), `address` (nom lu dans l'adresse), ou, sans nom (`name` vide, jamais l'adresse
+// elle-même), `noName` (l'adresse ne contient pas de nom), `otherDoc` (l'identifiant n'est pas celui de ce document), `otherSite` (autre
+// instance Grist), `invalid` (pas une adresse de page de document). Une adresse n'est jamais gardée ni envoyée : seul le nom en sort.
+export function docNameFrom(input, here) {
+  const text = String(input ?? '').trim();
+  if (!/^https?:\/\//i.test(text)) return { kind: 'typed', name: cleanLabel(text) };
+  const page = parsePageAddress(text);
+  if (!page) return { kind: 'invalid', name: '' };
+  if (page.origin !== (here || {}).origin) return { kind: 'otherSite', name: '' };
+  if (!sameId(String(here.docId || ''), page.docId)) return { kind: 'otherDoc', name: '' };
+  return page.name ? { kind: 'address', name: page.name } : { kind: 'noName', name: '' };
+}
+
 // `baseUrl` renvoyé par getAccessToken : https://<instance>[/o/<équipe>]/api/docs/<docId>
 export function parseDocBaseUrl(baseUrl) {
   const url = new URL(baseUrl);

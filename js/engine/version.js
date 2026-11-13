@@ -200,7 +200,12 @@
 //         (nouveau, sur le clic d'un propriétaire) la convertit et reprend le lien de la SOURCE dans ses cellules. Ni port, ni nom de table, ni
 //         `CODE_FORMAT`, ni texte des formules de `Synchro` ne changent. Une CIBLE d'avant la 4.11 qui reçoit une colonne `list` en ferait une
 //         Référence simple : à ne pas mélanger après la publication (relever `CODE_FORMAT` alors).
-export const ENGINE_VERSION = '4.11.0';
+// 4.12.0 (13 novembre 2026) : le nom du document de la SOURCE peut se lire dans l'adresse de la page collée par la personne (un widget ne
+//         peut pas lire le sien, voir 2.2.0). `parsePageAddress` et `docNameFrom` (`logic/codes.js`, purs) lisent l'équipe, l'identifiant et le
+//         nom que Grist écrit dans l'adresse (« Donnees-Ministere-2026-v2 » : sans accent ni ponctuation) et refusent une adresse d'une autre
+//         instance ou d'un autre document (`otherSite`, `otherDoc`) : seul le nom en sort, jamais l'adresse. Ni port, ni nom de table, ni
+//         `CODE_FORMAT` ne changent ; l'hôte qui a un champ « nom du document » peut s'en servir avant `rememberDocName`.
+export const ENGINE_VERSION = '4.12.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir
