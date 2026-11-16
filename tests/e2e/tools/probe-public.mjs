@@ -8,18 +8,11 @@
 // doit ne plus rien trouver, sauf le courriel du destinataire, que le widget écrit dans le mémo des webhooks (voir KNOWN).
 // Usage : tests/e2e/start-grist.sh, puis `node tests/e2e/tools/probe-public.mjs` (STRICT=1 : code de sortie 1 s'il y a une fuite).
 import { log } from '../harness.mjs';
-import { startProbe } from './probe.mjs';
+import { leavePendingInvitation, startProbe } from './probe.mjs';
 
 const { h, p } = await startProbe({ port: Number(process.env.PORT || 8753), name: 'Sonde publique', rows: 5 });
 const { env, TEAM } = h;
-// Une invitation en attente garde sa clé privée dans la note de la SOURCE jusqu'à l'approbation.
-await p.sv.openTab(p.src.url, 'Envoyer');
-await p.sv.button('Ajouter un destinataire').click();
-await p.sv.dialogButton('Créer l’invitation').click();
-await p.sv.dialog().getByText('Transmettez ce code').waitFor({ timeout: 60000 });
-await p.sv.dialogButton('Plus tard').click();
-await p.dv.openTab(p.dst.url, 'Recevoir'); // un propriétaire passe : les règles sont en place
-await new Promise(r => setTimeout(r, 12000));
+await leavePendingInvitation(p);
 
 for (const doc of [p.src.doc, p.dst.doc]) await h.shareDoc(doc, 'everyone@getgrist.com', 'viewers');
 const anon = async path => {

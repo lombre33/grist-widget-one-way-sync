@@ -5,7 +5,7 @@
 // Usage : tests/e2e/start-grist.sh, puis `node tests/e2e/tools/probe-gaps.mjs`.
 import { log } from '../harness.mjs';
 import { columnsOf, makeRow } from '../data.mjs';
-import { startProbe } from './probe.mjs';
+import { exportAndInvite, startProbe } from './probe.mjs';
 
 const { h, p } = await startProbe({ port: Number(process.env.PORT || 8755), name: 'Sonde cas limites', rows: 5 });
 const { env, TEAM } = h;
@@ -162,13 +162,7 @@ if (want(9)) {
   await h.fillTable(src.doc, 'Contacts', columnsOf(4), 3, makeRow);
   const dst = await h.newDocWithWidget('Fenetre cible CIBLE', []);
   await h.shareDoc(dst.doc, 'everyone@getgrist.com', 'viewers');
-  const sv = await h.newView('s9');
-  await h.login(sv);
-  await sv.open(src.url);
-  await h.createExport(sv, 'Contacts', 'Annuaire');
-  const code = await h.invite(sv);
-  const dv = await h.newView('d9');
-  await h.login(dv);
+  const { sv, dv, code } = await exportAndInvite(h, src, ['s9', 'd9']);
   const t0 = Date.now();
   let last = '';
   let running = true;

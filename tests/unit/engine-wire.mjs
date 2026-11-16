@@ -4,7 +4,7 @@
 import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
-import { syncRows } from '../../js/engine/source/synchro.js';
+import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
 import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
@@ -73,3 +73,8 @@ export const journalNote = async () => receivedJournals(await readSchema())[0].n
 export const resultOf = (made, table = 'Fiches') => state.results.get(tableKey(made.journal, table));
 export const columnOf = (doc, table, colId) => doc.fetchRows('_grist_Tables_column').find(c => c.colId === colId && doc.tables.get(table).columns.some(x => x.id === c.id));
 export const lotColumns = lot => JSON.parse(lot[SCHEMA_COL]);
+
+// La SOURCE relit les options de ses exports (`refreshOptions`) ; `lotsMarked` : les lignes de lot de `Synchro` (aucune ne doit repartir
+// quand seule la description des colonnes change).
+export const refreshed = async () => refreshOptions(await readSchema(), await syncRows());
+export const lotsMarked = source => source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;

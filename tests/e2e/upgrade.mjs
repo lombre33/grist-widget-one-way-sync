@@ -17,7 +17,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
-import { ROOT, docTools, pickTab, serveWidget } from './shared.mjs';
+import { ROOT, docTools, gestures, gristApi, pickTab, serveWidget } from './shared.mjs';
 
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e', process.env.ENV_FILE || '.env.json'), 'utf8'));
 const ALPHA_COMMIT = process.env.ALPHA_COMMIT || '7646875'; // V0.5.9, l'Alpha publiée (tag v0.5.9 de grist-factory)
@@ -37,16 +37,7 @@ let newsOn = false; // la fenêtre des nouveautés de la Bêta : montrée une fo
 await serveWidget({ env, port: ALPHA_PORT, root: alphaDir });
 await serveWidget({ env, port: BETA_PORT, news: () => newsOn });
 
-async function api(method, path, body) {
-  const res = await fetch(`${TEAM}/api${path}`, {
-    method, headers: { Authorization: `Bearer ${env.apiKey}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
-const applyActions = (doc, actions) => api('POST', `/docs/${doc}/apply`, actions);
+const { api, applyActions } = gristApi(env);
 const records = async (doc, table) => (await api('GET', `/docs/${doc}/tables/${table}/records`)).records.map(r => ({ id: r.id, ...r.fields }));
 const sql = async (doc, query) => (await api('POST', `/docs/${doc}/sql`, { sql: query })).records.map(r => r.fields);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -76,14 +67,7 @@ page.on('console', (m) => {
 page.on('pageerror', e => betaErrors.push(`pageerror : ${e.message}`));
 await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
 
-const widget = () => page.frameLocator('iframe').first();
-const button = name => widget().getByRole('button', { name, exact: true });
-const dialog = () => widget().getByRole('dialog');
-const dialogButton = name => dialog().getByRole('button', { name, exact: true });
-async function openWidget(url) {
-  await page.goto(url);
-  await widget().locator('.topbar').waitFor({ timeout: 30000 });
-}
+const { widget, button, dialog, dialogButton, openWidget, testLink, pasteReply, acceptInvitation } = gestures({ page, env });
 let shotN = 0;
 const shot = async name => {
   if (!process.env.SHOTS) return;
@@ -94,12 +78,6 @@ const shot = async name => {
 // ----------------------------------------------------------------------------------------------------------------
 // Ce qu'un humain fait avec l'Alpha (les textes sont ceux de la V0.5.9).
 
-async function testLink(label, link, ok) {
-  await dialog().getByLabel(label).fill(link);
-  await dialogButton('Tester le lien').click();
-  await dialog().getByText(ok).waitFor();
-  return dialog().locator('textarea.code').first().inputValue();
-}
 async function newExport(table, name) {
   await button('Nouvel export').click();
   await dialog().getByRole('checkbox', { name: table }).check();
@@ -145,10 +123,7 @@ async function accept(doc, url, code, tables) {
 // SOURCE : coller la réponse, approuver, envoyer l'existant.
 async function approve(src, reply) {
   await openWidget(src.url);
-  await button('Coller la réponse').click();
-  await dialog().locator('textarea.code').first().fill(reply);
-  await dialogButton('Vérifier').click();
-  await dialog().getByText(env.email).waitFor();
+  await pasteReply(reply);
   await dialogButton('Approuver et brancher').click();
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Envoyer').click();
@@ -314,11 +289,7 @@ async function buildAlphaPublic() {
   await widget().locator('.pill', { hasText: /^Public$/ }).waitFor();
   await openWidget(t.url);
   await receiveScreen();
-  await button('Accepter une invitation').click();
-  await dialog().locator('textarea.code').first().fill(code);
-  await dialogButton('Continuer').click();
-  await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill('Annuaire');
-  await dialogButton('Continuer').click();
+  await acceptInvitation(code);
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Fermer').click();
   await waitFor(async () => (await records(t.doc, 'Annuaire')).length === 4, 'lien public : lignes lues');

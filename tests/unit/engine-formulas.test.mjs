@@ -12,12 +12,12 @@ import { sentElements } from '../../js/engine/logic/descriptions.js';
 import { exportSchema } from '../../js/engine/logic/codes.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
-import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
+import { syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { consolidateAll, restyle, state, tableKey } from '../../js/engine/target/loop.js';
 import { formulaColumns } from '../../js/engine/target/formulas.js';
 import { fakePair } from './engine-fake.mjs';
-import { engineAs, lotColumns, wireReception } from './engine-wire.mjs';
+import { engineAs, lotColumns, lotsMarked, refreshed, wireReception } from './engine-wire.mjs';
 
 const { world, source, target } = fakePair('fx', { contacts: false });
 const as = engineAs(world);
@@ -118,12 +118,12 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
   await t.test('SOURCE : une formule changée met la description des colonnes à jour, sans renvoyer de ligne', async () => {
     as(source);
     source.apply([['ModifyColumn', 'Budget', 'TVA', { isFormula: true, formula: '$Montant * 0.1' }]]);
-    const marked = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
+    const marked = lotsMarked(source);
+    assert.equal(await refreshed(), true);
     story.lot = await lotOf(story.exp.id);
     assert.equal(lotColumns(story.lot)[2].fx, '$Montant * 0.1');
-    assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, marked);
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
+    assert.equal(lotsMarked(source), marked);
+    assert.equal(await refreshed(), false, 'rien de plus au passage suivant');
   });
 
   await t.test('CIBLE : une autre formule dans la SOURCE est dite « autre » et ne remplace la nôtre que sur « Reprendre »', async () => {

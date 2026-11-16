@@ -28,3 +28,13 @@ export function schemaFrom(tables, columns) {
     },
   };
 }
+
+// Ce que les plans d'une destination (`entry.dest`) lisent d'abord : ses colonnes d'ici par nom (`here`), la correspondance « colonne
+// envoyée → colonne d'ici » (`map`) et les colonnes que le widget y a créées (`own`, voir la note de l'entrée).
+export function destContext(schema, entry) {
+  return {
+    here: new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c])),
+    map: entry.map || {},
+    own: new Set(Array.isArray(entry.own) ? entry.own : []),
+  };
+}

@@ -12,12 +12,12 @@ import { elementCounts } from '../../js/engine/logic/exports.js';
 import { schemaFrom } from '../../js/engine/logic/schema.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
-import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
+import { syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { fakePair } from './engine-fake.mjs';
-import { engineAs, lotColumns, wireReception } from './engine-wire.mjs';
+import { engineAs, lotColumns, lotsMarked, refreshed, wireReception } from './engine-wire.mjs';
 
 const { world, source, target } = fakePair('ly', { contacts: false });
 const as = engineAs(world);
@@ -104,12 +104,12 @@ test('mise en page : SOURCE vers CIBLE', async (t) => {
   await t.test('SOURCE : un nouvel ordre met la description des colonnes à jour, sans renvoyer de ligne', async () => {
     as(source);
     moveField(source, 'Budget', 'Reel', 1); // Reel passe en tête
-    const sent = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
+    const sent = lotsMarked(source);
+    assert.equal(await refreshed(), true);
     story.lot = await lotOf(story.exp.id);
     assert.deepEqual(Object.fromEntries(lotColumns(story.lot).map(c => [c.id, c.pos])), { Libelle: 2, Montant: 3, Reel: 0, Note: -1, Code: 1 });
-    assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, sent);
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
+    assert.equal(lotsMarked(source), sent);
+    assert.equal(await refreshed(), false, 'rien de plus au passage suivant');
   });
 
   await t.test('CIBLE : « Reprendre depuis la SOURCE » remet l\'ordre et cache la colonne cachée', async () => {
@@ -137,7 +137,7 @@ test('mise en page : SOURCE vers CIBLE', async (t) => {
     as(source);
     const section = pageSection(source, 'Budget');
     source.apply([['BulkRemoveRecord', '_grist_Views_section_field', source.fetchRows('_grist_Views_section_field').filter(f => f.parentId === section.id).map(f => f.id)], ['RemoveRecord', '_grist_Views_section', section.id]]);
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
+    assert.equal(await refreshed(), true);
     assert.ok(!lotColumns(await lotOf(story.exp.id)).some(c => 'pos' in c));
   });
 });

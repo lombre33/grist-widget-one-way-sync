@@ -5,6 +5,7 @@ import { JOURNAL_PREFIX, KEY_COL, LIST_COL, SIG_KEY, columnNote, isUserTable, no
 import { destColumns } from './journal.js';
 import { columnOptions, fillOptions, isChoice, ownsColumn, receivedChoices, replaceOptions, ruleStyle, ruleStyles, sentRules, withRuleStyles } from './options.js';
 import { parseRule, printRule } from './rules.js';
+import { destContext } from './schema.js';
 
 // Note d'un journal : JSON dans la description de sa colonne Synchro_Ids (description de référence).
 // - invitation : id, export, name, secret (pour le code de la réponse), from { email, docId,
@@ -69,7 +70,7 @@ export function missingColumns(schema, dest, columns, map = {}) {
 // Listes de choix et formats reçus, ajoutés à ce qui manque aux colonnes de la destination que la
 // CIBLE a créées (voir ownsColumn et fillOptions). `columns` : colonnes envoyées, avec `opts`.
 export function optionActions(schema, entry, columns) {
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  const { here } = destContext(schema, entry);
   return destColumns(columns).filter(c => c.opts).flatMap((c) => {
     const column = here.get((entry.map || {})[c.id] || c.id);
     if (!column || !ownsColumn(entry.own, c.id, column)) return [];
@@ -81,7 +82,7 @@ export function optionActions(schema, entry, columns) {
 // « Reprendre la mise en forme » : le style de chaque colonne reçue prend celui de la SOURCE (voir
 // replaceOptions), colonnes créées ici ou non. `columns` : colonnes envoyées, avec `opts`.
 export function restyleOptionActions(schema, entry, columns) {
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  const { here } = destContext(schema, entry);
   return destColumns(columns).flatMap((c) => {
     const column = here.get((entry.map || {})[c.id] || c.id);
     const text = column ? replaceOptions(column.type, column.widgetOptions, c.opts || {}) : null;
@@ -107,10 +108,10 @@ export function planRules(schema, entry, columns, { replace = false } = {}) {
   };
   const todo = [];
   const settled = [];
-  for (const c of destColumns(columns)) {
-    const planned = planColumnRules(c, context);
+  for (const sent of destColumns(columns)) {
+    const planned = planColumnRules(sent, context);
     if (!planned) continue;
-    if (planned.settled) settled.push(c.id);
+    if (planned.settled) settled.push(sent.id);
     else todo.push(planned.todo);
   }
   return { todo, settled };
@@ -157,7 +158,7 @@ export const madeHelpers = (owners, retValues) => owners.map((owner, k) => (owne
 // ou colonne sans liste) : la liste se complète des valeurs reçues (voir receivedChoices).
 // `rows` : fonction qui rend les dernières versions reçues, lues seulement s'il y a une colonne.
 export function valueChoiceActions(schema, entry, columns, rows) {
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  const { here } = destContext(schema, entry);
   const wanted = destColumns(columns).filter(c => isChoice(c.type) && !(c.opts && c.opts.choices)).map(c => ({ c, column: here.get((entry.map || {})[c.id] || c.id) }))
     .filter(({ c, column }) => column && isChoice(column.type) && ownsColumn(entry.own, c.id, column));
   const received = wanted.length ? rows() : [];

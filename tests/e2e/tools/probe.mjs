@@ -9,3 +9,28 @@ export async function startProbe({ port, name, rows = 30 }) {
   await h.waitFor(async () => (await h.count(p.dst.doc, p.dest)) === rows, 'départ', 90000, 2000);
   return { h, p };
 }
+
+// Une invitation en attente garde sa clé privée dans la note de la SOURCE jusqu'à l'approbation : la sonde la laisse là, puis
+// un propriétaire passe sur la CIBLE (les règles d'accès y sont alors en place).
+export async function leavePendingInvitation(p) {
+  await p.sv.openTab(p.src.url, 'Envoyer');
+  await p.sv.button('Ajouter un destinataire').click();
+  await p.sv.dialogButton('Créer l’invitation').click();
+  await p.sv.dialog().getByText('Transmettez ce code').waitFor({ timeout: 60000 });
+  await p.sv.dialogButton('Plus tard').click();
+  await p.dv.openTab(p.dst.url, 'Recevoir');
+  await new Promise(resolve => setTimeout(resolve, 12000));
+}
+
+// L'export « Annuaire » (Contacts) de la SOURCE `src`, son invitation (`code`), puis la vue de la CIBLE, connectée : `{ sv, dv, code }`.
+// `tags` nomme les deux vues.
+export async function exportAndInvite(h, src, tags = ['source', 'cible']) {
+  const sv = await h.newView(tags[0]);
+  await h.login(sv);
+  await sv.open(src.url);
+  await h.createExport(sv, 'Contacts', 'Annuaire');
+  const code = await h.invite(sv);
+  const dv = await h.newView(tags[1]);
+  await h.login(dv);
+  return { sv, dv, code };
+}

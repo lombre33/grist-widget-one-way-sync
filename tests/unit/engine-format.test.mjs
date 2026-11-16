@@ -8,14 +8,14 @@ import assert from 'node:assert/strict';
 import { EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
-import { syncRows, refreshOptions } from '../../js/engine/source/synchro.js';
+import { syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { alignDocFormat, readDocFormat } from '../../js/engine/target/style.js';
 import { currencyOf, formatGap } from '../../js/engine/logic/docformat.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { fakePair } from './engine-fake.mjs';
-import { columnOf, engineAs, wireReception } from './engine-wire.mjs';
+import { columnOf, engineAs, lotsMarked, refreshed, wireReception } from './engine-wire.mjs';
 
 const { world, source, target } = fakePair('fm', { contacts: false, source: { locale: 'fr-FR' } });
 const as = engineAs(world);
@@ -138,15 +138,15 @@ test('mise en forme : SOURCE fr-FR vers CIBLE en-US', async (t) => {
     source.apply([['UpdateRecord', '_grist_DocInfo', 1, { documentSettings: JSON.stringify({ locale: 'de-DE', engine: 'python3' }) }]]);
     const rule = columnOf(source, 'Budget', 'Montant').rules[1];
     source.apply([['ModifyColumn', 'Budget', source.fetchRows('_grist_Tables_column').find(c => c.id === rule).colId, { formula: '$Montant < 100' }]]);
-    const marked = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
+    const marked = lotsMarked(source);
+    assert.equal(await refreshed(), true);
     const lot = (await syncRows()).find(r => r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Budget');
     const columns = JSON.parse(lot[SCHEMA_COL]);
     assert.deepEqual(columns[0].doc, { locale: 'de-DE' });
     assert.equal(columns[1].opts.currency, 'EUR', 'de-DE : l\'euro aussi');
     assert.equal(columns[1].opts.rules[0].when, '$Montant < 100');
-    assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, marked);
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
+    assert.equal(lotsMarked(source), marked);
+    assert.equal(await refreshed(), false, 'rien de plus au passage suivant');
   });
 
   await t.test('SOURCE : un export qui n\'envoie pas sa mise en forme garde la description d\'avant', async () => {

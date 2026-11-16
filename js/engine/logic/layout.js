@@ -14,6 +14,7 @@
 // Chez le destinataire, la mise en page ne touche que les colonnes que le widget a créées (`own`) : une colonne qui existait
 // déjà garde sa place. Les colonnes créées sont décidées une fois (`laid` de l'entrée de la note), puis à la demande
 // (« Reprendre depuis la SOURCE »).
+import { destContext } from './schema.js';
 
 export const POS_MAX = 100000;
 
@@ -55,9 +56,7 @@ export const layoutSent = columns => (Array.isArray(columns) ? columns : []).som
 export function planLayout(schema, entry, columns, { sections, fields, replace = false } = {}) {
   const section = modelSection(schema.table(entry.dest), sections);
   if (!section || !Array.isArray(fields)) return { actions: [], laid: [] };
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
-  const map = entry.map || {};
-  const own = new Set(Array.isArray(entry.own) ? entry.own : []);
+  const { here, map, own } = destContext(schema, entry);
   const done = new Set(entry.laid || []);
   const field = new Map(fields.filter(f => f.parentId === section.id).map(f => [f.colRef, f]));
   const asked = columns.filter(c => isPos(c.pos) && own.has(c.id) && here.has(map[c.id] || c.id) && (replace || !done.has(c.id)))

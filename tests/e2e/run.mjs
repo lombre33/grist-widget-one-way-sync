@@ -16,7 +16,7 @@ import { partRow } from '../../js/engine/logic/files.js';
 import { decodeCode } from '../../js/engine/logic/codes.js';
 import { linkKeys, newKeyPair, readKeys, signText } from '../../js/engine/logic/trust.js';
 import { PUBLIC_KEY, bucketOf } from '../../js/engine/logic/common.js';
-import { ROOT, docTools, pickTab, serveWidget } from './shared.mjs';
+import { ROOT, docTools, gestures, gristApi, pickTab, serveWidget } from './shared.mjs';
 
 // ENV_FILE=.env-dev.json WIDGET_PORT=8685 : un second Grist (voir start-grist.sh) et un autre port du widget, pour deux parcours à la fois.
 const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e', process.env.ENV_FILE || '.env.json'), 'utf8'));
@@ -38,16 +38,7 @@ const server = await serveWidget({
 });
 
 // --- API REST de Grist (préparation et vérifications seulement)
-async function api(method, path, body) {
-  const res = await fetch(`${TEAM}/api${path}`, {
-    method, headers: { Authorization: `Bearer ${env.apiKey}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text}`);
-  return text ? JSON.parse(text) : null;
-}
-const applyActions = (doc, actions) => api('POST', `/docs/${doc}/apply`, actions);
+const { api, applyActions } = gristApi(env);
 
 // Règle d'accès qui cache une colonne aux lecteurs ; rend de quoi la retirer.
 async function hideColumn(doc, tableId, colIds) {
@@ -303,12 +294,7 @@ const widgetCode = `http://localhost:${WIDGET_PORT}`;
 page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) errors.push(`${e.message} (pageerror) [après : ${lastStep.slice(0, 70)}]`); });
 await page.goto(`${env.grist}/test/login?username=${env.email}&name=Test&next=${env.grist}/`);
 
-const widget = () => page.frameLocator('iframe').first();
-const button = name => widget().getByRole('button', { name, exact: true });
-async function openWidget(url) {
-  await page.goto(url);
-  await widget().locator('.topbar').waitFor({ timeout: 30000 });
-}
+const { widget, button, dialog, dialogButton, openWidget, testLink, pasteReply, acceptInvitation } = gestures({ page, env });
 // Ouvre la page du widget, puis son onglet `name` (voir pickTab : un clic donné trop tôt serait perdu).
 async function openWidgetTab(url, name) {
   await openWidget(url);
@@ -316,8 +302,6 @@ async function openWidgetTab(url, name) {
 }
 
 try {
-  const dialog = () => widget().getByRole('dialog');
-  const dialogButton = name => dialog().getByRole('button', { name, exact: true });
   // Le widget pose les règles d'accès de `Synchro` au premier dessin qui suit la fermeture d'un assistant (jamais pendant
   // un assistant, voir syncRules), et Grist recharge alors le document, donc le widget, environ 250 ms plus tard : un clic
   // donné entre-temps est perdu (c'était déjà le cas avant la 0.18). Attend que les règles soient là, puis que le widget
@@ -391,12 +375,6 @@ try {
   }
   // Coller un lien de formulaire dans le champ `label`, le tester ; rend le code affiché si le
   // test donne le texte `ok`.
-  async function testLink(label, link, ok) {
-    await dialog().getByLabel(label).fill(link);
-    await dialogButton('Tester le lien').click();
-    await dialog().getByText(ok).waitFor();
-    return dialog().locator('textarea.code').first().inputValue();
-  }
   // `count` lignes de Contacts (`prefix` numéro, remplissage de 80 caractères) ; rend leurs id.
   async function addContacts(prefix, count, fill) {
     const names = Array.from({ length: count }, (_, i) => `${prefix} ${i} ${fill.repeat(80)}`);
@@ -469,10 +447,7 @@ try {
   // SOURCE : coller la réponse sur la ligne de l'invitation, approuver, envoyer l'existant.
   async function approve(reply, { shots = false, url = source.url, compare = false } = {}) {
     await openWidget(url);
-    await button('Coller la réponse').click();
-    await dialog().locator('textarea.code').first().fill(reply);
-    await dialogButton('Vérifier').click();
-    await dialog().getByText(env.email).waitFor();
+    await pasteReply(reply);
     await dialog().getByText('Document, dossier et équipe sont donnés par Grist').waitFor();
     assert.equal(await dialog().locator('.control-code strong').textContent(), shownControl, 'même code de contrôle des deux côtés');
     assert.ok(!/\bnull\b/.test(await dialog().innerText()), 'aucun « null » écrit dans la fiche');
@@ -1165,10 +1140,7 @@ try {
 
     // SOURCE : approuver la réponse remplace l'envoi (un webhook neuf), puis l'envoi de contrôle part.
     await openWidget(src.url);
-    await button('Coller la réponse').click();
-    await dialog().locator('textarea.code').first().fill(reply);
-    await dialogButton('Vérifier').click();
-    await dialog().getByText(env.email).waitFor();
+    await pasteReply(reply);
     assert.equal(await dialog().locator('.control-code strong').textContent(), shownControl, 'même code de contrôle des deux côtés');
     await shot('34-renforcer-source-approuver', 'modal');
     await dialogButton('Approuver et brancher').click();
@@ -3768,11 +3740,7 @@ try {
 
   await openWidget(target.url);
   await widget().locator('.tile', { hasText: 'Recevoir des tables' }).click();
-  await button('Accepter une invitation').click();
-  await dialog().locator('textarea.code').first().fill(publicCode);
-  await dialogButton('Continuer').click();
-  await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill('Annuaire');
-  await dialogButton('Continuer').click();
+  await acceptInvitation(publicCode);
   await confirmNewTable();
   await dialog().getByText('Branché').waitFor();
   await dialogButton('Fermer').click();

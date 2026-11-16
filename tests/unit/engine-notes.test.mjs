@@ -9,12 +9,12 @@ import { NOTE_MAX, TABLE_NOTE_MAX, cleanNote, noteSent, planNotes, sentElements,
 import { exportSchema } from '../../js/engine/logic/codes.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
-import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
+import { syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { fakePair } from './engine-fake.mjs';
-import { columnOf, engineAs, lotColumns, wireReception } from './engine-wire.mjs';
+import { columnOf, engineAs, lotColumns, lotsMarked, refreshed, wireReception } from './engine-wire.mjs';
 
 const { world, source, target } = fakePair('nt', { contacts: false });
 const as = engineAs(world);
@@ -97,14 +97,14 @@ test('descriptions : SOURCE vers CIBLE', async (t) => {
     as(source);
     describe(source, 'Budget', 'Reel', 'Dépensé réellement');
     setTableNote(source, 'Budget', 'Budget 2026, mis à jour');
-    const marked = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
+    const marked = lotsMarked(source);
+    assert.equal(await refreshed(), true);
     const lot = await lotOf(story.exp.id);
     const columns = lotColumns(lot);
     assert.deepEqual(columns.map(c => c.desc).slice(2), ['Dépensé réellement']);
     assert.equal(columns[0].tdesc, 'Budget 2026, mis à jour');
-    assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, marked);
-    assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
+    assert.equal(lotsMarked(source), marked);
+    assert.equal(await refreshed(), false, 'rien de plus au passage suivant');
     story.lot = lot;
   });
 

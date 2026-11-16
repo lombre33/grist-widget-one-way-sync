@@ -11,6 +11,7 @@
 // les envoie, même vide. `fd` (seulement quand il y en a une) : la formule par défaut d'une colonne de données, c'est-à-dire
 // une formule de déclenchement « sur les nouvelles lignes » seulement (voir sourceDefault).
 import { KEY_COL } from './common.js';
+import { destContext } from './schema.js';
 
 // Longueur maximale d'une formule, et de toutes celles d'une table de l'export (la description des colonnes part avec
 // chaque envoi : 20 000 caractères restent loin du mégaoctet que Grist accepte). Une formule trop longue n'est pas
@@ -190,12 +191,11 @@ function placed(column, kind, formula) {
 // déclenchement « sur les nouvelles lignes » (`state` : 'data' sans formule par défaut ici, 'other' une autre, 'same' déjà posée) ;
 // une colonne qui est de formule ici n'est pas transformée (`formulaHere`).
 export function planFormulas(schema, entry, columns, { tables = new Map(), replace = false } = {}) {
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
-  const context = { entry, here, own: new Set(Array.isArray(entry.own) ? entry.own : []), map: entry.map || {}, tables, replace };
+  const context = { entry, ...destContext(schema, entry), tables, replace };
   const items = [];
   const actions = [];
-  for (const c of formulaItems(columns)) {
-    const planned = planFormula(c, context);
+  for (const sent of formulaItems(columns)) {
+    const planned = planFormula(sent, context);
     if (!planned) continue;
     if (planned.action) actions.push(planned.action);
     items.push(planned.item);

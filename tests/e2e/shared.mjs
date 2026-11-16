@@ -49,6 +49,58 @@ export async function pickTab(frame, name, timeout = 30000) {
   }
 }
 
+// L'API REST de Grist (préparation et vérifications seulement) : `api(méthode, chemin, corps)` et `applyActions(doc, actions)`.
+export function gristApi(env) {
+  const team = `${env.grist}/o/${env.team}`;
+  const api = async (method, path, body) => {
+    const res = await fetch(`${team}/api${path}`, {
+      method, headers: { Authorization: `Bearer ${env.apiKey}`, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${text}`);
+    return text ? JSON.parse(text) : null;
+  };
+  return { api, applyActions: (doc, actions) => api('POST', `/docs/${doc}/apply`, actions) };
+}
+
+// Les gestes d'une personne dans le widget, partagés par le parcours complet et l'essai de montée de version : les repères de la
+// page (cadre du widget, boutons, fenêtre), l'ouverture de la page, le test d'un lien de formulaire, la réponse collée côté SOURCE,
+// l'invitation acceptée côté CIBLE.
+export function gestures({ page, env }) {
+  const widget = () => page.frameLocator('iframe').first();
+  const button = name => widget().getByRole('button', { name, exact: true });
+  const dialog = () => widget().getByRole('dialog');
+  const dialogButton = name => dialog().getByRole('button', { name, exact: true });
+  async function openWidget(url) {
+    await page.goto(url);
+    await widget().locator('.topbar').waitFor({ timeout: 30000 });
+  }
+  // Colle un lien de formulaire dans la fenêtre, le teste et rend le code à transmettre.
+  async function testLink(label, link, ok) {
+    await dialog().getByLabel(label).fill(link);
+    await dialogButton('Tester le lien').click();
+    await dialog().getByText(ok).waitFor();
+    return dialog().locator('textarea.code').first().inputValue();
+  }
+  // SOURCE : « Coller la réponse », vérifiée (la fiche donne l'adresse de la personne qui a répondu).
+  async function pasteReply(reply) {
+    await button('Coller la réponse').click();
+    await dialog().locator('textarea.code').first().fill(reply);
+    await dialogButton('Vérifier').click();
+    await dialog().getByText(env.email).waitFor();
+  }
+  // CIBLE : « Accepter une invitation », code collé, table reçue nommée.
+  async function acceptInvitation(code, table = 'Annuaire') {
+    await button('Accepter une invitation').click();
+    await dialog().locator('textarea.code').first().fill(code);
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de la nouvelle table pour Contacts').fill(table);
+    await dialogButton('Continuer').click();
+  }
+  return { widget, button, dialog, dialogButton, openWidget, testLink, pasteReply, acceptInvitation };
+}
+
 // Documents et formulaires, au-dessus de l'API de Grist de l'essai : `api`, `applyActions`, `records` et `waitFor`
 // viennent de l'essai ; `widgetUrl` est l'adresse du widget servi par `serveWidget`.
 export function docTools({ env, api, applyActions, records, waitFor, widgetUrl }) {

@@ -27,7 +27,7 @@ function showNews(wizard, facts, onGo) {
   const buttons = POINTS.map((point, i) => el('button', {
     class: 'btn', type: 'button', 'aria-pressed': String(i === 0), 'data-news': point,
     onclick: () => {
-      for (const b of buttons) b.setAttribute('aria-pressed', String(b === buttons[i]));
+      for (const other of buttons) other.setAttribute('aria-pressed', String(other === buttons[i]));
       detail.textContent = t(`news.${point}.line`);
     },
   }, t(`news.${point}.title`)));

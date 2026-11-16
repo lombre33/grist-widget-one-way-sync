@@ -8,6 +8,7 @@
 
 import { formulasSent } from './column-formulas.js';
 import { layoutSent } from './layout.js';
+import { destContext } from './schema.js';
 
 // Longueur maximale d'une description de colonne, et de la table. La description des colonnes part avec chaque
 // envoi (un lot la porte) : 40 colonnes de 300 caractères restent loin du mégaoctet que Grist accepte par envoi.
@@ -75,18 +76,16 @@ const noteChange = (current, text, replace) => (replace ? (current || '') !== te
 // Description de chaque colonne reçue : posée une fois si la colonne est de celles que le widget a créées et n'en a pas ; remplacée
 // par celle de la SOURCE avec `replace`.
 function columnNotePlan(schema, entry, columns, replace) {
-  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
-  const map = entry.map || {};
-  const own = new Set(Array.isArray(entry.own) ? entry.own : []);
+  const { here, map, own } = destContext(schema, entry);
   const done = new Set(entry.described || []);
   const actions = [];
   const described = [];
-  for (const c of columns) {
-    const column = here.get(map[c.id] || c.id);
-    if (typeof c.desc !== 'string' || !column || (!replace && (done.has(c.id) || !own.has(c.id)))) continue;
-    const text = cleanNote(c.desc);
+  for (const sent of columns) {
+    const column = here.get(map[sent.id] || sent.id);
+    if (typeof sent.desc !== 'string' || !column || (!replace && (done.has(sent.id) || !own.has(sent.id)))) continue;
+    const text = cleanNote(sent.desc);
     if (noteChange(column.description, text, replace)) actions.push(['UpdateRecord', '_grist_Tables_column', column.id, { description: text }]);
-    if (text || replace) described.push(c.id);
+    if (text || replace) described.push(sent.id);
   }
   return { actions, described };
 }

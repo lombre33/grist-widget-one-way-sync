@@ -214,9 +214,9 @@ async function showColumns(ctx) {
     showName(ctx);
   };
   const auto = autoColsBlock(ctx);
-  const data = [removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null, ...blocks];
-  const sections = elementsNode ? [section('send.sec.data', 'send.sec.data.sub', data), section('send.sec.with', 'send.sec.with.sub', [elementsNode]),
-    section('send.sec.next', null, [auto])] : data;
+  const dataBlocks = [removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null, ...blocks];
+  const sections = elementsNode ? [section('send.sec.data', 'send.sec.data.sub', dataBlocks), section('send.sec.with', 'send.sec.with.sub', [elementsNode]),
+    section('send.sec.next', null, [auto])] : dataBlocks;
   ctx.wizard.show(1, [...stepIntro(), ...sections, addsNode, report], [
     backButton(() => showTables(ctx)), cancel,
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
