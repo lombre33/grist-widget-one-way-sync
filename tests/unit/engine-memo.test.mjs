@@ -3,33 +3,20 @@
 // nom) est dans la note de la SOURCE, que les lecteurs ne lisent pas, et remise dans les webhooks que lit le widget.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { readSchema } from '../../js/engine/port.js';
 import { protectMemos, readHooks, readSourceNote, rememberDest, updateSourceNote } from '../../js/engine/source/synchro.js';
-import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { dropDest, identifyHooks, isMemoToken, putDest, staleDest } from '../../js/engine/logic/notes.js';
 import { hookLabel, memoDoc } from '../../js/engine/logic/exports.js';
 import { deleteWebhook } from '../../js/engine/port.js';
 import { fakePair } from './engine-fake.mjs';
+import { engineAs, exportAnnuaire, wireReception } from './engine-wire.mjs';
 
 // Une SOURCE qui a un destinataire (webhook branché), et la CIBLE qui reçoit.
 async function wired() {
   const { world, source, target } = fakePair('mm');
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
-  as(source);
-  const { created: exp } = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom'], filter: null }] });
-  const { entry, secret } = await startInvitation(exp);
-  const { code } = await invitationCode(exp, entry, secret);
-  as(target);
-  const invitation = await readInvitation(code);
-  const made = await createReception(invitation, invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' })), { reserve: true, options: {} });
-  const { code: reply } = await receptionReply(made, world.formLink(target, made.journal));
-  as(source);
-  const accepted = await checkReply(exp, entry, reply);
-  const hook = await approveReply(exp, entry, accepted);
-  return { world, source, target, as, exp, hook };
+  const exp = await exportAnnuaire(world, source);
+  const { hook } = await wireReception({ world, source, target, exp, dest: 'Annuaire_recu', check: false, receive: { reserve: true, options: {} } });
+  return { world, source, target, as: engineAs(world), exp, hook };
 }
 
 const FICHE = /cible@fake\.local|targetdoc/;

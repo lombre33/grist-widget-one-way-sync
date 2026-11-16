@@ -15,8 +15,9 @@ export const markNewsSeen = () => writePref('news', NEWS_VERSION);
 // `facts` : { exports, people, invitations, receptions } (voir newsFacts) ; `onGo(tab)` : ouvre l'onglet où se renforce un partage.
 export function openNews({ facts, onGo, onClose }) {
   const steps = [t('news.step.news'), t('news.step.shares')];
-  markNewsSeen();
-  const wizard = openWizard({ title: t('news.title'), steps, onClose });
+  // Vue seulement quand la fenêtre se ferme : si Grist recharge le document au même moment (règles d'accès posées au premier
+  // affichage d'un partage monté depuis une version d'avant), la fenêtre disparaît avec la page et revient au chargement suivant.
+  const wizard = openWizard({ title: t('news.title'), steps, onClose: () => { markNewsSeen(); if (onClose) onClose(); } });
   wizard.start(() => showNews(wizard, facts, onGo));
   return wizard;
 }

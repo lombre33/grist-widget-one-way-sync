@@ -1206,6 +1206,12 @@ try {
       await rulesSettled(doc.doc);
       await openWidget(doc.url);
       await widget().getByRole('heading', { name: 'Sync+ : les nouveautés' }).waitFor({ timeout: 30000 });
+      // Marquée vue à sa fermeture seulement : si Grist recharge le document pendant qu'elle est ouverte (règles d'accès posées au
+      // premier affichage d'un partage monté), elle revient au chargement suivant au lieu d'être perdue (trouvé par `upgrade.mjs`).
+      const newsPref = () => widget().locator('body').evaluate(() => localStorage.getItem('gristsync.news'));
+      assert.equal(await newsPref(), null, 'les nouveautés sont marquées vues dès leur ouverture');
+      await openWidget(doc.url);
+      await widget().getByRole('heading', { name: 'Sync+ : les nouveautés' }).waitFor({ timeout: 30000 });
       await widget().getByRole('button', { name: 'Pièces jointes', exact: true }).click();
       await widget().getByText(/une seule fois par destinataire/).waitFor();
       await shot('35-nouveautes', 'modal');
@@ -1215,6 +1221,7 @@ try {
       await shot('36-nouveautes-partages', 'modal');
       await dialogButton('Plus tard').click();
       await dialog().waitFor({ state: 'detached' });
+      assert.match(await newsPref(), /^\d+\.\d+$/, 'les nouveautés ne sont pas marquées vues à la fermeture');
       await openWidget(doc.url); // déjà vue : elle ne revient pas
       await widget().locator('.topbar').waitFor();
       await page.waitForTimeout(3000);

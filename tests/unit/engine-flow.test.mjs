@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startEngine } from '../../js/engine/index.js';
-import { EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
+import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { readSourceNote, rememberDocName, sourceDocName, syncRows } from '../../js/engine/source/synchro.js';
@@ -18,6 +18,7 @@ import { receivedJournals } from '../../js/engine/logic/received.js';
 import { diagnostic } from '../../js/engine/diagnostic.js';
 import { format } from '../../js/i18n.js';
 import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { receivedNames } from './engine-wire.mjs';
 
 const world = fakeWorld();
 const source = fakeDoc({ docId: 'sourcedoc0001x', name: 'Annuaire de la source', email: 'source@fake.local' });
@@ -126,20 +127,19 @@ test('SOURCE puis CIBLE : un envoi de bout en bout, sans écran', async (t) => {
     await send(story.accepted.keys.down, [['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }], ['k2', 100, false, { Nom: 'Bob', Ville: 'Nice' }]]);
     as(target);
     await consolidateAll();
-    const names = () => target.rows('Annuaire_recu').filter(r => r.Supprime !== true).map(r => `${r[KEY_COL]}:${r.Nom}:${r.Ville}`).sort();
-    assert.deepEqual(names(), ['k1:Alice:Lyon', 'k2:Bob:Nice']);
+    assert.deepEqual(receivedNames(target, 'Annuaire_recu'), ['k1:Alice:Lyon', 'k2:Bob:Nice']);
 
     // Un lot signé avec une autre clé (celle d'un autre destinataire, ou inventée) n'est pas recopié.
     await send('0'.repeat(64), [['k9', 200, false, { Nom: 'Intrus', Ville: 'Ailleurs' }]]);
     await consolidateAll({ reread: true });
-    assert.deepEqual(names(), ['k1:Alice:Lyon', 'k2:Bob:Nice'], 'le lot mal signé est rejeté');
+    assert.deepEqual(receivedNames(target, 'Annuaire_recu'), ['k1:Alice:Lyon', 'k2:Bob:Nice'], 'le lot mal signé est rejeté');
     assert.deepEqual(target.rows('Journal_Annuaire').filter(r => r[TYPE_COL] === KIND.lot), [], 'et il ne reste pas dans le journal');
 
     // Une version plus récente, bien signée : la destination suit.
     target.tick();
     await send(story.accepted.keys.down, [['k1', 300, false, { Nom: 'Alice', Ville: 'Paris' }]]);
     await consolidateAll({ reread: true });
-    assert.deepEqual(names(), ['k1:Alice:Paris', 'k2:Bob:Nice']);
+    assert.deepEqual(receivedNames(target, 'Annuaire_recu'), ['k1:Alice:Paris', 'k2:Bob:Nice']);
   });
 
   await t.test('CIBLE : une nouvelle invitation du même document reprend la même réception', async () => {

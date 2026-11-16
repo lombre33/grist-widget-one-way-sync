@@ -4,7 +4,6 @@
 // tout d'accord. Puis la logique pure : section modèle, rangs, plan d'écritures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { isPos, layoutSent, modelSection, planLayout, withLayout } from '../../js/engine/logic/layout.js';
 import { sentElements } from '../../js/engine/logic/descriptions.js';
@@ -15,16 +14,13 @@ import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { fakePair } from './engine-fake.mjs';
+import { engineAs, lotColumns, wireReception } from './engine-wire.mjs';
 
-const world = fakeWorld();
-const source = fakeDoc({ docId: 'sourcedoclay01', name: 'Budget source', email: 'source@fake.local' });
-const target = fakeDoc({ docId: 'targetdoclay02', name: 'Budget copie', email: 'cible@fake.local' });
-const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+const { world, source, target } = fakePair('ly', { contacts: false });
+const as = engineAs(world);
 
 const COLS = ['Libelle', 'Montant', 'Reel', 'Note', 'Code'];
 source.addTable('Budget', COLS.map(id => ({ id, type: 'Text' })), [{ Libelle: 'Loyer', Montant: '100', Reel: '90', Note: 'n', Code: 'c1' }]);
@@ -53,7 +49,6 @@ const moveField = (doc, table, colId, parentPos) => {
 addPage(source, 'Budget', ['Code', 'Libelle', 'Montant', 'Reel']); // Note est cachée dans la page de la SOURCE
 
 const story = {};
-const columnsOf = lot => JSON.parse(lot[SCHEMA_COL]);
 const lotOf = async exportId => (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Budget');
 const row = { Libelle: 'Loyer', Montant: '100', Reel: '90', Note: 'n', Code: 'c1' };
 
@@ -65,23 +60,13 @@ test('mise en page : SOURCE vers CIBLE', async (t) => {
     const saved = await saveChosenExport({ name: 'Budget', layout: true, selection: [{ table: 'Budget', columns: COLS, filter: null }] });
     story.exp = saved.created;
     story.lot = await lotOf(saved.id);
-    assert.deepEqual(Object.fromEntries(columnsOf(story.lot).map(c => [c.id, c.pos])), { Libelle: 1, Montant: 2, Reel: 3, Note: -1, Code: 0 });
-    assert.ok(columnsOf(story.lot).every(c => !c.fmt && !c.desc && !c.tdesc), 'seule la mise en page était demandée');
-    assert.deepEqual(sentElements(columnsOf(story.lot)), ['layout']);
+    assert.deepEqual(Object.fromEntries(lotColumns(story.lot).map(c => [c.id, c.pos])), { Libelle: 1, Montant: 2, Reel: 3, Note: -1, Code: 0 });
+    assert.ok(lotColumns(story.lot).every(c => !c.fmt && !c.desc && !c.tdesc), 'seule la mise en page était demandée');
+    assert.deepEqual(sentElements(lotColumns(story.lot)), ['layout']);
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
-    const { entry, secret } = await startInvitation(story.exp);
-    const { code } = await invitationCode(story.exp, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: 'Budget_recu' }));
-    await checkDestinations(invitation, plans);
-    story.made = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.made, world.formLink(target, story.made.journal));
-    as(source);
-    story.accepted = await checkReply(story.exp, entry, reply);
-    await approveReply(story.exp, entry, story.accepted);
+    Object.assign(story, await wireReception({ world, source, target, exp: story.exp, dest: 'Budget_recu' }));
   });
 
   const deliver = async (lot, rows = [['k1', 100, false, row]]) => {
@@ -122,7 +107,7 @@ test('mise en page : SOURCE vers CIBLE', async (t) => {
     const sent = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
     story.lot = await lotOf(story.exp.id);
-    assert.deepEqual(Object.fromEntries(columnsOf(story.lot).map(c => [c.id, c.pos])), { Libelle: 2, Montant: 3, Reel: 0, Note: -1, Code: 1 });
+    assert.deepEqual(Object.fromEntries(lotColumns(story.lot).map(c => [c.id, c.pos])), { Libelle: 2, Montant: 3, Reel: 0, Note: -1, Code: 1 });
     assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, sent);
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
   });
@@ -153,7 +138,7 @@ test('mise en page : SOURCE vers CIBLE', async (t) => {
     const section = pageSection(source, 'Budget');
     source.apply([['BulkRemoveRecord', '_grist_Views_section_field', source.fetchRows('_grist_Views_section_field').filter(f => f.parentId === section.id).map(f => f.id)], ['RemoveRecord', '_grist_Views_section', section.id]]);
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
-    assert.ok(!columnsOf(await lotOf(story.exp.id)).some(c => 'pos' in c));
+    assert.ok(!lotColumns(await lotOf(story.exp.id)).some(c => 'pos' in c));
   });
 });
 

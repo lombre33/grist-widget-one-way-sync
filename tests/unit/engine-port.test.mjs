@@ -14,6 +14,7 @@ import { createJournal, prepareDest } from '../../js/engine/target/journals.js';
 import { consolidateAll, state } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { fakeDoc, fakePort } from './engine-fake.mjs';
+import { receivedNames } from './engine-wire.mjs';
 
 const EXPORT = 'fedcba9876543210';
 const COLUMNS = [{ id: 'Nom', type: 'Text', label: 'Nom' }, { id: 'Ville', type: 'Text', label: 'Ville' }];
@@ -71,15 +72,14 @@ test('CIBLE : un lot déposé dans le journal est recopié dans la destination',
   const lot = lines => dropLot(doc, journal, lines);
   lot([['k1', 100, false, { Nom: 'Alice', Ville: 'Lyon' }], ['k2', 100, false, { Nom: 'Bob', Ville: 'Nice' }]]);
   await consolidateAll();
-  const names = () => doc.rows('Gfs_Contacts').filter(r => r.Supprime !== true).map(r => `${r[KEY_COL]}:${r.Nom}:${r.Ville}`).sort();
-  assert.deepEqual(names(), ['k1:Alice:Lyon', 'k2:Bob:Nice']);
+  assert.deepEqual(receivedNames(doc, 'Gfs_Contacts'), ['k1:Alice:Lyon', 'k2:Bob:Nice']);
   assert.deepEqual(doc.rows(journal).filter(r => r[TYPE_COL] === KIND.lot), [], 'la ligne brute est dépliée puis effacée');
 
   // Une modification plus récente, une ligne de plus : la destination suit.
   doc.tick();
   lot([['k1', 200, false, { Nom: 'Alice', Ville: 'Paris' }], ['k3', 200, false, { Nom: 'Chloé', Ville: 'Brest' }]]);
   await consolidateAll({ reread: true });
-  assert.deepEqual(names(), ['k1:Alice:Paris', 'k2:Bob:Nice', 'k3:Chloé:Brest']);
+  assert.deepEqual(receivedNames(doc, 'Gfs_Contacts'), ['k1:Alice:Paris', 'k2:Bob:Nice', 'k3:Chloé:Brest']);
 
   // Ce que l'écran lit : le résultat du dernier passage, sous le nom du journal préfixé.
   const result = state.results.get(`${journal}|Contacts`);

@@ -5,7 +5,6 @@
 // formules refusées d'office, colonnes et tables citées, plan d'écriture.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { FORMULAS_TOTAL_MAX, FORMULA_MAX, cleanFormula, formulaItems, formulaProblems, formulasOffered, formulasSent, planFormulas, sourceDefault, sourceFormula, withFormulas } from '../../js/engine/logic/column-formulas.js';
 import { elementCounts } from '../../js/engine/logic/exports.js';
@@ -15,16 +14,13 @@ import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { consolidateAll, restyle, state, tableKey } from '../../js/engine/target/loop.js';
 import { formulaColumns } from '../../js/engine/target/formulas.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { fakePair } from './engine-fake.mjs';
+import { engineAs, lotColumns, wireReception } from './engine-wire.mjs';
 
-const world = fakeWorld();
-const source = fakeDoc({ docId: 'sourcedocfx001', name: 'Budget source', email: 'source@fake.local' });
-const target = fakeDoc({ docId: 'targetdocfx002', name: 'Budget copie', email: 'cible@fake.local' });
-const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+const { world, source, target } = fakePair('fx', { contacts: false });
+const as = engineAs(world);
 
 source.addTable('Budget', [
   { id: 'Libelle', type: 'Text' },
@@ -35,7 +31,6 @@ source.addTable('Budget', [
 ], [{ Libelle: 'Loyer', Montant: 100, TVA: 20, Fuite: '/', Declenchee: 'xLoyer' }]);
 
 const story = {};
-const columnsOf = lot => JSON.parse(lot[SCHEMA_COL]);
 const lotOf = async exportId => (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Budget');
 const all = { table: 'Budget', columns: ['Libelle', 'Montant', 'TVA', 'Fuite', 'Declenchee'], filter: null };
 const destColumn = (doc, table, colId) => doc.fetchRows('_grist_Tables_column').find(c => c.colId === colId && doc.tables.get(table).columns.some(x => x.id === c.id));
@@ -54,7 +49,7 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     const saved = await saveChosenExport({ name: 'Budget', formulas: true, selection: [all] });
     story.exp = saved.created;
     story.lot = await lotOf(saved.id);
-    const columns = columnsOf(story.lot);
+    const columns = lotColumns(story.lot);
     assert.deepEqual(columns.map(c => c.fx), ['', '', '$Montant * 0.2', 'import os\nreturn os.getcwd()', ''],
       'la colonne à formule de déclenchement n\'est pas une formule ; une colonne de données dit « vide » : l\'export les envoie');
     assert.deepEqual(columns.map(c => c.fd), [undefined, undefined, undefined, undefined, '"x" + $Libelle'],
@@ -62,17 +57,7 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
-    const { entry, secret } = await startInvitation(story.exp);
-    const { code } = await invitationCode(story.exp, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: 'Budget_recu' }));
-    await checkDestinations(invitation, plans);
-    story.made = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.made, world.formLink(target, story.made.journal));
-    as(source);
-    story.accepted = await checkReply(story.exp, entry, reply);
-    await approveReply(story.exp, entry, story.accepted);
+    Object.assign(story, await wireReception({ world, source, target, exp: story.exp, dest: 'Budget_recu' }));
   });
 
   const deliver = async (lot, rows) => {
@@ -92,7 +77,7 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     assert.deepEqual(items.map(i => i.kind), ['column', 'column', 'default']);
     assert.deepEqual(items[1].problems.map(p => [p.code, p.name]), [['unsafe', 'os']], 'le module système est refusé d\'office');
     assert.equal(items[0].formula, '$Montant * 0.2');
-    assert.deepEqual(sentElements(columnsOf(story.lot)), ['formulas']);
+    assert.deepEqual(sentElements(lotColumns(story.lot)), ['formulas']);
     assert.ok(!JSON.stringify(target.fetchRows('_grist_Tables_column').filter(c => c.colId === 'id_sync')).includes('Montant * 0.2'), 'la note du journal ne garde pas les formules');
   });
 
@@ -136,7 +121,7 @@ test('formules de colonne : SOURCE vers CIBLE', async (t) => {
     const marked = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
     story.lot = await lotOf(story.exp.id);
-    assert.equal(columnsOf(story.lot)[2].fx, '$Montant * 0.1');
+    assert.equal(lotColumns(story.lot)[2].fx, '$Montant * 0.1');
     assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, marked);
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), false, 'rien de plus au passage suivant');
   });

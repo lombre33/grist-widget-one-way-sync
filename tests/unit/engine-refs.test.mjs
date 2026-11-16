@@ -4,24 +4,20 @@
 // complète les cellules à l'arrivée d'une ligne visée, laisse du texte une colonne déjà remplie jusqu'à « Refaire les références ».
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { consolidateAll, relink, state, tableKey } from '../../js/engine/target/loop.js';
 import { linkOffers } from '../../js/engine/logic/links.js';
 import { exportableColumns } from '../../js/engine/logic/exports.js';
 import { pullColumns } from '../../js/source/pull.js';
 import { readSchema } from '../../js/engine/port.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { fakePair } from './engine-fake.mjs';
+import { engineAs, wireReception } from './engine-wire.mjs';
 
-const world = fakeWorld();
-const source = fakeDoc({ docId: 'sourcedoclnk1', name: 'Annuaire source', email: 'source@fake.local' });
-const target = fakeDoc({ docId: 'targetdoclnk2', name: 'Annuaire copie', email: 'cible@fake.local' });
-const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+const { world, source, target } = fakePair('lk', { contacts: false });
+const as = engineAs(world);
 const columnId = (doc, table, colId) => doc.fetchRows('_grist_Tables_column').find(c => c.colId === colId && doc.tables.get(table).columns.some(x => x.id === c.id)).id;
 const typeOf = (doc, table, colId) => doc.tables.get(table).columns.find(c => c.colId === colId).type;
 
@@ -78,17 +74,7 @@ test('références entre tables : SOURCE puis CIBLE', async (t) => {
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
-    const { entry, secret } = await startInvitation(story.exp);
-    const { code } = await invitationCode(story.exp, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: `${tb.table}_recu` }));
-    await checkDestinations(invitation, plans);
-    story.made = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.made, world.formLink(target, story.made.journal));
-    as(source);
-    story.accepted = await checkReply(story.exp, entry, reply);
-    await approveReply(story.exp, entry, story.accepted);
+    Object.assign(story, await wireReception({ world, source, target, exp: story.exp, dest: tb => `${tb.table}_recu` }));
   });
 
   const deliver = async (table, lines) => {
@@ -134,17 +120,9 @@ test('références entre tables : SOURCE puis CIBLE', async (t) => {
     as(source);
     const plain = await saveChosenExport({ name: 'Texte', selection: [{ table: 'Contacts', columns: ['Nom', 'Services'], filter: null }, { table: 'Services', columns: ['Libelle'], filter: null }], links: new Set() });
     story.plain = plain.created;
-    const { entry, secret } = await startInvitation(story.plain);
-    const { code } = await invitationCode(story.plain, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: `${tb.table}_texte` }));
-    await checkDestinations(invitation, plans);
-    story.second = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.second, world.formLink(target, story.second.journal));
-    as(source);
-    story.acceptedPlain = await checkReply(story.plain, entry, reply);
-    await approveReply(story.plain, entry, story.acceptedPlain);
+    const second = await wireReception({ world, source, target, exp: story.plain, dest: tb => `${tb.table}_texte` });
+    story.second = second.made;
+    story.acceptedPlain = second.accepted;
     const send = async (exp, accepted, table, lines, schemaText) => {
       const row = { [EXPORT_COL]: exp.id, [TABLE_COL]: table, [TYPE_COL]: KIND.lot, [SCHEMA_COL]: schemaText };
       world.deliver(accepted.url, [{ ...row, [LOT_COL]: await signText(accepted.keys.down, row, JSON.stringify({ lignes: lines, total: lines.length })) }]);

@@ -243,15 +243,16 @@ export function fakePort(doc, { owner = true, world = null } = {}) {
   };
 }
 
-// Une SOURCE (table Contacts d'une ligne) et une CIBLE neuves sur le même monde. `tag` (deux caractères) range les
-// identifiants de document d'un fichier d'essai : deux essais ne partagent jamais le même (`n` : le rang de la paire).
+// Une SOURCE (table Contacts d'une ligne, sauf `contacts: false`) et une CIBLE neuves sur le même monde. `tag` (deux caractères) range
+// les identifiants de document d'un fichier d'essai : deux essais ne partagent jamais le même (`n` : le rang de la paire). `source` et
+// `target` complètent les réglages de chaque document (langue, nom…).
 let pairs = 0;
-export function fakePair(tag) {
+export function fakePair(tag, { source: sourceOptions = {}, target: targetOptions = {}, contacts = true } = {}) {
   const world = fakeWorld();
   const n = String(++pairs).padStart(2, '0');
-  const source = fakeDoc({ docId: `sourcedoc${tag}${n}x`, name: 'Annuaire', email: 'source@fake.local' });
-  const target = fakeDoc({ docId: `targetdoc${tag}${n}x`, name: 'Réception', email: 'cible@fake.local' });
-  source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }], [{ Nom: 'Alice' }]);
+  const source = fakeDoc({ docId: `sourcedoc${tag}${n}x`, name: 'Annuaire', email: 'source@fake.local', ...sourceOptions });
+  const target = fakeDoc({ docId: `targetdoc${tag}${n}x`, name: 'Réception', email: 'cible@fake.local', ...targetOptions });
+  if (contacts) source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }], [{ Nom: 'Alice' }]);
   return { world, source, target, n };
 }
 

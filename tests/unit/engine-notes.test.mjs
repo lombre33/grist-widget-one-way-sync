@@ -4,7 +4,6 @@
 // remet tout d'accord, élément par élément. Puis la logique pure : texte nettoyé et borné, rien d'envoyé sans la case.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { NOTE_MAX, TABLE_NOTE_MAX, cleanNote, noteSent, planNotes, sentElements, tableNoteOf, withTableNote } from '../../js/engine/logic/descriptions.js';
 import { exportSchema } from '../../js/engine/logic/codes.js';
@@ -12,18 +11,14 @@ import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { refreshOptions, syncRows } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { fakePair } from './engine-fake.mjs';
+import { columnOf, engineAs, lotColumns, wireReception } from './engine-wire.mjs';
 
-const world = fakeWorld();
-const source = fakeDoc({ docId: 'sourcedocnote1', name: 'Budget source', email: 'source@fake.local' });
-const target = fakeDoc({ docId: 'targetdocnote2', name: 'Budget copie', email: 'cible@fake.local' });
-const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+const { world, source, target } = fakePair('nt', { contacts: false });
+const as = engineAs(world);
 
-const columnOf = (doc, table, colId) => doc.fetchRows('_grist_Tables_column').find(c => c.colId === colId && doc.tables.get(table).columns.some(x => x.id === c.id));
 const describe = (doc, table, colId, description) => doc.apply([['UpdateRecord', '_grist_Tables_column', columnOf(doc, table, colId).id, { description }]]);
 const noteOfColumn = (doc, table, colId) => columnOf(doc, table, colId).description;
 const rawSection = (doc, table) => doc.fetchRows('_grist_Views_section').find(s => s.id === doc.fetchRows('_grist_Tables').find(tb => tb.tableId === table).rawViewSectionRef);
@@ -36,7 +31,6 @@ describe(source, 'Budget', 'Montant', 'Montant TTC en euros\nsaisi par le servic
 setTableNote(source, 'Budget', 'Lignes du budget 2026');
 
 const story = {};
-const columnsOf = lot => JSON.parse(lot[SCHEMA_COL]);
 const lotOf = async exportId => (await syncRows()).find(r => r[EXPORT_COL] === exportId && r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Budget');
 
 test('descriptions : SOURCE vers CIBLE', async (t) => {
@@ -45,7 +39,7 @@ test('descriptions : SOURCE vers CIBLE', async (t) => {
     const saved = await saveChosenExport({ name: 'Budget', notes: true, tableNote: true, selection: [{ table: 'Budget', columns: ['Libelle', 'Montant', 'Reel'], filter: null }] });
     story.exp = saved.created;
     story.lot = await lotOf(saved.id);
-    const columns = columnsOf(story.lot);
+    const columns = lotColumns(story.lot);
     assert.deepEqual(columns.map(c => c.desc), ['Intitulé de la ligne budgétaire', 'Montant TTC en euros\nsaisi par le service', ''], 'une colonne sans description dit « vide » : l\'export les envoie');
     assert.deepEqual(columns.map(c => c.tdesc), ['Lignes du budget 2026', undefined, undefined], 'la description de la table est portée par la première colonne');
     assert.ok(columns.every(c => !c.fmt && !c.opts), 'ni mise en forme ni format : seules les descriptions étaient demandées');
@@ -59,22 +53,12 @@ test('descriptions : SOURCE vers CIBLE', async (t) => {
     const only = await saveChosenExport({ name: 'Colonnes seules', notes: true, selection: [{ table: 'Budget', columns: ['Libelle'], filter: null }] });
     assert.ok(!(await lotOf(only.id))[SCHEMA_COL].includes('tdesc'), 'la case de la table est à part');
     const table = await saveChosenExport({ name: 'Table seule', tableNote: true, selection: [{ table: 'Budget', columns: ['Libelle'], filter: null }] });
-    const columns = columnsOf(await lotOf(table.id));
+    const columns = lotColumns(await lotOf(table.id));
     assert.deepEqual([columns[0].desc, columns[0].tdesc], [undefined, 'Lignes du budget 2026']);
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
-    const { entry, secret } = await startInvitation(story.exp);
-    const { code } = await invitationCode(story.exp, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: 'Budget_recu' }));
-    await checkDestinations(invitation, plans);
-    story.made = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.made, world.formLink(target, story.made.journal));
-    as(source);
-    story.accepted = await checkReply(story.exp, entry, reply);
-    await approveReply(story.exp, entry, story.accepted);
+    Object.assign(story, await wireReception({ world, source, target, exp: story.exp, dest: 'Budget_recu' }));
   });
 
   const deliver = async (lot, rows = [['k1', 100, false, { Libelle: 'Loyer', Montant: 100, Reel: 90 }]]) => {
@@ -116,7 +100,7 @@ test('descriptions : SOURCE vers CIBLE', async (t) => {
     const marked = source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length;
     assert.equal(await refreshOptions(await readSchema(), await syncRows()), true);
     const lot = await lotOf(story.exp.id);
-    const columns = columnsOf(lot);
+    const columns = lotColumns(lot);
     assert.deepEqual(columns.map(c => c.desc).slice(2), ['Dépensé réellement']);
     assert.equal(columns[0].tdesc, 'Budget 2026, mis à jour');
     assert.equal(source.rows('Synchro').filter(r => r[TYPE_COL] === KIND.lot).length, marked);

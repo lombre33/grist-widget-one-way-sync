@@ -4,32 +4,25 @@
 // d'avant la 3.0.0, et la règle qui cache la clé de signature aux lecteurs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { readSchema } from '../../js/engine/port.js';
 import { syncRules } from '../../js/engine/acl.js';
 import { moveNotes } from '../../js/engine/note-move.js';
-import { saveChosenExport } from '../../js/engine/source/export.js';
-import { invitationCode, startInvitation } from '../../js/engine/source/invite.js';
 import { ensureSyncTable, readSourceNote, updateSourceNote } from '../../js/engine/source/synchro.js';
-import { createReception, readInvitation } from '../../js/engine/target/receive.js';
+import { createReception } from '../../js/engine/target/receive.js';
 import { consolidateAll } from '../../js/engine/target/loop.js';
 import { KEY_MEMO } from '../../js/engine/logic/acl.js';
 import { receivedJournals, receivedKey, signedTables } from '../../js/engine/logic/received.js';
 import { SIG_KEY } from '../../js/engine/logic/common.js';
 import { fakePair } from './engine-fake.mjs';
+import { engineAs, exportAnnuaire, invite } from './engine-wire.mjs';
 
 // Une SOURCE qui exporte Contacts et une CIBLE qui le reçoit dans Annuaire_recu.
 async function reception() {
   const { world, source, target } = fakePair('11');
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
-  as(source);
-  const { created: exp } = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom'], filter: null }] });
-  const { entry, secret } = await startInvitation(exp);
-  const { code } = await invitationCode(exp, entry, secret);
-  as(target);
-  const invitation = await readInvitation(code);
+  const exp = await exportAnnuaire(world, source);
+  const { invitation } = await invite({ world, target, exp });
   const made = await createReception(invitation, invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' })), { reserve: true, options: {} });
-  return { source, target, made, as };
+  return { source, target, made, as: engineAs(world) };
 }
 
 const columnsOf = (doc, tableId) => {

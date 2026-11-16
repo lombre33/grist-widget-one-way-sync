@@ -4,52 +4,20 @@
 // (comme avant) crée la colonne toute seule. Puis la logique pure.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
-import { EXPORT_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { backfillActions, acknowledged, structureChanges } from '../../js/engine/logic/structure.js';
-import { optionsNote, receivedJournals } from '../../js/engine/logic/received.js';
-import { signText } from '../../js/engine/logic/trust.js';
-import { readSchema } from '../../js/engine/port.js';
-import { syncRows } from '../../js/engine/source/synchro.js';
-import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
-import { approveStructure, consolidateAll, state, tableKey } from '../../js/engine/target/loop.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { optionsNote } from '../../js/engine/logic/received.js';
+import { approveStructure, consolidateAll } from '../../js/engine/target/loop.js';
+import { journalNote, resultOf, wireFiches } from './engine-wire.mjs';
 
 // Une SOURCE (table Fiches : Nom, Ville) et une CIBLE ; `ask` : la réception demande l'accord. Rend de quoi livrer des lots.
 async function pair(tag, options) {
-  const world = fakeWorld();
-  const source = fakeDoc({ docId: `source${tag}docx`, name: `Source ${tag}`, email: 'source@fake.local' });
-  const target = fakeDoc({ docId: `target${tag}docx`, name: `Cible ${tag}`, email: 'cible@fake.local' });
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
-  source.addTable('Fiches', [{ id: 'Nom', type: 'Text' }, { id: 'Ville', type: 'Text' }], [{ Nom: 'Alice', Ville: 'Lyon' }]);
-  as(source);
-  const saved = await saveChosenExport({ name: 'Fiches', selection: [{ table: 'Fiches', columns: ['Nom', 'Ville'], filter: null }] });
-  const { entry, secret } = await startInvitation(saved.created);
-  const { code } = await invitationCode(saved.created, entry, secret);
-  as(target);
-  const invitation = await readInvitation(code);
-  const plans = invitation.tables.map(tb => ({ tb, dest: 'Fiches_recu' }));
-  await checkDestinations(invitation, plans);
-  const made = await createReception(invitation, plans, { reserve: false, options });
-  const { code: reply } = await receptionReply(made, world.formLink(target, made.journal));
-  as(source);
-  const accepted = await checkReply(saved.created, entry, reply);
-  await approveReply(saved.created, entry, accepted);
-  const lot = (await syncRows()).find(r => r[EXPORT_COL] === saved.id && r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Fiches');
-  // `columns` : les colonnes que l'export décrit à ce moment-là (la SOURCE en ajoute ou en retire) ; `rows` : [clé, heure, supprimée, données].
-  const deliver = async (columns, rows) => {
-    const row = { [EXPORT_COL]: saved.id, [TABLE_COL]: 'Fiches', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: JSON.stringify(columns) };
-    world.deliver(accepted.url, [{ ...row, [LOT_COL]: await signText(accepted.keys.down, row, JSON.stringify({ lignes: rows, total: rows.length })) }]);
-  };
-  const base = JSON.parse(lot[SCHEMA_COL]);
+  const { source, target, made, as, base, deliver } = await wireFiches(tag, {
+    rows: [{ Nom: 'Alice', Ville: 'Lyon' }], dest: 'Fiches_recu', receive: { reserve: false, options },
+  });
   const column = id => ({ id, type: 'Text', label: id, source: 'Text', visible: '' });
   return { source, target, made, as, deliver, base, column };
 }
 
-const journalNote = async () => receivedJournals(await readSchema())[0].note;
-const resultOf = made => state.results.get(tableKey(made.journal, 'Fiches'));
 const columnsOf = doc => doc.tables.get('Fiches_recu').columns.map(c => c.colId).filter(id => id !== 'id_sync');
 
 test('réception qui demande l\'accord : la colonne ajoutée à la SOURCE attend un clic, puis se remplit', async (t) => {

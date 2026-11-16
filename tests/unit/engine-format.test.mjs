@@ -5,27 +5,22 @@
 // que sur un geste. « Reprendre la mise en forme » remet tout d'accord.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { readSchema } from '../../js/engine/port.js';
 import { syncRows, refreshOptions } from '../../js/engine/source/synchro.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { consolidateAll, restyle } from '../../js/engine/target/loop.js';
 import { alignDocFormat, readDocFormat } from '../../js/engine/target/style.js';
 import { currencyOf, formatGap } from '../../js/engine/logic/docformat.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { fakePair } from './engine-fake.mjs';
+import { columnOf, engineAs, wireReception } from './engine-wire.mjs';
 
-const world = fakeWorld();
-const source = fakeDoc({ docId: 'sourcedocfmt1x', name: 'Budget source', email: 'source@fake.local', locale: 'fr-FR' });
-const target = fakeDoc({ docId: 'targetdocfmt2x', name: 'Budget copie', email: 'cible@fake.local' });
-const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+const { world, source, target } = fakePair('fm', { contacts: false, source: { locale: 'fr-FR' } });
+const as = engineAs(world);
 
 // Une colonne du document `doc` d'après son nom.
-const columnOf = (doc, table, colId) => doc.fetchRows('_grist_Tables_column').find(c => c.colId === colId && doc.tables.get(table).columns.some(x => x.id === c.id));
 const options = (doc, table, colId) => JSON.parse(columnOf(doc, table, colId).widgetOptions || '{}');
 // Règles d'une colonne : [{ formula, style }] dans l'ordre de ses règles.
 const rulesOf = (doc, table, colId) => {
@@ -76,17 +71,7 @@ test('mise en forme : SOURCE fr-FR vers CIBLE en-US', async (t) => {
   });
 
   await t.test('SOURCE puis CIBLE : invitation, réception, webhook', async () => {
-    const { entry, secret } = await startInvitation(story.exp);
-    const { code } = await invitationCode(story.exp, entry, secret);
-    as(target);
-    const invitation = await readInvitation(code);
-    const plans = invitation.tables.map(tb => ({ tb, dest: 'Budget_recu' }));
-    await checkDestinations(invitation, plans);
-    story.made = await createReception(invitation, plans, { reserve: false, options: {} });
-    const { code: reply } = await receptionReply(story.made, world.formLink(target, story.made.journal));
-    as(source);
-    story.accepted = await checkReply(story.exp, entry, reply);
-    await approveReply(story.exp, entry, story.accepted);
+    Object.assign(story, await wireReception({ world, source, target, exp: story.exp, dest: 'Budget_recu' }));
   });
 
   const deliver = async (lot) => {

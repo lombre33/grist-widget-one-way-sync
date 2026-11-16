@@ -3,13 +3,12 @@
 // type inconnu de la CIBLE, cochée par défaut, rendait l'invitation illisible (codeInvalid).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { exportableColumns, exportDrift, sentType, unsentColumns } from '../../js/engine/logic/exports.js';
 import { readSchema } from '../../js/engine/port.js';
 import { saveChosenExport } from '../../js/engine/source/export.js';
-import { invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { checkDestinations, readInvitation } from '../../js/engine/target/receive.js';
-import { fakeDoc, fakeWorld } from './engine-fake.mjs';
+import { checkDestinations } from '../../js/engine/target/receive.js';
+import { fakePair } from './engine-fake.mjs';
+import { engineAs, invite } from './engine-wire.mjs';
 
 const COLS = [
   { colId: 'Nom', type: 'Text' }, { colId: 'Photo', type: 'Blob', label: 'Signature binaire' }, { colId: 'Rang', type: 'PositionNumber' },
@@ -46,19 +45,14 @@ test('un export d\'avant qui envoyait un Blob : l\'écart le signale, « Modifie
 });
 
 test('SOURCE puis CIBLE : une colonne Blob cochée ne rend pas l\'invitation illisible', async () => {
-  const world = fakeWorld();
-  const source = fakeDoc({ docId: 'sourcedoc0001x', name: 'Annuaire', email: 'source@fake.local' });
-  const target = fakeDoc({ docId: 'targetdoc0002x', name: 'Réception', email: 'cible@fake.local' });
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
+  const { world, source, target } = fakePair('ty', { contacts: false });
+  const as = engineAs(world);
   source.addTable('Contacts', [{ id: 'Nom', type: 'Text' }, { id: 'Photo', type: 'Blob' }, { id: 'Rang', type: 'PositionNumber' }], [{ Nom: 'Alice', Rang: 1.5 }]);
   as(source);
   const saved = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom', 'Photo', 'Rang'], filter: null }] });
   assert.deepEqual(saved.tables[0].columns.map(c => [c.id, c.type]), [['Nom', 'Text'], ['Rang', 'Numeric']], 'le Blob coché ne part pas');
-  const { entry, secret } = await startInvitation(saved.created);
-  const { code } = await invitationCode(saved.created, entry, secret);
   assert.ok((await readSchema()).has('Synchro'));
-  as(target);
-  const invitation = await readInvitation(code);
+  const { invitation } = await invite({ world, target, exp: saved.created });
   assert.deepEqual(invitation.tables[0].columns.map(c => [c.id, c.type]), [['Nom', 'Text'], ['Rang', 'Numeric']]);
   const { existing } = await checkDestinations(invitation, invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' })));
   assert.deepEqual(existing, []);

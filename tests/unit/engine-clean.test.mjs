@@ -3,21 +3,18 @@
 // scellées et ordonnent encore les versions). Rien ne se fait seul.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { BEFORE_COL, DATA_COL, EXPORT_COL, KEY_COL, KIND, LOT_COL, SCHEMA_COL, SEAL_COL, STATE_COL, TABLE_COL, TYPE_COL } from '../../js/engine/logic/common.js';
 import { signText } from '../../js/engine/logic/trust.js';
 import { cleanPlan } from '../../js/engine/logic/clean.js';
 import { addEvent, clearEvents, eventsOf, vanishedRecipients } from '../../js/engine/logic/notes.js';
 import { readSchema } from '../../js/engine/port.js';
 import { readSourceNote, syncRows, updateSourceNote } from '../../js/engine/source/synchro.js';
-import { saveChosenExport } from '../../js/engine/source/export.js';
-import { approveReply, checkReply, invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { createReception, readInvitation, receptionReply } from '../../js/engine/target/receive.js';
 import { cleanJournal } from '../../js/engine/target/clean.js';
 import { clearExportHistory } from '../../js/engine/source/history.js';
 import { consolidateAll } from '../../js/engine/target/loop.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { fakePair } from './engine-fake.mjs';
+import { engineAs, exportAnnuaire, wireReception } from './engine-wire.mjs';
 
 test('cleanPlan : l\'avant des états montrés et les valeurs des clés parties, rien en Échange', () => {
   const row = (id, key, extra) => ({ id, Synchro_Table: 'T', [KEY_COL]: key, MajLe: id, ...extra });
@@ -53,18 +50,9 @@ test('clearEvents : rien de montré, des repères pour les destinataires disparu
 // Une SOURCE et une CIBLE branchées, un lot signé reçu et recopié.
 async function copied() {
   const { world, source, target } = fakePair('cl');
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
-  as(source);
-  const { created: exp } = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom'], filter: null }] });
-  const { entry, secret } = await startInvitation(exp);
-  const { code } = await invitationCode(exp, entry, secret);
-  as(target);
-  const invitation = await readInvitation(code);
-  const made = await createReception(invitation, invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' })), { reserve: true, options: {} });
-  const { code: reply } = await receptionReply(made, world.formLink(target, made.journal));
-  as(source);
-  const accepted = await checkReply(exp, entry, reply);
-  await approveReply(exp, entry, accepted);
+  const as = engineAs(world);
+  const exp = await exportAnnuaire(world, source);
+  const { made, accepted } = await wireReception({ world, source, target, exp, dest: 'Annuaire_recu', check: false, receive: { reserve: true, options: {} } });
   const lotRow = (await syncRows()).find(r => r[TYPE_COL] === KIND.lot && r[TABLE_COL] === 'Contacts');
   const send = async (lines) => {
     const row = { [EXPORT_COL]: exp.id, [TABLE_COL]: 'Contacts', [TYPE_COL]: KIND.lot, [SCHEMA_COL]: lotRow[SCHEMA_COL] };

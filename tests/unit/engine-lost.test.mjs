@@ -3,15 +3,13 @@
 // widget ne repart plus de zéro sans rien dire. Deux documents en mémoire (engine-fake.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startEngine } from '../../js/engine/index.js';
 import { readSchema } from '../../js/engine/port.js';
-import { saveChosenExport } from '../../js/engine/source/export.js';
-import { invitationCode, startInvitation } from '../../js/engine/source/invite.js';
-import { createReception, readInvitation } from '../../js/engine/target/receive.js';
+import { createReception } from '../../js/engine/target/receive.js';
 import { dismissLost, markReceptions, readLost } from '../../js/engine/target/lost.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
 import { readMark } from '../../js/engine/logic/lost.js';
 import { fakePair } from './engine-fake.mjs';
+import { engineAs, exportAnnuaire, invite } from './engine-wire.mjs';
 
 // Une CIBLE qui a une table `Annuaire_recu` sur sa page, puis une autre page, et qui reçoit un export.
 async function reception({ arrange }) {
@@ -23,16 +21,11 @@ async function reception({ arrange }) {
   const other = target.apply([['AddRecord', '_grist_Views', null, { name: 'Autre page' }]]).retValues[0];
   target.apply([['AddRecord', '_grist_Pages', null, { viewRef: view, shareRef: 0, indentation: 0, pagePos: 1 }],
     ['AddRecord', '_grist_Pages', null, { viewRef: other, shareRef: 0, indentation: 0, pagePos: 2 }]]);
-  const as = doc => startEngine({ port: world.port(doc), version: '9.9.9' });
-  as(source);
-  const { created: exp } = await saveChosenExport({ name: 'Annuaire', selection: [{ table: 'Contacts', columns: ['Nom'], filter: null }] });
-  const { entry, secret } = await startInvitation(exp);
-  const { code } = await invitationCode(exp, entry, secret);
-  as(target);
-  const invitation = await readInvitation(code);
+  const exp = await exportAnnuaire(world, source);
+  const { invitation } = await invite({ world, target, exp });
   const plans = invitation.tables.map(tb => ({ tb, dest: 'Annuaire_recu' }));
   const made = await createReception(invitation, plans, { reserve: true, options: {}, arrange });
-  return { target, made, as };
+  return { target, made, as: engineAs(world) };
 }
 
 const order = target => {
