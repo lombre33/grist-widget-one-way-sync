@@ -99,22 +99,31 @@ export function restyleOptionActions(schema, entry, columns) {
 export function planRules(schema, entry, columns, { replace = false } = {}) {
   const cols = schema.columns(entry.dest) || [];
   const here = new Map(cols.map(c => [c.colId, c]));
-  const byRow = new Map(cols.map(c => [c.id, c]));
   const map = entry.map || {};
-  const rename = id => (here.has(map[id] || id) ? map[id] || id : null);
-  const decided = new Set(entry.styled || []);
-  const own = new Set(Array.isArray(entry.own) ? entry.own : []);
+  const context = {
+    here, map, replace, byRow: new Map(cols.map(c => [c.id, c])),
+    rename: id => (here.has(map[id] || id) ? map[id] || id : null),
+    decided: new Set(entry.styled || []), own: new Set(Array.isArray(entry.own) ? entry.own : []),
+  };
   const todo = [];
   const settled = [];
   for (const c of destColumns(columns)) {
-    const rules = sentRules(c.opts).map(r => ({ formula: printRule(parseRule(r.when), rename), style: ruleStyle(r) })).filter(r => r.formula);
-    const column = here.get(map[c.id] || c.id);
-    if (!rules.length || !column || (!replace && (decided.has(c.id) || !own.has(c.id)))) continue;
-    const old = (Array.isArray(column.rules) ? column.rules.slice(1) : []).map(ref => (byRow.get(ref) || {}).colId).filter(Boolean);
-    if (!replace && (old.length || ruleStyles(column.widgetOptions).length)) settled.push(c.id);
-    else todo.push({ id: c.id, column, rules, old: replace ? old : [] });
+    const planned = planColumnRules(c, context);
+    if (!planned) continue;
+    if (planned.settled) settled.push(c.id);
+    else todo.push(planned.todo);
   }
   return { todo, settled };
+}
+
+// Les règles d'une colonne envoyée : à poser (`todo`) ou déjà là (`settled`) ; null quand la colonne n'est pas à traiter.
+function planColumnRules(c, { here, map, replace, byRow, rename, decided, own }) {
+  const rules = sentRules(c.opts).map(r => ({ formula: printRule(parseRule(r.when), rename), style: ruleStyle(r) })).filter(r => r.formula);
+  const column = here.get(map[c.id] || c.id);
+  if (!rules.length || !column || (!replace && (decided.has(c.id) || !own.has(c.id)))) return null;
+  const old = (Array.isArray(column.rules) ? column.rules.slice(1) : []).map(ref => (byRow.get(ref) || {}).colId).filter(Boolean);
+  if (!replace && (old.length || ruleStyles(column.widgetOptions).length)) return { settled: true };
+  return { todo: { id: c.id, column, rules, old: replace ? old : [] } };
 }
 
 // Première étape de la pose des règles : les colonnes cachées d'ici à retirer, puis une règle vide par règle

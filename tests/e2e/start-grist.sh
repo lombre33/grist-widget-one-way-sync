@@ -7,6 +7,8 @@
 # Variante des tests de charge (tests/e2e/charge.mjs, CHAOS=1) : un second Grist derrière un mandataire qui
 # fait échouer les envois à volonté ; il écoute sur INTERNAL_PORT et le mandataire sur PORT :
 #   PORT=8494 INTERNAL_PORT=8493 CONTAINER=grist-sync-chaos ENV_FILE=.env-chaos.json tests/e2e/start-grist.sh
+# Second Grist ordinaire, à côté du premier (essai de montée de version tests/e2e/upgrade.mjs) :
+#   PORT=8494 CONTAINER=grist-sync-upg ENV_FILE=.env-upg.json tests/e2e/start-grist.sh
 # Variante « instance qui n'autorise pas les webhooks vers elle-même » (tests/e2e/tools/probe-webhook-refused.mjs) :
 #   PORT=8474 CONTAINER=grist-sync-refus ENV_FILE=.env-refus.json WEBHOOK_DOMAINS=example.com tests/e2e/start-grist.sh
 set -euo pipefail
@@ -17,8 +19,11 @@ ENV_FILE=${ENV_FILE:-.env.json}
 EMAIL=test@sync.local
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
+# Sans mandataire, Grist écoute sur PORT dans le conteneur aussi : ses envois de webhooks visent http://localhost:$PORT depuis l'intérieur.
+INSIDE_PORT=8484
+[ "$PORT" = "$INTERNAL_PORT" ] && INSIDE_PORT=$PORT
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-docker run -d --name "$CONTAINER" -p "$INTERNAL_PORT:8484" \
+docker run -d --name "$CONTAINER" -p "$INTERNAL_PORT:$INSIDE_PORT" -e PORT="$INSIDE_PORT" \
   -e GRIST_SESSION_SECRET=e2e-only-not-a-secret \
   -e GRIST_IN_SERVICE=true -e GRIST_DEFAULT_EMAIL="$EMAIL" -e GRIST_TEST_LOGIN=1 -e GRIST_ORG_IN_PATH=true \
   -e APP_HOME_URL="http://localhost:$PORT" \

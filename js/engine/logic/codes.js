@@ -71,17 +71,33 @@ export function validColumns(cols) {
 
 // `withOpts` : avec leur liste de choix et leur format (voir options.js), contrôlés. Les codes ne
 // les portent pas (ils resteraient courts) : la CIBLE les lit dans la description reçue au journal.
-export const exportSchema = (columns, withOpts = false) => columns.map(({ id, type, label, as, opts, link, list, visible, doc, desc, tdesc, fmt, pos, fx, fd }) => {
-  const kept = withOpts && opts ? columnOptions(type, opts, { extras: true }) : null;
-  const sourceDoc = withOpts ? docFormat(doc) : null; // langue et monnaie du document de la SOURCE (voir docformat.js)
-  // Référence conservée (voir links.js) : table visée et colonne qu'elle affichait, dans la SOURCE.
-  // `list` : la colonne désigne plusieurs lignes (Liste de références).
-  const aim = withOpts && isSafeId(link) ? { link, ...(isSafeId(visible) ? { visible } : {}), ...(list === true ? { list: true } : {}) } : {};
-  // Descriptions de la colonne et de la table (voir descriptions.js) : du texte, nettoyé et borné ; la clé dit que l'export les envoie.
-  const notes = withOpts ? { ...(fmt === true ? { fmt } : {}), ...(typeof desc === 'string' ? { desc: cleanNote(desc) } : {}), ...(typeof tdesc === 'string' ? { tdesc: cleanNote(tdesc, TABLE_NOTE_MAX) } : {}), ...(isPos(pos) ? { pos } : {}),
-    ...(typeof fx === 'string' ? { fx: cleanFormula(fx) } : {}), ...(typeof fd === 'string' && cleanFormula(fd) ? { fd: cleanFormula(fd) } : {}) } : {}; // formules : voir column-formulas.js
-  return { id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}), ...aim, ...(kept ? { opts: kept } : {}), ...(sourceDoc ? { doc: sourceDoc } : {}), ...notes };
-});
+export const exportSchema = (columns, withOpts = false) => columns.map(column => schemaColumn(column, withOpts));
+
+// Référence conservée (voir links.js) : table visée et colonne qu'elle affichait, dans la SOURCE.
+// `list` : la colonne désigne plusieurs lignes (Liste de références).
+const schemaAim = ({ link, visible, list }) => (isSafeId(link) ? { link, ...(isSafeId(visible) ? { visible } : {}), ...(list === true ? { list: true } : {}) } : {});
+
+// Descriptions de la colonne et de la table (voir descriptions.js) : du texte, nettoyé et borné ; la clé dit que l'export les envoie.
+// Mise en forme (`fmt`), rang dans la page (`pos`), formules (voir column-formulas.js). L'ordre des clés est celui du texte signé.
+function schemaNotes({ desc, tdesc, fmt, pos, fx, fd }) {
+  return {
+    ...(fmt === true ? { fmt } : {}),
+    ...(typeof desc === 'string' ? { desc: cleanNote(desc) } : {}),
+    ...(typeof tdesc === 'string' ? { tdesc: cleanNote(tdesc, TABLE_NOTE_MAX) } : {}),
+    ...(isPos(pos) ? { pos } : {}),
+    ...(typeof fx === 'string' ? { fx: cleanFormula(fx) } : {}),
+    ...(typeof fd === 'string' && cleanFormula(fd) ? { fd: cleanFormula(fd) } : {}),
+  };
+}
+
+function schemaColumn(column, withOpts) {
+  const { id, type, label, as, opts } = column;
+  const head = { id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}) };
+  if (!withOpts) return head;
+  const kept = opts ? columnOptions(type, opts, { extras: true }) : null;
+  const docInfo = docFormat(column.doc); // langue et monnaie du document de la SOURCE (voir docformat.js)
+  return { ...head, ...schemaAim(column), ...(kept ? { opts: kept } : {}), ...(docInfo ? { doc: docInfo } : {}), ...schemaNotes(column) };
+}
 
 const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from[k] ?? '').slice(0, 200)]));
 
@@ -290,22 +306,29 @@ export function parsePageAddress(text) {
     return null;
   }
   if (!['http:', 'https:'].includes(url.protocol)) return null;
-  const parts = url.pathname.split('/').filter(Boolean).map((part) => {
-    try {
-      return decodeURIComponent(part);
-    } catch (e) {
-      return '';
-    }
-  });
+  const found = addressParts(url.pathname.split('/').filter(Boolean).map(decoded));
+  if (!TEAM_ID.test(found.docId) || (found.team && !TEAM_ID.test(found.team))) return null;
+  const name = found.slug === 'document' ? '' : cleanLabel(found.slug.replace(/-+/g, ' '));
+  return { origin: url.origin, team: found.team, docId: found.docId, name };
+}
+
+function decoded(part) {
+  try {
+    return decodeURIComponent(part);
+  } catch (e) {
+    return '';
+  }
+}
+
+// Équipe, identifiant et nom (tel que Grist l'écrit) d'un chemin d'adresse de page ; le nom manque après `/doc/` et quand la suite
+// est `/p/<page>`.
+function addressParts(parts) {
   const team = parts[0] === 'o' ? parts[1] || '' : '';
   const rest = parts.slice(parts[0] === 'o' ? 2 : 0);
   const plain = rest[0] === 'doc';
-  const docId = (plain ? rest[1] : rest[0]) || '';
   const after = rest.slice(plain ? 2 : 1);
-  const slug = plain || (after[0] === 'p' && /^\d+$/.test(after[1] || '')) ? '' : after[0] || '';
-  if (!TEAM_ID.test(docId) || (team && !TEAM_ID.test(team))) return null;
-  const name = slug === 'document' ? '' : cleanLabel(slug.replace(/-+/g, ' '));
-  return { origin: url.origin, team, docId, name };
+  const page = after[0] === 'p' && /^\d+$/.test(after[1] || '');
+  return { team, docId: (plain ? rest[1] : rest[0]) || '', slug: plain || page ? '' : after[0] || '' };
 }
 
 // Deux identifiants du même document : l'adresse d'une page porte l'identifiant court (au moins 12 caractères, règle de Grist) ou

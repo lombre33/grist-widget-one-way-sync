@@ -2,7 +2,7 @@
 // des lignes visées, cellules complétées à l'arrivée de la ligne visée.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideLinks, fillLinks, keyIds, linkActions, linkOffers, linkTables, linkable, planLinks, refKey, refOf, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/engine/logic/links.js';
+import { decideLinks, fillLinks, keyIds, linkActions, linkOffers, linkTables, planLinks, refKey, refOf, resolveLinks, targetRows, textFill, unlinkActions } from '../../js/engine/logic/links.js';
 import { exportSchema } from '../../js/engine/logic/codes.js';
 import { exportRowsActions } from '../../js/engine/logic/exports.js';
 import { syncFormulas } from '../../js/engine/logic/formulas.js';
@@ -10,6 +10,8 @@ import { LINK_PREFIX, SCHEMA_COL, TYPE_COL } from '../../js/engine/logic/common.
 
 const col = (id, extra = {}) => ({ id, type: 'Text', label: id, source: 'Text', visible: '', ...extra });
 const lieu = col('Lieu', { source: 'Ref:Villes', visible: 'Nom' });
+// Une colonne Référence de l'export garde-t-elle son lien quand on les garde toutes ?
+const linkable = tables => linkTables(tables, true).some(tb => tb.columns.some(c => c.link));
 const SOURCE = [
   { table: 'Contacts', columns: [col('Nom'), lieu], filter: null },
   { table: 'Villes', columns: [col('Nom'), col('Pays')], filter: null },

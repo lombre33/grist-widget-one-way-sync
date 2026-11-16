@@ -13,11 +13,12 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 // Le widget servi en local. L'instance de test est ajoutée à la liste des instances autorisées (config.js) et à la
 // politique de sécurité (index.html), comme le ferait une instance qui héberge sa propre copie. `adjust(chemin,
 // corps)` rend le corps à servir : un essai y change une constante (un budget, un délai) quand son scénario l'exige.
-export async function serveWidget({ env, port, adjust = (path, body) => body, news = () => false }) {
+// `root` : le dossier servi (le dépôt d'ici par défaut ; l'essai de montée de version y met l'Alpha extraite de git).
+export async function serveWidget({ env, port, root = ROOT, adjust = (path, body) => body, news = () => false }) {
   const server = createServer(async (req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     try {
-      let body = await readFile(join(ROOT, path));
+      let body = await readFile(join(root, path));
       if (path === '/index.html') body = String(body).replaceAll('https://grist.numerique.gouv.fr', `${env.grist} https://grist.numerique.gouv.fr`);
       if (path === '/js/config.js') body = String(body).replace('GRIST_ORIGINS = [', `GRIST_ORIGINS = ['${env.grist}', `);
       res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });

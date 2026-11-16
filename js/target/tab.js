@@ -144,17 +144,22 @@ export async function renderTarget(root = container, { periodic = false } = {}) 
   const groups = await receivedGroups(schema, owner || state.viewer);
   const out = el('div', { class: 'out' }, lastNotice());
   await prepareReceptions(groups, { owner, periodic }, out);
-  const cards = groups.map(safeCard);
-  redraw(container, [targetToolbar(groups, out),
+  redraw(container, targetPage(groups, groups.map(safeCard), { owner, out }));
+  if (!state.readOnly) await openPending(groups, periodic);
+  // « Accepter une invitation » demandé juste avant le rechargement que la pose des règles d'accès de Synchro a causé (Échange).
+  if (!periodic && !state.readOnly && wizardAsked('reception', { consume: true }) && !document.querySelector('.scrim')) receiveWizard(null, renderTarget);
+}
+
+// L'écran de Recevoir : barre d'actions, avis, réceptions (ou ce qui explique qu'il n'y en a pas), aide.
+function targetPage(groups, cards, { owner, out }) {
+  const empty = el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty'));
+  return [targetToolbar(groups, out),
     state.readOnly ? message('warn', t('common.readonly')) : null,
     owner ? rulesRefusedNotice() : null,
     out,
     lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
-    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small', title: t('recv.auto.detail') }, t('recv.auto'))) : el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty')),
-    roleGuide({ you: 'target' })].filter(Boolean));
-  if (!state.readOnly) await openPending(groups, periodic);
-  // « Accepter une invitation » demandé juste avant le rechargement que la pose des règles d'accès de Synchro a causé (Échange).
-  if (!periodic && !state.readOnly && wizardAsked('reception', { consume: true }) && !document.querySelector('.scrim')) receiveWizard(null, renderTarget);
+    cards.length ? el('div', { class: 'cards' }, cards, el('p', { class: 'muted small', title: t('recv.auto.detail') }, t('recv.auto'))) : empty,
+    roleGuide({ you: 'target' })].filter(Boolean);
 }
 
 // Ouvre seul, une fois par chargement : l'assistant d'une réception qui attend son lien, sinon la

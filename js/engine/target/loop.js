@@ -256,6 +256,22 @@ async function noteArrivals(journal, note, { plan, forged, flood }) {
 // les colonnes recopiées, leurs types, les colonnes de pièces jointes et celles qui sont des
 // Références vers une table reçue (`links`, voir linkColumns).
 async function prepareColumns(ctx, noted, tableRows) {
+  const base = await addColumns(ctx, noted, tableRows);
+  const { received, dropped, kept, made, own } = base;
+  await refreshColumnOptions(ctx, base, tableRows);
+  const { linked, laid, formulas } = await decideColumns(ctx, base, tableRows);
+  const structure = ctx.exchange ? null : structureChanges({ ...laid, own }, { held: received.held, all: received.all, described: hasSchema(tableRows), here: ctx.schema.columns(received.entry.dest) });
+  // Un clic sur « Appliquer » : les avis sont vus (voir acknowledged), et les colonnes créées à l'instant se remplissent.
+  const ack = ctx.approve ? acknowledged(laid, structure) : laid.ack;
+  const entry = { ...laid, ...(ack ? { ack } : {}), sends: received.sends.length ? received.sends : undefined, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
+  const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
+  const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
+  const created = ctx.approve ? made.map(id => ({ from: id, to: (received.entry.map || {})[id] || id })) : [];
+  return { entry, dropped, copyCols, types, formulas, structure: ctx.approve ? null : structure, created, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs, relinkable: linked.text };
+}
+
+// Les colonnes qui arrivent, celles effacées ici et celles qui manquent à la destination, ajoutées tout de suite.
+async function addColumns(ctx, noted, tableRows) {
   // La réception demande l'accord (`ask`) : les colonnes arrivées après coup attendent un clic (voir structure.js).
   const received = receivedColumns(noted, tableRows, ctx.schema, ctx.allowedFor(noted.dest), Math.floor(nowS()), { hold: ctx.ask && !ctx.approve });
   const dropped = ctx.exchange ? [] : droppedColumns(received.entry, received.sent, ctx.schema.columns(received.entry.dest).map(c => c.colId));
@@ -267,8 +283,12 @@ async function prepareColumns(ctx, noted, tableRows) {
     await apply(added);
     ctx.schema = await readSchema();
   }
-  // Choix ajoutés à la SOURCE, format d'une colonne créée avant l'arrivée de sa description ; ou, sur
-  // demande (« Reprendre la mise en forme »), le style de chaque colonne reçue remis sur celui de la SOURCE.
+  return { received, dropped, kept, made, own };
+}
+
+// Choix ajoutés à la SOURCE, format d'une colonne créée avant l'arrivée de sa description ; ou, sur
+// demande (« Reprendre la mise en forme »), le style de chaque colonne reçue remis sur celui de la SOURCE.
+async function refreshColumnOptions(ctx, { received, kept, own }, tableRows) {
   const again = ctx.restyle || {}; // « Reprendre depuis la SOURCE » : les éléments à reprendre ({ style, notes, table, formulas })
   const options = (again.style ? restyleOptionActions : optionActions)(ctx.schema, { ...received.entry, own }, kept);
   if (options.length) {
@@ -281,6 +301,11 @@ async function prepareColumns(ctx, noted, tableRows) {
     await apply(values);
     ctx.schema = await readSchema();
   }
+}
+
+// Ce que la SOURCE décide pour les colonnes reçues, dans l'ordre : références, mise en forme, descriptions, ordre de la page, formules.
+async function decideColumns(ctx, { received, kept, own }, tableRows) {
+  const again = ctx.restyle || {};
   const linked = await linkColumns(ctx, { ...received.entry, own }, kept, tableRows, { relink: Boolean(again.links) });
   // Règles de mise en forme conditionnelle de la SOURCE (reconstruites, jamais copiées), et sa langue.
   const styled = await styleColumns(ctx, linked.entry, kept, { replace: Boolean(again.style) });
@@ -290,14 +315,7 @@ async function prepareColumns(ctx, noted, tableRows) {
   const laid = await layoutColumns(ctx, described, destColumns(kept), { replace: Boolean(again.layout) });
   // Formules de colonne : lues à chaque passage (la carte les montre), posées seulement sur « Reprendre depuis la SOURCE ».
   const formulas = await formulaColumns(ctx, laid, kept, { replace: Boolean(again.formulas) });
-  const structure = ctx.exchange ? null : structureChanges({ ...laid, own }, { held: received.held, all: received.all, described: hasSchema(tableRows), here: ctx.schema.columns(received.entry.dest) });
-  // Un clic sur « Appliquer » : les avis sont vus (voir acknowledged), et les colonnes créées à l'instant se remplissent.
-  const ack = ctx.approve ? acknowledged(laid, structure) : laid.ack;
-  const entry = { ...laid, ...(ack ? { ack } : {}), sends: received.sends.length ? received.sends : undefined, ...(received.doc ? { sourceDoc: received.doc } : {}), refs: destRefs(ctx.schema, received.entry.dest), dropped: dropped.length ? dropped.map(([, to]) => to) : undefined };
-  const copyCols = copyColumns(received.sent.map(c => c.id), ctx.schema.columns(entry.dest), entry.map);
-  const types = Object.fromEntries(received.sent.map(c => [c.id, c.type]));
-  const created = ctx.approve ? made.map(id => ({ from: id, to: (received.entry.map || {})[id] || id })) : [];
-  return { entry, dropped, copyCols, types, formulas, structure: ctx.approve ? null : structure, created, fileCols: copyCols.filter(([from]) => types[from] === 'Attachments'), links: linked.specs, relinkable: linked.text };
+  return { linked, laid, formulas };
 }
 
 // Références conservées (voir links.js) : une colonne que la SOURCE envoie comme Référence ou Liste de références
@@ -364,11 +382,22 @@ async function copyTable(ctx, noted) {
     return { entry, stats: { added: 0, updated: 0, removed: 0 }, copyCols, types, dropped, links, formulas, structure: { held: [], gone: [], retyped: [], ...structure, adoption },
       numbers: rowNumbers(destRows), drift: [], pending: [], gaps: [], files: null, wrote: false };
   }
+  const fill = fillWrites(ctx, entry, { tableRows, rows, destRows, fileCols, present, links, lookups, created });
+  const destChanged = await writeTable(ctx, entry, plan, fill);
+  if (plan.actions.length || destChanged) settled.delete(key);
+  else settled.set(key, { signature, at: Date.now(), dest: entry.dest, deps: links.map(s => s.target) });
+  const after = destChanged ? await fetchRows(entry.dest) : destRows;
+  const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public', plan.waiting);
+  rememberRead(ctx, key, { rows, after, copyCols, plan, files });
+  return { entry: { ...entry, waiting: files.waiting, ...(adopting === 'mark' ? { adopted: true } : {}) }, stats: plan.stats, copyCols, types, dropped, links, relinkable, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
+}
+
+// Cellules à compléter en même temps que la recopie. Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui
+// arrivent ensuite complètent les cellules (fillActions). Pas en Échange : une version n'y est écrite qu'avec tous ses fichiers (voir
+// `waiting`), une cellule complétée repartirait comme une modification d'ici.
+function fillWrites(ctx, entry, { tableRows, rows, destRows, fileCols, present, links, lookups, created }) {
   const presentKeys = new Set([...present.keys()].map(short));
-  // Pièces jointes : la recopie écrit les fichiers que le document a déjà ; ceux qui arrivent ensuite
-  // complètent les cellules (fillActions). Pas en Échange : une version n'y est écrite qu'avec tous ses
-  // fichiers (voir `waiting`), une cellule complétée repartirait comme une modification d'ici.
-  const fill = [
+  return [
     ...(ctx.exchange ? [] : fillActions({
       journalRows: tableRows, destRows, copyCols: fileCols, present, destTable: entry.dest, arrived: new Set((entry.waiting || []).filter(k => presentKeys.has(k))),
     })),
@@ -376,16 +405,14 @@ async function copyTable(ctx, noted) {
     // Colonnes que la personne vient d'accepter (voir structure.js) : leurs valeurs, déjà reçues, y sont mises.
     ...backfillActions({ journalRows: rows, destRows, specs: created, destTable: entry.dest }),
   ];
-  const destChanged = await writeTable(ctx, entry, plan, fill);
-  if (plan.actions.length || destChanged) settled.delete(key);
-  else settled.set(key, { signature, at: Date.now(), dest: entry.dest, deps: links.map(s => s.target) });
-  const after = destChanged ? await fetchRows(entry.dest) : destRows;
-  const files = filesSummary(tableRows, fileCols, present, ctx.mode === 'public', plan.waiting);
+}
+
+// Ce que la destination montre après la recopie : numéros de ligne, retouches à la main, lignes en attente, écarts d'un refus, fichiers.
+function rememberRead(ctx, key, { rows, after, copyCols, plan, files }) {
   lastRead.set(key, {
     numbers: rowNumbers(after), drift: manualEdits({ journalRows: rows, destRows: after, copyCols, exchange: ctx.exchange, except: plan.gone }),
     pending: plan.pending, gaps: ctx.review ? refusedGaps({ journalRows: rows, destRows: after, copyCols }) : [], files: files.card,
   });
-  return { entry: { ...entry, waiting: files.waiting, ...(adopting === 'mark' ? { adopted: true } : {}) }, stats: plan.stats, copyCols, types, dropped, links, relinkable, formulas, structure, wrote: plan.actions.length > 0, ...lastRead.get(key) };
 }
 
 // Pour chaque table d'ici visée par une Référence : ses lignes (voir targetRows).

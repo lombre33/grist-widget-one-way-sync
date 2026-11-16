@@ -18,3 +18,4 @@ node_modules/
 dist/
 tests/e2e/.env*.json
 tests/e2e/echec.png
+tests/e2e/echec-upgrade.png

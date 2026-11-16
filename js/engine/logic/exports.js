@@ -165,14 +165,20 @@ const SYNC_FIELDS = [EXPORT_COL, TABLE_COL, TYPE_COL, SCHEMA_COL, RESEND_COL];
 
 // Valeur de Synchro_Colonnes voulue pour chaque type de ligne d'une table : ses colonnes, ou son
 // filtre (ligne 'filtre', seulement s'il y en a un).
-const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(({ id, type, label, source, visible, as, opts, link, list, fmt, doc, desc, tdesc, pos, fx, fd }) => ({
-  id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(link && list === true ? { list: true } : {}), ...(opts && withOpts ? { opts } : {}),
-  ...(fmt && withOpts ? { fmt: true } : {}), ...(doc && withOpts ? { doc } : {}),
-  ...(typeof desc === 'string' && withOpts ? { desc } : {}), ...(typeof tdesc === 'string' && withOpts ? { tdesc } : {}),
-  ...(isPos(pos) && withOpts ? { pos } : {}),
-  ...(typeof fx === 'string' && withOpts ? { fx } : {}),
-  ...(typeof fd === 'string' && fd && withOpts ? { fd } : {}),
-})));
+// Ce qui s'ajoute à une colonne quand l'export envoie format et descriptions (`withOpts`) ; l'ordre des clés est celui du texte.
+const textExtras = ({ opts, fmt, doc, desc, tdesc, pos, fx, fd }) => ({
+  ...(opts ? { opts } : {}), ...(fmt ? { fmt: true } : {}), ...(doc ? { doc } : {}),
+  ...(typeof desc === 'string' ? { desc } : {}), ...(typeof tdesc === 'string' ? { tdesc } : {}),
+  ...(isPos(pos) ? { pos } : {}),
+  ...(typeof fx === 'string' ? { fx } : {}),
+  ...(typeof fd === 'string' && fd ? { fd } : {}),
+});
+const columnText = (column, withOpts) => {
+  const { id, type, label, source, visible, as, link, list } = column;
+  const head = { id, type, label, source, visible, ...(as ? { as } : {}), ...(link ? { link } : {}), ...(link && list === true ? { list: true } : {}) };
+  return withOpts ? { ...head, ...textExtras(column) } : head;
+};
+const schemaText = (columns, withOpts = true) => JSON.stringify(columns.map(column => columnText(column, withOpts)));
 // Avec un filtre de lignes, la liste des choix d'une colonne ne part pas : elle montrerait des
 // valeurs de lignes que le filtre retient pas. Le format part ; la CIBLE complète sa liste des
 // valeurs qu'elle reçoit (voir receivedChoices).
@@ -365,7 +371,6 @@ export function hookErrorKey(h, now = Date.now()) {
 
 // Lien de réception mort (clé de formulaire inconnue, réception arrêtée) : l'envoi échoue et échouera toujours.
 export const DEAD_KEYS = ['send.error.link', 'send.error.journal'];
-export const deadLink = h => h.fields.enabled && hookStatus(h)[0] === 'error' && DEAD_KEYS.includes(hookErrorKey(h));
 
 // Pourquoi le widget met ce destinataire en pause d'office : 'link' (lien ou journal mort), 'slow' (un envoi attend
 // une réponse qui ne vient pas : Grist n'a pas de délai, vu au test de charge, 20 minutes sans reprise et la file

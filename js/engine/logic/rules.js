@@ -29,148 +29,178 @@ const WORDS = new Set(['and', 'or', 'not', 'in', 'is', 'True', 'False', 'None', 
 class Refused extends Error {}
 const refuse = () => { throw new Refused('règle hors grammaire'); };
 
+// Un jeton, lu à partir de `i` : `[jeton, indice suivant]`. Tout ce qui n'est pas reconnu est refusé.
+function lexColumn(text, i) {
+  const name = WORD.exec(text.slice(i + 1));
+  if (!name || !COL_ID.test(name[0])) refuse();
+  return [{ type: 'col', value: name[0] }, i + 1 + name[0].length];
+}
+function lexNumber(text, i) {
+  const rest = text.slice(i);
+  const num = NUMBER.exec(rest);
+  if (!num || /^[A-Za-z_]/.test(rest.slice(num[0].length))) refuse();
+  return [{ type: 'num', value: num[0] }, i + num[0].length];
+}
+function lexString(text, i) {
+  const end = text.indexOf(text[i], i + 1);
+  const value = end < 0 ? '' : text.slice(i + 1, end);
+  if (end < 0 || value.length > STRING_MAX || /[\\"'\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200b-\u200f\u202a-\u202e\u2066-\u206f\ufeff]/.test(value)) refuse();
+  return [{ type: 'str', value }, end + 1];
+}
+function lexWord(text, i) {
+  const rest = text.slice(i);
+  const word = WORD.exec(rest)[0];
+  if (word === 'rec' && rest[3] === '.') {
+    const name = WORD.exec(rest.slice(4));
+    if (!name) refuse();
+    return [{ type: 'col', value: name[0] }, i + 4 + name[0].length];
+  }
+  if (!WORDS.has(word)) refuse();
+  return [{ type: 'word', value: word }, i + word.length];
+}
+function lexOperator(text, i) {
+  const rest = text.slice(i);
+  const op = OPERATORS.find(o => rest.startsWith(o));
+  if (!op) refuse();
+  return [{ type: 'op', value: op }, i + op.length];
+}
+function nextToken(text, i) {
+  const ch = text[i];
+  if (ch === '$') return lexColumn(text, i);
+  if (/[0-9]/.test(ch)) return lexNumber(text, i);
+  if (ch === '"' || ch === "'") return lexString(text, i);
+  if (/[A-Za-z_]/.test(ch)) return lexWord(text, i);
+  return lexOperator(text, i);
+}
+
 function tokens(text) {
   const out = [];
   let i = 0;
   while (i < text.length) {
-    const ch = text[i];
-    if (' \t\r\n'.includes(ch)) { i++; continue; }
-    const rest = text.slice(i);
-    if (ch === '$') {
-      const name = WORD.exec(rest.slice(1));
-      if (!name || !COL_ID.test(name[0])) refuse();
-      out.push({ type: 'col', value: name[0] });
-      i += 1 + name[0].length;
-    } else if (/[0-9]/.test(ch)) {
-      const num = NUMBER.exec(rest);
-      if (!num || /^[A-Za-z_]/.test(rest.slice(num[0].length))) refuse();
-      out.push({ type: 'num', value: num[0] });
-      i += num[0].length;
-    } else if (ch === '"' || ch === "'") {
-      const end = text.indexOf(ch, i + 1);
-      const value = end < 0 ? '' : text.slice(i + 1, end);
-      if (end < 0 || value.length > STRING_MAX || /[\\"'\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200b-\u200f\u202a-\u202e\u2066-\u206f\ufeff]/.test(value)) refuse();
-      out.push({ type: 'str', value });
-      i = end + 1;
-    } else if (/[A-Za-z_]/.test(ch)) {
-      const word = WORD.exec(rest)[0];
-      if (word === 'rec' && rest[3] === '.') {
-        const name = WORD.exec(rest.slice(4));
-        if (!name) refuse();
-        out.push({ type: 'col', value: name[0] });
-        i += 4 + name[0].length;
-      } else {
-        if (!WORDS.has(word)) refuse();
-        out.push({ type: 'word', value: word });
-        i += word.length;
-      }
-    } else {
-      const op = OPERATORS.find(o => rest.startsWith(o));
-      if (!op) refuse();
-      out.push({ type: 'op', value: op });
-      i += op.length;
-    }
+    if (' \t\r\n'.includes(text[i])) { i++; continue; }
+    const [token, next] = nextToken(text, i);
+    out.push(token);
+    i = next;
   }
   return out;
 }
 
-function parser(list) {
-  let at = 0;
-  let nodes = 0;
-  const peek = () => list[at];
-  const is = (type, value) => list[at] && list[at].type === type && (value === undefined || list[at].value === value);
-  const take = (type, value) => { if (!is(type, value)) refuse(); return list[at++]; };
-  const make = (node) => { if (++nodes > NODES_MAX) refuse(); return node; };
+const CONSTANTS = ['True', 'False', 'None'];
 
-  function literal() {
-    const minus = is('op', '-') && list[at++];
-    const tok = peek();
+// Lecture des jetons en arbre, du plus lâche (`or`) au plus serré (une valeur) ; `nodes` et `depth` bornent sa taille.
+class Parser {
+  constructor(list) {
+    this.list = list;
+    this.at = 0;
+    this.nodes = 0;
+  }
+  peek() { return this.list[this.at]; }
+  step() { return this.list[this.at++]; }
+  is(type, value) {
+    const tok = this.list[this.at];
+    return tok && tok.type === type && (value === undefined || tok.value === value);
+  }
+  take(type, value) {
+    if (!this.is(type, value)) refuse();
+    return this.step();
+  }
+  make(node) {
+    if (++this.nodes > NODES_MAX) refuse();
+    return node;
+  }
+  literal() {
+    const minus = this.is('op', '-') && this.step();
+    const tok = this.peek();
     if (!tok || (minus && tok.type !== 'num')) refuse();
-    if (tok.type === 'num') return make({ k: 'num', v: `${minus ? '-' : ''}${list[at++].value}` });
-    if (tok.type === 'str') return make({ k: 'str', v: list[at++].value });
-    if (tok.type === 'word' && ['True', 'False', 'None'].includes(tok.value)) return make({ k: 'const', v: list[at++].value });
+    if (tok.type === 'num') return this.make({ k: 'num', v: `${minus ? '-' : ''}${this.step().value}` });
+    if (tok.type === 'str') return this.make({ k: 'str', v: this.step().value });
+    if (tok.type === 'word' && CONSTANTS.includes(tok.value)) return this.make({ k: 'const', v: this.step().value });
     return refuse();
   }
-  function items() {
-    const close = take('op', is('op', '(') ? '(' : '[').value === '(' ? ')' : ']';
+  items() {
+    const close = this.take('op', this.is('op', '(') ? '(' : '[').value === '(' ? ')' : ']';
     const found = [];
-    while (!is('op', close)) {
-      found.push(literal());
+    while (!this.is('op', close)) {
+      found.push(this.literal());
       if (found.length > LIST_MAX) refuse();
-      if (is('op', ',')) at++;
-      else if (!is('op', close)) refuse();
+      if (this.is('op', ',')) this.at++;
+      else if (!this.is('op', close)) refuse();
     }
-    take('op', close);
+    this.take('op', close);
     return found;
   }
-  function atom(depth) {
+  atom(depth) {
     if (depth > DEPTH_MAX) refuse();
-    const tok = peek();
+    const tok = this.peek();
     if (!tok) return refuse();
-    if (tok.type === 'num') return make({ k: 'num', v: list[at++].value });
-    if (tok.type === 'str') return make({ k: 'str', v: list[at++].value });
-    if (tok.type === 'col') return make({ k: 'col', v: list[at++].value });
-    if (is('word', 'TODAY')) { at++; take('op', '('); take('op', ')'); return make({ k: 'today' }); }
-    if (tok.type === 'word' && ['True', 'False', 'None'].includes(tok.value)) return make({ k: 'const', v: list[at++].value });
-    if (is('op', '(')) { at++; const inner = or(depth + 1); take('op', ')'); return inner; }
+    if (tok.type === 'num') return this.make({ k: 'num', v: this.step().value });
+    if (tok.type === 'str') return this.make({ k: 'str', v: this.step().value });
+    if (tok.type === 'col') return this.make({ k: 'col', v: this.step().value });
+    if (this.is('word', 'TODAY')) { this.at++; this.take('op', '('); this.take('op', ')'); return this.make({ k: 'today' }); }
+    if (tok.type === 'word' && CONSTANTS.includes(tok.value)) return this.make({ k: 'const', v: this.step().value });
+    if (this.is('op', '(')) { this.at++; const inner = this.or(depth + 1); this.take('op', ')'); return inner; }
     return refuse();
   }
-  function unary(depth) {
-    if (is('op', '-')) { at++; return make({ k: 'neg', a: unary(depth + 1) }); }
-    return atom(depth);
+  unary(depth) {
+    if (this.is('op', '-')) { this.at++; return this.make({ k: 'neg', a: this.unary(depth + 1) }); }
+    return this.atom(depth);
   }
-  function binary(next, ops, depth) {
+  binary(next, ops, depth) {
     let left = next(depth);
-    while (list[at] && list[at].type === 'op' && ops.includes(list[at].value)) {
-      const op = list[at++].value;
-      left = make({ k: 'bin', op, a: left, b: next(depth) });
+    while (this.list[this.at] && this.list[this.at].type === 'op' && ops.includes(this.list[this.at].value)) {
+      const op = this.step().value;
+      left = this.make({ k: 'bin', op, a: left, b: next(depth) });
     }
     return left;
   }
-  const product = depth => binary(unary, ['*', '/'], depth);
-  const sum = depth => binary(product, ['+', '-'], depth);
-  function comparison(depth) {
-    const left = sum(depth);
-    if (list[at] && list[at].type === 'op' && COMPARE.has(list[at].value)) {
-      const op = list[at++].value;
-      return make({ k: 'cmp', op, a: left, b: sum(depth) });
+  product(depth) { return this.binary(d => this.unary(d), ['*', '/'], depth); }
+  sum(depth) { return this.binary(d => this.product(d), ['+', '-'], depth); }
+  comparison(depth) {
+    const left = this.sum(depth);
+    if (this.list[this.at] && this.list[this.at].type === 'op' && COMPARE.has(this.list[this.at].value)) {
+      const op = this.step().value;
+      return this.make({ k: 'cmp', op, a: left, b: this.sum(depth) });
     }
-    if (is('word', 'in') || (is('word', 'not') && list[at + 1] && list[at + 1].value === 'in')) {
-      const negated = is('word', 'not') && ++at;
-      take('word', 'in');
-      return make({ k: 'in', not: Boolean(negated), a: left, list: items() });
+    if (this.is('word', 'in') || (this.is('word', 'not') && this.list[this.at + 1] && this.list[this.at + 1].value === 'in')) {
+      const negated = this.is('word', 'not') && ++this.at;
+      this.take('word', 'in');
+      return this.make({ k: 'in', not: Boolean(negated), a: left, list: this.items() });
     }
-    if (is('word', 'is')) {
-      at++;
-      const negated = is('word', 'not') && ++at;
-      take('word', 'None');
-      return make({ k: 'isnone', not: Boolean(negated), a: left });
+    if (this.is('word', 'is')) {
+      this.at++;
+      const negated = this.is('word', 'not') && ++this.at;
+      this.take('word', 'None');
+      return this.make({ k: 'isnone', not: Boolean(negated), a: left });
     }
     return left;
   }
-  function not(depth) {
+  not(depth) {
     if (depth > DEPTH_MAX) refuse();
-    if (is('word', 'not')) { at++; return make({ k: 'not', a: not(depth + 1) }); }
-    return comparison(depth);
+    if (this.is('word', 'not')) { this.at++; return this.make({ k: 'not', a: this.not(depth + 1) }); }
+    return this.comparison(depth);
   }
-  function and(depth) {
-    let left = not(depth);
-    while (is('word', 'and')) { at++; left = make({ k: 'and', a: left, b: not(depth) }); }
+  and(depth) {
+    let left = this.not(depth);
+    while (this.is('word', 'and')) { this.at++; left = this.make({ k: 'and', a: left, b: this.not(depth) }); }
     return left;
   }
-  function or(depth) {
-    let left = and(depth);
-    while (is('word', 'or')) { at++; left = make({ k: 'or', a: left, b: and(depth) }); }
+  or(depth) {
+    let left = this.and(depth);
+    while (this.is('word', 'or')) { this.at++; left = this.make({ k: 'or', a: left, b: this.and(depth) }); }
     return left;
   }
-  return { run() { const tree = or(0); if (at !== list.length) refuse(); return tree; } };
+  run() {
+    const tree = this.or(0);
+    if (this.at !== this.list.length) refuse();
+    return tree;
+  }
 }
 
 // Arbre d'une règle, ou null si elle sort de la grammaire (texte trop long, jeton inconnu…).
 export function parseRule(text) {
   if (typeof text !== 'string' || !text.trim() || text.length > RULE_MAX) return null;
   try {
-    return parser(tokens(text.trim())).run();
+    return new Parser(tokens(text.trim())).run();
   } catch (e) {
     if (e instanceof Refused) return null;
     throw e;
@@ -202,26 +232,27 @@ function show(node, name, min = 0) {
   const text = body(node, name);
   return levelOf(node) < min ? `(${text})` : text;
 }
-function body(node, name) {
-  switch (node.k) {
-    case 'num': return node.v;
-    case 'str': return `"${node.v}"`;
-    case 'const': return node.v;
-    case 'col': return `$${name(node.v)}`;
-    case 'today': return 'TODAY()';
-    case 'neg': return `-${show(node.a, name, 7)}`;
-    case 'not': return `not ${show(node.a, name, 3)}`;
-    case 'and':
-    case 'or': return chain(node, node.k).map(operand => show(operand, name, 3)).join(` ${node.k} `);
-    case 'in': return `${show(node.a, name, 5)} ${node.not ? 'not in' : 'in'} [${node.list.map(v => show(v, name)).join(', ')}]`;
-    case 'isnone': return `${show(node.a, name, 5)} is ${node.not ? 'not ' : ''}None`;
-    case 'cmp': return `${show(node.a, name, 5)} ${node.op} ${show(node.b, name, 5)}`;
-    default: {
-      const wide = node.op === '+' || node.op === '-' ? 5 : 6;
-      return `${show(node.a, name, wide)} ${node.op} ${show(node.b, name, wide + 1)}`;
-    }
-  }
+const shown = (node, name) => show(node.a, name, 5);
+const joined = (node, name) => chain(node, node.k).map(operand => show(operand, name, 3)).join(` ${node.k} `);
+const SHOWERS = {
+  num: node => node.v,
+  str: node => `"${node.v}"`,
+  const: node => node.v,
+  col: (node, name) => `$${name(node.v)}`,
+  today: () => 'TODAY()',
+  neg: (node, name) => `-${show(node.a, name, 7)}`,
+  not: (node, name) => `not ${show(node.a, name, 3)}`,
+  and: joined,
+  or: joined,
+  in: (node, name) => `${shown(node, name)} ${node.not ? 'not in' : 'in'} [${node.list.map(v => show(v, name)).join(', ')}]`,
+  isnone: (node, name) => `${shown(node, name)} is ${node.not ? 'not ' : ''}None`,
+  cmp: (node, name) => `${shown(node, name)} ${node.op} ${show(node.b, name, 5)}`,
+};
+function showBinary(node, name) {
+  const wide = node.op === '+' || node.op === '-' ? 5 : 6;
+  return `${show(node.a, name, wide)} ${node.op} ${show(node.b, name, wide + 1)}`;
 }
+const body = (node, name) => (Object.hasOwn(SHOWERS, node.k) ? SHOWERS[node.k] : showBinary)(node, name);
 
 // La formule d'un arbre, écrite par nous : seules des colonnes (`rename(nom)` rend leur nom dans le
 // document qui l'écrit, ou null si elle n'y est pas : la règle est alors laissée), des nombres, des

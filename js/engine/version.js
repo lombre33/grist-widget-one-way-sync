@@ -216,7 +216,13 @@
 //         n'est à refaire dans l'autre document, et de recharger la page. Ni port, ni nom de table, ni texte des formules de `Synchro` ne
 //         changent. Une liaison déjà branchée n'est pas concernée (les lots se lisent dans le journal, pas dans un code) : deux documents qui
 //         veulent se lier de nouveau doivent avoir la même version du widget, comme toujours.
-export const ENGINE_VERSION = '5.0.0';
+// 5.0.1 (16 novembre 2026, syncPlus 0.30.2, refonte de fond avant la Bêta) : correctif, sans ajout ni retrait. Douze fonctions du moteur
+//         (et quatre de l'écran) passaient les seuils de l'outil d'audit (81 lignes ou plus, complexité au-dessus de 15) : elles sont découpées sans rien changer à ce
+//         qu'elles rendent : `exportSchema`, `parsePageAddress`, `schemaText`, `planNotes`, `planFormulas`, `planRules`, `fillable`,
+//         `prepareColumns`, `copyTable` et le lecteur de règles de mise en forme (`tokens`, `parser`, `body` de `logic/rules.js`).
+//         Deux exports qu'aucun code n'appelait (`deadLink`, `linkable`) sont retirés. Port, tables, codes et texte des formules
+//         inchangés (`formulas-golden`) ; comparaison avant/après sur des centaines de milliers de cas (`exportSchema` 40 000, règles 200 000).
+export const ENGINE_VERSION = '5.0.1';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

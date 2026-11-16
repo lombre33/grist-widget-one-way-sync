@@ -190,26 +190,39 @@ function placed(column, kind, formula) {
 // déclenchement « sur les nouvelles lignes » (`state` : 'data' sans formule par défaut ici, 'other' une autre, 'same' déjà posée) ;
 // une colonne qui est de formule ici n'est pas transformée (`formulaHere`).
 export function planFormulas(schema, entry, columns, { tables = new Map(), replace = false } = {}) {
-  const cols = schema.columns(entry.dest) || [];
-  const here = new Map(cols.map(c => [c.colId, c]));
-  const own = new Set(Array.isArray(entry.own) ? entry.own : []);
-  const map = entry.map || {};
+  const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
+  const context = { entry, here, own: new Set(Array.isArray(entry.own) ? entry.own : []), map: entry.map || {}, tables, replace };
   const items = [];
   const actions = [];
   for (const c of formulaItems(columns)) {
-    const kind = hasText(c.fx) ? 'column' : 'default';
-    const formula = cleanFormula(kind === 'column' ? c.fx : c.fd);
-    const to = map[c.id] || c.id;
-    const column = here.get(to);
-    if (!formula || !column || to === KEY_COL) continue;
-    const problems = formulaProblems(formula, { here, map, tables });
-    if (!own.has(c.id)) problems.unshift({ code: 'notOwn', name: to });
-    if (kind === 'default' && column.isFormula) problems.unshift({ code: 'formulaHere', name: to });
-    const state = placed(column, kind, formula);
-    const ok = !problems.length;
-    const applied = replace && ok && state !== 'same';
-    if (applied) actions.push(['ModifyColumn', entry.dest, to, kind === 'column' ? { isFormula: true, formula } : { isFormula: false, formula, recalcWhen: 0 }]);
-    items.push({ id: c.id, to, label: c.label || c.id, formula, kind, state: applied ? 'same' : state, problems, ok, applied });
+    const planned = planFormula(c, context);
+    if (!planned) continue;
+    if (planned.action) actions.push(planned.action);
+    items.push(planned.item);
   }
   return { items, actions };
 }
+
+// Une formule envoyée : sa ligne pour la carte et, avec `replace` et sans objection, l'écriture qui la pose (null : la colonne n'existe pas ici).
+function planFormula(c, { entry, here, own, map, tables, replace }) {
+  const kind = hasText(c.fx) ? 'column' : 'default';
+  const formula = cleanFormula(kind === 'column' ? c.fx : c.fd);
+  const to = map[c.id] || c.id;
+  const column = here.get(to);
+  if (!formula || !column || to === KEY_COL) return null;
+  const problems = objections({ formula, kind, column, to, owned: own.has(c.id) }, { here, map, tables });
+  const state = placed(column, kind, formula);
+  const ok = !problems.length;
+  const applied = replace && ok && state !== 'same';
+  return { action: applied ? formulaWrite(entry.dest, to, kind, formula) : null, item: { id: c.id, to, label: c.label || c.id, formula, kind, state: applied ? 'same' : state, problems, ok, applied } };
+}
+
+// Ce qui s'oppose à poser la formule : sa lecture (formulaProblems), une colonne que le widget n'a pas créée, une colonne déjà de formule ici.
+function objections({ formula, kind, column, to, owned }, { here, map, tables }) {
+  const problems = formulaProblems(formula, { here, map, tables });
+  if (!owned) problems.unshift({ code: 'notOwn', name: to });
+  if (kind === 'default' && column.isFormula) problems.unshift({ code: 'formulaHere', name: to });
+  return problems;
+}
+
+const formulaWrite = (dest, to, kind, formula) => ['ModifyColumn', dest, to, kind === 'column' ? { isFormula: true, formula } : { isFormula: false, formula, recalcWhen: 0 }];

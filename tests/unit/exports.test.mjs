@@ -2,13 +2,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, deadLink, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
+  autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
   hookLabel, hookMemo, hookName, memoDoc, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/engine/logic/exports.js';
 import { hookDoc, hookShown } from '../../js/source/shown.js';
 import { sentColumns } from '../../js/engine/logic/journal.js';
 import { memoMatches } from '../../js/engine/logic/trust.js';
 import { EXPORT } from './fixtures.mjs';
+
+// Le lien est mort (clé inconnue, réception arrêtée) : le widget mettrait ce destinataire en pause d'office.
+const deadLink = h => autoPauseKind(h) === 'link';
 
 test('Échange : ligne \'echange\' de l\'export, colonnes avec leur nom dans l\'autre document', () => {
   const E = '0123456789abcdef';

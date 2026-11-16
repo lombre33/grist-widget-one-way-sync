@@ -64,6 +64,17 @@ export function sentElements(columns) {
 // `sections` : lignes de `_grist_Views_section` (nécessaires seulement pour la table).
 // Rend `actions` (à appliquer), `described` (colonnes décidées) et `tabled` (vrai si la table l'est).
 export function planNotes(schema, entry, columns, { replace = false, replaceTable = false, tableNote = null, sections = null } = {}) {
+  const forColumns = columnNotePlan(schema, entry, columns, replace);
+  const forTable = tableNotePlan(schema, entry, { replaceTable, tableNote, sections });
+  return { actions: [...forColumns.actions, ...forTable.actions], described: forColumns.described, tabled: forTable.tabled };
+}
+
+// Faut-il écrire `text` : remplacer ce qui est là s'il diffère (`replace`), sinon seulement remplir une description vide.
+const noteChange = (current, text, replace) => (replace ? (current || '') !== text : !current && Boolean(text));
+
+// Description de chaque colonne reçue : posée une fois si la colonne est de celles que le widget a créées et n'en a pas ; remplacée
+// par celle de la SOURCE avec `replace`.
+function columnNotePlan(schema, entry, columns, replace) {
   const here = new Map((schema.columns(entry.dest) || []).map(c => [c.colId, c]));
   const map = entry.map || {};
   const own = new Set(Array.isArray(entry.own) ? entry.own : []);
@@ -74,16 +85,22 @@ export function planNotes(schema, entry, columns, { replace = false, replaceTabl
     const column = here.get(map[c.id] || c.id);
     if (typeof c.desc !== 'string' || !column || (!replace && (done.has(c.id) || !own.has(c.id)))) continue;
     const text = cleanNote(c.desc);
-    if (replace ? (column.description || '') !== text : !column.description && text) actions.push(['UpdateRecord', '_grist_Tables_column', column.id, { description: text }]);
+    if (noteChange(column.description, text, replace)) actions.push(['UpdateRecord', '_grist_Tables_column', column.id, { description: text }]);
     if (text || replace) described.push(c.id);
   }
+  return { actions, described };
+}
+
+// Description de la table : celle de sa section de données brutes, posée quand elle est vide, remplacée avec `replaceTable`.
+function tableNotePlan(schema, entry, { replaceTable, tableNote, sections }) {
+  const actions = [];
   let tabled = Boolean(entry.tabled);
   const raw = (schema.table(entry.dest) || {}).rawViewSectionRef;
   const section = raw && typeof tableNote === 'string' && Array.isArray(sections) ? sections.find(s => s.id === raw) : null;
   if (section && (replaceTable || (!tabled && tableNote))) {
     const text = cleanNote(tableNote, TABLE_NOTE_MAX);
-    if (replaceTable ? (section.description || '') !== text : !section.description && text) actions.push(['UpdateRecord', '_grist_Views_section', raw, { description: text }]);
+    if (noteChange(section.description, text, replaceTable)) actions.push(['UpdateRecord', '_grist_Views_section', raw, { description: text }]);
     tabled = Boolean(text) || replaceTable;
   }
-  return { actions, described, tabled };
+  return { actions, tabled };
 }

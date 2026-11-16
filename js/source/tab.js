@@ -155,20 +155,9 @@ export async function refreshSource() {
 export async function renderSource(root = container, { periodic = false } = {}) {
   container = root;
   const state = await upgradeSource(await loadState());
+  const { access, open } = await readPublicAccess(state);
   // Règles d'accès du widget (voir syncRules) : Synchro réservée aux propriétaires, et lien public
-  // accordé aux exports partagés. Document lisible par lien public ? Vérifié à chaque affichage :
-  // tant qu'il l'est, le refus général posé par le widget reste en place, même sans export public ;
-  // le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même. Lien public réglé
-  // sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus rien. Réponse
-  // inconnue (null) : rien ne change.
-  const identity = await docIdentity();
-  here = identity.origin;
-  const access = await publicAccess(identity.baseUrl);
-  const open = access === null ? null : Boolean(access);
-  // Ce que l'écran montre du lien public, relu à chaque coup d'œil tant qu'il en dépend (voir tickFlows).
-  const facts = { note: state.note, exports: state.exports, access };
-  shownAccess = { base: identity.baseUrl, access, watch: !state.ownerOnly && watchesAccess(facts), waiting: !state.ownerOnly && waitsForAccess(facts) };
-  if (!state.ownerOnly && forgettable(facts)) updateSourceNote(clearStay).catch(console.warn); // lien fermé : le lien coupé est oublié
+  // accordé aux exports partagés.
   if (!periodic && !state.ownerOnly && await syncRules({ publicIds: state.exports.filter(e => e.public).map(e => e.id), open })) {
     reloading(container, renderSource);
     return;
@@ -176,12 +165,31 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   redraw(container, sourceView(state, access, open));
   // « Nouvel export » demandé juste avant le rechargement que les règles d'accès ont causé : l'assistant s'ouvre.
   if (!periodic && wizardAsked('export', { consume: true }) && !state.ownerOnly && !state.foreign && !blocksNew(state.lost)) run(null, container.querySelector('.out'), newExport);
-  if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
-  else if (state.exports.some(exp => exp.recipients.length) || shownAccess.watch) watchFlows(restMs());
+  watchSource(state);
   if (state.ownerOnly) return;
   resumeExchange(state);
   if (!periodic) askAboutSync(state);
   if (await checkHooks(state.exports.flatMap(exp => exp.recipients))) await renderSource(root, { periodic });
+}
+
+// Document lisible par lien public ? Vérifié à chaque affichage : tant qu'il l'est, le refus général posé par le widget reste en
+// place, même sans export public ; le widget n'en pose jamais un sur un document qu'il n'a pas partagé lui-même. Lien public réglé
+// sur Éditeur : les règles du widget, qui visent les lecteurs, ne protègent plus rien. Réponse inconnue (null) : rien ne change.
+async function readPublicAccess(state) {
+  const identity = await docIdentity();
+  here = identity.origin;
+  const access = await publicAccess(identity.baseUrl);
+  // Ce que l'écran montre du lien public, relu à chaque coup d'œil tant qu'il en dépend (voir tickFlows).
+  const facts = { note: state.note, exports: state.exports, access };
+  shownAccess = { base: identity.baseUrl, access, watch: !state.ownerOnly && watchesAccess(facts), waiting: !state.ownerOnly && waitsForAccess(facts) };
+  if (!state.ownerOnly && forgettable(facts)) updateSourceNote(clearStay).catch(console.warn); // lien fermé : le lien coupé est oublié
+  return { access, open: access === null ? null : Boolean(access) };
+}
+
+// Relecture de l'état d'envoi tant que quelque chose bouge, ou au rythme du repos s'il y a un destinataire ou un lien public à suivre.
+function watchSource(state) {
+  if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
+  else if (state.exports.some(exp => exp.recipients.length) || shownAccess.watch) watchFlows(restMs());
 }
 
 // Mise à niveau silencieuse du montage (colonnes de Synchro, dépendances de MajLe), puis
@@ -450,18 +458,21 @@ function errorText(h, syncCols) {
 // qu'un envoi bouge (voir tickFlows).
 function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
   const [status] = hookStatus(h);
-  const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
-  const failing = status === 'error';
-  const autoPaused = status === 'paused' ? note.pauses.find(p => p.hook === h.id && p.auto) : null;
-  // Vider la file ne règle ni un lien mort, ni un serveur qui n'en peut plus (l'envoi suivant échoue de la même
-  // façon) : la pause libère les autres destinataires, ou l'on attend (Grist retente seul).
-  const waits = failing && !columnFault(h.usage, syncCols) && NO_UNBLOCK.includes(hookErrorKey(h));
-  const { other, bad } = hookCheck(h.id);
   const slot = { pill: el('span', {}), lines: el('div', {}), syncCols, status };
   personSlots.set(h.id, slot);
   fillPerson(slot, h);
   return el('li', { class: 'person', 'data-memo': h.fields.memo || '' },
     el('div', { class: 'person-head' }, el('span', { class: 'person-who', title: personLabel(h) }, personWho(h)), slot.pill),
+    personNotices(exp, h, status, note),
+    slot.lines,
+    personActions(exp, h, { status, ownerOnly, out, syncCols }));
+}
+
+// Les avis d'une personne : adresse refusée, autre document, clé de signature absente, renforcement, pause.
+function personNotices(exp, h, status, note) {
+  const autoPaused = status === 'paused' ? note.pauses.find(p => p.hook === h.id && p.auto) : null;
+  const { other, bad } = hookCheck(h.id);
+  return [
     bad ? message('err', t('send.person.badAddress')) : null,
     other ? message('err', t('send.person.otherDoc', { doc: other })) : null,
     // Sans clé de signature : si le renforcement est possible, il est aussi la réparation (un envoi neuf, avec sa clé) ;
@@ -470,12 +481,20 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
     reinforceLine(exp, h),
     autoPaused ? message('info', t(autoPaused.why === 'slow' ? 'send.paused.slow' : 'send.paused.auto')) : null,
     status === 'paused' && !autoPaused ? message('info', t('send.paused.manual')) : null,
-    slot.lines,
-    el('div', { class: 'person-actions' },
-      reinforceable(exp, h) ? smallButton(t('send.renf.action'), 'key', () => run(null, out, () => reinforce(exp, h)), { disabled: ownerOnly }) : null,
-      status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
-      failing && !waits ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
-      action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' })));
+  ];
+}
+
+function personActions(exp, h, { status, ownerOnly, out, syncCols }) {
+  const action = (label, iconName, fn, options) => actionButton(label, iconName, fn, ownerOnly, out, options);
+  const failing = status === 'error';
+  // Vider la file ne règle ni un lien mort, ni un serveur qui n'en peut plus (l'envoi suivant échoue de la même
+  // façon) : la pause libère les autres destinataires, ou l'on attend (Grist retente seul).
+  const waits = failing && !columnFault(h.usage, syncCols) && NO_UNBLOCK.includes(hookErrorKey(h));
+  return el('div', { class: 'person-actions' },
+    reinforceable(exp, h) ? smallButton(t('send.renf.action'), 'key', () => run(null, out, () => reinforce(exp, h)), { disabled: ownerOnly }) : null,
+    status === 'paused' ? action(t('send.action.resume'), 'play', () => resume(exp, h, out)) : action(t('send.action.pause'), 'pause', () => pause(exp, h)),
+    failing && !waits ? action(t('send.action.unblock'), 'unblock', unblockQueue) : null,
+    action(t('send.action.revoke'), 'revoke', () => revoke(exp, h), { kind: 'btn-danger-text' }));
 }
 
 function fillPerson(slot, h) {

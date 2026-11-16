@@ -48,9 +48,6 @@ export const linkTables = (tables, on) => {
   }));
 };
 
-// Une colonne Référence de l'export pourrait-elle garder son lien ? (comme avant la 0.27)
-export const linkable = tables => tables.some(tb => tb.columns.some(c => aim(tables, c, false)));
-
 // SOURCE, étape Colonnes : ce que la personne peut décider pour chaque colonne Référence ou Liste de
 // références cochée, et les tables qu'il faut ajouter à l'export pour en garder le lien. `chosen` :
 // tables cochées à l'étape Tables ; `columnsOf(table)` : colonnes envoyables (exportableColumns) ;
@@ -219,15 +216,18 @@ export function resolveLinks(rows, specs, lookups) {
 // numéro) ; une retouche vers une ligne qui existe reste. Une Liste de références, si elle est vide, garde des éléments
 // qui ne sont plus là, ou s'il lui manque des lignes visées (arrivées depuis). Une colonne qu'on vient de refaire
 // (`relink`) reprend exactement la SOURCE : ce que Grist a laissé de l'ancien texte est remplacé ou vidé.
-function fillable(s, cell, want, live) {
-  if (s.list) {
-    const have = cellItems(cell);
-    const same = JSON.stringify(have) === JSON.stringify(want);
-    if (s.relink) return same ? undefined : listCell(want);
-    const stale = have.some(id => typeof id !== 'number' || !live.has(id));
-    const missing = have.length < want.length && have.every(id => want.includes(id));
-    return want.length && (!have.length || stale || missing) && !same ? listCell(want) : undefined;
-  }
+const fillable = (s, cell, want, live) => (s.list ? fillableList(s, cell, want, live) : fillableRef(s, cell, want, live));
+
+function fillableList(s, cell, want, live) {
+  const have = cellItems(cell);
+  const same = JSON.stringify(have) === JSON.stringify(want);
+  if (s.relink) return same ? undefined : listCell(want);
+  const stale = have.some(id => typeof id !== 'number' || !live.has(id));
+  const missing = have.length < want.length && have.every(id => want.includes(id));
+  return want.length && (!have.length || stale || missing) && !same ? listCell(want) : undefined;
+}
+
+function fillableRef(s, cell, want, live) {
   if (s.relink) {
     if (want) return want === cell ? undefined : want;
     return cell && !live.has(cell) ? 0 : undefined;
