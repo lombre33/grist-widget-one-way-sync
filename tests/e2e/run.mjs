@@ -745,7 +745,7 @@ try {
     await shot('28-source-historique', 'card');
     // Modifier l'export : on peut en sortir à chaque étape (Annuler, croix, Échap) sans aller jusqu'au bout. Après un changement,
     // la fenêtre « Quitter ? » propose d'abandonner ou d'enregistrer tel quel.
-    const autoCols = () => dialog().getByRole('checkbox', { name: 'Envoyer aussi les colonnes que j’ajouterai à ces tables' });
+    const autoCols = () => dialog().getByRole('checkbox', { name: 'Envoyer aussi les futures colonnes que j’ajouterai à ces tables' });
     const editColumns = async () => { await button('Modifier').click(); await dialogButton('Continuer').click(); await autoCols().waitFor(); };
     await editColumns();
     await page.keyboard.press('Escape');
@@ -1508,7 +1508,7 @@ try {
     await button('Modifier').click();
     await dialogButton('Continuer').click();
     await dialog().getByRole('checkbox', { name: 'Commune' }).first().check();
-    const auto = dialog().getByRole('checkbox', { name: 'Envoyer aussi les colonnes que j’ajouterai à ces tables' });
+    const auto = dialog().getByRole('checkbox', { name: 'Envoyer aussi les futures colonnes que j’ajouterai à ces tables' });
     assert.ok(!(await auto.isChecked()), 'décochée d\'emblée : une colonne ajoutée ne part pas sans accord');
     await auto.check();
     await dialogButton('Continuer').click();
