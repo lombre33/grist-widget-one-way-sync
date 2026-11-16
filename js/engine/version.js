@@ -220,8 +220,10 @@
 //         (et quatre de l'écran) passaient les seuils de l'outil d'audit (81 lignes ou plus, complexité au-dessus de 15) : elles sont découpées sans rien changer à ce
 //         qu'elles rendent : `exportSchema`, `parsePageAddress`, `schemaText`, `planNotes`, `planFormulas`, `planRules`, `fillable`,
 //         `prepareColumns`, `copyTable` et le lecteur de règles de mise en forme (`tokens`, `parser`, `body` de `logic/rules.js`).
-//         Deux exports qu'aucun code n'appelait (`deadLink`, `linkable`) sont retirés. Port, tables, codes et texte des formules
-//         inchangés (`formulas-golden`) ; comparaison avant/après sur des centaines de milliers de cas (`exportSchema` 40 000, règles 200 000).
+//         Deux exports qu'aucun code n'appelait (`deadLink`, `linkable`) sont retirés. Les plans d'une destination (mise en page,
+//         descriptions, formules, formats) partagent `destContext` (`logic/schema.js`) au lieu de six copies des mêmes lignes. Port, tables,
+//         codes et texte des formules inchangés (`formulas-golden`) ; comparaison avant/après sur des centaines de milliers de cas
+//         (`exportSchema` 40 000, règles 200 000).
 export const ENGINE_VERSION = '5.0.1';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation

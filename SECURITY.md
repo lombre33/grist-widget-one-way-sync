@@ -550,7 +550,7 @@ Pour un usage en production :
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et
   la politique de `index.html` que les instances Grist utilisées ;
-- relire le code à chaque mise à jour : environ 13 500 lignes de JavaScript commenté, sans dépendance.
+- relire le code à chaque mise à jour : environ 15 700 lignes de JavaScript commenté, sans dépendance.
 
 **Webhooks limités à l'instance.** Un webhook part du serveur Grist, page fermée : une copie piégée
 du widget, ouverte par un propriétaire, pourrait en créer un vers n'importe quelle adresse que le
