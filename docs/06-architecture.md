@@ -151,3 +151,13 @@ commun signalé puis coupé, réception reprise, arrêts, lien public (seul l'in
 sans la note de la SOURCE) et Échange. Avec `CAPTURES=1`, il refait les captures de `docs/images`,
 leurs vignettes recadrées pour le README (`docs/images/readme`) et les images d'aide de `img/`. Les deux suites tournent à chaque push
 (`.github/workflows/tests.yml`).
+
+`tests/e2e/upgrade.mjs` est l'essai de **non-régression de la montée de version** : il monte, avec l'Alpha publiée (V0.5.9, extraite de
+git, servie à côté du code d'ici), des partages actifs dans un vrai Grist (une SOURCE, deux CIBLE dont une en pause, deux exports,
+un Échange, un lien public), puis fait passer les documents sur la Bêta un par un en changeant l'adresse du widget dans leur page. À chaque
+combinaison de versions (CIBLE montée seule, SOURCE montée seule, puis les deux) les envois continuent : la CIBLE reflète la SOURCE clé par
+clé, sans doublon ni ligne perdue, les webhooks sont ceux d'avant et leurs files se vident, la fenêtre des nouveautés s'ouvre, les notes
+passent dans les options des colonnes, les courriels quittent les mémos des webhooks, et « Renforcer la sécurité » est proposé sans rien
+imposer. `ENV_FILE=.env-upg.json` (un second Grist : `PORT=8494 CONTAINER=grist-sync-upg ENV_FILE=.env-upg.json tests/e2e/start-grist.sh`),
+`RESUME=public,migrations` rejoue seulement ces phases sur les documents déjà montés (`target`, `source`, `big`, `last`, `exchange`,
+`public`, `migrations`, `news`), `ALPHA_COMMIT=<commit>` essaie une autre Alpha, `SHOTS=<dossier>` garde une capture de chaque écran de la Bêta.
