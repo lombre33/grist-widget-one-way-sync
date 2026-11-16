@@ -665,7 +665,7 @@ function publicRow(exp, open, ownerOnly, out) {
 function stayNotice(state, access, out) {
   if (state.ownerOnly || !lingering({ note: state.note, exports: state.exports, access })) return null;
   return noticeBox({
-    tone: 'warn', title: t('send.public.stay.title'), lines: [t('send.public.stay.body'), t('send.public.stay.how')], 'data-public-stay': '',
+    tone: 'warn', title: t('send.public.stay.title'), lines: [t('send.public.stay.body'), t('send.public.stay.how'), t('send.public.stay.rules')], 'data-public-stay': '',
     actions: [actionButton(t('send.public.stay.keep'), 'check', () => updateSourceNote(clearStay), false, out)],
   });
 }

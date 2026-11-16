@@ -942,6 +942,7 @@ try {
     await notice().waitFor({ timeout: 60000 });
     await notice().getByText('Le document reste public dans Grist').waitFor();
     await notice().getByText(/«\sAccès public\s» sur Désactivé/).waitFor(); // espaces insécables de t() : \s
+    await notice().getByText('Les visiteurs ne voient rien tant que vous ne modifiez pas les règles d’accès.').waitFor();
     assert.equal((await stayNote()).publicCoupe, true, 'la note retient le lien coupé');
     await openWidgetTab(src.url, 'Envoyer');
     await notice().waitFor({ timeout: 60000 });
