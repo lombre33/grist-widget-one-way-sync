@@ -6,6 +6,8 @@ import {
 } from '../engine/source/actions.js';
 import { clearAndMark } from '../engine/source/resend.js';
 import { clearExportHistory } from '../engine/source/history.js';
+import { updateSourceNote } from '../engine/source/synchro.js';
+import { markStay } from './public-stay.js';
 import { hookShown } from './shown.js';
 import { progressTo } from './flow.js';
 import { closeButtons, confirmDialog, copyField, el, openModal } from '../ui.js';
@@ -67,6 +69,7 @@ export async function deleteExport(exp) {
   const body = t('send.delete.body', { n: exp.recipients.length });
   if (!(await confirmDialog({ title: t('send.delete.title', { name: exp.name }), body, confirmLabel: t('send.action.delete') }))) return;
   await endExport(exp);
+  if (exp.public) await rememberStay(); // le partage public de Grist, lui, reste ouvert (voir public-stay.js)
 }
 
 // Effacer l'historique des envois d'un export (et, en Échange, l'avant et les lignes supprimées de ses journaux de retour) :
@@ -93,4 +96,10 @@ export async function stopPublic(exp) {
   const body = t('send.public.revokeBody');
   if (!(await confirmDialog({ title: t('send.public.stopTitle', { name: exp.name }), body, confirmLabel: t('send.public.stop') }))) return;
   await stopPublicShare(exp);
+  await rememberStay();
 }
+
+// Couper un lien public ou supprimer un export public retire l'export du widget, pas le partage public de Grist : la note le
+// retient, l'onglet le dit tant que Grist montre le document public (voir public-stay.js). Sans note (la table Synchro part avec
+// le dernier export), rien à retenir ; un échec ne fait jamais échouer l'action déjà faite.
+const rememberStay = () => updateSourceNote(markStay).catch(console.warn);

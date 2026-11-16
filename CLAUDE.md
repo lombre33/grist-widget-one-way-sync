@@ -375,7 +375,33 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.29.1 (16 novembre 2026)
+## État : V0.29.2 (16 novembre 2026)
+
+V0.29.2 (Antoine, 16 novembre, en testant le lien public sur la Bêta : « même après l'avoir activé j'ai encore ça » [pastille « Lien public à activer » et sa consigne], puis « ça semble s'être mis à jour en
+cliquant dans le widget », puis « quand on clique sur "couper le lien public" ça garde l'option public de partage, il faut laisser un message à ce sujet en orange tant que ça détecte que le doc est publié en
+public, et laisse une option à la personne pour confirmer qu'elle veut bien le laisser en public, et dans ce cas virer le message »). **Moteur inchangé (5.0.0)**, écran seul (`js/source/public-stay.js`, `tab.js`, `actions.js`).
+- **Cause du badge périmé** (relu dans le code, vérifié en vrai Grist) : `publicAccess` (GET anonyme du document) n'était lu qu'à un **affichage complet** de l'onglet Envoyer (ouverture, clic) ; le rythme du repos
+  (`tickFlows`, 10 s ou 30 s) ne relisait que les webhooks et l'état d'envoi, et **ne tournait même pas** pour un export sans destinataire à webhook (un export public n'en a pas : `watchFlows` ne démarrait que si
+  `exp.recipients.length`). Activer l'accès public dans Partager ne changeait donc rien à l'écran avant un clic. Ce n'était pas la détection elle-même (la route et le jeton sont les bons).
+- **Relecture** : `shownAccess` (`tab.js`) garde le droit dessiné ; `watchesAccess` (`public-stay.js`) dit si l'écran en dépend (export public, avis du lien resté ouvert, bannière « réglé sur Éditeur ») ; alors chaque
+  `tickFlows` relit `publicAccess` (`accessChanged`) et l'onglet se redessine (`refreshSource`, périodique : **aucune règle d'accès posée**, elles suivent au prochain affichage complet) quand le droit change.
+  `renderSource` lance aussi `watchFlows` pour un export public sans webhook. Rythme : 10 s quand la personne règle le lien dans Grist (`waitsForAccess` : export public « à activer », ou avis orange en attente),
+  30 s sinon. Aucune lecture de plus pour un document sans lien public. Réponse inconnue (réseau) : rien ne change ; fenêtre ouverte : la relecture suivante réessaie.
+- **Avis orange « Le document reste public dans Grist »** (`stayNotice` de `tab.js`, `data-public-stay`, textes `send.public.stay.*`) : « Couper le lien public » (`stopPublic`) et la suppression d'un export public
+  (`deleteExport`) retirent l'export du widget, pas le partage public de Grist ; le widget le note (`publicCoupe: true` dans la **note SOURCE**, `markStay`, jamais un secret) et, tant que `publicAccess` dit le document
+  ouvert (`lingering` : note posée, aucun export public, accès non vide), l'onglet montre l'avis orange (titre, ce qui se passe, comment fermer dans Partager, bouton **« Oui, je laisse le document public »**).
+  Le bouton efface la note (`clearStay`) : l'avis part et ne revient pas. Quand Grist dit le lien **fermé** (accès `''`), la note est effacée aussi (`forgettable`) : un partage rouvert plus tard pour une autre raison
+  n'est pas signalé ; un document public d'avant, sans lien coupé par le widget, n'est jamais signalé.
+- **Limites dites** : supprimer le **dernier** export efface la table `Synchro` et sa note : l'avis ne peut pas se montrer (aucune carte, rien où garder la confirmation) ; la confirmation ne lève **pas** la règle du widget
+  qui cache le reste du document aux lecteurs (`keepDeny`, inchangée : le document « public » reste donc illisible pour un visiteur tant que le widget la garde) : à rouvrir si Antoine veut qu'elle parte à la confirmation ;
+  une version d'avant qui a coupé un lien n'a pas posé la note (pas d'avis rétroactif).
+- Testé : unit 14 de plus (`public-stay.test.mjs`) ; e2e `ONLY_PUBLIC=1` (`publicStaySteps`, vrai Grist, dans le parcours complet après `historySteps`) : pastille « à activer » puis « Public » sans clic quand l'accès est
+  activé dans Partager, retour à « à activer » à la fermeture, bannière Éditeur qui vient et part seule ; « Couper le lien public » : avis, note posée, avis encore là après rechargement, confirmation qui l'efface (note comprise),
+  second export coupé puis partage fermé dans Grist : l'avis part sans clic, la note est oubliée, partage rouvert sans avis. **Piège de l'essai** : les textes de `t()` ont des espaces insécables autour de `« »`,
+  une expression régulière de `getByText` y met `\s`.
+- Tutoriel (`docs/04`, `i18n/tutorial.json`) : un paragraphe sur l'avis ; rien d'autre ne change à l'écran.
+
+## État précédent : V0.29.1 (16 novembre 2026)
 
 V0.29.1 (Antoine, 16 novembre, en préparant un export avec une colonne Référence : « si on fait "garder le lien" ça ouvre la fenêtre au dessus, c'est étrange, au dessous ça serait mieux » ; puis « "Envoyer aussi les
 colonnes que j'ajouterai à ces tables" -> "Envoyer aussi les futures colonnes que j'ajouterai à ces tables" »). **Moteur inchangé (5.0.0)**, écran et textes seulement.

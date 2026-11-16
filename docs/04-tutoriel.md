@@ -659,7 +659,8 @@ n'est que **lectrice** du document, dont le lien public, ne voit plus que les in
 exports publics, dans la table `Synchro`. Enfin, dans le menu **Partager** du document,
 **Gérer les utilisateurs** : « Accès public » sur **Activé**, en **Lecture seule** (jamais
 **Éditeur** : la carte le signale), puis **Confirmer**. La ligne passe de « Lien public à
-activer » à « Public ».
+activer » à « Public » toute seule (le widget relit le réglage de Grist toutes les 10 secondes tant qu'il
+attend l'activation), sans recharger la page.
 
 ![Mode lien public](images/15-source-public.png)
 
@@ -668,8 +669,12 @@ les 10 secondes tant que sa page est ouverte. À éviter pour des données qui n
 publiques ; les lecteurs déjà invités sur la SOURCE ne voient plus, eux aussi, que les exports
 publics.
 
-**Couper le lien public** retire l'accès à l'export. Tant que le lien public reste actif, le widget
-garde la règle qui cache le reste du document : désactivez-le dans **Partager**.
+**Couper le lien public** retire l'accès à l'export, mais pas le partage public de Grist. Tant que Grist
+montre le document public, un avis orange « Le document reste public dans Grist » reste en haut de
+l'onglet **Envoyer** (le widget garde aussi sa règle qui cache le reste du document). Deux façons de
+le faire partir : désactiver « Accès public » dans **Partager**, **Gérer les utilisateurs** (l'avis
+disparaît tout seul), ou cliquer sur **Oui, je laisse le document public** si le document doit rester
+public. Un document public pour une autre raison, sans lien public coupé par le widget, n'est pas signalé.
 
 ## Envoyer et recevoir dans le même document, relais
 

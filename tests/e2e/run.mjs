@@ -895,6 +895,84 @@ try {
     step('Historique des envois (SOURCE) : le dernier envoi ordinaire (état de Grist) en tête, mis à jour sans clic au repos, gardé après « Effacer l\'historique »');
   }
 
+  // --- Lien public de Grist vu de l'onglet Envoyer : la pastille d'un export public suit le droit du lien public sans clic ni rechargement
+  // (activé dans Partager, fermé, réglé sur Éditeur), et « Couper le lien public » retire l'export du widget mais pas le partage de Grist :
+  // un avis orange le dit tant que Grist montre le document public, jusqu'à la confirmation de la personne ou la fermeture du partage.
+  async function publicStaySteps() {
+    const src = await fichesDoc('Public SOURCE');
+    const stayNote = async () => syncNoteOf((await records(src.doc, '_grist_Tables_column')).find(c => c.colId === 'Synchro_Export'));
+    const setPublic = access => api('PATCH', `/docs/${src.doc}/access`, { delta: { users: { 'everyone@getgrist.com': access } } });
+    const notice = () => widget().locator('[data-public-stay]');
+    // Un export public : l'invitation par lien public, puis le widget pose les règles d'accès du lien (le document se recharge).
+    const publicExport = async name => {
+      await dialogButton('Ajouter un destinataire').click();
+      await dialog().getByRole('radio', { name: /Lien public/ }).check();
+      await dialogButton('Créer l’invitation').click();
+      await dialog().getByText('Transmettez ce code').waitFor();
+      await dialogButton('Fermer').click();
+      const id = (await stayNote()).exports.find(e => e.name === name).id;
+      await waitFor(async () => (await records(src.doc, '_grist_ACLRules')).some(r => r.memo === 'Synchro : lecture limitée aux exports publics' && String(r.aclFormula).includes(id)), `règles du lien public de « ${name} » posées`, 60000);
+      await rulesSettled(src.doc);
+    };
+    await startExport(src, 'Fiches', 'Annuaire');
+    await publicExport('Annuaire');
+    await openWidgetTab(src.url, 'Envoyer');
+    // Tant que Grist ne dit pas le document public : « à activer » et sa consigne. Activé dans Partager : la pastille change seule.
+    await widget().getByText('Lien public à activer').waitFor({ timeout: 60000 });
+    await widget().getByText(/menu Partager du document, Gérer les utilisateurs/).waitFor();
+    await setPublic('viewers');
+    await widget().getByText('Public', { exact: true }).waitFor({ timeout: 60000 });
+    assert.equal(await widget().getByText('Lien public à activer').count(), 0, 'la pastille « à activer » est partie sans clic');
+    assert.equal(await widget().getByText(/menu Partager du document, Gérer les utilisateurs/).count(), 0, 'la consigne aussi');
+    // Fermé dans Partager : elle revient seule ; rouvert en Éditeur : l'avis rouge paraît seul ; remis en Lecture seule : il part.
+    await setPublic(null);
+    await widget().getByText('Lien public à activer').waitFor({ timeout: 60000 });
+    await setPublic('editors');
+    await widget().getByText(/Le lien public de ce document est réglé sur Éditeur/).waitFor({ timeout: 60000 });
+    await setPublic('viewers');
+    await waitFor(async () => (await widget().getByText(/réglé sur Éditeur/).count()) === 0, 'avis « Éditeur » parti sans clic', 60000);
+    await widget().getByText('Public', { exact: true }).waitFor({ timeout: 60000 });
+    step('Lien public : la pastille de l\'export suit le droit du lien public sans clic ni rechargement (activé, fermé, Éditeur)');
+
+    // Couper le lien public d'un export : l'export n'est plus public, le partage de Grist reste. L'avis orange le dit et tient
+    // après un rechargement tant que le document est public.
+    assert.equal(await notice().count(), 0, 'pas d\'avis tant qu\'un export est public');
+    await button('Couper le lien public').click();
+    await dialogButton('Couper le lien public').click();
+    await notice().waitFor({ timeout: 60000 });
+    await notice().getByText('Le document reste public dans Grist').waitFor();
+    await notice().getByText(/«\sAccès public\s» sur Désactivé/).waitFor(); // espaces insécables de t() : \s
+    assert.equal((await stayNote()).publicCoupe, true, 'la note retient le lien coupé');
+    await openWidgetTab(src.url, 'Envoyer');
+    await notice().waitFor({ timeout: 60000 });
+    // La personne confirme qu'elle laisse le document public : l'avis disparaît, y compris après un rechargement.
+    await notice().getByRole('button', { name: 'Oui, je laisse le document public' }).click();
+    await waitFor(async () => (await notice().count()) === 0, 'avis retiré à la confirmation', 60000);
+    assert.equal((await stayNote()).publicCoupe, undefined, 'la note ne retient plus rien');
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().getByRole('button', { name: 'Nouvel export', exact: true }).waitFor({ timeout: 60000 });
+    assert.equal(await notice().count(), 0, 'toujours aucun avis après rechargement');
+    step('Lien public coupé : avis orange tant que Grist dit le document public, retiré par « Oui, je laisse le document public »');
+
+    // Un second export public, coupé à son tour : l'avis revient, et part tout seul quand le partage est fermé dans Grist ; un partage
+    // rouvert ensuite pour une autre raison n'est plus signalé.
+    await newExport('Fiches', 'Second');
+    await publicExport('Second');
+    await openWidgetTab(src.url, 'Envoyer');
+    await widget().locator('[data-export]', { hasText: 'Second' }).getByRole('button', { name: 'Couper le lien public' }).click();
+    await dialogButton('Couper le lien public').click();
+    await notice().waitFor({ timeout: 60000 });
+    assert.equal((await stayNote()).publicCoupe, true);
+    await setPublic(null);
+    await waitFor(async () => (await notice().count()) === 0, 'avis parti sans clic quand le partage est fermé', 60000);
+    await waitFor(async () => (await stayNote()).publicCoupe === undefined, 'note du lien coupé oubliée', 60000);
+    await setPublic('viewers');
+    await page.waitForTimeout(25000);
+    assert.equal(await notice().count(), 0, 'partage rouvert pour une autre raison : aucun avis');
+    await setPublic(null);
+    step('Lien public coupé puis partage fermé dans Grist : l\'avis part sans clic, la note l\'oublie, un partage rouvert ensuite n\'est pas signalé');
+  }
+
   // --- « Ajouter le widget à la page de la table reçue » (carte d'une réception). La table que la réception a créée a sa propre page,
   // sans le widget : le bouton y pose une section du widget, sans l'accès accordé (Grist le demande), une seule fois. Une fois
   // l'accès accepté, ce widget-là recopie les envois suivants (un seul widget ouvert suffit pour tout le document).
@@ -2677,8 +2755,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3718,6 +3796,7 @@ try {
   await protectSteps();
   await cleanSteps();
   await historySteps();
+  await publicStaySteps();
   await widgetPageSteps();
   await renfSteps();
   await newsSteps();

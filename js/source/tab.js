@@ -17,7 +17,7 @@ import { expiresAt, unkeyedRecipients } from '../engine/logic/trust.js';
 import { unsignedHooks } from '../engine/logic/reinforce.js';
 import { columnFault, foreignSync, hasContent, lostSync, ownsSync, refusedColumn, strayColumns, syncColumnIds } from '../engine/logic/strays.js';
 import { protectSync, ruleRefusal, syncRules } from '../engine/acl.js';
-import { ensureSyncTable, identified, isCharge, protectMemos, readHooks, readSourceNote, refreshMajLe, refreshOptions, watchRows } from '../engine/source/synchro.js';
+import { ensureSyncTable, identified, isCharge, protectMemos, readHooks, readSourceNote, refreshMajLe, refreshOptions, updateSourceNote, watchRows } from '../engine/source/synchro.js';
 import { catchUp, currentCharge, flowOf, resendTables } from '../engine/source/resend.js';
 import { exportEstimate } from '../engine/source/estimate.js';
 import { newColumns } from '../engine/logic/new-columns.js';
@@ -33,6 +33,7 @@ import { foreignDialog, strayDialog } from './strays.js';
 import { checkKeys } from '../engine/source/keys.js';
 import { keysBlock } from './keys.js';
 import { lastSend } from './last-send.js';
+import { accessMoved, clearStay, forgettable, lingering, waitsForAccess, watchesAccess } from './public-stay.js';
 import { filterSummary } from './filter-editor.js';
 import { recipientWizard } from './recipient-wizard.js';
 import { hookDoc, hookShown } from './shown.js';
@@ -67,6 +68,9 @@ function personWho(h) {
 let container;
 let notice = null; // message à montrer au prochain affichage (fin d'un renvoi)
 let resumed = false; // l'assistant d'un Échange ne se rouvre seul qu'une fois par chargement
+// Droit du lien public tel que l'écran l'a dessiné (voir public-stay.js) : `watch` dit si l'écran en dépend, donc si chaque coup
+// d'œil le relit à `base`, et `waiting` si la personne est en train de le changer dans Grist (relecture plus rapprochée).
+let shownAccess = { base: '', access: null, watch: false, waiting: false };
 
 // ---------------------------------------------------------------------------------------------
 // État du document : exports (note + lignes Synchro), destinataires (webhooks sur Synchro, rangés
@@ -161,6 +165,10 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   here = identity.origin;
   const access = await publicAccess(identity.baseUrl);
   const open = access === null ? null : Boolean(access);
+  // Ce que l'écran montre du lien public, relu à chaque coup d'œil tant qu'il en dépend (voir tickFlows).
+  const facts = { note: state.note, exports: state.exports, access };
+  shownAccess = { base: identity.baseUrl, access, watch: !state.ownerOnly && watchesAccess(facts), waiting: !state.ownerOnly && waitsForAccess(facts) };
+  if (!state.ownerOnly && forgettable(facts)) updateSourceNote(clearStay).catch(console.warn); // lien fermé : le lien coupé est oublié
   if (!periodic && !state.ownerOnly && await syncRules({ publicIds: state.exports.filter(e => e.public).map(e => e.id), open })) {
     reloading(container, renderSource);
     return;
@@ -169,7 +177,7 @@ export async function renderSource(root = container, { periodic = false } = {}) 
   // « Nouvel export » demandé juste avant le rechargement que les règles d'accès ont causé : l'assistant s'ouvre.
   if (!periodic && wizardAsked('export', { consume: true }) && !state.ownerOnly && !state.foreign && !blocksNew(state.lost)) run(null, container.querySelector('.out'), newExport);
   if ([...flowSlots.values()].some(slot => slot.moving) || state.exports.some(exp => exp.recipients.some(hookBusy))) watchFlows();
-  else if (state.exports.some(exp => exp.recipients.length)) watchFlows(IDLE_MS);
+  else if (state.exports.some(exp => exp.recipients.length) || shownAccess.watch) watchFlows(restMs());
   if (state.ownerOnly) return;
   resumeExchange(state);
   if (!periodic) askAboutSync(state);
@@ -252,6 +260,7 @@ function sourceView(state, access, open) {
   return [el('div', { class: 'toolbar' }, newExportButton(state, out)),
     state.ownerOnly ? message('info', t('send.ownersOnly')) : null,
     access && access !== 'viewers' ? message('err', t('send.public.editors')) : null,
+    stayNotice(state, access, out),
     state.ownerOnly ? null : rulesRefusedNotice(),
     out,
     cards.length ? el('div', { class: 'cards' }, cards) : state.ownerOnly ? null : el('p', { class: 'muted' }, t('send.empty')),
@@ -572,8 +581,20 @@ async function tickFlows() {
     return;
   }
   const { moving, changed } = refreshPeople(hooks, refreshFlows(charge, hooks, conditions, loading > 0));
-  if (changed && !document.querySelector('.scrim')) await refreshSource();
-  else watchFlows(moving || changed ? FLOW_MS : IDLE_MS);
+  const moved = await accessChanged();
+  if ((changed || moved) && !document.querySelector('.scrim')) await refreshSource();
+  else watchFlows(moving || changed || moved ? FLOW_MS : restMs());
+}
+
+// Rythme de relecture au repos : plus rapproché quand la personne est en train de régler le lien public dans Grist.
+const restMs = () => (shownAccess.waiting ? FLOW_MS : IDLE_MS);
+
+// Le droit du lien public a-t-il changé depuis le dernier dessin (activé, coupé, passé sur Éditeur dans Partager) ? Relu seulement
+// quand l'écran en dépend ; une réponse inconnue (réseau, serveur occupé) ne change rien. Le redessin est périodique : il ne pose
+// aucune règle d'accès (voir refreshSource), celles-ci suivent au prochain affichage complet de l'onglet.
+async function accessChanged() {
+  if (!shownAccess.watch) return false;
+  return accessMoved(shownAccess.access, await publicAccess(shownAccess.base));
 }
 
 // Invitation en attente. Celle d'un Échange attend d'abord le lien de son formulaire de retour, et
@@ -618,6 +639,16 @@ function publicRow(exp, open, ownerOnly, out) {
     el('div', { class: 'person-actions' },
       actionButton(t('send.public.code'), 'key', () => showPublicCode(exp), ownerOnly, out),
       actionButton(t('send.public.stop'), 'unlink', () => stopPublic(exp), ownerOnly, out, { kind: 'btn-danger-text' })));
+}
+
+// Lien public coupé ici alors que le partage public de Grist reste ouvert (voir public-stay.js) : avis orange tant que Grist dit le
+// document public, jusqu'à ce que la personne le ferme dans Grist ou confirme qu'elle le laisse ainsi (l'avis disparaît alors).
+function stayNotice(state, access, out) {
+  if (state.ownerOnly || !lingering({ note: state.note, exports: state.exports, access })) return null;
+  return noticeBox({
+    tone: 'warn', title: t('send.public.stay.title'), lines: [t('send.public.stay.body'), t('send.public.stay.how')], 'data-public-stay': '',
+    actions: [actionButton(t('send.public.stay.keep'), 'check', () => updateSourceNote(clearStay), false, out)],
+  });
 }
 
 // Carte d'avertissement avec un bouton qui nettoie, après confirmation.
