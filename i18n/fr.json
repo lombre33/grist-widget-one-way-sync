@@ -367,6 +367,7 @@
   "send.public.stay.title": "Le document reste public dans Grist",
   "send.public.stay.body": "Vous avez coupé le lien public de l’export, mais le partage public du document est toujours activé dans Grist. Le widget n’envoie plus rien par ce lien ; il garde sa règle qui cache le reste du document aux personnes qui ne font que lire.",
   "send.public.stay.how": "Pour fermer le partage public : menu Partager du document, Gérer les utilisateurs, « Accès public » sur Désactivé, puis Confirmer. Si le document doit rester public, confirmez-le ci-dessous : cet avis disparaît.",
+  "send.public.stay.rules": "Les visiteurs ne voient rien tant que vous ne modifiez pas les règles d’accès.",
   "send.public.stay.keep": "Oui, je laisse le document public",
   "send.check.missing": "En créant l’export, le widget ajoutera : {items}.",
   "send.check.sync": "la table technique Synchro (une seule pour tous les exports)",

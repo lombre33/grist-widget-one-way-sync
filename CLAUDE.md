@@ -375,7 +375,15 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.30.0 (16 novembre 2026)
+## État : V0.30.1 (16 novembre 2026)
+
+V0.30.1 (Antoine, 16 novembre, réponse à la question laissée ouverte en 0.29.2 : lever ou non la règle du widget qui cache le document aux visiteurs quand on confirme « laisser public » ; sa décision, relayée par
+le coordinateur : « on GARDE la règle » et ajouter à l'avis orange « Les visiteurs ne voient rien tant que vous ne modifiez pas les règles d'accès. »). **Moteur inchangé (5.0.0)**, texte seulement.
+- **Décision close** : confirmer « Oui, je laisse le document public » efface seulement la note `publicCoupe` (avis qui part) ; `keepDeny` et toutes les règles d'accès restent comme elles sont. Ne plus proposer de la lever.
+- L'avis orange (`stayNotice`, `js/source/tab.js`) a une ligne de plus, `send.public.stay.rules` (fr et en), après « comment fermer » ; tutoriel intégré (`i18n/tutorial.json`) et `docs/04` le disent aussi
+  (« Confirmer ne change rien aux règles d'accès »). L'e2e `publicStaySteps` attend la phrase dans l'avis.
+
+## État précédent : V0.30.0 (16 novembre 2026)
 
 V0.30.0 (Antoine, 16 novembre, sur l'étape Colonnes qu'il « n'arrive pas à expliquer » : critique en cinq points et trois maquettes A, B, C
 (`/mnt/project-files/notes/maquettes-colonnes/`, Artifact https://claude.ai/artifact/B7ziddNAtRi756yA4NEeSq) ; sa réponse : « le départ très bien la proposition A »).
@@ -437,7 +445,7 @@ public, et laisse une option à la personne pour confirmer qu'elle veut bien le 
   Le bouton efface la note (`clearStay`) : l'avis part et ne revient pas. Quand Grist dit le lien **fermé** (accès `''`), la note est effacée aussi (`forgettable`) : un partage rouvert plus tard pour une autre raison
   n'est pas signalé ; un document public d'avant, sans lien coupé par le widget, n'est jamais signalé.
 - **Limites dites** : supprimer le **dernier** export efface la table `Synchro` et sa note : l'avis ne peut pas se montrer (aucune carte, rien où garder la confirmation) ; la confirmation ne lève **pas** la règle du widget
-  qui cache le reste du document aux lecteurs (`keepDeny`, inchangée : le document « public » reste donc illisible pour un visiteur tant que le widget la garde) : à rouvrir si Antoine veut qu'elle parte à la confirmation ;
+  qui cache le reste du document aux lecteurs (`keepDeny`, inchangée : le document « public » reste donc illisible pour un visiteur tant que le widget la garde) (décidé en 0.30.1 : elle reste) ;
   une version d'avant qui a coupé un lien n'a pas posé la note (pas d'avis rétroactif).
 - Testé : unit 14 de plus (`public-stay.test.mjs`) ; e2e `ONLY_PUBLIC=1` (`publicStaySteps`, vrai Grist, dans le parcours complet après `historySteps`) : pastille « à activer » puis « Public » sans clic quand l'accès est
   activé dans Partager, retour à « à activer » à la fermeture, bannière Éditeur qui vient et part seule ; « Couper le lien public » : avis, note posée, avis encore là après rechargement, confirmation qui l'efface (note comprise),

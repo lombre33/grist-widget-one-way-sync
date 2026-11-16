@@ -501,11 +501,11 @@
     },
     "text": {
       "fr": [
-        "SOURCE : en ajoutant un destinataire, choisir Lien public. Le widget pose des règles d’accès : un lecteur du document, dont le lien public, ne voit plus que les exports publics. Puis, dans Partager, Gérer les utilisateurs : « Accès public » sur Activé, en Lecture seule. Couper le lien public ne ferme pas le partage de Grist : un avis orange le rappelle tant que le document est public, jusqu’à ce que vous le désactiviez dans Partager ou que vous confirmiez le laisser public.",
+        "SOURCE : en ajoutant un destinataire, choisir Lien public. Le widget pose des règles d’accès : un lecteur du document, dont le lien public, ne voit plus que les exports publics. Puis, dans Partager, Gérer les utilisateurs : « Accès public » sur Activé, en Lecture seule. Couper le lien public ne ferme pas le partage de Grist : un avis orange le rappelle tant que le document est public, jusqu’à ce que vous le désactiviez dans Partager ou que vous confirmiez le laisser public. Confirmer ne change rien aux règles d’accès : les visiteurs ne voient rien tant que vous ne les modifiez pas.",
         "CIBLE : coller le code, choisir les destinations, c’est tout. Le widget lit la SOURCE toutes les 10 secondes tant que sa page est ouverte. À éviter pour des données qui ne doivent pas être publiques."
       ],
       "en": [
-        "SOURCE: when adding a recipient, pick Public link. The widget adds access rules: a viewer of the document, including the public link, only sees the public exports. Then, in Share, Manage users: “Public access” On, as Viewer. Stopping the public link does not turn off Grist’s sharing: an orange notice reminds you while the document is public, until you turn it off in Share or confirm you keep it public.",
+        "SOURCE: when adding a recipient, pick Public link. The widget adds access rules: a viewer of the document, including the public link, only sees the public exports. Then, in Share, Manage users: “Public access” On, as Viewer. Stopping the public link does not turn off Grist’s sharing: an orange notice reminds you while the document is public, until you turn it off in Share or confirm you keep it public. Confirming changes nothing in the access rules: visitors see nothing until you change them.",
         "TARGET: paste the code, pick the destinations, that is all. The widget reads the SOURCE every 10 seconds while its page is open. Avoid for data that must not be public."
       ]
     },

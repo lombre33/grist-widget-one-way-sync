@@ -682,7 +682,8 @@ montre le document public, un avis orange « Le document reste public dans Grist
 l'onglet **Envoyer** (le widget garde aussi sa règle qui cache le reste du document). Deux façons de
 le faire partir : désactiver « Accès public » dans **Partager**, **Gérer les utilisateurs** (l'avis
 disparaît tout seul), ou cliquer sur **Oui, je laisse le document public** si le document doit rester
-public. Un document public pour une autre raison, sans lien public coupé par le widget, n'est pas signalé.
+public. Confirmer ne change rien aux règles d'accès : les visiteurs ne voient rien tant que vous ne les modifiez pas.
+Un document public pour une autre raison, sans lien public coupé par le widget, n'est pas signalé.
 
 ## Envoyer et recevoir dans le même document, relais
 
