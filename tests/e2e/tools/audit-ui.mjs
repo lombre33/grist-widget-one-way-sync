@@ -96,8 +96,8 @@ try {
     await nextBtn(sv).click();
     await dlg().locator('.table-block').first().waitFor();
     await snap(sv, 's02-export-colonnes');
-    // Tout ouvrir : éléments envoyés, choix des colonnes, filtre.
-    for (const summary of await dlg().locator('details.options-more > summary').all()) await summary.click().catch(() => {});
+    // Tout ouvrir : aide en images, choix des colonnes, filtre.
+    await dlg().getByRole('button', { name: /Aide en images|Help with screenshots/ }).click().catch(() => {});
     const buttons = dlg().locator('.table-block .block-actions button');
     for (let i = 0; i < await buttons.count(); i++) await buttons.nth(i).click().catch(() => {});
     await snap(sv, 's03-export-colonnes-ouvert');

@@ -375,7 +375,51 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.29.2 (16 novembre 2026)
+## État : V0.30.0 (16 novembre 2026)
+
+V0.30.0 (Antoine, 16 novembre, sur l'étape Colonnes qu'il « n'arrive pas à expliquer » : critique en cinq points et trois maquettes A, B, C
+(`/mnt/project-files/notes/maquettes-colonnes/`, Artifact https://claude.ai/artifact/B7ziddNAtRi756yA4NEeSq) ; sa réponse : « le départ très bien la proposition A »).
+**Moteur inchangé (5.0.0)**, écran, textes et styles seulement.
+- **L'étape 2 s'appelle « Contenu »** (`send.step.content`, ancienne `send.step.columns` ; toujours la 2ᵉ de trois : Tables / Contenu / Nom, les indices 1 et 2 de
+  l'assistant ne bougent pas) et se range par question (`showColumns`, `js/source/export-wizard.js`). En tête : la phrase d'introduction (`send.columns.help`,
+  inchangée) et à sa droite le lien discret « Aide en images », qui déplie `stepHelp(['s-columns'])` juste dessous (le `details` porte `linked` : son résumé est
+  caché). Puis trois sections `.sec` (leurs titres ne se montrent que s'il y en a plusieurs : un Échange n'a que la première, sans titre) :
+  1. **Les données** : une fiche par table (inchangée) avec, en bas, un emplacement `.ref-slot` (`ctx.refSlots` : table -> nœud, remis à zéro à chaque `showColumns`)
+     où viennent les colonnes Référence de cette table.
+  2. **Envoyé avec les données** : les cinq éléments à plat (plus de `details.options-more` ni de ligne « Envoyé avec les colonnes » : `send.elements*` et
+     `send.el.*.short` sont retirés), libellés courts (« Mise en forme des colonnes », « Descriptions des colonnes », « Descriptions des tables », « Ordre et colonnes
+     cachées de la page », « Formules des colonnes (Python) »), chacun avec son compte et son « ? ». Les formules ferment la liste, avec la pastille « demande confirmation »
+     (`send.el.formulas.badge`) avant le clic ; la classe `.formulas-box` est gardée (la CIBLE l'emploie, `restyle.js`), neutralisée dans `.opts`.
+  3. **Pour la suite** : la case « futures colonnes » (`autoColsBlock`, `.opts.auto-cols`).
+  **Coches d'emblée inchangées** (mise en forme et descriptions cochées ; mise en page, formules et futures colonnes décochées). **Question restée sans réponse** : décocher aussi la mise
+  en forme et les descriptions d'emblée, comme les formules (les descriptions peuvent porter des notes internes) : rien n'est changé tant qu'Antoine n'a pas tranché.
+- **Références dans la fiche de leur table** (`js/source/export-links.js`, nouveau : `pullMode`, `pulledColumns`, `offersOf` (exportés, `choicesOf` les emploie),
+  `pulledBlock`, `refRow`, `place`, `linkSection` ; `js/source/export-parts.js` : `columnLabel`, `togglePart`). Plus de bloc « Références entre tables », plus de ligne de
+  résumé « Part en plus des tables cochées ». Par colonne : `div.ref-item[data-ref=<clé>]` = nom, pastille du type, « renvoie à la table X (affiche Y) », un « ? », deux choix
+  empilés (`.choice` : « Envoyer seulement le texte » / « Garder le lien », chacun avec sa conséquence dessous, `aria-labelledby` et `aria-describedby`), puis `.ref-panel`, où
+  vient le panneau « Ajoutée pour un lien » de la table visée **juste sous le choix** (ce que demandait Antoine en 0.29.1). Cascade : le panneau d'une table ajoutée a son
+  propre `.ref-slot` pour ses propres colonnes Référence (garder l'une d'elles ajoute sa table sous elle). Une table ajoutée n'a **qu'un** panneau, sous la première colonne
+  qui la vise (tables de l'export dans l'ordre, puis en profondeur) ; les autres disent « La table X est déjà ajoutée sous Y » (`send.refs.already`).
+- **Pièges de l'écran** : lignes (`rows`) et panneaux (`blocks`, signature `JSON(required)`) sont **gardés d'un dessin à l'autre** et `place` ne remplace des enfants que s'ils
+  diffèrent (`setChildren`) : un nœud déplacé perd le focus, et un clic sur un bouton radio ne doit pas faire perdre le sien ; le panneau d'une table qui n'est plus ajoutée
+  est jeté du cache (son état `ctx.extras` et `ctx.pulls` est vidé comme avant). Les radios d'une colonne partagent `name="gristsync-ref-<clé>"` : un `name` en double dans la
+  page défait les choix (les maquettes l'ont montré). `.form h3` (0,1,1) bat `.sec-title` : la règle est `.sec .sec-title`. `.ref-slot:empty` se cache : ne jamais y laisser de
+  texte blanc.
+- **Textes** : nouvelles clés `send.step.content`, `send.sec.*`, `send.refs.link.why`, `send.refs.already`, `send.refs.help`, `send.el.formulas.badge` ; changées
+  `send.refs.values`, `send.refs.aim`, `send.refs.note.inside`, `send.el.style|notes|tableNote|layout|formulas` ; retirées `send.step.columns`, `send.refs.title|found|found.help|of|
+  summary.some|summary.none|added.because|note.pull`, `send.elements*`, `send.el.*.short`. Tutoriel intégré (`i18n/tutorial.json`), `docs/04`, deux README : nom de l'étape,
+  structure, libellés.
+- **Essais cassés par la 0.29.1, réparés ici** (dit franchement) : la 0.29.1 avait renommé la case en « futures colonnes » sans reporter le libellé dans `tests/e2e/run.mjs`
+  (`autoCols` de l'édition et `newColumnsSteps` cherchaient l'ancien) ; elle n'avait lancé que `ONLY_LINKS=1`, qui ne les touche pas. Ils seraient tombés au prochain parcours complet.
+- Testé : unit 531 ; e2e `ONLY_LINKS=1` (le panneau est dans la colonne cliquée et **sous** son choix, pas sous les autres ; plus de bloc « Références entre tables »),
+  `NEWCOLS`, `FORMULAS`, `FORMAT`, `LAYOUT`, `OPTIONS`, `CHOICES`, `DOCLINK` verts ; **parcours complet depuis un worktree propre** : 76 étapes vertes, puis `protectSteps` a échoué
+  (60 s d'attente du bouton « Nouvel export », l'écran montre l'accueil : **l'aléa déjà noté** de `ONLY_PROTECT` lancé juste après une série lourde sur le même Grist, voir la 0.28.2), sans lien avec
+  cette version ; sur un Grist neuf, `PROTECT`, `CLEAN`, `HISTORY`, `PUBLIC`, `WIDGETPAGE`, `RENF`, `NEWS` et `TABS` (les étapes que le parcours n'avait pas atteintes) passent une à une. `tests/e2e/tools/audit-ui.mjs` ouvre « Aide en images » au lieu des
+  `details.options-more` de la SOURCE (celui de la CIBLE existe toujours).
+- Captures refaites : `docs/images/03-source-colonnes`, `29-source-liens`, `29b-source-liens-tables-ajoutees` et leurs vignettes. **Le forum** (`/mnt/project-files/forum/`)
+  **n'est pas refait** : il se publie avec la Bêta, on le refait avec le lot.
+
+## État précédent : V0.29.2 (16 novembre 2026)
 
 V0.29.2 (Antoine, 16 novembre, en testant le lien public sur la Bêta : « même après l'avoir activé j'ai encore ça » [pastille « Lien public à activer » et sa consigne], puis « ça semble s'être mis à jour en
 cliquant dans le widget », puis « quand on clique sur "couper le lien public" ça garde l'option public de partage, il faut laisser un message à ce sujet en orange tant que ça détecte que le doc est publié en

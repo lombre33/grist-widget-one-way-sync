@@ -7,7 +7,7 @@ import { elementCounts, exportableColumns, isFileColumn, unsentColumns } from '.
 import { noteSent } from '../engine/logic/descriptions.js';
 import { formulasOffered } from '../engine/logic/column-formulas.js';
 import { layoutSent } from '../engine/logic/layout.js';
-import { linkOffers, refKey, refOf } from '../engine/logic/links.js';
+import { refKey, refOf } from '../engine/logic/links.js';
 import { REFUSALS, RULES, exchangeRules } from '../engine/logic/consolidation.js';
 import { missingSyncColumns } from '../engine/logic/formulas.js';
 import { STATES } from '../engine/logic/journal.js';
@@ -18,13 +18,13 @@ import { recipientWizard } from './recipient-wizard.js';
 import { progressTo } from './flow.js';
 import { backButton, cancelButton, checkList, closeButtons, confirmDialog, el, laterButton, message, notice, openWizard, pickField, run, withHelp } from '../ui.js';
 import { filterEditor, filterSummary } from './filter-editor.js';
-import { PULL_MODES, extrasFor, pullColumns, pullLeftOut } from './pull.js';
+import { columnLabel, togglePart } from './export-parts.js';
+import { linkSection, offersOf, pulledColumns } from './export-links.js';
 import { roleGuide } from '../guide.js';
 import { stepHelp } from '../tutorial.js';
 import { t, typeName } from '../i18n.js';
 
 const cancel = cancelButton();
-const columnLabel = c => (c.label === c.id ? c.id : `${c.label} (${c.id})`);
 
 // `onClose` : appelé à la fermeture (l'onglet se redessine). Échap et la croix demandent quoi faire de ce qui a été changé :
 // un export modifié peut s'enregistrer tel quel sans passer par les étapes qui restent (`quickSave`) ; un export qu'on crée
@@ -42,7 +42,7 @@ export function exportWizard(exp, onClose) {
   };
   ctx.wizard = openWizard({
     title: exp ? t('send.edit.title', { name: exp.name }) : t('send.new'),
-    steps: ['send.step.tables', 'send.step.columns', 'send.step.name'].map(k => t(k)),
+    steps: ['send.step.tables', 'send.step.content', 'send.step.name'].map(k => t(k)),
     onClose,
     guard: { save: exp ? () => quickSave(ctx) : null },
   });
@@ -71,11 +71,11 @@ async function showTables(ctx) {
     ctx.exp ? null : roleGuide({ you: 'source', current: 0 })], [cancel, next]);
 }
 
-// Bloc d'une table à l'étape Colonnes : par défaut toutes ses colonnes et toutes ses lignes, dit
+// Fiche d'une table à l'étape Contenu : par défaut toutes ses colonnes et toutes ses lignes, dit
 // en une ligne ; deux boutons ouvrent le choix des colonnes et le filtre des lignes (ouverts
 // d'emblée quand l'export modifié les précise déjà). Une colonne Pièces jointes ne part que cochée
 // (ses fichiers partent page ouverte, et peuvent peser lourd) : le choix des colonnes est alors
-// ouvert.
+// ouvert. En bas de la fiche, `refs` reçoit les choix de ses colonnes Référence.
 function columnsBlock(ctx, schema, table, relayed) {
   const usable = exportableColumns(schema.columns(table));
   if (!ctx.selected.has(table)) ctx.selected.set(table, usable.filter(c => !isFileColumn(c)).map(c => c.id));
@@ -100,165 +100,18 @@ function columnsBlock(ctx, schema, table, relayed) {
   const filtered = Boolean(filterSummary(ctx.filters.get(table)));
   if (filtered) editor.load();
   describe();
+  const refs = el('div', { class: 'ref-slot' }); // les colonnes Référence de la table (voir export-links.js)
+  ctx.refSlots.set(table, refs);
   return el('div', { class: 'form table-block' }, el('h3', {}, table),
     relayed ? message('info', t('send.columns.relay')) : null, summary,
     unsent.length ? message('info', t('send.columns.unsent', { cols: unsent.join(', ') })) : null,
     el('div', { class: 'block-actions' },
       togglePart(columns, t('send.columns.pick'), ctx.selected.get(table).length !== usable.length),
       togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
-    columns, editor.node);
+    columns, editor.node, refs);
 }
 
-// Bouton qui ouvre ou ferme une partie de la fenêtre ; `onOpen` à chaque ouverture.
-function togglePart(part, label, open, onOpen = () => {}) {
-  part.classList.toggle('hidden', !open);
-  const button = el('button', { class: 'btn btn-small', type: 'button', 'aria-expanded': String(open), onclick: () => {
-    const now = part.classList.toggle('hidden') === false;
-    button.setAttribute('aria-expanded', String(now));
-    if (now) onOpen();
-  } }, label);
-  return button;
-}
-
-// Ce que la personne décide pour chaque colonne Référence ou Liste de références cochée (voir linkOffers), à
-// l'état de la fenêtre : les choix faits, ceux de l'export enregistré, sinon le lien est gardé quand la table visée est
-// cochée. Les colonnes d'une table ajoutée pour un lien sont celles que le lien affiche et celles que la personne y prend
-// (toute la table, ou celles qu'elle y coche : voir pull.js).
-const pullMode = (ctx, table) => ctx.pulls.get(table) || 'shown';
-const pulledColumns = (ctx, schema, table, required = []) => pullColumns({
-  mode: pullMode(ctx, table), usable: exportableColumns(schema.columns(table) || []), required, extras: [...(ctx.extras.get(table) || [])],
-});
-const offersOf = (ctx, schema) => linkOffers({
-  chosen: ctx.chosen, columnsOf: table => exportableColumns(schema.columns(table) || []),
-  picked: table => (ctx.chosen.includes(table) ? ctx.selected.get(table) : pulledColumns(ctx, schema, table)),
-  choices: ctx.choices, saved: ctx.saved,
-});
-
-// Bloc d'une table ajoutée pour un lien. Trois choix (voir pull.js) : la seule colonne que la Référence affiche (d'emblée), toute la
-// table, ou les colonnes que la personne coche (la colonne affichée reste verrouillée). Ses lignes peuvent se filtrer comme celles
-// des autres tables.
-function pulledBlock(ctx, schema, { table, required, because, onChange }) {
-  const usable = exportableColumns(schema.columns(table) || []);
-  const mode = () => pullMode(ctx, table);
-  const picked = () => pulledColumns(ctx, schema, table, required);
-  const labels = ids => usable.filter(c => ids.includes(c.id)).map(c => c.label);
-  const summary = el('p', { class: 'small' });
-  const leftOut = el('p', { class: 'muted small' });
-  const describe = () => {
-    const rows = filterSummary(ctx.filters.get(table));
-    const names = mode() === 'all' ? t('send.refs.summary.whole') : labels(picked()).join(', ');
-    summary.textContent = `${t('send.columns.some', { n: picked().length, total: usable.length })} (${names}) · ${rows ? t('send.rows.filtered', { filter: rows }) : t('send.rows.all')}`;
-    const files = pullLeftOut({ mode: mode(), usable }).map(c => c.label);
-    leftOut.textContent = files.length ? t('send.refs.mode.files', { cols: files.join(', ') }) : '';
-    leftOut.classList.toggle('hidden', !files.length);
-  };
-  const columns = el('div', { class: 'form' });
-  const drawColumns = () => {
-    columns.replaceChildren(checkList({
-      items: usable.map(c => ({ value: c.id, label: columnLabel(c), hint: typeName(c.source), keywords: typeName(c.source), locked: required.includes(c.id) })), wide: true,
-      checked: picked(), label: table, onChange: (values) => { ctx.extras.set(table, values.filter(v => !required.includes(v))); describe(); onChange(); },
-    }));
-    columns.classList.toggle('hidden', mode() !== 'pick');
-  };
-  const choose = (next) => {
-    // De « toute la table » à « choisir » : ce qui partait reste coché, pour pouvoir y retirer des colonnes.
-    if (next === 'pick' && mode() !== 'pick') ctx.extras.set(table, extrasFor({ usable, required, columns: picked() }));
-    ctx.pulls.set(table, next);
-    drawColumns();
-    describe();
-    onChange();
-  };
-  const name = `gristsync-pull-${table}`;
-  const texts = {
-    shown: t('send.refs.mode.shown', { cols: labels(required).join(', ') }),
-    all: t('send.refs.mode.all', { n: usable.filter(c => !pullLeftOut({ mode: 'all', usable }).includes(c)).length }),
-    pick: t('send.refs.mode.pick'),
-  };
-  const modes = el('div', { class: 'radios pull-modes', role: 'radiogroup', 'aria-label': t('send.refs.mode', { table }) },
-    PULL_MODES.map(value => el('label', { class: 'check' },
-      el('input', { type: 'radio', name, value, checked: mode() === value, onchange: () => choose(value) }), el('span', {}, texts[value]))));
-  const editor = filterEditor({ table, columns: usable, current: ctx.filters.get(table), labelOf: columnLabel, onChange: (filter) => { ctx.filters.set(table, filter); describe(); } });
-  const filtered = Boolean(filterSummary(ctx.filters.get(table)));
-  if (filtered) editor.load();
-  drawColumns();
-  describe();
-  return el('div', { class: 'form table-block table-added', 'data-pulled': table },
-    el('div', { class: 'added-head' }, el('h3', {}, table), el('span', { class: 'pill pill-ok' }, t('send.refs.added'))),
-    el('p', { class: 'muted small' }, t('send.refs.added.because', { cols: because.join(', ') })),
-    el('p', { class: 'field-title' }, t('send.refs.mode', { table })), modes, summary, leftOut,
-    el('div', { class: 'block-actions' }, togglePart(editor.node, t('send.rows.pick'), filtered, editor.load)),
-    columns, editor.node);
-}
-
-// Une ligne du bloc « Références entre tables » : la colonne, ce qu'elle vise, le choix « Valeurs seulement » / « Garder le lien »
-// et ce que ce choix fait. `update` la remet à l'état des choix sans la redessiner (le focus reste sur le bouton radio).
-function refRow(ctx, offer, onPick) {
-  const name = `gristsync-ref-${offer.key}`;
-  const note = el('p', { class: 'ref-note muted small' });
-  const radio = (link, label) => {
-    const input = el('input', { type: 'radio', name, checked: false, onchange: () => { ctx.choices.set(offer.key, link); onPick(); } });
-    return { input, node: el('label', { class: 'check' }, input, el('span', {}, label)) };
-  };
-  const values = radio(false, t('send.refs.values'));
-  const keep = radio(true, t('send.refs.link'));
-  const kind = t(offer.list ? 'type.RefList' : 'type.Ref');
-  const update = (now) => {
-    values.input.checked = !now.link;
-    keep.input.checked = now.link;
-    keep.input.disabled = !now.ok;
-    const vars = { target: now.target, shown: now.shown, kind };
-    note.textContent = t(!now.ok ? `send.refs.note.${now.why}` : now.link ? (now.inside ? 'send.refs.note.inside' : 'send.refs.note.pull') : 'send.refs.note.values', vars);
-  };
-  update(offer);
-  return {
-    key: offer.key, update,
-    node: el('div', { class: 'ref-row', 'data-ref': offer.key },
-      el('div', {}, el('strong', {}, offer.label), ' ', el('span', { class: 'muted small' }, t('send.refs.of', { table: offer.table })), ' ', el('span', { class: 'pill pill-off' }, kind),
-        el('div', { class: 'muted small' }, t('send.refs.aim', { target: offer.target, shown: offer.shown || '—' }))),
-      el('div', { class: 'radios', role: 'radiogroup', 'aria-label': `${offer.table} · ${offer.label}` }, values.node, keep.node), note),
-  };
-}
-
-// Colonnes Référence et Liste de références (voir links.js) : pour chacune, n'envoyer que le texte affiché ou garder le lien (la table
-// visée s'ajoute alors à l'export : sa colonne affichée seule, toute la table ou des colonnes au choix). Hors Échange, où les colonnes vont dans les deux sens par leur
-// nom. `onTables` reçoit les tables de l'export à chaque changement. Rend les nœuds : le bloc des choix, puis dessous les tables ajoutées
-// (le choix « Garder le lien » ouvre son panneau sous la ligne qu'on vient de cliquer, pas au-dessus).
-function linkSection(ctx, schema, onTables) {
-  if (ctx.exp?.echange) return null;
-  const pulledSlot = el('div', { class: 'form' });
-  const refsSlot = el('div', { class: 'form' });
-  const state = { shown: '', pulled: '', rows: new Map(), summary: el('p', { class: 'small summary' }) };
-  const redrawPulled = (offers) => {
-    const because = (table) => offers.rows.filter(r => r.link && r.target === table).map(r => `${r.table}.${r.label}`);
-    pulledSlot.replaceChildren(...[...offers.pulled].map(([table, required]) => pulledBlock(ctx, schema, { table, required, because: because(table), onChange: refresh })));
-  };
-  const redrawRefs = (offers) => {
-    state.rows = new Map(offers.rows.map(r => [r.key, refRow(ctx, r, refresh)]));
-    const n = offers.rows.length;
-    refsSlot.replaceChildren(...(n ? [el('div', { class: 'form table-block' }, el('h3', {}, t('send.refs.title')),
-      withHelp(el('p', { class: 'field-title' }, t('send.refs.found', { n })), t('send.refs.found.help'), t('send.refs.title')),
-      ...[...state.rows.values()].map(row => row.node), state.summary)] : []));
-  };
-  function refresh() {
-    const offers = offersOf(ctx, schema);
-    for (const map of [ctx.extras, ctx.pulls]) for (const table of [...map.keys()]) if (!offers.pulled.has(table)) map.delete(table);
-    const rowsSig = JSON.stringify(offers.rows.map(r => [r.key, r.ok, r.why]));
-    if (rowsSig !== state.shown) { state.shown = rowsSig; redrawRefs(offers); } else offers.rows.forEach(r => state.rows.get(r.key).update(r));
-    const pulledSig = JSON.stringify([[...offers.pulled], offers.rows.filter(r => r.link).map(r => [r.key, r.target])]);
-    if (pulledSig !== state.pulled) { state.pulled = pulledSig; redrawPulled(offers); }
-    const items = [...offers.pulled].map(([table, required]) => {
-      const names = pullMode(ctx, table) === 'all' ? [t('send.refs.summary.whole')] : pulledColumns(ctx, schema, table, required).map(id => (exportableColumns(schema.columns(table) || []).find(c => c.id === id) || { label: id }).label);
-      return `${table} (${names.join(', ')})`;
-    });
-    state.summary.textContent = items.length ? t('send.refs.summary.some', { items: items.join(', ') }) : t('send.refs.summary.none');
-    onTables([...ctx.chosen, ...offers.pulled.keys()]);
-  }
-  ctx.refresh = refresh;
-  refresh();
-  return [refsSlot, pulledSlot];
-}
-
-// Case « Envoyer aussi les colonnes que j'ajouterai » (voir new-columns.js) : décochée d'emblée, telle que l'export l'est pour un export
+// Case « Envoyer aussi les futures colonnes que j'ajouterai » (voir new-columns.js) : décochée d'emblée, telle que l'export l'est pour un export
 // modifié, jamais en Échange. Sans elle, une colonne ajoutée plus tard ne part pas : la carte de l'export le dit, avec un bouton pour l'envoyer.
 function autoColsBlock(ctx) {
   if (ctx.exp?.echange) {
@@ -267,17 +120,17 @@ function autoColsBlock(ctx) {
   }
   if (ctx.autoCols === undefined) ctx.autoCols = Boolean(ctx.exp?.autoCols);
   const box = el('input', { type: 'checkbox', checked: ctx.autoCols, onchange: () => { ctx.autoCols = box.checked; } });
-  return el('div', { class: 'form auto-cols' }, withHelp(el('label', { class: 'check' }, box, t('send.autoCols')), t('send.autoCols.help'), t('send.autoCols')));
+  return el('div', { class: 'opts auto-cols' }, withHelp(el('label', { class: 'check' }, box, t('send.autoCols')), t('send.autoCols.help'), t('send.autoCols')));
 }
 
-// Éléments des colonnes envoyés en plus des données, chacun sa case (`ctx.elements`) : la mise en forme (voir options.js,
+// Ce qui accompagne les données, chaque élément sa case, tout visible (`ctx.elements`) : la mise en forme (voir options.js,
 // rules.js, docformat.js : en-têtes, règles conditionnelles simples, monnaie résolue, langue du document, en plus des
 // formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js), l'ordre et
 // les colonnes cachées de la page de chaque table (voir layout.js : décochée d'emblée, elle change l'affichage chez le destinataire).
 // Chaque case dit combien de colonnes (de tables) sont concernées. Cochées d'emblée pour un nouvel export (sauf la mise en page) ; pour un export
-// modifié, telles que l'export l'est déjà. Repliées derrière une ligne qui dit ce qui part. Jamais en Échange (les
-// colonnes y vont dans les deux sens). Les formules (voir column-formulas.js) ont leur case à part, hors du repli, décochée
-// d'emblée, et un message qui demande si l'on est sûr : c'est du Python qu'un destinataire exécutera chez lui.
+// modifié, telles que l'export l'est déjà. Jamais en Échange (les colonnes y vont dans les deux sens). Les formules (voir
+// column-formulas.js) ferment la liste : décochées d'emblée, avec un message qui demande si l'on est sûr (c'est du Python qu'un
+// destinataire exécutera chez lui), et une pastille qui le dit avant le clic.
 const ELEMENTS = [['style', 'send.el.style', 'send.el.style.count'], ['notes', 'send.el.notes', 'send.el.notes.count'], ['tableNote', 'send.el.tableNote', 'send.el.tableNote.count'], ['layout', 'send.el.layout', 'send.el.layout.count']];
 async function elementsBlock(ctx, schema) {
   if (ctx.exp?.echange) {
@@ -291,18 +144,14 @@ async function elementsBlock(ctx, schema) {
       : { style: true, notes: true, tableNote: true, layout: false, formulas: false };
   }
   const counts = elementCounts(schema, ctx.chosen, await fetchRows('_grist_Views_section'));
-  const summary = el('summary', {});
-  const names = () => ELEMENTS.filter(([key]) => ctx.elements[key]).map(([, name]) => t(`${name}.short`));
-  const refresh = () => { summary.textContent = t('send.elements', { items: names().join(', ') || t('send.elements.none') }); };
   const boxes = ELEMENTS.map(([key, name, count]) => {
-    const box = el('input', { type: 'checkbox', checked: ctx.elements[key], onchange: () => { ctx.elements[key] = box.checked; refresh(); } });
-    return el('div', { class: 'form' }, withHelp(el('label', { class: 'check' }, box, t(name), el('span', { class: 'muted small' }, ` · ${t(count, { n: counts[key] })}`)), t(`${name}.help`), t(name)));
+    const box = el('input', { type: 'checkbox', checked: ctx.elements[key], onchange: () => { ctx.elements[key] = box.checked; } });
+    return withHelp(el('label', { class: 'check' }, box, t(name), el('span', { class: 'muted small' }, ` · ${t(count, { n: counts[key] })}`)), t(`${name}.help`), t(name));
   });
-  refresh();
-  return el('div', {}, el('details', { class: 'guide options-more' }, summary, ...boxes), formulasBox(ctx, counts.formulas));
+  return el('div', { class: 'opts' }, ...boxes, formulasBox(ctx, counts.formulas));
 }
 
-// La case des formules : hors du repli, jamais cochée sans que la personne ait lu le message. Rien à envoyer (aucune colonne
+// La case des formules : jamais cochée sans que la personne ait lu le message. Rien à envoyer (aucune colonne
 // de formule) : grisée, sauf si l'export les envoie déjà (on peut alors la décocher).
 function formulasBox(ctx, count) {
   const box = el('input', {
@@ -313,7 +162,8 @@ function formulasBox(ctx, count) {
     },
   });
   return el('div', { class: 'form formulas-box' },
-    withHelp(el('label', { class: 'check' }, box, t('send.el.formulas'), el('span', { class: 'muted small' }, ` · ${t('send.el.formulas.count', { n: count })}`)), t('send.el.formulas.help'), t('send.el.formulas')));
+    withHelp(el('label', { class: 'check' }, box, t('send.el.formulas'), el('span', { class: 'muted small' }, ` · ${t('send.el.formulas.count', { n: count })}`),
+      el('span', { class: 'pill pill-pending badge' }, t('send.el.formulas.badge'))), t('send.el.formulas.help'), t('send.el.formulas')));
 }
 
 // Le message avant d'envoyer des formules : du Python, que seul un propriétaire du document destinataire peut poser, après les
@@ -323,12 +173,30 @@ const formulasWarning = () => confirmDialog({
   body: [el('p', {}, t('send.formulas.intro')), el('ul', {}, ['own', 'run', 'refused', 'initial', 'sandbox', 'slow'].map(k => el('li', {}, t(`send.formulas.${k}`))))],
 });
 
-// 2. Colonnes, par table, et ce que le widget ajoutera pour la synchro.
+// Une section de l'étape Contenu : un titre, sa phrase, puis ses blocs.
+const section = (title, sub, nodes) => el('section', { class: 'sec' },
+  el('div', {}, el('h3', { class: 'sec-title' }, t(title)), sub ? el('p', { class: 'sec-sub' }, t(sub)) : null), ...nodes);
+
+// L'introduction de l'étape, avec à droite le lien qui déplie l'aide en images (juste dessous : on la voit s'ouvrir).
+function stepIntro() {
+  const help = stepHelp(['s-columns']);
+  help.classList.add('linked');
+  help.id = 'gristsync-columns-help';
+  const link = el('button', { class: 'linkish', type: 'button', 'aria-expanded': 'false', 'aria-controls': help.id, onclick: () => {
+    help.open = !help.open;
+    link.setAttribute('aria-expanded', String(help.open));
+  } }, t('tuto.step'));
+  return [el('div', { class: 'step-intro' }, el('p', {}, t('send.columns.help')), link), help];
+}
+
+// 2. Contenu : par question, ce qui part (les tables, leurs colonnes et leurs lignes, les Références de chaque table), ce qui accompagne
+// les données, et ce qui vaudra pour la suite. Un Échange n'a que la première (ses colonnes vont dans les deux sens).
 async function showColumns(ctx) {
   const schema = await readSchema();
   const relays = receivedDests(schema).map(d => d.dest);
   const report = ctx.report = el('div', { class: 'report' });
   ctx.refresh = null;
+  ctx.refSlots = new Map(); // table de l'export -> emplacement de ses colonnes Référence, dans sa fiche
   const blocks = ctx.chosen.map(table => columnsBlock(ctx, schema, table, relays.includes(table)));
   // Ce que le widget ajoute aux tables de l'export, celles ajoutées pour un lien comprises (la ligne suit les choix).
   const addsNode = el('p', { class: 'muted small' });
@@ -338,16 +206,18 @@ async function showColumns(ctx) {
     addsNode.textContent = adds.length ? t('send.check.missing', { items: adds.join(', ') }) : '';
     addsNode.classList.toggle('hidden', !adds.length);
   };
-  const links = linkSection(ctx, schema, showAdds) || (showAdds(ctx.chosen), null);
+  if (!linkSection(ctx, schema, showAdds)) showAdds(ctx.chosen);
   const removed = ctx.exp ? ctx.exp.tables.map(tb => tb.table).filter(table => !ctx.chosen.includes(table)) : [];
   const elementsNode = await elementsBlock(ctx, schema);
   const next = () => {
     if (ctx.chosen.some(table => !(ctx.selected.get(table) || []).length)) throw new Error('noColumn');
     showName(ctx);
   };
-  ctx.wizard.show(1, [el('p', {}, t('send.columns.help')),
-    removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null,
-    ...blocks, ...(links || []), elementsNode, autoColsBlock(ctx), addsNode, report, stepHelp(['s-columns'])], [
+  const auto = autoColsBlock(ctx);
+  const data = [removed.length ? message('warn', t('send.edit.removed', { tables: removed.join(', ') })) : null, ...blocks];
+  const sections = elementsNode ? [section('send.sec.data', 'send.sec.data.sub', data), section('send.sec.with', 'send.sec.with.sub', [elementsNode]),
+    section('send.sec.next', null, [auto])] : data;
+  ctx.wizard.show(1, [...stepIntro(), ...sections, addsNode, report], [
     backButton(() => showTables(ctx)), cancel,
     { label: t('common.next'), kind: 'btn-primary', onClick: () => run(null, report, next) }]);
 }

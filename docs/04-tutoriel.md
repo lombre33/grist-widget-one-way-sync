@@ -88,16 +88,17 @@ quelque chose, le widget demande s'il faut **enregistrer** ou **abandonner** ces
 
 ![Choix des tables](images/02-source-tables.png)
 
-### 2. Choisir les colonnes
+### 2. Choisir le contenu
 
-Cocher les colonnes qui partent (toutes par défaut, sauf les pièces jointes, à cocher : voir
-[Pièces jointes](#pièces-jointes)). Le reste ne sort jamais du document. Une
-Référence part comme le texte qu'elle affiche, ou garde son lien (bloc **Références entre tables**,
-voir [Options d'une réception, liens entre tables](#options-dune-réception-liens-entre-tables-historique-des-envois)). Une
+L'étape **Contenu** est rangée par question. **Les données** : une fiche par table, où l'on coche les colonnes qui
+partent (toutes par défaut, sauf les pièces jointes, à cocher : voir [Pièces jointes](#pièces-jointes)). Le reste ne
+sort jamais du document. Une Référence, rangée dans la fiche de sa table, part comme le texte qu'elle affiche
+(**Envoyer seulement le texte**) ou garde son lien (**Garder le lien**, voir
+[Options d'une réception, liens entre tables](#options-dune-réception-liens-entre-tables-historique-des-envois)). Une
 colonne **Binaire (Blob)** ne part pas : Grist ne permet pas à un autre document d'en recevoir les octets,
 et l'assistant le dit. Les colonnes valent pour toutes les personnes qui reçoivent l'export. **Tous** et **Aucun** cochent ou décochent
 d'un coup les colonnes que la recherche affiche, et la liste s'agrandit par son coin (la fenêtre
-aussi).
+aussi). Le lien **Aide en images**, en haut à droite de l'étape, déplie les captures.
 
 En option, un **filtre de lignes** par table (**Filtrer les lignes**, puis **Ajouter une
 condition**) : une colonne, un opérateur et ses valeurs. Selon le type de la colonne : *est l'une
@@ -108,7 +109,15 @@ fiches citées : une fiche renommée reste dans le filtre. Plusieurs conditions 
 ou au moins une), et le nombre de lignes qui partiront s'affiche pendant le réglage. Une ligne qui
 sort du filtre est effacée chez les destinataires.
 
-![Colonnes](images/03-source-colonnes.png)
+![Contenu](images/03-source-colonnes.png)
+
+**Envoyé avec les données** réunit, chacune avec sa case et le nombre de colonnes ou de tables concernées : la
+mise en forme des colonnes, les descriptions des colonnes et des tables, l'ordre et les colonnes cachées de la page,
+et les formules (décochées d'emblée, avec une pastille « demande confirmation » et un message avant de cocher).
+Ce qui est coché part, et rien d'autre : le détail de chaque case est plus bas. **Pour la suite** porte la case
+« Envoyer aussi les futures colonnes que j'ajouterai à ces tables ».
+
+![Ce qui part avec les données, et les futures colonnes](images/03c-source-contenu.png)
 
 Le widget dit ce qu'il ajoutera, et ne l'ajoute qu'à la dernière étape :
 
@@ -295,9 +304,9 @@ toute seule. La carte de l'export le dit (« N colonnes ne partent pas ») avec 
 **Envoyer ces colonnes** enregistre l'export avec elles et renvoie la table, **Ne pas les envoyer**
 les range (la carte n'en parle plus). Une colonne renommée ou d'un autre type est dite par son nom
 (« la colonne « Ville » n'existe plus ; « Commune » est du même type, elle a sans doute été
-renommée ») : **Modifier** remet l'export d'accord. À l'étape Colonnes, la case « Envoyer aussi les
-futures colonnes que j'ajouterai à ces tables » (décochée d'emblée) les envoie seules quand un propriétaire
-ouvre la page du widget.
+renommée ») : **Modifier** remet l'export d'accord. À l'étape Contenu, la case « Envoyer aussi les
+futures colonnes que j'ajouterai à ces tables » (section **Pour la suite**, décochée d'emblée) les envoie
+seules quand un propriétaire ouvre la page du widget.
 
 ![Colonnes ajoutées à une table de l'export, qui ne partent pas](images/39-source-colonnes-ajoutees.png)
 
@@ -467,37 +476,36 @@ carte :
   reçues (une règle d'accès, posée par un propriétaire). La recopie, qui écrit avec les droits de la
   personne qui a la page ouverte, attend alors qu'un propriétaire l'ouvre ; la carte le dit.
 
-**Liens entre tables.** À l'étape Colonnes, le bloc **Références entre tables** liste chaque colonne
-Référence ou Liste de références de l'export, avec la table qu'elle vise et la colonne qu'elle affiche.
-Pour chacune, deux choix : **Valeurs seulement** (le destinataire reçoit le texte affiché) ou **Garder le
-lien** (il reçoit une vraie Référence, ou Liste de références, vers la table reçue, qui affiche la même
-colonne). Quand la table visée est déjà cochée, le lien est gardé d'emblée ; sinon ce sont les valeurs
-seules qui partent, et garder le lien **ajoute la table visée à l'export** (un bloc « Ajoutée pour
-un lien » le dit ; la ligne « Part en plus des tables cochées » fait le compte). Trois choix dans ce
-bloc, sous « Que prendre de la table ? » : **Seulement la colonne affichée** (d'emblée), **Toute la
-table** (ses Pièces jointes restent à cocher) ou **Choisir les colonnes** (la colonne affichée est
+**Liens entre tables.** À l'étape Contenu, chaque colonne Référence ou Liste de références de l'export est dans
+la fiche de sa table, avec la table qu'elle vise et la colonne qu'elle affiche. Deux choix, chacun suivi de ce
+qu'il fait : **Envoyer seulement le texte** (le destinataire reçoit le texte affiché) ou **Garder le lien** (il
+reçoit une vraie Référence, ou Liste de références, vers la table reçue, qui affiche la même colonne). Quand la
+table visée est déjà cochée, le lien est gardé d'emblée ; sinon c'est le texte seul qui part, et garder le lien
+**ajoute la table visée à l'export** : un panneau « Ajoutée pour un lien » s'ouvre juste sous le choix cliqué.
+Trois choix dans ce panneau, sous « Que prendre de la table ? » : **Seulement la colonne affichée** (d'emblée),
+**Toute la table** (ses Pièces jointes restent à cocher) ou **Choisir les colonnes** (la colonne affichée est
 toujours envoyée, on coche les autres). On peut aussi y filtrer les lignes.
 
-![Bloc « Références entre tables »](images/29-source-liens.png)
+![Colonnes Référence, rangées dans la fiche de leur table](images/29-source-liens.png)
 
 ![Table ajoutée pour un lien](images/29b-source-liens-tables-ajoutees.png)
 
 Une colonne que le destinataire avait déjà remplie de texte reste du texte (rien n'est touché sans
 accord) : sa carte le dit (« … reste du texte ») et un propriétaire clique **Refaire les références**
-pour la convertir et reprendre le lien envoyé par la SOURCE. **Valeurs seulement**, dans **Modifier**, rend
+pour la convertir et reprendre le lien envoyé par la SOURCE. **Envoyer seulement le texte**, dans **Modifier**, rend
 le texte. Une ligne qui arrive avant les lignes qu'elle vise est complétée à leur arrivée.
 
 ![Carte : références refaites, colonne restée du texte](images/29c-cible-liens-refaire.png)
 
-**Mise en forme des colonnes.** La case **Envoyer la mise en forme des colonnes** (étape Colonnes,
-cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise
+**Mise en forme des colonnes.** La case **Mise en forme des colonnes** (étape Contenu, section
+**Envoyé avec les données**, cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise
 et les règles de mise en forme conditionnelle simples (comparaisons sur les colonnes envoyées). Une
 règle n'est jamais copiée telle quelle : elle est relue, puis réécrite avec les colonnes du
 destinataire ; une règle plus complexe n'est pas envoyée. Seules les colonnes créées par le widget
 la prennent, une fois : ce qui est retouché chez le destinataire reste, et le bouton **Reprendre
 depuis la SOURCE** de la carte remet tout d'accord avec la SOURCE.
 
-**Descriptions.** Deux autres cases, sous la même ligne repliée **Envoyé avec les colonnes**, envoient
+**Descriptions.** Deux autres cases, **Descriptions des colonnes** et **Descriptions des tables** (cochées d'emblée), envoient
 le texte de la description de chaque colonne (300 caractères au plus) et celui de chaque table (500
 caractères au plus). Chaque case dit combien de colonnes ou de tables sont concernées. Le texte part
 tel quel et chaque destinataire peut le lire : ne cochez pas la case si vos descriptions portent des
@@ -505,7 +513,7 @@ notes internes. Chez le destinataire, une colonne créée par le widget la reço
 a pas), la table aussi si la sienne est vide ; ce qui est écrit ou effacé ici n'est pas écrasé, et
 **Reprendre depuis la SOURCE** (une case par élément) le remet d'accord.
 
-**Ordre et colonnes cachées.** Une case à part, **Envoyer l'ordre et les colonnes cachées de la page**, décochée
+**Ordre et colonnes cachées.** La case **Ordre et colonnes cachées de la page**, décochée
 d'emblée (elle change l'affichage chez le destinataire), envoie le rang de chaque colonne dans la page de la table
 (la première vue en tableau d'une page, pas les données brutes) et celles que cette page cache. Seul l'affichage change :
 les données d'une colonne cachée arrivent comme les autres. Chez le destinataire, les colonnes que le widget a créées la
@@ -516,7 +524,7 @@ SOURCE** range de nouveau la page comme celle de la SOURCE. Les tris, filtres, g
 
 ![Reprendre des éléments depuis la SOURCE](images/41-cible-reprendre.png)
 
-**Formules.** Une case à part, **Envoyer aussi les formules des colonnes (Python)**, décochée d'emblée,
+**Formules.** La case **Formules des colonnes (Python)**, qui ferme la liste et que la pastille « demande confirmation » signale, décochée d'emblée,
 envoie le texte de chaque colonne de formule, et celui de la **formule par défaut** d'une colonne de
 données (une formule de déclenchement qui ne joue que sur les nouvelles lignes ; pas celle qui se
 recalcule quand une colonne change, ni celle d'une colonne Référence ou Pièces jointes). Quand vous la cochez, un message rappelle qu'une formule est du code Python

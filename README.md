@@ -102,16 +102,17 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   fichier part une fois par destinataire, quand la page SOURCE est ouverte, et n'est déposé
   qu'une fois. Dans un Échange, les fichiers vont dans les deux sens : une ligne attend les
   fichiers de l'autre document avant d'être recopiée, et un fichier reçu n'est pas renvoyé.
-- **Liens entre tables** : pour chaque colonne Référence ou Liste de références de l'export, le bloc
-  « Références entre tables » (étape Colonnes) demande si elle part en valeurs seulement ou si elle
-  garde son lien. Garder le lien d'une table qui n'est pas dans l'export l'ajoute, au choix avec sa
+- **Liens entre tables** : chaque colonne Référence ou Liste de références de l'export est rangée dans la
+  fiche de sa table (étape Contenu) : « Envoyer seulement le texte » ou « Garder le lien », chaque choix
+  disant ce qu'il fait. Garder le lien d'une table qui n'est pas dans l'export l'ajoute, au choix avec sa
   seule colonne affichée (d'emblée), toute la table ou les colonnes que l'on coche ; chez le destinataire, la colonne devient une vraie Référence (ou Liste de
   références) vers la table reçue, qui affiche la même colonne. Une colonne déjà remplie là-bas reste
   du texte, jusqu'à ce qu'un propriétaire clique « Refaire les références ».
 - **Éléments des colonnes** : en-têtes, couleurs, devise et règles de mise en forme
-  conditionnelle simples (case « Envoyer la mise en forme des colonnes »), descriptions des
+  conditionnelle simples (case « Mise en forme des colonnes »), descriptions des
   colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, cochée d'emblée,
-  dit combien de colonnes sont concernées (étape Colonnes, repliée sous « Envoyé avec les colonnes »).
+  dit combien de colonnes sont concernées (étape Contenu, section « Envoyé avec les données », toutes
+  les cases visibles).
   L'ordre des colonnes et celles que la page de la table cache ont leur case (0.26), décochée d'emblée :
   le destinataire les reprend une fois sur les colonnes que le widget a créées, puis à la demande.
   Une règle n'est jamais copiée telle quelle : elle est relue puis réécrite avec les colonnes du
@@ -269,7 +270,7 @@ L'analyse complète est dans [`SECURITY.md`](SECURITY.md).
 - Un export en Échange n'a que des participants à l'Échange. Une ligne de plus de 1 Mo ne peut pas
   partir.
 - Une colonne **Binaire (Blob)** ne part pas : Grist n'écrit pas d'octets dans une colonne par ses API,
-  une autre colonne ne pourrait pas les recevoir fidèlement. L'assistant le dit à l'étape Colonnes.
+  une autre colonne ne pourrait pas les recevoir fidèlement. L'assistant le dit à l'étape Contenu.
 
 La liste complète est dans [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 

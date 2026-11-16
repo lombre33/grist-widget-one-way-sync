@@ -1452,7 +1452,7 @@ try {
   }
   // --- SOURCE : une colonne ajoutée à une table de l'export ne part pas toute seule ; la carte le dit, avec « Envoyer ces colonnes » (l'export
   // est enregistré avec elles, la table renvoyée) ou « Ne pas les envoyer » (elles sont connues, plus rien n'est dit). Une colonne
-  // renommée, d'un autre type, est dite par son nom ; la case « Envoyer aussi les colonnes que j'ajouterai » les envoie ensuite seule.
+  // renommée, d'un autre type, est dite par son nom ; la case « Envoyer aussi les futures colonnes que j'ajouterai » les envoie ensuite seule.
   async function newColumnsSteps() {
     const src = await fichesDoc('Colonnes ajoutées SOURCE');
     const dst = await newDocWithWidget('Colonnes ajoutées CIBLE');
@@ -1524,13 +1524,13 @@ try {
     await waitFor(async () => (await columnsHere()).includes('Note'), 'colonne ajoutée créée chez la CIBLE', 90000);
     await waitFor(async () => (await records(dst.doc, 'Fiches')).every(r => r.Note), 'colonne envoyée seule remplie', 90000);
     assert.equal(await fresh().count(), 0, 'rien n\'est dit : elle est partie');
-    step('SOURCE : colonne renommée et colonne d\'un autre type dites par leur nom ; la case « Envoyer aussi les colonnes que j\'ajouterai » envoie la suivante seule');
+    step('SOURCE : colonne renommée et colonne d\'un autre type dites par leur nom ; la case « Envoyer aussi les futures colonnes que j\'ajouterai » envoie la suivante seule');
   }
   // --- Références conservées, choix par colonne (0.27) : une colonne Référence vers une autre table de l'export
   // devient une vraie Référence chez le destinataire (elle affiche la même colonne et suit une ville renommée) ;
   // une Liste de références vers une table hors de l'export, dont la personne garde le lien, ajoute cette table
   // (avec sa seule colonne affichée) et arrive en vraie Liste de références ; une ligne qui cite une ligne arrivée
-  // en même temps (la table vise elle-même) est complétée au passage suivant ; « Valeurs seulement » rend le texte ;
+  // en même temps (la table vise elle-même) est complétée au passage suivant ; « Envoyer seulement le texte » rend le texte ;
   // une colonne restée du texte parce qu'elle était remplie se refait d'un clic (« Refaire les références »).
   async function linksSteps() {
     const src = await newDocWithWidget('Liens SOURCE', [
@@ -1568,22 +1568,26 @@ try {
     assert.ok(await keeps('Gens.Lieu') && await keeps('Gens.Chef'), 'liens gardés d\'emblée quand la table visée est cochée');
     assert.ok(!(await keeps('Gens.Equipes')), 'Services n\'est pas cochée : les valeurs seules, rien ne s\'ajoute sans le choix');
     assert.equal(await dialog().locator('.table-added').count(), 0);
-    const toRefs = () => dialog().getByRole('heading', { name: 'Références entre tables' }).evaluate(node => node.scrollIntoView({ block: 'start' }));
-    await toRefs();
+    // 0.30 : chaque colonne Référence est dans la fiche de sa table, avec deux choix empilés qui disent chacun ce qu'ils font.
+    assert.equal(await dialog().getByRole('heading', { name: 'Références entre tables' }).count(), 0, 'plus de bloc à part : les Références sont dans leur table');
+    assert.equal(await dialog().locator('.table-block', { hasText: 'Gens' }).first().locator('[data-ref="Gens.Lieu"]').count(), 1, 'Lieu est dans la fiche de Gens');
+    assert.match(await refRow('Gens.Equipes').innerText(), /Envoyer seulement le texte/);
+    assert.match(await refRow('Gens.Equipes').innerText(), /La table Services part aussi/, 'la conséquence est écrite sous le choix');
+    await dialog().getByRole('heading', { name: 'Gens', exact: true }).evaluate(node => node.scrollIntoView({ block: 'start' }));
     await shot('29-source-liens', 'modal');
     // Garder le lien de la Liste de références ajoute la table Services, avec sa seule colonne affichée.
     await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
     await dialog().locator('.table-added', { hasText: 'Services' }).waitFor();
     const added = dialog().locator('.table-added', { hasText: 'Services' });
-    const summary = () => dialog().locator('.table-block', { hasText: 'Références entre tables' }).innerText();
+    assert.equal(await refRow('Gens.Equipes').locator('.table-added').count(), 1, 'le panneau s\'ouvre dans la colonne qu\'on vient de cliquer, sous son choix');
+    assert.equal(await refRow('Gens.Lieu').locator('.table-added').count(), 0, 'pas sous les autres colonnes');
+    assert.ok((await added.boundingBox()).y > (await refRow('Gens.Equipes').getByLabel('Garder le lien').boundingBox()).y, 'le panneau est sous le choix, pas au-dessus');
     assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/);
     assert.ok(await added.getByLabel(/Seulement la colonne affichée \(Libelle\)/).isChecked(), 'd\'emblée : la colonne affichée seule');
-    assert.match(await summary(), /Part en plus des tables cochées\s:\sServices \(Libelle\)/);
     // Trois choix pour la table ajoutée : la colonne affichée seule, toute la table, ou des colonnes au choix (0.28).
     assert.ok(!(await added.getByText('Budget').isVisible()), 'la liste des colonnes est repliée tant qu\'on ne choisit pas les colonnes');
     await added.getByLabel(/Toute la table \(2 colonnes\)/).check();
     assert.match(await added.innerText(), /2 colonnes sur 2 \(toute la table\)/);
-    assert.match(await summary(), /Part en plus des tables cochées\s:\sServices \(toute la table\)/);
     await added.getByLabel('Choisir les colonnes').check();
     await added.getByRole('checkbox', { name: /Budget/ }).waitFor();
     assert.ok(await added.getByRole('checkbox', { name: /Budget/ }).isChecked(), 'de « toute la table » à « choisir » : Budget reste coché');
@@ -1592,12 +1596,12 @@ try {
     assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/);
     await added.getByRole('checkbox', { name: /Budget/ }).check();
     assert.match(await added.innerText(), /2 colonnes sur 2 \(Libelle, Budget\)/);
-    await added.evaluate(node => node.scrollIntoView({ block: 'end' }));
+    await refRow('Gens.Equipes').evaluate(node => node.scrollIntoView({ block: 'start' }));
     await shot('29b-source-liens-tables-ajoutees', 'modal');
     await added.getByLabel(/Seulement la colonne affichée/).check();
     assert.match(await added.innerText(), /1 colonne sur 2 \(Libelle\)/, 'retour à la colonne affichée seule');
     // Reprise d'avis : revenir aux valeurs retire la table ajoutée, puis la rajouter.
-    await refRow('Gens.Equipes').getByLabel('Valeurs seulement').check();
+    await refRow('Gens.Equipes').getByLabel('Envoyer seulement le texte').check();
     await dialog().locator('.table-added').waitFor({ state: 'detached' });
     await refRow('Gens.Equipes').getByLabel('Garder le lien').check();
     await dialog().locator('.table-added', { hasText: 'Services' }).waitFor();
@@ -1659,12 +1663,12 @@ try {
     assert.equal(await widget().locator('.drift').count(), 0, 'toujours aucune retouche');
     step('Références conservées : vraies Références chez le destinataire (colonne affichée reprise), ligne visée arrivée en même temps retrouvée, ville renommée et Référence changée suivies');
 
-    // « Valeurs seulement » dans « Modifier » : la colonne redevient du texte, les autres gardent leur lien.
+    // « Envoyer seulement le texte » dans « Modifier » : la colonne redevient du texte, les autres gardent leur lien.
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
     assert.ok(await keeps('Gens.Lieu') && await keeps('Gens.Equipes'), 'export modifié : tels que l\'export les a enregistrés');
-    await refRow('Gens.Lieu').getByLabel('Valeurs seulement').check();
+    await refRow('Gens.Lieu').getByLabel('Envoyer seulement le texte').check();
     await dialogButton('Continuer').click();
     await dialogButton('Enregistrer').click();
     await dialog().getByText(/Enregistré/).waitFor({ timeout: 60000 });
@@ -1676,7 +1680,7 @@ try {
     assert.deepEqual([now.Anna.Lieu, now.Basile.Lieu, now.Céline.Lieu], ['Villeurbanne', 'Villeurbanne', 'Paris']);
     assert.equal((await column(dst.doc, 'Gens', 'Chef')).type, 'Ref:Gens', 'les autres colonnes gardent leur lien');
     assert.equal((await column(dst.doc, 'Gens', 'Equipes')).type, 'RefList:Services');
-    step('Références conservées : « Valeurs seulement » rend le texte d\'une colonne, les autres gardent leur lien');
+    step('Références conservées : « Envoyer seulement le texte » rend le texte d\'une colonne, les autres gardent leur lien');
 
     // Le lien est redonné alors que la colonne est remplie de texte : rien n'est touché sans accord, un clic la refait.
     await openWidget(src.url);
@@ -1763,10 +1767,8 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
-    const elements = dialog().locator('details:not(.tuto-step)', { hasText: 'Envoyé avec les colonnes' });
-    assert.ok(!/ordre et colonnes cachées/.test(await elements.locator('summary').innerText()), 'la mise en page ne part pas sans accord');
-    await elements.locator('summary').click();
-    const send = dialog().getByRole('checkbox', { name: 'Envoyer l’ordre et les colonnes cachées de la page' });
+    const elements = dialog().locator('.opts', { hasText: 'Mise en forme des colonnes' });
+    const send = dialog().getByRole('checkbox', { name: 'Ordre et colonnes cachées de la page' });
     assert.ok(!(await send.isChecked()), 'décochée d\'emblée : elle change l\'affichage chez le destinataire');
     assert.match(await elements.innerText(), /1\stable concernée/);
     await send.check();
@@ -1848,14 +1850,16 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
-    // Les éléments envoyés avec les colonnes sont repliés derrière une ligne qui dit ce qui part ; chacun a sa case, cochée d'emblée.
-    const elements = dialog().locator('details:not(.tuto-step)', { hasText: 'Envoyé avec les colonnes' });
-    assert.match(await elements.locator('summary').innerText(), /mise en forme, descriptions des colonnes, descriptions des tables/);
-    await elements.locator('summary').click();
-    const send = dialog().getByRole('checkbox', { name: 'Envoyer la mise en forme des colonnes' });
+    // Les éléments envoyés avec les données sont tous visibles sous leur titre ; chacun a sa case, cochée d'emblée (sauf la mise en page et les formules).
+    const elements = dialog().locator('.opts', { hasText: 'Mise en forme des colonnes' });
+    await dialog().getByRole('heading', { name: 'Envoyé avec les données' }).waitFor();
+    const send = dialog().getByRole('checkbox', { name: 'Mise en forme des colonnes' });
+    assert.ok(await send.isVisible(), 'visible sans rien ouvrir');
     assert.ok(await send.isChecked(), 'cochée d\'emblée pour un nouvel export');
-    assert.ok(await dialog().getByRole('checkbox', { name: 'Envoyer les descriptions des colonnes' }).isChecked());
-    assert.ok(await dialog().getByRole('checkbox', { name: 'Envoyer la description des tables' }).isChecked());
+    assert.ok(await dialog().getByRole('checkbox', { name: 'Descriptions des colonnes' }).isChecked());
+    assert.ok(await dialog().getByRole('checkbox', { name: 'Descriptions des tables' }).isChecked());
+    assert.ok(!(await dialog().getByRole('checkbox', { name: 'Ordre et colonnes cachées de la page' }).isChecked()), 'la mise en page ne part pas sans accord');
+    assert.match(await dialog().locator('.pill', { hasText: 'demande confirmation' }).innerText(), /demande confirmation/, 'la pastille des formules le dit avant le clic');
     assert.match(await elements.innerText(), /2\scolonnes concernées/, 'chaque case dit combien de colonnes sont concernées');
     await dialogButton('Continuer').click();
     await dialog().getByLabel('Nom de l’export').fill('Budget');
@@ -1951,8 +1955,7 @@ try {
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    await dialog().locator('details:not(.tuto-step) > summary', { hasText: 'Envoyé avec les colonnes' }).click();
-    for (const name of ['Envoyer la mise en forme des colonnes', 'Envoyer les descriptions des colonnes', 'Envoyer la description des tables']) {
+    for (const name of ['Mise en forme des colonnes', 'Descriptions des colonnes', 'Descriptions des tables']) {
       const again = dialog().getByRole('checkbox', { name });
       assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
       await again.uncheck();
@@ -1992,10 +1995,10 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
-    // La case est à part (hors du repli des autres éléments), décochée d'emblée, et dit combien de colonnes sont concernées.
-    const box = dialog().getByRole('checkbox', { name: /Envoyer aussi les formules des colonnes/ });
+    // La case ferme la liste des éléments : décochée d'emblée, elle dit combien de colonnes sont concernées.
+    const box = dialog().getByRole('checkbox', { name: /Formules des colonnes/ });
     await box.waitFor({ timeout: 30000 });
-    assert.ok(await box.isVisible(), 'visible sans ouvrir le repli');
+    assert.ok(await box.isVisible(), 'visible sans rien ouvrir');
     assert.ok(!(await box.isChecked()), 'décochée d\'emblée, même pour un nouvel export');
     assert.match(await dialog().locator('.formulas-box').innerText(), /3\sformules/, 'deux formules de colonne et une formule par défaut');
     const warning = widget().getByRole('dialog', { name: 'Envoyer aussi les formules ?' });
@@ -2079,7 +2082,7 @@ try {
     await openWidget(src.url);
     await button('Modifier').click();
     await dialogButton('Continuer').click();
-    const again = dialog().getByRole('checkbox', { name: /Envoyer aussi les formules des colonnes/ });
+    const again = dialog().getByRole('checkbox', { name: /Formules des colonnes/ });
     assert.ok(await again.isChecked(), 'export modifié : telle que l\'export l\'est déjà');
     await again.uncheck();
     await dialogButton('Continuer').click();
@@ -2799,6 +2802,9 @@ try {
   await dialog().getByRole('checkbox', { name: 'Delta' }).uncheck();
   await dialog().getByText(/3 colonnes sur 5 · toutes les lignes/).waitFor();
   await shot('03-source-colonnes', 'modal');
+  // La suite de l'étape Contenu : ce qui part avec les données, puis les futures colonnes.
+  await dialog().getByRole('heading', { name: 'Envoyé avec les données' }).evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await shot('03c-source-contenu', 'modal');
   // Depuis la 0.19 la table Synchro est créée vide, avec ses règles d'accès, avant l'assistant (voir protectSync) : aucune ligne
   // d'export n'existe encore, donc rien de lisible avant la fin de l'assistant.
   assert.equal((await records(source.doc, 'Synchro')).length, 0, 'aucune ligne d\'export avant la fin de l\'assistant');
@@ -2806,6 +2812,7 @@ try {
   await dialogButton('Continuer').click();
   await dialog().getByLabel('Nom de l’export').fill('Annuaire');
   await shot('03b-source-nom');
+  if (process.env.STOP_AFTER === '03b') process.exit(0); // refaire seulement les captures 02, 03 et 03b : CAPTURES=1 STOP_AFTER=03b
   await dialogButton('Créer l’export').click();
   await dialog().getByText('Export « Annuaire » créé.').waitFor();
   const contacts = await records(source.doc, 'Contacts');

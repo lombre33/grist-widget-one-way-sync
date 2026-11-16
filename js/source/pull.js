@@ -1,5 +1,5 @@
 // Table ajoutée à l'export pour garder le lien d'une Référence (voir linkOffers de engine/logic/links.js) : ce qu'elle envoie.
-// Trois choix, faits dans son bloc de l'étape Colonnes :
+// Trois choix, faits dans son panneau de l'étape Contenu :
 //  - 'shown' (d'emblée) : la seule colonne que le lien affiche, rien de plus ;
 //  - 'all' : toutes les colonnes de la table, sauf les Pièces jointes (elles ne partent que cochées : leurs fichiers partent page ouverte
 //    et peuvent peser lourd), que la personne ajoute par 'pick' ;

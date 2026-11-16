@@ -1,4 +1,4 @@
-// SOURCE : filtre des lignes d'une table, à l'étape Colonnes de l'assistant d'export (comparaisons :
+// SOURCE : filtre des lignes d'une table, à l'étape Contenu de l'assistant d'export (comparaisons :
 // filters.js). Chaque condition : une colonne, un opérateur selon son type, et ses valeurs, cochées
 // parmi celles de la colonne (avec leur nombre de lignes) ou tapées. Les lignes de la table sont lues
 // à la première ouverture (`load`), pour proposer les valeurs et dire combien de lignes partiront.

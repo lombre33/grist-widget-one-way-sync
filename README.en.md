@@ -100,16 +100,16 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   per recipient, while the SOURCE page is open, and stored only once. In an Exchange, files travel
   both ways: a row waits for the other document's files before being copied, and a received file
   is not sent back.
-- **Links between tables**: for each Reference or Reference list column of the export, the
-  “References between tables” block (Columns step) asks whether it is sent as values only or keeps
-  its link. Keeping the link of a table that is not in the export adds it, with a choice: only the
+- **Links between tables**: each Reference or Reference list column of the export sits in the card
+  of its table (Content step): “Send the text only” or “Keep the link”, each choice saying what it
+  does. Keeping the link of a table that is not in the export adds it, with a choice: only the
   column it shows (the default), the whole table, or the columns you tick; on the receiving side the column becomes a real Reference (or Reference list) to the
   received table, showing the same column. A column that already holds text there stays text until
   an owner clicks “Rebuild the references”.
 - **Column elements**: headers, colors, currency and simple conditional formatting rules
-  (“Send the column formatting” box), column and table descriptions (separate boxes) can travel
-  with the export; each box, ticked by default, says how many columns are concerned (Columns step,
-  folded under “Sent with the columns”). The order of the columns and the ones the table's page hides
+  (“Column formatting” box), column and table descriptions (separate boxes) can travel
+  with the export; each box, ticked by default, says how many columns are concerned (Content step,
+  “Sent along with the data” section, all boxes visible). The order of the columns and the ones the table's page hides
   have their own box (0.26), unticked by default: the receiver applies them once to the columns the widget
   created, then on request. A rule is never copied as it is: it is read, then
   rewritten with the receiver's columns. The card flags a different document language (it decides
@@ -255,7 +255,7 @@ Full analysis (in French): [`SECURITY.md`](SECURITY.md).
   and **Edit** lets you tick the columns again.
 - An export in Exchange only has Exchange participants. A row larger than 1 MB cannot be sent.
 - A **Binary (Blob)** column is not sent: Grist does not write bytes into a column through its APIs, so another
-  document could not receive them faithfully. The wizard says so at the Columns step.
+  document could not receive them faithfully. The wizard says so at the Content step.
 
 Full list (in French): [`docs/06-architecture.md`](docs/06-architecture.md#limites-connues).
 
