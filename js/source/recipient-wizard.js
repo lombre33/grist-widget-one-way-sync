@@ -258,7 +258,7 @@ function replyFiche(reply, { docId, origin }) {
   return [el('dl', { class: 'fiche' }, fiche.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v || '—')])),
     el('p', { class: 'muted small' }, t('send.reply.verified')),
     share.personal ? message('warn', t('send.reply.personal')) : null,
-    reply.secret ? null : message('warn', t('send.reply.unprotected')),
+    reply.secret ? null : message('warn', t('send.reply.nosecret')),
     versionNote(reply.version, VERSION),
     controlLine(t('send.reply.code'), reply.code),
     el('p', { class: 'muted small' }, maskKey(reply.url))].filter(Boolean);

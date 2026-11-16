@@ -8,14 +8,13 @@
 import assert from 'node:assert/strict';
 import { createHarness, shootPage } from '../harness.mjs';
 import { columnsOf, makeRow } from '../data.mjs';
-import { exportAndInvite } from './probe.mjs';
 
 const h = await createHarness({ port: 8588, envFile: '.env-refus.json' });
 try {
   const src = await h.newDocWithWidget('Refus SOURCE');
   await h.fillTable(src.doc, 'Contacts', columnsOf(4), 5, makeRow);
   const dst = await h.newDocWithWidget('Refus CIBLE');
-  const { sv, dv, code } = await exportAndInvite(h, src);
+  const { sv, dv, code } = await h.exportAndInvite(src);
   const answer = await h.accept(dv, dst, code, { exportName: 'Annuaire', table: 'Contacts' });
 
   await sv.open(src.url);

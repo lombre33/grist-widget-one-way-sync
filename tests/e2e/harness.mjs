@@ -217,6 +217,19 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     await view.dialog().waitFor({ state: 'detached' });
   }
 
+  // L'export `exportName` de la table `table` de la SOURCE `src` (vue `sv`, ouverte), son invitation (`code`), puis la vue de la CIBLE,
+  // connectée (`dv`). `tags` nomme les deux vues.
+  async function exportAndInvite(src, { table = 'Contacts', exportName = 'Annuaire', tags = ['source', 'cible'] } = {}) {
+    const sv = await newView(tags[0]);
+    await login(sv);
+    await sv.open(src.url);
+    await createExport(sv, table, exportName);
+    const code = await invite(sv);
+    const dv = await newView(tags[1]);
+    await login(dv);
+    return { sv, dv, code };
+  }
+
   // Paire branchée : SOURCE (table `table` déjà remplie) et CIBLE, un export, un destinataire.
   // Rend les documents, les vues ouvertes sur chacun, et l'identifiant de l'export.
   async function pair({ name, table, columns, rows, makeRow, exportName = 'Annuaire', send = 'skip', source: setup = [], afterAccept = async () => {}, beforeExport = async () => {} }) {
@@ -224,13 +237,7 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     if (columns) await fillTable(src.doc, table, columns, rows, makeRow);
     const dst = await newDocWithWidget(`${name} CIBLE`);
     await beforeExport({ src });
-    const sv = await newView('source');
-    await login(sv);
-    await sv.open(src.url);
-    await createExport(sv, table, exportName);
-    const code = await invite(sv);
-    const dv = await newView('cible');
-    await login(dv);
+    const { sv, dv, code } = await exportAndInvite(src, { table, exportName });
     const answer = await accept(dv, dst, code, { exportName, table });
     await afterAccept({ sv, dv, src, dst });
     await approve(sv, src, answer, { send });
@@ -270,6 +277,6 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
 
   return {
     env, TEAM, WIDGET_URL, api, request, applyActions, records, sql, count, tableRef, webhooks, journalOf, waitFor, newDocWithWidget, fillTable,
-    newView, userView, shareDoc, login, createExport, editExport, invite, accept, approve, pair, addRecipient, close, problems, formKey, formLink, publishedForms,
+    newView, userView, shareDoc, login, createExport, editExport, invite, exportAndInvite, accept, approve, pair, addRecipient, close, problems, formKey, formLink, publishedForms,
   };
 }

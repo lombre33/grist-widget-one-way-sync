@@ -21,16 +21,3 @@ export async function leavePendingInvitation(p) {
   await p.dv.openTab(p.dst.url, 'Recevoir');
   await new Promise(resolve => setTimeout(resolve, 12000));
 }
-
-// L'export « Annuaire » (Contacts) de la SOURCE `src`, son invitation (`code`), puis la vue de la CIBLE, connectée : `{ sv, dv, code }`.
-// `tags` nomme les deux vues.
-export async function exportAndInvite(h, src, tags = ['source', 'cible']) {
-  const sv = await h.newView(tags[0]);
-  await h.login(sv);
-  await sv.open(src.url);
-  await h.createExport(sv, 'Contacts', 'Annuaire');
-  const code = await h.invite(sv);
-  const dv = await h.newView(tags[1]);
-  await h.login(dv);
-  return { sv, dv, code };
-}

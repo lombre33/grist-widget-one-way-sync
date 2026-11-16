@@ -392,7 +392,7 @@
   "send.reply.team": "Team",
   "send.reply.at": "Date",
   "send.reply.approve": "Approve and connect",
-  "send.reply.unprotected": "This invitation is not protected by any secret: check the card above carefully before approving.",
+  "send.reply.nosecret": "This invitation is not protected by any secret. Check the card above carefully before approving.",
   "send.reply.sameDoc": "this document",
   "send.reply.verified": "Document, folder and team come from Grist; the email and date come from the pasted code.",
   "send.reply.personal": "This document is in a personal space: Grist does not say who owns it. Check by phone with the person, using the control code.",

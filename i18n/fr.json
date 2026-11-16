@@ -392,7 +392,7 @@
   "send.reply.team": "Équipe",
   "send.reply.at": "Date",
   "send.reply.approve": "Approuver et brancher",
-  "send.reply.unprotected": "Cette invitation n’est protégée par aucun secret : vérifiez bien la fiche ci-dessus avant d’approuver.",
+  "send.reply.nosecret": "Cette invitation n’est protégée par aucun secret. Vérifiez bien la fiche ci-dessus avant d’approuver.",
   "send.reply.sameDoc": "ce document",
   "send.reply.verified": "Document, dossier et équipe sont donnés par Grist ; le courriel et la date viennent du code collé.",
   "send.reply.personal": "Ce document est dans un espace personnel : Grist ne dit pas à qui il appartient. Vérifiez par téléphone avec la personne, code de contrôle à l’appui.",
