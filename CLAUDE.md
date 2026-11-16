@@ -375,7 +375,18 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.29.0 (13 novembre 2026)
+## État : V0.29.1 (16 novembre 2026)
+
+V0.29.1 (Antoine, 16 novembre, en préparant un export avec une colonne Référence : « si on fait "garder le lien" ça ouvre la fenêtre au dessus, c'est étrange, au dessous ça serait mieux » ; puis « "Envoyer aussi les
+colonnes que j'ajouterai à ces tables" -> "Envoyer aussi les futures colonnes que j'ajouterai à ces tables" »). **Moteur inchangé (5.0.0)**, écran et textes seulement.
+- **Ordre de l'étape Colonnes** : `linkSection` (`js/source/export-wizard.js`) rend maintenant `[refsSlot, pulledSlot]` : le bloc « Références entre tables » d'abord, puis dessous, les blocs « Ajoutée pour un lien »
+  (avant : l'inverse, donc le panneau qui s'ouvrait en choisissant « Garder le lien » apparaissait au-dessus de la ligne cliquée). Le texte `send.refs.note.pull` disait « dans son bloc, plus haut » : il dit « juste en dessous ».
+- **Libellé** `send.autoCols` (fr et en) : « futures colonnes » ; `docs/04` suit. Les essais qui cherchent la case (`/colonnes que j.ajouterai|columns I add/`) matchent toujours.
+- Captures refaites : `docs/images/29-source-liens`, `29b-source-liens-tables-ajoutees` (et leurs vignettes README). **Le forum (`/mnt/project-files/forum/images/04b`, `04`) n'est pas refait** (il ne se publie qu'avec la Bêta : on le refait avec le lot) et **`03-source-colonnes` montre encore l'ancien libellé de la case** :
+  elle se refera avec le prochain parcours complet `CAPTURES=1`, ou avec la refonte de l'étape si Antoine en choisit une (critique et trois maquettes : `/mnt/project-files/notes/maquettes-colonnes/`).
+- Testé : unit 524 ; e2e `ONLY_LINKS=1` vert (aucun test n'attendait l'ordre des blocs : tous passent par `.table-added`).
+
+## État précédent : V0.29.0 (13 novembre 2026)
 
 V0.29.0 (Antoine, 13 novembre : « peux-tu faire une passe sur toutes les textes de chaque modale ? […] un ton plus adapté à un user français courant qui ne connaît pas le widget […] et peut-être une petite
 audit UI, pour que les informations qui expliquent les options soient en info bulle ou autre ? car l'interface reste très verbeuse » ; puis « quand on est dans la modale de modification du partage côté source

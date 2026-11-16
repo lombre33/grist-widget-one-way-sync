@@ -221,7 +221,8 @@ function refRow(ctx, offer, onPick) {
 
 // Colonnes Référence et Liste de références (voir links.js) : pour chacune, n'envoyer que le texte affiché ou garder le lien (la table
 // visée s'ajoute alors à l'export : sa colonne affichée seule, toute la table ou des colonnes au choix). Hors Échange, où les colonnes vont dans les deux sens par leur
-// nom. `onTables` reçoit les tables de l'export à chaque changement. Rend les nœuds (tables ajoutées, puis bloc des choix).
+// nom. `onTables` reçoit les tables de l'export à chaque changement. Rend les nœuds : le bloc des choix, puis dessous les tables ajoutées
+// (le choix « Garder le lien » ouvre son panneau sous la ligne qu'on vient de cliquer, pas au-dessus).
 function linkSection(ctx, schema, onTables) {
   if (ctx.exp?.echange) return null;
   const pulledSlot = el('div', { class: 'form' });
@@ -254,7 +255,7 @@ function linkSection(ctx, schema, onTables) {
   }
   ctx.refresh = refresh;
   refresh();
-  return [pulledSlot, refsSlot];
+  return [refsSlot, pulledSlot];
 }
 
 // Case « Envoyer aussi les colonnes que j'ajouterai » (voir new-columns.js) : décochée d'emblée, telle que l'export l'est pour un export
