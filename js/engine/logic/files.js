@@ -35,7 +35,7 @@ export function neededFiles(rows) {
     if (!list || typeof list !== 'object' || Array.isArray(list)) continue;
     for (const [ident, info] of Object.entries(list)) {
       const sha = shaOf(ident);
-      if (sha && Array.isArray(info) && Number.isInteger(info[0])) files.set(sha, { id: info[0], name: String(info[1] || ''), size: Number(info[2]) || 0 });
+      if (sha && Array.isArray(info) && Number.isInteger(info[0])) files.set(sha, { id: info[0], name: safeName(String(info[1] || '')), size: Number(info[2]) || 0 });
     }
   }
   return files;
@@ -281,7 +281,7 @@ export const sha1 = async bytes => toHex(await digest('SHA-1', bytes));
 export function fileList(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(value[0] === 'L' ? 1 : 0).filter(f => Array.isArray(f) && shaOf(f[0]))
-    .map(f => ({ sha: shaOf(f[0]), name: String(f[1] ?? ''), size: Number(f[2]) || 0 }));
+    .map(f => ({ sha: shaOf(f[0]), name: safeName(String(f[1] ?? '')), size: Number(f[2]) || 0 }));
 }
 
 // Valeur d'une cellule reçue pour la destination : les numéros des fichiers que le document a

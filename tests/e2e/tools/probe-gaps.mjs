@@ -79,6 +79,9 @@ if (want(3)) {
   }
   const before = (await h.records(p.dst.doc, p.dest)).length;
   log(`(3) lignes de ${p.dest} après les essais : ${before} (5 avant)`);
+  // L'essai sur `_grist_Tables` n'écrit rien, mais Grist 1.7.22 laisse alors le moteur du document de travers (écriture du propriétaire
+  // refusée, « KeyError ») jusqu'au rechargement : voir probe-form-key-meta.mjs. On recharge pour que les sections suivantes marchent.
+  await h.api('POST', `/docs/${p.dst.doc}/force-reload`);
 }
 
 // (4) Ligne supprimée à la SOURCE : que reste-t-il dans le journal de la CIBLE ?

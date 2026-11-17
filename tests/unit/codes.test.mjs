@@ -314,3 +314,16 @@ test('docNameFrom : le champ « Nom de ce document », nom tapé ou adresse de l
     assert.equal(docNameFrom(text, here).name.includes('/'), false, `jamais une adresse : ${text}`);
   }
 });
+
+test('codes : ce que dit l\'autre document est nettoyé (contrôle, sens d\'écriture), dans l\'invitation comme dans la réponse', () => {
+  const evil = 'Paie‮ fdp.exe\u0007‏';
+  const clean = cleanLabel(evil);
+  const columns = [{ id: 'Nom', type: 'Text', label: evil }];
+  const inv = parseInvitation(buildInvitation({ pub: PUB, id: '0123456789abcdef', exportId: 'fedcba9876543210', name: evil, origin: 'https://g.fr', secret: SECRET, from: { email: evil, docId: evil, docName: evil }, tables: [{ table: 'Contacts', columns }] }));
+  assert.equal(inv.name, clean);
+  assert.deepEqual([inv.from.email, inv.from.docId, inv.from.docName], [clean, clean, clean]);
+  assert.equal(inv.tables[0].columns[0].label, clean);
+  assert.ok(!/[‮\u0007‏]/.test(JSON.stringify(inv)), JSON.stringify(inv));
+  const reply = parseReply(buildReply({ pub: PUB, id: '0123456789abcdef', recipient: { email: evil, docId: evil, team: 'eq', at: 'x' }, url: 'https://g.fr/o/eq/api/s/Xyz789/tables/Journal_A/records?flat=1' }), 'https://g.fr');
+  assert.equal(reply.recipient.email, clean);
+});

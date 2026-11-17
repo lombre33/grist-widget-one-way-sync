@@ -92,14 +92,15 @@ function schemaNotes({ desc, tdesc, fmt, pos, fx, fd }) {
 
 function schemaColumn(column, withOpts) {
   const { id, type, label, as, opts } = column;
-  const head = { id, type, ...(typeof label === 'string' ? { label: label.slice(0, 200) } : {}), ...(as ? { as } : {}) };
+  const head = { id, type, ...(typeof label === 'string' ? { label: cleanLabel(label) } : {}), ...(as ? { as } : {}) };
   if (!withOpts) return head;
   const kept = opts ? columnOptions(type, opts, { extras: true }) : null;
   const docInfo = docFormat(column.doc); // langue et monnaie du document de la SOURCE (voir docformat.js)
   return { ...head, ...schemaAim(column), ...(kept ? { opts: kept } : {}), ...(docInfo ? { doc: docInfo } : {}), ...schemaNotes(column) };
 }
 
-const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, String(from[k] ?? '').slice(0, 200)]));
+// Un texte dit par l'autre document (courriel, identifiant, équipe, nom) : nettoyé comme `cleanLabel` (sans caractère de contrôle ni de sens d'écriture).
+const text200 = (from, keys) => Object.fromEntries(keys.map(k => [k, cleanLabel(from[k])]));
 
 // Un nom que dit un code (le document de la SOURCE) : texte seul, jamais une décision. Sans caractères de
 // contrôle ni de sens d'écriture (un U+202E retournerait le texte qui suit), espaces ramenées à une, 200
@@ -168,7 +169,7 @@ export function parseInvitation(text, version = '') {
   if (mode.mode !== 'public' && !inv.pub) throw new Error(is(SIG_KEY, inv.cle) ? 'codeOld' : 'codeInvalid');
   const from = inv.from && typeof inv.from === 'object' ? inv.from : {};
   return {
-    id: inv.id, export: inv.export, name: inv.name.slice(0, 200), secret: inv.secret || '', origin: String(inv.origin || ''), ...mode,
+    id: inv.id, export: inv.export, name: cleanLabel(inv.name), secret: inv.secret || '', origin: String(inv.origin || ''), ...mode,
     expire: inv.expire || 0, renforce: inv.renforce === true, pub: inv.pub || '',
     from: { ...text200(from, ['email', 'docId']), ...sourceDoc(from) }, version: codeVersion(inv),
     tables: inv.tables.map(tb => ({ table: tb.table, columns: exportSchema(tb.columns) })),

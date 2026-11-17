@@ -224,7 +224,18 @@
 //         descriptions, formules, formats) partagent `destContext` (`logic/schema.js`) au lieu de six copies des mêmes lignes. Port, tables,
 //         codes et texte des formules inchangés (`formulas-golden`) ; comparaison avant/après sur des centaines de milliers de cas
 //         (`exportSchema` 40 000, règles 200 000).
-export const ENGINE_VERSION = '5.0.1';
+// 5.0.2 (17 novembre 2026, syncPlus 0.30.4, audit de sécurité avant la Bêta) : correctif, sans ajout ni retrait au port, aux tables ni aux
+//         codes (`CODE_FORMAT` 2, texte des formules de `Synchro` inchangé : `formulas-golden`). **La lecture d'une formule reçue refuse plus**
+//         (`logic/column-formulas.js`, `formulaProblems`) : tout nom qui commence par un tiret bas (les modules permis gardent `os` et `sys` sous
+//         un nom privé : `random._os`), tout caractère hors ASCII hors des textes et les mots lus après la normalisation NFKC de Python (un
+//         `eval` en pleine largeur), `operator`, `attrgetter`, `Formatter`, `get_field`, `REQUEST` (la fonction de Grist qui appelle une adresse
+//         du réseau), `grist`, `docmodel`, `engine`, `while`, `sleep`, `exit` ; `string` et `fractions` quittent `SAFE_MODULES` ; toute table d'ici
+//         qui n'est pas dans l'export est refusée quelle que soit la façon de la lire (`schemaFrom` rend `everyTableId`, résumés compris ; un
+//         port qui bâtit son schéma sans lui retombe sur `tableIds`). Les noms, adresses électroniques, identifiants de documents, libellés de
+//         colonnes et noms de fichiers que les codes et les listes de fichiers portent sont nettoyés comme les autres textes dits par l'autre
+//         document (`cleanLabel`, `safeName`). Un hôte qui montre les objections d'une formule reçoit des noms de plus dans `unsafe` (un nom privé,
+//         un caractère hors ASCII) ; rien d'autre ne change pour lui.
+export const ENGINE_VERSION = '5.0.2';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

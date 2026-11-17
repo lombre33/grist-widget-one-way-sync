@@ -603,6 +603,19 @@ d'un document :
   (50 Mo au plus) ; une seconde fois seulement si la recopie y a écrit.
 - La clé du formulaire lit la note de son journal, dont le secret de l'invitation, et le nom du
   document : le secret ne sert plus une fois l'invitation acceptée.
+- **Clé du formulaire et gel passager du moteur de la CIBLE (Grist 1.7.22, vérifié le 17 novembre 2026,
+  `tests/e2e/tools/probe-form-key-meta.mjs`)** : par la route des enregistrements, la clé d'un formulaire essaie d'écrire dans
+  les tables de métadonnées du document (`_grist_*`). Grist refuse (403, « Only owners can modify access rules ») les règles
+  d'accès, les partages, les réglages du document, les webhooks, les colonnes et les vues : rien de la structure, des droits
+  ni des webhooks ne change. **Une seule exception, un défaut de Grist** : une ligne ajoutée à `_grist_Tables` passe le
+  contrôle de droits, le moteur de calcul lève une erreur (« KeyError ») et reste de travers, sans que rien ne soit
+  enregistré : tant que le document n'est pas rechargé (sortie de mémoire après inactivité, redémarrage du serveur), **toute
+  écriture dans le document échoue** (« KeyError '<nom>' »), y compris celles du propriétaire et de la recopie. Qui tient la clé
+  d'un formulaire (la SOURCE, ou une personne à qui la clé a été divulguée) peut donc geler les écritures du document de la
+  CIBLE, aussi souvent qu'il veut. Rien n'est lu, rien n'est écrit : c'est un déni de service passager, du même ordre
+  que le remplissage du journal par la même clé. **Le widget ne peut rien y faire** (le défaut est dans le contrôle de droits
+  de Grist) ; à signaler à Grist Labs et à l'administrateur de l'instance ; en cas de gel, faire recharger le document
+  (l'administrateur de l'instance, ou sa mise en veille) et, si la clé a pu fuiter, couper puis refaire le lien de la réception.
 - **Nom du document de la SOURCE (0.13.5)** : saisi par la personne, il n'est pas vérifié ; qui fait une
   invitation peut y écrire ce qu'il veut (comme l'e-mail et le nom de l'export) et faire passer son document
   pour un autre auprès d'une CIBLE peu attentive. Le lien mène à l'identifiant réel du document, l'infobulle
@@ -704,11 +717,26 @@ d'un document :
   caractère de contrôle ni de sens d'écriture, 1 500 caractères par formule, 20 000 par table : une formule trop
   longue ne part pas, jamais coupée) et signé avec les colonnes (hors de portée de la clé du formulaire). La CIBLE lit
   chaque formule avant toute écriture et **refuse d'office** : un mot qui n'a rien à faire dans une formule de colonne
-  (`eval`, `exec`, `open`, `getattr`, `os`, `sys`, `subprocess`, réseau, fichiers…, cherchés hors des textes et des
-  commentaires), tout nom à doubles tirets bas (partout, texte compris), tout `import` hors de quinze modules de calcul,
-  de dates et de texte, une colonne citée qui n'est pas dans la destination ou y a changé de nom, une table citée qui
-  n'est pas une table de l'export. Le texte n'est jamais réécrit. **Ce que le widget ne garantit pas** : cette lecture
-  est un garde-fou, pas une preuve (Python se dissimule de bien des façons) ; la vraie protection est le bac à sable de
+  (`eval`, `exec`, `open`, `getattr`, `os`, `sys`, `subprocess`, réseau, fichiers…, cherchés hors des textes, des
+  commentaires et des colonnes citées), tout nom à doubles tirets bas (partout, texte compris), **tout nom qui commence
+  par un tiret bas** (`random._os`, `collections._sys` : les modules permis gardent leurs modules système sous un nom
+  privé, et un mot de la liste ne les trouvait pas), tout caractère hors ASCII hors des textes et les mots refusés lus
+  après la normalisation que Python applique aux noms (« ｅｖａｌ » en pleine largeur est `eval`), les lecteurs d'attributs par
+  leur nom que les modules permis laissent atteindre (`operator.attrgetter`, `string.Formatter().get_field`), **la fonction
+  `REQUEST` de Grist** (elle envoie une requête à n'importe quelle adresse quand l'instance l'a activée : une formule
+  y aurait envoyé le contenu de la table), l'intérieur de Grist (`grist`, `docmodel`, `engine`), `while`, `sleep` et `exit`
+  (un calcul qui ne finit pas bloque tout le document), tout `import` hors de treize modules de calcul et de dates
+  (`string` et `fractions` n'en font plus partie depuis la 0.30.4), une colonne citée qui n'est pas dans la destination ou
+  y a changé de nom, **toute table de ce document qui n'est pas dans l'export, quelle que soit la façon de la lire**
+  (`Nom.lookup_records`, `len(Nom)`, une table de résumé, un journal : la liste de toutes les tables d'ici est lue, plus
+  seulement `lookupRecords`, `lookupOne` et `all`). Le texte n'est jamais réécrit. **Contournements trouvés à l'audit du
+  17 novembre 2026** (essayés contre l'ancienne lecture, tous passaient sans objection, tous refusés maintenant,
+  `tests/unit/engine-formulas.test.mjs`) : les noms privés des modules, `fractions.operator.attrgetter`,
+  `string.Formatter().get_field`, `Secrets.lookup_records`, `len(Secrets)`, `REQUEST(…)`, un mot en pleine largeur, `exit()`.
+  **Ce que le widget ne garantit pas** : cette lecture
+  est un garde-fou, pas une preuve (Python se dissimule de bien des façons : `"{0.x}".format(…)` lit un attribut par son nom
+  même quand le nom est construit à la volée, ce qu'aucune lecture du texte ne voit, et une boucle `for` sur un très grand
+  `range` ou un calcul de grande puissance bloquent aussi) ; la vraie protection est le bac à sable de
   l'instance Grist et la lecture de la personne. **Vérifié le 12 novembre 2026** dans l'image Docker officielle de Grist
   (sans bac à sable renforcé) : une formule de colonne a pu `import os` et lister les fichiers du serveur. Sur une
   instance dont les formules tournent sans bac à sable, poser une formule reçue revient donc à laisser la SOURCE

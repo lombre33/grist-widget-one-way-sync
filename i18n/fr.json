@@ -991,7 +991,7 @@
   "send.formulas.intro": "Une formule de colonne, ou une formule par défaut, est du code Python que Grist exécute sur les données du document. En cochant cette case, vous proposez à chaque destinataire d’en poser dans son document.",
   "send.formulas.own": "Rien n’est posé tout seul : seul un propriétaire du document destinataire peut les reprendre, après avoir lu chaque formule.",
   "send.formulas.run": "Il exécute alors votre code chez lui : n’y mettez rien de secret, et écrivez des formules que vous pouvez lui expliquer.",
-  "send.formulas.refused": "Le destinataire refuse d’office une formule trop longue, qui utilise un module système ou qui cite une table absente de l’export. Une colonne Référence ou Pièces jointes ne part pas avec sa formule.",
+  "send.formulas.refused": "Le destinataire refuse d’office une formule trop longue, qui utilise un module système, un nom caché (qui commence par un tiret bas), la fonction REQUEST, une boucle « while » ou qui cite une table absente de l’export. Une colonne Référence ou Pièces jointes ne part pas avec sa formule.",
   "send.formulas.sandbox": "Grist exécute les formules dans un espace isolé, dont la solidité dépend de la configuration de l’instance. Pour des données sensibles, renseignez-vous auprès de son administrateur.",
   "send.formulas.slow": "Une formule trop lourde peut ralentir le document du destinataire. L’Historique du document permet de revenir en arrière.",
   "recv.restyle.formulas": "Formules : poser celles de la SOURCE (Python) sur les colonnes créées par ce widget",
