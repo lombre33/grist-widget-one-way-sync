@@ -11,7 +11,7 @@ Sans serveur à héberger, sans dépendance, et seules les colonnes que vous cho
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="Le widget dans le document qui reçoit : l'export « Annuaire » est à jour et liste les lignes ajoutées, modifiées et supprimées depuis la dernière visite">
 
-<sub>Version 0.30.2 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
+<sub>Version 0.30.3 · Grist 1.7.11 ou plus récent · licence GPL-3.0 · Grist Factory</sub>
 
 </div>
 
@@ -110,10 +110,10 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
   du texte, jusqu'à ce qu'un propriétaire clique « Refaire les références ».
 - **Éléments des colonnes** : en-têtes, couleurs, devise et règles de mise en forme
   conditionnelle simples (case « Mise en forme des colonnes »), descriptions des
-  colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, cochée d'emblée,
+  colonnes et des tables (cases à part) peuvent partir avec l'export ; chaque case, décochée d'emblée,
   dit combien de colonnes sont concernées (étape Contenu, section « Envoyé avec les données », toutes
   les cases visibles).
-  L'ordre des colonnes et celles que la page de la table cache ont leur case (0.26), décochée d'emblée :
+  L'ordre des colonnes et celles que la page de la table cache ont leur case (0.26), elle aussi décochée d'emblée :
   le destinataire les reprend une fois sur les colonnes que le widget a créées, puis à la demande.
   Une règle n'est jamais copiée telle quelle : elle est relue puis réécrite avec les colonnes du
   destinataire. La carte signale une langue de document différente (elle décide de l'écriture des

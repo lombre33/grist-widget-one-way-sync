@@ -375,7 +375,24 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
-## État : V0.30.2 (16 novembre 2026, nuit)
+## État : V0.30.3 (17 novembre 2026)
+
+V0.30.3 (Antoine, 17 novembre, réponse « le 1 » à la question laissée ouverte en 0.30.0 sur les coches d'emblée de l'étape « Contenu » : tout décocher, comme les formules, pour coller au texte d'introduction
+« ce que vous ne cochez pas ne quitte jamais ce document »). **Moteur inchangé (5.0.1)**, écran, textes et essais seulement.
+- **Les cinq cases de « Envoyé avec les données » sont décochées d'emblée pour un nouvel export** : mise en forme des colonnes, descriptions des colonnes, descriptions des tables (avant : cochées), ordre et colonnes
+  cachées, formules (déjà décochées), plus la case « futures colonnes » de « Pour la suite ». `elementsBlock` (`js/source/export-wizard.js`) : `{ style: false, notes: false, tableNote: false, layout: false, formulas: false }`
+  pour un nouvel export ; un export modifié garde l'état enregistré (`noteSent`, `layoutSent`, `formulasOffered`, marque `fmt`), donc **rien ne change pour les exports déjà faits**. Décision close : ne plus proposer de recocher
+  la mise en forme ou les descriptions d'emblée (les descriptions peuvent porter des notes internes ; ce qui n'est pas coché ne part pas).
+- **Ce qui change pour la personne** : un nouvel export n'envoie plus ni couleurs, ni en-têtes, ni devise, ni règles de mise en forme, ni descriptions tant qu'elle ne les coche pas ; les formats de base (nombres, dates, listes de choix) partent
+  comme avant. Le destinataire d'un tel export ne voit donc pas la case « Mise en forme » proposée à « Reprendre depuis la SOURCE » (`entry.sends` ne la cite pas).
+- **Textes** : tutoriel intégré (`i18n/tutorial.json`, mise en forme et descriptions « décochées d'emblée »), `docs/04` (étape Contenu : toutes les cases décochées), deux README, `ELEMENTS` commenté dans le code. `send.sec.with.sub` (« Ce qui est coché part. ») et
+  `send.columns.help` n'ont pas bougé : ils sont maintenant exacts pour toutes les cases.
+- **Essais** : `tests/e2e/run.mjs`, partie mise en forme (`formatSteps`) : les cinq cases sont vérifiées décochées, puis l'essai coche mise en forme et descriptions (il en a besoin pour que la CIBLE les reçoive) ; « Modifier » les retrouve cochées (état enregistré).
+  Aucun autre essai ne dépendait de ces coches (ONLY_FORMAT, LAYOUT, FORMULAS, OPTIONS, NEWCOLS, LINKS, CHOICES verts).
+- Captures refaites : `docs/images/03c-source-contenu`, `40-source-ordre-colonnes`, `42-source-formules-message` (cases décochées). `03-source-colonnes` ne montre que le haut de l'étape : inchangée. **Le forum** (`/mnt/project-files/forum/`, hors dépôt) est mis à jour : la phrase de l'étape « Choisir le contenu » dit
+  que toutes les cases sont décochées d'emblée, la capture `04c` est la nouvelle `03c`, le zip est refait (il se publie avec la Bêta).
+
+## État précédent : V0.30.2 (16 novembre 2026, nuit)
 
 V0.30.2 (Antoine, 16 novembre, avant de dormir, « en toute autonomie » : refonte de fond du code pour la qualité et l'optimisation, puis gwaudit et corrections, puis documentation et message du forum à jour, « pour sortir la Bêta à mon réveil » ;
 et : « test de non régression sur des gens ayant des partages actifs avec la V alpha »). **Aucun comportement ne change** sauf un défaut trouvé par le nouvel essai (la fenêtre des nouveautés, voir plus bas). Moteur **5.0.1**
@@ -403,7 +420,7 @@ et : « test de non régression sur des gens ayant des partages actifs avec la V
   (`04`, `04b`, `04c`), une ligne « vos partages de l'Alpha continuent sans rien refaire » et la précision sur « Couper le lien public », zip refait. `docs/04` et `i18n/tutorial.json` étaient à jour (0.30.x).
 - **Résultats** : unit 531 verts ; **parcours e2e complet vert, 92 étapes** (vrai Grist 1.7.22, depuis un worktree propre), une fois sur la refonte seule (0537c98) puis sur le code final (73dbb97, après la seconde refonte et le correctif des nouveautés) ;
   **montée de version vert** (`upgrade.mjs`, 16 étapes, Alpha 7646875 vers la Bêta : envois sans doublon ni perte dans les deux sens, deux CIBLE dont une en pause d'avant, Échange A et B, lien public, migrations, fenêtre des nouveautés) sur le même code. L'optimisation n'a pas été le but de cette passe (la 0.11.1 l'a faite) : rien n'a été mesuré de plus vite ou de plus lent.
-- **Pour Antoine à son réveil** : la Bêta se publie sur son feu vert et PC allumé (rien n'est transmis à grist-factory d'ici là) ; la question des coches d'emblée de la mise en forme et des descriptions reste ouverte (rien n'a été changé) ;
+- **Pour Antoine à son réveil** : la Bêta se publie sur son feu vert et PC allumé (rien n'est transmis à grist-factory d'ici là) ; la question des coches d'emblée de la mise en forme et des descriptions est tranchée le 17 novembre (« le 1 » : tout décocher, V0.30.3) ;
   le texte du forum se publie avec la Bêta.
 
 ## État précédent : V0.30.1 (16 novembre 2026)
@@ -430,8 +447,7 @@ V0.30.0 (Antoine, 16 novembre, sur l'étape Colonnes qu'il « n'arrive pas à ex
      cachées de la page », « Formules des colonnes (Python) »), chacun avec son compte et son « ? ». Les formules ferment la liste, avec la pastille « demande confirmation »
      (`send.el.formulas.badge`) avant le clic ; la classe `.formulas-box` est gardée (la CIBLE l'emploie, `restyle.js`), neutralisée dans `.opts`.
   3. **Pour la suite** : la case « futures colonnes » (`autoColsBlock`, `.opts.auto-cols`).
-  **Coches d'emblée inchangées** (mise en forme et descriptions cochées ; mise en page, formules et futures colonnes décochées). **Question restée sans réponse** : décocher aussi la mise
-  en forme et les descriptions d'emblée, comme les formules (les descriptions peuvent porter des notes internes) : rien n'est changé tant qu'Antoine n'a pas tranché.
+  **Coches d'emblée de la 0.30.0** : mise en forme et descriptions cochées ; mise en page, formules et futures colonnes décochées. **Question tranchée par Antoine le 17 novembre (« le 1 ») : tout est décoché d'emblée, voir la V0.30.3.**
 - **Références dans la fiche de leur table** (`js/source/export-links.js`, nouveau : `pullMode`, `pulledColumns`, `offersOf` (exportés, `choicesOf` les emploie),
   `pulledBlock`, `refRow`, `place`, `linkSection` ; `js/source/export-parts.js` : `columnLabel`, `togglePart`). Plus de bloc « Références entre tables », plus de ligne de
   résumé « Part en plus des tables cochées ». Par colonne : `div.ref-item[data-ref=<clé>]` = nom, pastille du type, « renvoie à la table X (affiche Y) », un « ? », deux choix

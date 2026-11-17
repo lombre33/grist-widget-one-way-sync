@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.30.2 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.30.3 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -108,9 +108,9 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   an owner clicks “Rebuild the references”.
 - **Column elements**: headers, colors, currency and simple conditional formatting rules
   (“Column formatting” box), column and table descriptions (separate boxes) can travel
-  with the export; each box, ticked by default, says how many columns are concerned (Content step,
+  with the export; each box, unticked by default, says how many columns are concerned (Content step,
   “Sent along with the data” section, all boxes visible). The order of the columns and the ones the table's page hides
-  have their own box (0.26), unticked by default: the receiver applies them once to the columns the widget
+  have their own box (0.26), also unticked by default: the receiver applies them once to the columns the widget
   created, then on request. A rule is never copied as it is: it is read, then
   rewritten with the receiver's columns. The card flags a different document language (it decides
   how numbers are written) and an owner can set the document with one click. The “Take again from

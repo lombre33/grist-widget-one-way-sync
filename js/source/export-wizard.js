@@ -127,7 +127,8 @@ function autoColsBlock(ctx) {
 // rules.js, docformat.js : en-têtes, règles conditionnelles simples, monnaie résolue, langue du document, en plus des
 // formats que la CIBLE reprend déjà), les descriptions des colonnes et celle de chaque table (voir descriptions.js), l'ordre et
 // les colonnes cachées de la page de chaque table (voir layout.js : décochée d'emblée, elle change l'affichage chez le destinataire).
-// Chaque case dit combien de colonnes (de tables) sont concernées. Cochées d'emblée pour un nouvel export (sauf la mise en page) ; pour un export
+// Chaque case dit combien de colonnes (de tables) sont concernées. Toutes décochées d'emblée pour un nouvel export (Antoine, 17 novembre : ce que la
+// personne ne coche pas ne quitte pas le document, y compris les descriptions, qui peuvent porter des notes internes) ; pour un export
 // modifié, telles que l'export l'est déjà. Jamais en Échange (les colonnes y vont dans les deux sens). Les formules (voir
 // column-formulas.js) ferment la liste : décochées d'emblée, avec un message qui demande si l'on est sûr (c'est du Python qu'un
 // destinataire exécutera chez lui), et une pastille qui le dit avant le clic.
@@ -141,7 +142,7 @@ async function elementsBlock(ctx, schema) {
     const sent = ctx.exp ? noteSent(ctx.exp.tables.flatMap(tb => tb.columns)) : null;
     ctx.elements = ctx.exp
       ? { style: ctx.exp.tables.some(tb => tb.columns.some(c => c.fmt)), notes: sent.notes, tableNote: sent.table, layout: layoutSent(ctx.exp.tables.flatMap(tb => tb.columns)), formulas: formulasOffered(ctx.exp.tables.flatMap(tb => tb.columns)) }
-      : { style: true, notes: true, tableNote: true, layout: false, formulas: false };
+      : { style: false, notes: false, tableNote: false, layout: false, formulas: false };
   }
   const counts = elementCounts(schema, ctx.chosen, await fetchRows('_grist_Views_section'));
   const boxes = ELEMENTS.map(([key, name, count]) => {

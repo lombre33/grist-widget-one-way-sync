@@ -1830,15 +1830,18 @@ try {
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: 'Budget' }).check();
     await dialogButton('Continuer').click();
-    // Les éléments envoyés avec les données sont tous visibles sous leur titre ; chacun a sa case, cochée d'emblée (sauf la mise en page et les formules).
+    // Les éléments envoyés avec les données sont tous visibles sous leur titre ; chacun a sa case, décochée d'emblée (17 novembre : ce qui n'est pas coché ne part pas).
     const elements = dialog().locator('.opts', { hasText: 'Mise en forme des colonnes' });
     await dialog().getByRole('heading', { name: 'Envoyé avec les données' }).waitFor();
     const send = dialog().getByRole('checkbox', { name: 'Mise en forme des colonnes' });
     assert.ok(await send.isVisible(), 'visible sans rien ouvrir');
-    assert.ok(await send.isChecked(), 'cochée d\'emblée pour un nouvel export');
-    assert.ok(await dialog().getByRole('checkbox', { name: 'Descriptions des colonnes' }).isChecked());
-    assert.ok(await dialog().getByRole('checkbox', { name: 'Descriptions des tables' }).isChecked());
-    assert.ok(!(await dialog().getByRole('checkbox', { name: 'Ordre et colonnes cachées de la page' }).isChecked()), 'la mise en page ne part pas sans accord');
+    for (const name of ['Mise en forme des colonnes', 'Descriptions des colonnes', 'Descriptions des tables', 'Ordre et colonnes cachées de la page', 'Formules des colonnes']) {
+      assert.ok(!(await dialog().getByRole('checkbox', { name }).isChecked()), `« ${name} » est décochée d'emblée pour un nouvel export`);
+    }
+    // Ce test veut la mise en forme et les descriptions : la personne les coche (la mise en page reste décochée).
+    await send.check();
+    await dialog().getByRole('checkbox', { name: 'Descriptions des colonnes' }).check();
+    await dialog().getByRole('checkbox', { name: 'Descriptions des tables' }).check();
     assert.match(await dialog().locator('.pill', { hasText: 'demande confirmation' }).innerText(), /demande confirmation/, 'la pastille des formules le dit avant le clic');
     assert.match(await elements.innerText(), /2\scolonnes concernées/, 'chaque case dit combien de colonnes sont concernées');
     await dialogButton('Continuer').click();

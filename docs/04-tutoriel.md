@@ -113,7 +113,8 @@ sort du filtre est effacée chez les destinataires.
 
 **Envoyé avec les données** réunit, chacune avec sa case et le nombre de colonnes ou de tables concernées : la
 mise en forme des colonnes, les descriptions des colonnes et des tables, l'ordre et les colonnes cachées de la page,
-et les formules (décochées d'emblée, avec une pastille « demande confirmation » et un message avant de cocher).
+et les formules. Toutes ces cases sont décochées d'emblée (les formules ont en plus une pastille « demande confirmation »
+et un message avant de cocher).
 Ce qui est coché part, et rien d'autre : le détail de chaque case est plus bas. **Pour la suite** porte la case
 « Envoyer aussi les futures colonnes que j'ajouterai à ces tables ».
 
@@ -498,14 +499,14 @@ le texte. Une ligne qui arrive avant les lignes qu'elle vise est complétée à 
 ![Carte : références refaites, colonne restée du texte](images/29c-cible-liens-refaire.png)
 
 **Mise en forme des colonnes.** La case **Mise en forme des colonnes** (étape Contenu, section
-**Envoyé avec les données**, cochée d'emblée) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise
+**Envoyé avec les données**, décochée d'emblée, comme toutes les cases de cette section : ce que vous ne cochez pas ne quitte pas le document) envoie en plus des formats déjà repris : les couleurs, le style des en-têtes, la devise
 et les règles de mise en forme conditionnelle simples (comparaisons sur les colonnes envoyées). Une
 règle n'est jamais copiée telle quelle : elle est relue, puis réécrite avec les colonnes du
 destinataire ; une règle plus complexe n'est pas envoyée. Seules les colonnes créées par le widget
 la prennent, une fois : ce qui est retouché chez le destinataire reste, et le bouton **Reprendre
 depuis la SOURCE** de la carte remet tout d'accord avec la SOURCE.
 
-**Descriptions.** Deux autres cases, **Descriptions des colonnes** et **Descriptions des tables** (cochées d'emblée), envoient
+**Descriptions.** Deux autres cases, **Descriptions des colonnes** et **Descriptions des tables** (décochées d'emblée), envoient
 le texte de la description de chaque colonne (300 caractères au plus) et celui de chaque table (500
 caractères au plus). Chaque case dit combien de colonnes ou de tables sont concernées. Le texte part
 tel quel et chaque destinataire peut le lire : ne cochez pas la case si vos descriptions portent des
