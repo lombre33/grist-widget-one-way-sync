@@ -49,7 +49,9 @@ The sending document (the **SOURCE**) and the receiving one (the **TARGET**) bot
 In the SOURCE, it prepares the changed rows in a single technical table; a Grist webhook pushes
 them right away into the TARGET's journal, through a form the TARGET published for that purpose.
 In the TARGET, the widget checks what arrives and copies it into ordinary tables as soon as an
-editor opens its page. Details (in French): [`docs/06-architecture.md`](docs/06-architecture.md).
+editor opens its page. Details (in French, with three diagrams: one way, Exchange, Exchange with several people): [`docs/06-architecture.md`](docs/06-architecture.md).
+
+![How it works: one-way sync (diagram labels in French)](docs/images/schema-un-sens.png)
 
 ## Connect a sync in three steps
 

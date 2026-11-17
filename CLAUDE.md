@@ -375,6 +375,14 @@ catalogue), syncPlus seul se comporte comme avant, tout est dans `js/engine/` (m
   `engine-fake.mjs`, préfixe `Gfs_`) ; les autres essais n'ont changé que leurs chemins d'import (`js/logic` devient
   `js/engine/logic`), l'e2e que les chemins des fichiers servis.
 
+## Schémas du fonctionnement (17 novembre 2026, textes et images seulement, aucun code)
+
+Antoine, 17 novembre : « plusieurs schémas : un qui explique le fonctionnement du widget pour la sync one way, avec la data source, le webhook, un formulaire côté source et une table journal, et un pour les deux sens ».
+Trois schémas SVG (rendus PNG à l'échelle 2, générés à la main, couleurs du widget) : `docs/images/schema-un-sens`, `schema-echange`, `schema-plusieurs`, cités dans `docs/06-architecture.md` (« Schémas »), les deux README (un sens) et le tutoriel du forum
+(`/mnt/project-files/forum/`, avec `message-forum-nouveautes.md`, la liste à puces des nouveautés de la Bêta). **Relus contre le code de `main`** : le formulaire publié est **dans le document qui reçoit**, sur son journal (`ensureForm`, `createReception`) ;
+la SOURCE n'a que `Synchro` et le webhook (`approveReply`). Dans un Échange, chaque document a les deux : son `Synchro` et son webhook, son formulaire et son journal (le journal de retour de A vient de `startReturn`, le webhook de B de `wireExchange`).
+Si un schéma est à refaire, éditer le `.svg` (texte et rectangles) puis le rendre avec Chromium à `deviceScaleFactor` 2.
+
 ## État : V0.30.4 (17 novembre 2026, audit de sécurité ++)
 
 V0.30.4 (Antoine, 17 novembre : « quand c'est fait audit sécurité ++ », puis « attention à ne pas te biaiser avec la mémoire, revérifie tout proprement, tous les risques de partages, d'injections, d'accès à la donnée […] il faut être super clean là »).

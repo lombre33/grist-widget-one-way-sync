@@ -52,7 +52,9 @@ Le document qui envoie (la **SOURCE**) et celui qui reçoit (la **CIBLE**) ont c
 Dans la SOURCE, il prépare les lignes modifiées dans une seule table technique ; un webhook de
 Grist les pousse aussitôt dans le journal de la CIBLE, par un formulaire qu'elle a publié pour
 cela. Dans la CIBLE, le widget contrôle ce qui arrive et le recopie dans des tables normales dès
-qu'un éditeur ouvre sa page. Le détail est dans [`docs/06-architecture.md`](docs/06-architecture.md).
+qu'un éditeur ouvre sa page. Le détail est dans [`docs/06-architecture.md`](docs/06-architecture.md), avec trois schémas (un seul sens, Échange, Échange à plusieurs).
+
+![Comment ça marche : la synchro dans un seul sens](docs/images/schema-un-sens.png)
 
 ## Brancher une synchro en trois étapes
 

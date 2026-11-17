@@ -46,6 +46,32 @@ Villes  ──┤ formules ─▶ Synchro ── un webhook par ─────�
 L'étude de départ, avec les preuves dans le code de Grist, est dans
 [`01-etude-faisabilite.md`](01-etude-faisabilite.md).
 
+### Schémas
+
+Trois schémas, aux couleurs du widget (blanc : vos tables ; gris : mécanismes natifs de Grist ; bleu : ce que fait le
+widget). Les sources sont les fichiers `.svg` de `docs/images`, les `.png` en sont le rendu pour le forum et les README.
+Ils ont été relus contre le code du moteur : **le formulaire publié est toujours dans le document qui reçoit** (sa clé ne
+laisse qu'ajouter des lignes à son journal) ; le webhook, lui, est sur la table `Synchro` du document qui envoie.
+
+**Dans un seul sens.** La SOURCE n'a que la table `Synchro` et un webhook par destinataire ; la CIBLE a le formulaire, le
+journal `Journal_<export>` et les tables de destination.
+
+![Un seul sens : tables, Synchro et webhook dans la SOURCE ; formulaire, journal et widget dans la CIBLE](images/schema-un-sens.png)
+
+**Dans les deux sens (Échange).** Les deux documents jouent les deux rôles : chacun a sa table `Synchro` et son webhook
+(celui de B est posé à l'acceptation, vers l'adresse d'écriture du journal de retour de A, `wireExchange`), chacun
+publie un formulaire sur un journal (celui de A est le journal de retour, créé par `startReturn`). La modification la
+plus récente (`MajLe`) l'emporte et ce qui vient de l'autre document n'est pas renvoyé.
+
+![Échange : un webhook, un formulaire et un journal de chaque côté](images/schema-echange.png)
+
+**Échange à plusieurs.** Le document qui invite (A) a un journal de retour par participant et un webhook par
+participant ; la ligne `echange` de `Synchro` est marquée `plusieurs` (`markHub`), donc le même lot part vers tous et A
+relaie à chacun ce que l'autre a envoyé, après avoir appliqué ses règles (accepter, refuser, à valider).
+
+![Échange à plusieurs : A administre et relaie entre B et C](images/schema-plusieurs.png)
+
+
 ## Ce que le widget écrit dans les documents
 
 Ses tables techniques n'ont pas de page : elles ne se voient que dans « Données source ». Pas de
