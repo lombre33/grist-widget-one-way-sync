@@ -572,6 +572,27 @@ d'un document :
   cette barrière n'existe pas : raison de plus pour n'installer que la copie officielle ou une
   copie figée.
 
+### Le widget dans le document (mode optionnel)
+
+Le widget peut aussi s'exécuter **dans le document** (le choix « Créez le vôtre » de Grist), sans rien héberger :
+[`docs/09-widget-dans-le-document.md`](docs/09-widget-dans-le-document.md), build dans [`builder/`](builder/README.md).
+Rien de ce qui précède ne change (même code, mêmes contrôles) ; ce mode déplace trois choses :
+
+- **le code vit dans le document** : qui peut modifier la structure du document peut le remplacer (par défaut, les
+  éditeurs : réserver la structure aux propriétaires). Il n'y a plus d'adresse de widget à surveiller ; la version
+  déployée se vérifie par l'empreinte SHA-256 de la page (le build est déterministe, `tests/unit/builder.test.mjs`) ;
+- **le cadre est plus étroit** (`sandbox="allow-scripts"`, origine opaque : ni cookies, ni stockage, ni fenêtres) et la page
+  a sa **propre politique de sécurité** (balise `<meta>`) : chargeur et styles signés, modules en adresses `blob:`, requêtes
+  vers les seules instances, images `data:` ; elle autorise **toute l'origine de l'instance** pour les scripts (l'API des
+  widgets y est chargée par une adresse relative que Grist résout), alors que `index.html` n'autorise que
+  `<instance>/grist-plugin-api.js` ;
+- **ce que le cadre retire** : préférences non gardées (en mémoire, `window.name`), pas de verrou entre onglets
+  (`navigator.locks` remplacé par une file dans la page : deux onglets ouverts agissent chacun), pas de canal entre
+  onglets, liens qui ne s'ouvrent pas. Aucune de ces limites n'ouvre de porte ; les deux premières coûtent des envois en double.
+
+L'origine d'une instance du build est contrôlée (`checkOrigin` : un nom d'hôte et un port seulement, un `;`, un `'` ou une
+espace sont refusés : le texte est écrit dans la politique et dans `js/config.js`).
+
 ## Ce que le widget ne fait pas
 
 - Aucune requête vers un service tiers, aucune télémétrie, aucune donnée hors de Grist.

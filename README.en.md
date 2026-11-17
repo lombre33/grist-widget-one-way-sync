@@ -207,6 +207,10 @@ three values (`GRIST_ORIGINS` and `WIDGET_URL` in `js/config.js`, the security p
 the instance gallery and the webhook setting:
 [**Hosting your own copy**](docs/08-self-hosting.en.md).
 
+**No server to publish on?** The widget can also live **inside the document** (Grist's "Create your own" choice, a single HTML
+page built by `node builder/build.mjs`, nothing to host): [**The widget inside the document**](docs/09-in-document-widget.en.md),
+with what this mode changes and its security. Optional mode, tried in Grist 1.7.22.
+
 ### Document access
 
 - **Full access** (`requiredAccess: 'full'`): the widget reads the structure of the entire
@@ -272,6 +276,7 @@ The documentation is in French.
 | Connecting a sync, screenshot by screenshot | [`docs/04-tutoriel.md`](docs/04-tutoriel.md) |
 | How it works, what the widget writes, code map, tests | [`docs/06-architecture.md`](docs/06-architecture.md) |
 | Hosting your own copy, for a private instance or a frozen version | [`docs/08-self-hosting.en.md`](docs/08-self-hosting.en.md) |
+| The widget inside the document (nothing to host) | [`docs/09-in-document-widget.en.md`](docs/09-in-document-widget.en.md) |
 | Security analysis | [`SECURITY.md`](SECURITY.md) |
 | Feasibility study, test on `grist.numerique.gouv.fr` | [`docs/01-etude-faisabilite.md`](docs/01-etude-faisabilite.md), [`docs/02-procedure-test-dinum.md`](docs/02-procedure-test-dinum.md) |
 | Ideas for later | [`docs/05-pistes.md`](docs/05-pistes.md) |

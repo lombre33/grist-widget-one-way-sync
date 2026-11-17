@@ -102,8 +102,9 @@ export function gestures({ page, env }) {
 }
 
 // Documents et formulaires, au-dessus de l'API de Grist de l'essai : `api`, `applyActions`, `records` et `waitFor`
-// viennent de l'essai ; `widgetUrl` est l'adresse du widget servi par `serveWidget`.
-export function docTools({ env, api, applyActions, records, waitFor, widgetUrl }) {
+// viennent de l'essai ; `widgetUrl` est l'adresse du widget servi par `serveWidget`. `creatorHtml` (essai du mode « widget dans le
+// document », builder/) : la page construite par builder/build.mjs, posée dans une section Widget Creator au lieu d'une adresse.
+export function docTools({ env, api, applyActions, records, waitFor, widgetUrl, creatorHtml = null }) {
   const team = `${env.grist}/o/${env.team}`;
   const tableRef = async (doc, tableId) => (await records(doc, '_grist_Tables')).find(t => t.tableId === tableId).id;
 
@@ -113,12 +114,13 @@ export function docTools({ env, api, applyActions, records, waitFor, widgetUrl }
     const workspace = (await api('GET', `/orgs/${env.team}/workspaces`))[0].id;
     const doc = await api('POST', `/workspaces/${workspace}/docs`, { name });
     if (setup) await applyActions(doc, setup);
-    const view = (await applyActions(doc, [['CreateViewSection', await tableRef(doc, 'Table1'), 0, 'record', null, null]])).retValues[0];
+    const view = (await applyActions(doc, [['CreateViewSection', await tableRef(doc, 'Table1'), 0, creatorHtml ? 'creator' : 'record', null, null]])).retValues[0];
+    const section = creatorHtml
+      ? { options: JSON.stringify({ html: creatorHtml, customView: JSON.stringify({ access }) }) }
+      : { parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: widgetUrl, access, renderAfterReady: false }) }) };
     await applyActions(doc, [
       ['UpdateRecord', '_grist_Views', view.viewRef, { name: 'Synchro' }],
-      ['UpdateRecord', '_grist_Views_section', view.sectionRef, {
-        parentKey: 'custom', options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: widgetUrl, access, renderAfterReady: false }) }),
-      }],
+      ['UpdateRecord', '_grist_Views_section', view.sectionRef, section],
     ]);
     return { doc, url: `${team}/doc/${doc}/p/${view.viewRef}` };
   }
@@ -126,14 +128,16 @@ export function docTools({ env, api, applyActions, records, waitFor, widgetUrl }
   const pageOf = async (doc, viewRef) => (await records(doc, '_grist_Pages')).find(p => p.viewRef === viewRef);
   const publishedForms = async doc => (await records(doc, '_grist_Views_section')).filter(sc => JSON.parse(sc.shareOptions || '{}').publish);
   // Clé de la page d'un formulaire (une par page partagée), lue dans la base du serveur de test ; Grist l'enregistre
-  // juste après le partage.
+  // juste après le partage. `env.homeDb` : le fichier de cette base quand Grist tourne sans Docker (chroot).
+  const keyQuery = (db, linkId) => `import sqlite3;print(sqlite3.connect('${db}').execute("select key from shares where link_id=?",("${linkId}",)).fetchone()[0])`;
   async function formKey(doc, form) {
     const { shareRef } = await pageOf(doc, form.parentId);
     const share = (await records(doc, '_grist_Shares')).find(sh => sh.id === shareRef);
     return waitFor(() => {
       try {
-        return execFileSync('docker', ['exec', env.container, 'python3', '-c',
-          `import sqlite3;print(sqlite3.connect('/persist/home.sqlite3').execute("select key from shares where link_id=?",("${share.linkId}",)).fetchone()[0])`]).toString().trim();
+        const command = env.homeDb ? ['python3', ['-c', keyQuery(env.homeDb, share.linkId)]]
+          : ['docker', ['exec', env.container, 'python3', '-c', keyQuery('/persist/home.sqlite3', share.linkId)]];
+        return execFileSync(command[0], command[1]).toString().trim();
       } catch (e) {
         return null;
       }

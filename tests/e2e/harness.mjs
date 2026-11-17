@@ -21,7 +21,7 @@ export async function shootPage(view, name) {
   await view.page.screenshot({ path: `${process.env.SHOTS}/${name}.png` });
 }
 
-export async function createHarness({ port = 8586, patches = {}, envFile = '.env.json' } = {}) {
+export async function createHarness({ port = 8586, patches = {}, envFile = '.env.json', creatorHtml = null } = {}) {
   const env = JSON.parse(await readFile(join(ROOT, 'tests/e2e', envFile), 'utf8'));
   const TEAM = `${env.grist}/o/${env.team}`;
   const WIDGET_URL = `http://localhost:${port}/index.html`;
@@ -66,7 +66,7 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
     }
   }
 
-  const { tableRef, newDocWithWidget, publishedForms, formKey, formLink } = docTools({ env, api, applyActions, records, waitFor, widgetUrl: WIDGET_URL });
+  const { tableRef, newDocWithWidget, publishedForms, formKey, formLink } = docTools({ env, api, applyActions, records, waitFor, widgetUrl: WIDGET_URL, creatorHtml });
 
   // Table de `rows` lignes remplie par paquets (le corps d'une requête reste petit).
   async function fillTable(doc, tableId, columns, rows, makeRow, { prefix = 0 } = {}) {
@@ -95,11 +95,12 @@ export async function createHarness({ port = 8586, patches = {}, envFile = '.env
       this.page = page; this.name = name; this.messages = [];
       page.on('console', (m) => {
         const where = m.location().url || '';
-        if (!where.startsWith(widgetCode) && !where.endsWith('grist-plugin-api.js')) return;
+        // Mode « widget dans le document » : les modules sont des adresses blob:, que seul le widget fabrique.
+        if (!where.startsWith(widgetCode) && !where.endsWith('grist-plugin-api.js') && !(creatorHtml && where.startsWith('blob:'))) return;
         if (m.type() === 'error' || m.type() === 'warning') this.messages.push(`${m.type()} ${m.text()}`);
         if (m.type() === 'error') problems.push(`${name}: ${m.text()} (${where})`);
       });
-      page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode)) problems.push(`${name}: ${e.message} (pageerror)`); });
+      page.on('pageerror', (e) => { if ((e.stack || '').includes(widgetCode) || (creatorHtml && (e.stack || '').includes('blob:'))) problems.push(`${name}: ${e.message} (pageerror)`); });
     }
     widget() { return this.page.frameLocator('iframe').first(); }
     button(name) { return this.widget().getByRole('button', { name, exact: true }); }

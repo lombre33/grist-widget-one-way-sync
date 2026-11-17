@@ -13,6 +13,8 @@ Either way the answer is the same: **copy the repository, change three values, p
 files**. There is nothing to compile and nothing to install on the server: the widget is a static
 page, with no dependency and no build step.
 
+*No server to publish files on? See [the widget inside the document](09-in-document-widget.en.md): a single page pasted into Grist, nothing to host.*
+
 ![The path, from the copy to the document](images/auto-heberger-principe.png)
 
 *(The figures are in French; the steps below say the same thing.)*

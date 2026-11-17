@@ -216,6 +216,10 @@ publier les fichiers sur une adresse https. Le guide, illustré, pas à pas, ave
 galerie de l'instance et le réglage des webhooks :
 [**Héberger sa propre copie**](docs/08-auto-hebergement.md).
 
+**Pas de serveur où publier ?** Le widget peut aussi vivre **dans le document** (le choix « Créez le vôtre » de Grist,
+une seule page HTML construite par `node builder/build.mjs`, sans rien héberger) : [**Le widget dans le document**](docs/09-widget-dans-le-document.md),
+avec ce que ce mode change et sa sécurité. Mode optionnel, essayé dans Grist 1.7.22.
+
 ### Accès au document
 
 - **Accès complet** (`requiredAccess: 'full'`) : le widget lit la structure de l'ensemble du
@@ -285,6 +289,7 @@ La liste complète est dans [`docs/06-architecture.md`](docs/06-architecture.md#
 | Brancher une synchro, capture par capture | [`docs/04-tutoriel.md`](docs/04-tutoriel.md) |
 | Fonctionnement, ce que le widget écrit, carte du code, tests | [`docs/06-architecture.md`](docs/06-architecture.md) |
 | Héberger sa propre copie, pour une instance privée ou une version figée | [`docs/08-auto-hebergement.md`](docs/08-auto-hebergement.md) |
+| Le widget dans le document (rien à héberger) | [`docs/09-widget-dans-le-document.md`](docs/09-widget-dans-le-document.md) |
 | Analyse de sécurité | [`SECURITY.md`](SECURITY.md) |
 | Étude de faisabilité, test sur `grist.numerique.gouv.fr` | [`docs/01-etude-faisabilite.md`](docs/01-etude-faisabilite.md), [`docs/02-procedure-test-dinum.md`](docs/02-procedure-test-dinum.md) |
 | Idées pour la suite | [`docs/05-pistes.md`](docs/05-pistes.md) |

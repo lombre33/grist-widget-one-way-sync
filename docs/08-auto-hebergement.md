@@ -13,6 +13,8 @@ Dans les deux cas, la réponse est la même : **recopier le dépôt, changer tro
 les fichiers**. Il n'y a rien à compiler et rien à installer sur le serveur : le widget est une page
 statique, sans dépendance ni étape de build.
 
+*Pas de serveur où publier des fichiers ? Voir [le widget dans le document](09-widget-dans-le-document.md) : une seule page collée dans Grist, rien à héberger.*
+
 ![Le parcours, de la copie au document](images/auto-heberger-principe.png)
 
 Le guide suit ce parcours : [avant de commencer](#avant-de-commencer),

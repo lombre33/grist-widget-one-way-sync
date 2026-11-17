@@ -397,6 +397,26 @@ avec l'origine). Une copie change **trois valeurs** : `GRIST_ORIGINS`, la CSP, `
 - **Figures** : cinq en SVG et PNG (`auto-heberger-principe`, `-verrous`, `-trois-modifications` (relue dans les vraies lignes de `js/config.js` et `index.html`), `-mises-a-jour`) et deux captures réelles (`-instance-absente`, `-hors-de-grist`), toutes par `node tests/tools/figures-auto-hebergement.mjs` (Playwright). **Le forum** a une ligne de plus
   (lien vers le guide du dépôt public, qui n'existera qu'à la publication de la Bêta) et son zip est refait.
 
+## Le widget dans le document (17 novembre 2026, branche `claude/project-thread-xoobyx`, PAS dans la Bêta)
+
+Antoine, 17 novembre : une façon de distribuer le widget est le **Custom Widget Builder de Grist** (le code vit dans le document) ; « pour la version du code pour le custom builder on ne le met pas dans la
+Bêta, ça sera une montée de petite version après ». Donc : **rien sur `main` avant la publication de la Bêta et un feu vert**, et ni la CSP ni les origines de la Bêta ne bougent (la page construite a sa propre CSP). Tout est dans `builder/`
+(`README.md` : le build et le chargeur ; guide : `docs/09-widget-dans-le-document.md` et `docs/09-in-document-widget.en.md`). Le widget servi n'est cité nulle part dans ce dossier et ne le cite pas.
+- **Ce que Grist 1.7.22 fait vraiment** (code de l'image et essais) : le choix s'appelle « Créez le vôtre » (« Create your own », sous « Plus » du sélecteur d'ajout de page), section de type `creator`, **une seule page HTML** dans
+  `_grist_Views_section.options.html` (l'ancien Builder `_html`/`_js` est migré) ; affichée dans `<iframe sandbox="allow-scripts" allow="clipboard-write" srcdoc>` : origine opaque, ni `localStorage`, ni `navigator.locks`, `BroadcastChannel` isolé, ni fenêtres (un lien
+  `target=_blank` n'ouvre rien) ; l'API des widgets se charge par `grist-plugin-api.js` (adresse relative) ; le niveau d'accès est dans `customView.access` et l'invite « Le widget a besoin de full access » avec Accepter est la même que pour un widget servi (panneau de droite) ;
+  l'éditeur (websocket) accepte 576 Ko et 1,3 Mo, l'API REST `/apply` refuse plus de 1 Mo (413). Un widget servi par adresse n'a aucun `sandbox` ; ici le cadre est plus étroit.
+- **Le build** (`builder/build.mjs`, sans dépendance, déterministe) : modules `js/**` et JSON rangés par dépendances (graphe acyclique, un cycle est refusé), adresses relatives remplacées par des marques `@syncplus:<rang>`, sept retouches nommées (chacune sur un texte
+  qui existe UNE fois, sinon le build s'arrête), chargeur en ligne (`builder/loader.js`) qui remplace verrous (file dans la page), stockage (mémoire gardée dans `window.name`), canal (retiré) et charge chaque module par une adresse `blob:` ; CSP en `<meta>`
+  (`script-src 'sha256-<chargeur>' blob: <instances>`, `connect-src blob: <instances>`, `style-src 'sha256-<styles>'`, `img-src data:`) ; `--compact` (gzip, base64) : 576 Ko contre 1,3 Mo ; `--instance`, `--widget-url`, `--lang`, `--out`. `checkOrigin` ne laisse passer qu'un nom d'hôte
+  et un port (un essai l'a montré : `https://a.org';` passait et se serait écrit tel quel dans la CSP et dans `config.js`).
+- **Limites dites au guide** (aucune n'ouvre de porte) : préférences non gardées (**le premier « Nouvel export » d'un document neuf recharge le document pour poser les règles d'accès, et l'assistant ne se rouvre pas** : la préférence qui le rouvre vit dans `localStorage`),
+  pas de verrou entre onglets, pas de canal entre onglets, liens inertes, pas de bouton « Ajouter le widget à la page de la table reçue », tutoriel sans captures, consignes qui citent l'adresse du widget, mises à jour à la main dans chaque document, même version des deux côtés.
+  **Sécurité** : le code est dans le document, donc remplaçable par qui a le droit de structure (réserver aux propriétaires) ; la politique autorise toute l'origine de l'instance pour les scripts (l'API est chargée par une adresse relative que Grist résout) ; section dans `SECURITY.md`.
+- **Essais** : `tests/unit/builder.test.mjs` (13) ; `tests/e2e/builder.mjs` (synchro complète dans un vrai Grist, six contrôles dont les limites du cadre ; `ENV_FILE=.env-builder.json`, `homeDb` dans le fichier d'environnement pour lire la clé du formulaire sans Docker : `tests/e2e/shared.mjs`
+  l'accepte) ; captures `docs/images/widget-doc-*.png` par `tests/tools/figures-widget-dans-le-document.mjs`. **Grist sans Docker** : l'image extraite dans `/opt/gristimg/root`, lancée en `chroot` (`GRIST_SANDBOX_FLAVOR=unsandboxed`, `NODE_PATH` comme `sandbox/run.sh`, un `/etc/hosts` avec `localhost`).
+- **À faire à la publication** : relever la version (petite montée), ajouter la ligne au forum et au message des nouveautés, relire le guide contre le Grist de l'instance cible (libellés « Créez le vôtre », « Éditer le code »).
+
 ## État : V0.30.4 (17 novembre 2026, audit de sécurité ++)
 
 V0.30.4 (Antoine, 17 novembre : « quand c'est fait audit sécurité ++ », puis « attention à ne pas te biaiser avec la mémoire, revérifie tout proprement, tous les risques de partages, d'injections, d'accès à la donnée […] il faut être super clean là »).
