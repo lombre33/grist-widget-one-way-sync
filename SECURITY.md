@@ -549,7 +549,9 @@ Pour un usage en production :
 - héberger une **copie figée** du dépôt (version relue, étiquette Git) sur un serveur de
   l'organisation, plutôt que la branche `main` sur GitHub Pages, et y changer `WIDGET_URL` ;
 - ajouter cette adresse à la liste des widgets de l'instance, et ne garder dans `js/config.js` et
-  la politique de `index.html` que les instances Grist utilisées ;
+  la politique de `index.html` que les instances Grist utilisées (le pas à pas, illustré :
+  [`docs/08-auto-hebergement.md`](docs/08-auto-hebergement.md) ; `tests/unit/instances.test.mjs`
+  échoue si la liste du code et celle de la politique ne disent pas la même chose) ;
 - relire le code à chaque mise à jour : environ 15 700 lignes de JavaScript commenté, sans dépendance.
 
 **Webhooks limités à l'instance.** Un webhook part du serveur Grist, page fermée : une copie piégée

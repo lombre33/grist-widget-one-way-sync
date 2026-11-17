@@ -86,7 +86,7 @@ test('tutoriel : sections complètes dans les deux langues, aides et images exis
 });
 
 test('toute image et tout lien des README et de la documentation existent', () => {
-  const pages = ['README.md', 'README.en.md', 'docs/04-tutoriel.md', 'docs/06-architecture.md'];
+  const pages = ['README.md', 'README.en.md', 'docs/04-tutoriel.md', 'docs/06-architecture.md', 'docs/08-auto-hebergement.md', 'docs/08-self-hosting.en.md'];
   const missing = pages.flatMap(page => {
     const dir = new URL(`../../${page}`, import.meta.url);
     return [...read(page).matchAll(/(?:src="|\]\()([^")#]+)/g)].map(m => m[1])

@@ -199,11 +199,13 @@ allowed webhook domains (Grist's `ALLOWED_WEBHOOK_DOMAINS` setting).
    stuck on a message that shows where to set it
    ([screenshots](docs/04-tutoriel.md#0-installer-le-widget-dans-chaque-document), in French).
 
-The widget works with `grist.numerique.gouv.fr` and `docs.getgrist.com`. For another instance,
-add its address to `js/config.js` and to the CSP in `index.html`. To host your own copy
-(advised in production, see [`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement)), publish this
-folder as is at an https address and set it as `WIDGET_URL` (`js/config.js`): it is the address
-the widget's instructions give.
+The widget works with `grist.numerique.gouv.fr` and `docs.getgrist.com`. For another instance, or to
+host your own frozen copy (advised in production, see
+[`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement), in French): copy the repository, change
+three values (`GRIST_ORIGINS` and `WIDGET_URL` in `js/config.js`, the security policy in
+`index.html`), and publish the files at an https address. The illustrated step-by-step guide, with
+the instance gallery and the webhook setting:
+[**Hosting your own copy**](docs/08-self-hosting.en.md).
 
 ### Document access
 
@@ -269,6 +271,7 @@ The documentation is in French.
 |---|---|
 | Connecting a sync, screenshot by screenshot | [`docs/04-tutoriel.md`](docs/04-tutoriel.md) |
 | How it works, what the widget writes, code map, tests | [`docs/06-architecture.md`](docs/06-architecture.md) |
+| Hosting your own copy, for a private instance or a frozen version | [`docs/08-self-hosting.en.md`](docs/08-self-hosting.en.md) |
 | Security analysis | [`SECURITY.md`](SECURITY.md) |
 | Feasibility study, test on `grist.numerique.gouv.fr` | [`docs/01-etude-faisabilite.md`](docs/01-etude-faisabilite.md), [`docs/02-procedure-test-dinum.md`](docs/02-procedure-test-dinum.md) |
 | Ideas for later | [`docs/05-pistes.md`](docs/05-pistes.md) |

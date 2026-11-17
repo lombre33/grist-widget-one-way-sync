@@ -209,10 +209,12 @@ liste des domaines autorisés (réglage `ALLOWED_WEBHOOK_DOMAINS` de Grist).
    ([captures](docs/04-tutoriel.md#0-installer-le-widget-dans-chaque-document)).
 
 Le widget fonctionne avec `grist.numerique.gouv.fr` et `docs.getgrist.com`. Pour une autre
-instance, ajouter son adresse dans `js/config.js` et dans la CSP de `index.html`. Pour héberger sa
-propre copie (conseillé en production, voir [`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement)),
-publier ce dossier tel quel sur une adresse https et la reporter dans `WIDGET_URL`
-(`js/config.js`) : c'est l'adresse que donnent les consignes du widget.
+instance, ou pour héberger sa propre copie figée (conseillé en production, voir
+[`SECURITY.md`](SECURITY.md#chaîne-dapprovisionnement)) : recopier le dépôt, changer trois valeurs
+(`GRIST_ORIGINS` et `WIDGET_URL` dans `js/config.js`, la politique de sécurité de `index.html`),
+publier les fichiers sur une adresse https. Le guide, illustré, pas à pas, avec l'ajout dans la
+galerie de l'instance et le réglage des webhooks :
+[**Héberger sa propre copie**](docs/08-auto-hebergement.md).
 
 ### Accès au document
 
@@ -282,6 +284,7 @@ La liste complète est dans [`docs/06-architecture.md`](docs/06-architecture.md#
 |---|---|
 | Brancher une synchro, capture par capture | [`docs/04-tutoriel.md`](docs/04-tutoriel.md) |
 | Fonctionnement, ce que le widget écrit, carte du code, tests | [`docs/06-architecture.md`](docs/06-architecture.md) |
+| Héberger sa propre copie, pour une instance privée ou une version figée | [`docs/08-auto-hebergement.md`](docs/08-auto-hebergement.md) |
 | Analyse de sécurité | [`SECURITY.md`](SECURITY.md) |
 | Étude de faisabilité, test sur `grist.numerique.gouv.fr` | [`docs/01-etude-faisabilite.md`](docs/01-etude-faisabilite.md), [`docs/02-procedure-test-dinum.md`](docs/02-procedure-test-dinum.md) |
 | Idées pour la suite | [`docs/05-pistes.md`](docs/05-pistes.md) |

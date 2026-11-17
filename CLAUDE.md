@@ -383,6 +383,20 @@ Trois schémas SVG (rendus PNG à l'échelle 2, générés à la main, couleurs 
 la SOURCE n'a que `Synchro` et le webhook (`approveReply`). Dans un Échange, chaque document a les deux : son `Synchro` et son webhook, son formulaire et son journal (le journal de retour de A vient de `startReturn`, le webhook de B de `wireExchange`).
 Si un schéma est à refaire, éditer le `.svg` (texte et rectangles) puis le rendre avec Chromium à `deviceScaleFactor` 2.
 
+## Héberger sa propre copie (17 novembre 2026, textes, images et un essai, aucun changement du widget)
+
+Antoine, 17 novembre, après le retour d'un utilisateur (« pour ajouter un site (config.js et RCP) il faut recopier votre widget ») : « le guide dispo sur le dépôt et illustré ». Le choix de sécurité est **gardé** : pas de configuration dynamique
+(ni paramètre d'adresse, ni saisie, ni variable), la liste des instances reste écrite dans le code relu, en deux endroits d'accord (`GRIST_ORIGINS` de `js/config.js` : `gristFetch` ; politique de `index.html` : `script-src` avec `<origine>/grist-plugin-api.js`, `connect-src`
+avec l'origine). Une copie change **trois valeurs** : `GRIST_ORIGINS`, la CSP, `WIDGET_URL` (adresse que donnent les consignes, avec barre finale), dans un seul commit pour qu'un `git rebase` les repose.
+- **Guides** : `docs/08-auto-hebergement.md` (fr) et `docs/08-self-hosting.en.md` (en) : parcours, trois modifications, vérification (la copie ouverte seule dit « Ce widget s'ouvre dans Grist » et donne `WIDGET_URL`), hébergement (fichiers à publier : `index.html`, `css/`, `js/`, `i18n/`, `img/`,
+  `docs/images/` pour l'onglet Tutoriel ; https, types `.js` et `.json`, cadre autorisé, pas d'authentification), ajout dans Grist (URL personnalisée, galerie `GRIST_WIDGET_LIST_URL`), `ALLOWED_WEBHOOK_DOMAINS`, pourquoi c'est ainsi, mises à jour (`amont`, rebase), tableau de dépannage. Liés des deux README, de
+  `docs/04`, de `SECURITY.md` et de `docs/06`. Le **mode Custom Widget Builder** (un seul HTML et un seul JS) n'y est pas : Antoine, 17 novembre : « on ne le met pas dans la bêta, ça sera une montée de petite version après » ; ne pas toucher à la CSP ni aux origines de la Bêta pour lui.
+- **Vérifié dans le code de Grist 1.7.22** (image extraite) : `GRIST_WIDGET_LIST_URL` remplace la liste par défaut de Grist Labs (`setDefaultEnv`), est un tableau JSON lu côté serveur, URL relatives permises (`fixUrls`) ; une entrée `accessLevel: "full"` fait demander l'accord à la personne ;
+  `ALLOWED_WEBHOOK_DOMAINS` : `matchesBaseDomain` (le domaine et ses sous-domaines), `*` autorise tout, http pour `localhost` seulement. Les widgets embarqués par plugin n'ont pas été essayés avec syncPlus : non documentés.
+- **Essai** : `tests/unit/instances.test.mjs` (5 essais : origines propres, `script-src` et `connect-src` exactement la liste du code, rien d'autre vers l'extérieur, `WIDGET_URL` en https avec barre finale ; contre-épreuve faite en ajoutant une instance d'un seul côté). Les liens du guide sont dans la liste de `i18n.test.mjs`.
+- **Figures** : cinq en SVG et PNG (`auto-heberger-principe`, `-verrous`, `-trois-modifications` (relue dans les vraies lignes de `js/config.js` et `index.html`), `-mises-a-jour`) et deux captures réelles (`-instance-absente`, `-hors-de-grist`), toutes par `node tests/tools/figures-auto-hebergement.mjs` (Playwright). **Le forum** a une ligne de plus
+  (lien vers le guide du dépôt public, qui n'existera qu'à la publication de la Bêta) et son zip est refait.
+
 ## État : V0.30.4 (17 novembre 2026, audit de sécurité ++)
 
 V0.30.4 (Antoine, 17 novembre : « quand c'est fait audit sécurité ++ », puis « attention à ne pas te biaiser avec la mémoire, revérifie tout proprement, tous les risques de partages, d'injections, d'accès à la donnée […] il faut être super clean là »).

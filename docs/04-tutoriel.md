@@ -42,7 +42,8 @@ comme avant.
 **Ajouter**, **Ajouter une page**, vue **Personnalisée** (une table qui existe déjà, par exemple Table1, jamais une table qu'on crée et qu'on nomme Synchro), **Ajouter une
 page** ; choisir Sync+ dans la galerie de l'instance s'il y est, sinon **URL
 personnalisée** et l'adresse officielle du widget (`https://grist-factory.github.io/grist-widget-syncPlus/`,
-ou celle de la copie hébergée par votre organisation ; jamais une adresse reçue par courriel),
+ou celle de la copie hébergée par votre organisation, voir [Héberger sa propre copie](08-auto-hebergement.md) ;
+jamais une adresse reçue par courriel),
 **Ajouter un widget** (Grist peut demander de confirmer).
 
 ![Ajouter une page](images/00a-installer-ajouter.png)
