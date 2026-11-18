@@ -76,6 +76,15 @@ async function answerOf(response, limit = 200) {
   return { status: response.status, body };
 }
 
+// Une requête REST dont le navigateur n'a pas pu lire la réponse (TypeError de `fetch` : « NetworkError when attempting to
+// fetch resource », « Failed to fetch »). Vu sur DINUM (18 novembre 2026) : quand Grist refuse le jeton `auth=` (401 « Broken
+// token », « Cannot verify token », « Token has expired »), sa réponse n'a aucun en-tête CORS, et le navigateur la cache : la personne
+// lit une erreur de réseau sans code d'état (sonde `tests/e2e/tools/probe-cors-token.mjs`). Un refus de droits (403) a ses en-têtes,
+// lui, et reste lisible. L'erreur dit quelle requête a échoué (`méthode chemin`, jamais l'adresse complète ni le jeton) et garde son type
+// (`unreachable` de ui.js la reconnaît : le document qui se recharge en passant ne fait pas peur).
+const unreachableError = (e, method, path) => Object.assign(new TypeError('gristUnreachable'), { vars: { request: `${method} ${path}` }, cause: e });
+const onlyUnreachable = (method, path) => (e) => { throw e instanceof TypeError ? unreachableError(e, method, path) : e; };
+
 const http = {
   // REST du document courant, avec le jeton de la personne (`full`) ou en lecture seule. Grist exige
   // l'un de ces en-têtes pour toute écriture sans cookie (protection CSRF).
@@ -87,7 +96,7 @@ const http = {
       headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: timeout ? AbortSignal.timeout(timeout) : undefined,
-    }));
+    }).catch(onlyUnreachable(method, path)));
   },
   // Sans jeton : écriture anonyme en JSON (l'en-tête Content-Type suffit à Grist), fiche d'un partage,
   // document public.
@@ -100,7 +109,8 @@ const http = {
     }), 120);
   },
   async download(id) {
-    const response = await gristFetch(await authUrl(`/attachments/${Number(id)}/download`));
+    const path = `/attachments/${Number(id)}/download`;
+    const response = await gristFetch(await authUrl(path)).catch(onlyUnreachable('GET', path));
     if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status });
     return new Uint8Array(await response.arrayBuffer());
   },
@@ -109,7 +119,7 @@ const http = {
     form.append('upload', new Blob([bytes]), name);
     const response = await gristFetch(await authUrl('/attachments', { full: true }), {
       method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: form,
-    });
+    }).catch(onlyUnreachable('POST', '/attachments'));
     return (await answerOf(response)).body[0];
   },
   docBaseUrl: async () => (await docIdentity()).baseUrl,

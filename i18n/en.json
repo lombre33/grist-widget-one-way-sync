@@ -836,6 +836,7 @@
   "error.exchangeOwner": "An Exchange also creates a sending from this document: you must own it.",
   "error.linkTest": "The link does not work ({detail}). Check that the form is published and the document is in a team site.",
   "error.linkElsewhere": "This link does not write into this reception’s journal (another reception’s form, or another document’s). Copy the link of the form named above.",
+  "error.gristUnreachable": "Grist did not answer the widget’s request (“{request}”), or the browser did not let it read the answer. Most often the server refused the access token Grist has just given the widget, or a proxy, a firewall or a browser extension blocks the request. Reload the page. If the error comes back: try a private window without extensions, then another network. For the instance administrator: in the browser console, the “CORS” error gives a status code (401, 502…) that says who refused.",
   "error.generic": "Error: {detail}",
   "error.blockedRules": "An access rule of this document stops the widget from writing here ({detail}). In Grist: Document settings, Access rules; remove or relax the rule that applies to this table. The widget’s tables (Synchro, journals) and the received tables must stay editable by the people who use them.",
   "error.rulesRefused": "Grist refused to set the widget’s access rules (“{why}”): no export is created until the Synchro table is protected. In Grist, Document settings, Access rules: fix the rule that targets a column or table that no longer exists, then try again.",

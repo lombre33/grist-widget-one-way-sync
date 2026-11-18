@@ -94,7 +94,8 @@ function sqlPort(http) {
   // d'avant la 0.5).
   async function journalStats(tableId, receivedCol, typeCol) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableId)) return null;
-    const [row] = (await querySql(`select count(*) as n, max("${receivedCol}") as last, sum(case when "${typeCol}" is not null and "${typeCol}" != '' then 1 else 0 end) as raw from "${tableId}"`)) || [];
+    // Pas de `case when` (voir keyCountSql) : une somme de booléens compte les lignes brutes, et le pare-feu de la DINUM laisse passer.
+    const [row] = (await querySql(`select count(*) as n, max("${receivedCol}") as last, sum("${typeCol}" is not null and "${typeCol}" != '') as raw from "${tableId}"`)) || [];
     return row ? { n: Number(row.n) || 0, last: Number(row.last) || 0, raw: Number(row.raw) || 0 } : null;
   }
 

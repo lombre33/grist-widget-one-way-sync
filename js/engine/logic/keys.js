@@ -9,9 +9,11 @@
 import { KEY_COL, isBlank, isSafeId, chunk } from './common.js';
 
 // Requête qui compte, sans rien lire d'autre : lignes, lignes sans clé, clés distinctes. Null si le nom de
-// la table ne peut pas s'écrire sans risque.
+// la table ne peut pas s'écrire sans risque. **Jamais de `case when`** : la requête voyage dans l'adresse de la
+// demande, et le pare-feu de la DINUM (Incapsula) refuse en 403, sans en-tête CORS, toute demande qui contient ces
+// mots (vérifié en direct le 18 novembre 2026) ; `iif` et une somme de booléens disent la même chose et passent.
 export const keyCountSql = table => (isSafeId(table)
-  ? `select count(*) as n, sum(case when trim("${KEY_COL}") is null or trim("${KEY_COL}") = '' then 1 else 0 end) as blank, count(distinct case when trim("${KEY_COL}") = '' then null else "${KEY_COL}" end) as keys from "${table}"`
+  ? `select count(*) as n, sum(trim("${KEY_COL}") is null or trim("${KEY_COL}") = '') as blank, count(distinct iif(trim("${KEY_COL}") = '', null, "${KEY_COL}")) as keys from "${table}"`
   : null);
 
 // Ce que dit la requête : { rows, blank, dup } ; `dup` : lignes en trop qui partagent la clé d'une autre.

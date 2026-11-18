@@ -428,8 +428,9 @@ export function pickField({ items, value, label, onChange = () => {} }) {
 // dessine rien. Les écrans les prennent d'ici.
 export { errorText, failure, noteError, recentErrors };
 
-// Requête qui n'a pas abouti (réseau, ou document rechargé par Grist après un changement de règles).
-export const unreachable = e => e instanceof TypeError && /fetch|load failed|network/i.test(e.message);
+// Requête qui n'a pas abouti (réseau, ou document rechargé par Grist après un changement de règles) : l'erreur de `fetch`
+// du navigateur, ou la même, déjà nommée par js/grist.js (`gristUnreachable`, qui dit quelle requête).
+export const unreachable = e => e instanceof TypeError && (e.message === 'gristUnreachable' || /fetch|load failed|network/i.test(e.message));
 
 // Exécute une action d'un bouton : le bouton est grisé pendant l'opération, l'erreur affichée
 // dans `out` (élément qui reçoit le message).

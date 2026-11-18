@@ -245,7 +245,14 @@
 //         distinguent une réponse, une comparaison sans réponse et un refus : sans réponse, la boucle garde le rythme d'avant la comparaison (10 s
 //         tant que des lignes arrivent, puis une minute) et, après `COMPARE_TRIES` (3) coups d'œil sans réponse de suite, laisse la comparaison
 //         (`comparing()` dit faux au diagnostic, comme pour un refus de droits). Un hôte n'a rien à changer.
-export const ENGINE_VERSION = '5.0.3';
+// 5.0.4 (18 novembre 2026, syncPlus 0.30.6, retour d'une personne sur DINUM) : correctif, sans ajout ni retrait au port, aux tables ni aux
+//         codes (texte des formules de `Synchro` inchangé : `formulas-golden`). **Les deux requêtes SQL de lecture n'ont plus de `case when`**
+//         (`keyCountSql` de `logic/keys.js`, `journalStats` de `rest-port.js` : `iif` et une somme de booléens, mêmes nombres, comparés sur un
+//         vrai Grist). Le pare-feu devant le Grist de la DINUM (Incapsula) refuse en 403, sans en-tête CORS, toute demande dont l'adresse ou le
+//         corps contient `case when`, `or 1=1`, `drop table` : le navigateur disait « CORS manquant » et le moteur recevait `null` (comptage des
+//         clés et résumé du journal perdus, lecture des tables entières à la place). `tests/unit/sql-firewall.test.mjs` garde les requêtes sans ces
+//         mots. Un hôte qui écrit lui-même du SQL pour une instance derrière un pare-feu de ce genre doit s'en garder aussi.
+export const ENGINE_VERSION = '5.0.4';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir
