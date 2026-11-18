@@ -1305,6 +1305,34 @@ try {
     assert.equal((await records(dst.doc, 'Fiches')).length, 3, 'les lignes aux cellules vidées restent');
     step('Types : chaque type traverse l\'export avec son type et sa valeur (dates, choix, rang) ; le Blob est dit « ne part pas », sans case, et l\'invitation reste lisible');
   }
+  // --- Ordre des lignes : la CIBLE reçoit les lignes dans l'ordre de la SOURCE. Le lot range ses lignes de la plus récente à la plus
+  // ancienne (un lot coupé garde les dernières) et la recopie les ajoutait dans cet ordre : Bob, Alice, Henri IV, Jacques à la SOURCE
+  // donnait Jacques, Henri IV, Alice, Bob à la CIBLE (Antoine, 18 novembre). Des lignes nées l'une après l'autre, envoyées avec l'existant,
+  // puis ajoutées une à une, par paquet, et coup sur coup.
+  async function orderSteps() {
+    const src = await newDocWithWidget('Ordre SOURCE', [['AddTable', 'Fiches', [{ id: 'Nom', type: 'Text' }]]]);
+    for (const Nom of ['Bob', 'Alice', 'Henri IV', 'Jacques']) {
+      await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom }]]);
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    const dst = await newDocWithWidget('Ordre CIBLE');
+    await startExport(src, 'Fiches', 'Ordre');
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, '« Ordre » : table Fiches.'), { url: src.url });
+    await openWidget(dst.url);
+    const order = async doc => (await api('POST', `/docs/${doc}/sql`, { sql: 'select Nom from "Fiches" order by manualSort, id' })).records.map(r => r.fields.Nom);
+    const sameOrder = async (what, count) => {
+      await waitFor(async () => (await order(dst.doc)).length === count, `${what} : lignes reçues`, 90000);
+      assert.deepEqual(await order(dst.doc), await order(src.doc), `${what} : l'ordre de la CIBLE est celui de la SOURCE`);
+    };
+    await sameOrder('envoi de l\'existant', 4);
+    assert.deepEqual(await order(dst.doc), ['Bob', 'Alice', 'Henri IV', 'Jacques']);
+    await applyActions(src.doc, [['BulkAddRecord', 'Fiches', [null, null, null], { Nom: ['Eva', 'Fred', 'Gina'] }]]);
+    await sameOrder('trois lignes ajoutées d\'un coup', 7);
+    for (const Nom of ['Hugo', 'Iris', 'Jules']) await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom }]]);
+    await sameOrder('trois lignes ajoutées coup sur coup', 10);
+    step('Ordre : les lignes arrivent chez la CIBLE dans l\'ordre de la SOURCE (envoi de l\'existant, paquet, ajouts coup sur coup), plus à l\'envers');
+  }
   // --- Changements de structure : une réception qui demande l'accord (case décochée d'emblée) ne crée pas la colonne que la SOURCE
   // ajoute à l'export, la propose avec son détail ; « Appliquer » la crée et la remplit ; une colonne retirée de l'export est dite ;
   // « Appliquer, puis traiter automatiquement » ne demande plus la suivante ; une réception d'avant (sans choix) crée toute seule.
@@ -2752,8 +2780,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_ORDER=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, ORDER: orderSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3781,6 +3809,7 @@ try {
   await optionsSteps();
   await choicesSteps();
   await typesSteps();
+  await orderSteps();
   await structureSteps();
   await adoptSteps();
   await newColumnsSteps();

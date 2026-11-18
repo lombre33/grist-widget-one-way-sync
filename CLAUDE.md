@@ -397,7 +397,28 @@ avec l'origine). Une copie change **trois valeurs** : `GRIST_ORIGINS`, la CSP, `
 - **Figures** : cinq en SVG et PNG (`auto-heberger-principe`, `-verrous`, `-trois-modifications` (relue dans les vraies lignes de `js/config.js` et `index.html`), `-mises-a-jour`) et deux captures réelles (`-instance-absente`, `-hors-de-grist`), toutes par `node tests/tools/figures-auto-hebergement.mjs` (Playwright). **Le forum** a une ligne de plus
   (lien vers le guide du dépôt public, qui n'existera qu'à la publication de la Bêta) et son zip est refait.
 
-## État : V0.30.6 (18 novembre 2026, « NetworkError » : jeton refusé, et pare-feu de la DINUM)
+## État : V0.30.7 (18 novembre 2026, ordre des lignes à l'arrivée dans la CIBLE)
+
+V0.30.7 (Antoine, 18 novembre, avec deux captures : « j'ai l'impression que les données arrivent à l'envers » ; SOURCE `Contact_Dev` : Bob, Alice, Henri IV, Jacques (lignes 1 à 4), CIBLE : Jacques, Henri IV, Alice, Bob, mêmes données).
+**Moteur 5.0.5** (correctif : port, tables, codes et texte des formules de `Synchro` inchangés, `formulas-golden` vert ; dit dans `GFS-ETAT.md`).
+- **Cause** (reproduite dans un vrai Grist 1.7.22, `tests/e2e/tools/probe-row-order.mjs`, `AVANT=1` sur le code d'avant : envoi de l'existant et paquet de trois lignes à l'envers, lignes ajoutées une par une dans l'ordre) : la formule du lot
+  range ses lignes de la plus récente à la plus ancienne (`sorted(rows, key=when, reverse=True)` dans `lotPackLines`, voulu : un lot coupé garde les dernières), le dépliage les met au journal dans cet ordre, et `planVersions` (`logic/consolidation.js`) les
+  écrivait dans l'ordre du journal ; `BulkAddOrUpdateRecord` donne à chaque ligne nouvelle un `manualSort` croissant dans l'ordre de la liste, donc la destination était à l'envers. L'envoi de l'existant (renvoi par tranches de 200, `rowsSince`) range
+  les tranches par MajLe croissant, chacune à l'envers dans son lot : même effet.
+- **Correction côté CIBLE seulement** (marche avec n'importe quelle SOURCE, déjà installée ou non) : `inArrivalOrder` (`logic/consolidation.js`) prend les dernières versions pas encore recopiées de la plus ancienne à la plus récente (`compareVersion` : date
+  de MajLe, puis numéro d'arrivée au journal, qui garde l'ordre du lot à date égale, donc celui de la table). Une ligne qui existe déjà n'est pas déplacée par une modification. **Le texte des formules de `Synchro` n'a pas changé** (pas de décision de changer
+  `lotPackLines`, voir la règle 6 du `README` du moteur).
+- **Limite dite** : on suit l'ordre des dates, **pas la position (`manualSort`) de la SOURCE**. Vérifié (`MIXED=1` de la sonde) : une ligne glissée en tête dans la SOURCE avant l'envoi de l'existant arrive à sa place d'arrivée chez la CIBLE (la
+  SOURCE a Jacques en tête, la CIBLE l'a en dernier), et une ligne insérée après coup au milieu (`manualSort` 1,5) arrive à la fin. Une ligne déjà copiée n'est jamais déplacée par une modification ; changer l'ordre à la SOURCE n'envoie rien (aucune colonne de
+  l'export ne change). Une ligne retouchée avant l'envoi de l'existant ne change rien (le renvoi date les lignes de `max(MajLe, RecalculLe)`, dans l'ordre des lignes de la table). Suivre la position exigerait de l'envoyer dans le lot (texte des formules, moteur plus
+  haut), de renvoyer en tranches dans l'ordre de la table (le renvoi reprenable s'appuie sur MajLe croissant, `chunkMark`) et de savoir où ranger une ligne entre deux lignes d'ici : non fait, à proposer si un cas réel le demande.
+- **Colonne `service` reçue en texte : attendu** (la même capture : une Référence à gauche, du texte à droite). Par défaut un lien n'est gardé que si la table visée fait partie de l'export (`linkOffers`, `wanted = chosen.includes(target)` ; V0.27.0), sinon « Envoyer seulement
+  le texte » : la CIBLE reçoit ce que la colonne affiche. Pour une vraie Référence : cocher la table visée à l'étape Tables, ou choisir « Garder le lien » dans « Contenu » (la table visée s'ajoute avec sa colonne affichée). La colonne de la CIBLE ne devient Référence que si elle est
+  encore vide et créée par le widget (`own`).
+- Testé : unit 550 (`consolidation.test.mjs` : trois attendus changés d'ordre, deux essais de plus dont l'ordre du lot à date égale ; contre-épreuve : les essais d'ordre échouent sur l'ancien code) ; e2e `ONLY_ORDER=1` (`orderSteps`, vrai Grist : l'existant, trois lignes d'un coup, trois lignes
+  coup sur coup ; échoue sur l'ancien code) ; sonde `probe-row-order.mjs` (`MIXED=1` pour les lignes glissées).
+
+## État précédent : V0.30.6 (18 novembre 2026, « NetworkError » : jeton refusé, et pare-feu de la DINUM)
 
 V0.30.6 (Antoine, 18 novembre, retour d'une personne sur DINUM, Firefox : « Erreur : NetworkError when attempting to fetch resource », console : « Blocage d'une requête multiorigines […] `…/o/<équipe>/api/docs/<id>/webhooks?auth=…` […]
 l'en-tête CORS « Access-Control-Allow-Origin » est manquant », deux documents sur le Grist de la DINUM). **Moteur 5.0.4** (correctif : deux requêtes SQL sans `case when`, voir plus bas) : `js/grist.js` (l'`http` de syncPlus), `js/ui.js`, un texte d'erreur.

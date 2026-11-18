@@ -252,7 +252,18 @@
 //         corps contient `case when`, `or 1=1`, `drop table` : le navigateur disait « CORS manquant » et le moteur recevait `null` (comptage des
 //         clés et résumé du journal perdus, lecture des tables entières à la place). `tests/unit/sql-firewall.test.mjs` garde les requêtes sans ces
 //         mots. Un hôte qui écrit lui-même du SQL pour une instance derrière un pare-feu de ce genre doit s'en garder aussi.
-export const ENGINE_VERSION = '5.0.4';
+// 5.0.5 (18 novembre 2026, syncPlus 0.30.7, ordre des lignes à l'arrivée) : correctif, sans ajout ni retrait au port, aux tables ni aux codes
+//         (`CODE_FORMAT` 2, texte des formules de `Synchro` inchangé : `formulas-golden`). **Les lignes arrivaient à l'envers dans la destination**
+//         (retour d'Antoine : Bob, Alice, Henri IV, Jacques à la SOURCE, Jacques, Henri IV, Alice, Bob à la CIBLE). Le lot de la SOURCE range ses
+//         lignes de la plus récente à la plus ancienne (`lotPackLines` : un lot coupé garde les dernières) et `planVersions`
+//         (`logic/consolidation.js`) les écrivait dans l'ordre du journal, donc du lot. Maintenant `inArrivalOrder` les prend de la plus ancienne
+//         à la plus récente (`compareVersion` : date de MajLe, puis ordre d'arrivée au journal, qui garde l'ordre du lot à date égale) : les
+//         lignes nouvelles se rangent dans la destination dans l'ordre où la SOURCE les a créées (première recopie, envoi de l'existant, paquets
+//         d'ajouts, ajouts coup sur coup). La lecture d'une SOURCE d'avant la 0.30.7 n'y change rien : le tri est fait à la recopie. Une ligne qui
+//         existe déjà ici n'est pas déplacée par une modification. **Limite** : l'ordre suivi est celui des dates de création ou d'envoi, pas la
+//         position (`manualSort`) de la SOURCE : une ligne glissée ou insérée au milieu de la SOURCE n'est pas replacée (changer l'ordre n'envoie
+//         rien), elle arrive à la fin si elle est nouvelle. Un hôte n'a rien à changer.
+export const ENGINE_VERSION = '5.0.5';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

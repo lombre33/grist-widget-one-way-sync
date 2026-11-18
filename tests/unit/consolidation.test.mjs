@@ -21,11 +21,32 @@ test('consolidation : ajout, mise à jour, suppression, versions déjà appliqu�
   const { actions, stats } = plan(journalRows, destRows);
   assert.deepEqual(stats, { added: 1, updated: 1, removed: 1 });
   assert.deepEqual(actions, [
-    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['b', 'e'] }, { Nom: ['b2', 'n7'] }, { on_many: 'all' }],
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['e', 'b'] }, { Nom: ['n7', 'b2'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [13]],
-    marked([5, 6, 7], ['modif', 'suppression', 'ajout']),
+    marked([7, 5, 6], ['ajout', 'modif', 'suppression']),
     replaced([[5, { v: { Nom: null } }], [6, { n: 3 }]]),
   ]);
+});
+
+test('consolidation : les lignes sont ajoutées de la plus ancienne à la plus récente, quel que soit l\'ordre du lot', () => {
+  // Le lot de la SOURCE range ses lignes de la plus récente à la plus ancienne : sans tri, la destination les recevait à l'envers
+  // (Antoine, 18 novembre : Bob, Alice, Henri IV, Jacques à la SOURCE, Jacques, Henri IV, Alice, Bob à la CIBLE).
+  const newestFirst = [j(1, 'd', 40), j(2, 'c', 30), j(3, 'b', 20), j(4, 'a', 10)];
+  const { actions } = plan(newestFirst, []);
+  assert.deepEqual(actions[0], ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a', 'b', 'c', 'd'] }, { Nom: ['n4', 'n3', 'n2', 'n1'] }, { on_many: 'all' }]);
+  // Plusieurs lots : chacun dans son ordre, le tout par date ; une version qui change une ligne déjà là ne la déplace pas.
+  const lots = [j(1, 'c', 30), j(2, 'b', 20), j(3, 'a', 10), j(4, 'e', 50), j(5, 'd', 40), j(6, 'b', 60, { Nom: 'b2' })];
+  const two = plan(lots, [{ id: 9, id_sync: 'b' }]);
+  assert.deepEqual(two.actions[0][2], { id_sync: ['a', 'c', 'd', 'e', 'b'] }, 'la modification de b (la plus récente) passe en dernier, la ligne b reste où elle est');
+  assert.deepEqual(two.stats, { added: 4, updated: 1, removed: 0 });
+});
+
+test('consolidation : à date égale, l\'ordre du lot (celui de la table) est gardé', () => {
+  // Un renvoi range ses lignes par date : celles qui ont la même date (ou aucune) restent dans l'ordre où le lot les donne.
+  const sameDate = [j(1, 'x', 10), j(2, 'y', 10), j(3, 'z', 10)];
+  assert.deepEqual(plan(sameDate, []).actions[0][2], { id_sync: ['x', 'y', 'z'] });
+  const withoutDate = [j(1, 'x', null), j(2, 'y', null), j(3, 'z', 5)];
+  assert.deepEqual(plan(withoutDate, []).actions[0][2], { id_sync: ['x', 'y', 'z'] }, 'sans date : plus ancienne, donc en tête');
 });
 
 test('consolidation : une version arrivée en retard ne remplace pas une plus récente', () => {
@@ -88,9 +109,9 @@ test('Échange : la version la plus récente gagne et écrit MajLe ; les listes 
   const { actions, stats } = swap(journalRows, destRows);
   assert.deepEqual(stats, { added: 1, updated: 2, removed: 0 }, 'rien n\'est effacé : ni par la liste, ni par une suppression plus ancienne que la ligne d\'ici');
   assert.deepEqual(actions, [
-    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['a', 'c', 'f'] }, { Nom: ['là-bas', 'là-bas', 'nouvelle'], MajLe: [30, 5, null] }, { on_many: 'all' }],
-    marked([7, 8, 1, 2, 3, 4, 5, 6], ['', '', 'modif', '', 'modif', '', '', 'ajout']),
-    replaced([[1, { v: { Nom: 'ici' } }], [3, { v: { Nom: 'ici' } }]]),
+    ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['f', 'c', 'a'] }, { Nom: ['nouvelle', 'là-bas', 'là-bas'], MajLe: [null, 5, 30] }, { on_many: 'all' }],
+    marked([7, 8, 6, 3, 2, 5, 4, 1], ['', '', 'ajout', 'modif', '', '', '', 'modif']),
+    replaced([[3, { v: { Nom: 'ici' } }], [1, { v: { Nom: 'ici' } }]]),
   ]);
   const deleted = swap([j(1, 'e', 25, { Supprime: true })], destRows);
   assert.deepEqual(deleted.actions[0], ['BulkRemoveRecord', 'Dest', [5]], 'Supprime plus récente : la ligne est effacée');
@@ -109,7 +130,7 @@ test('consolidation : clés parties d\'un seau effacées, sauf version plus réc
   assert.deepEqual(actions, [
     ['BulkAddOrUpdateRecord', 'Dest', { id_sync: ['c'] }, { Nom: ['n3'] }, { on_many: 'all' }],
     ['BulkRemoveRecord', 'Dest', [2]],
-    marked([5, 3, 4], ['', 'ajout', 'partie']),
+    marked([5, 4, 3], ['', 'partie', 'ajout']),
     ['BulkUpdateRecord', 'J', [2], { Sync_Etat: ['suppression'], Sync_Recu: [60] }],
     replaced([[2, { n: 2 }]]),
   ]);

@@ -4,7 +4,7 @@ import {
   APPLIED_COL, ARCHIVE_COL, AUTHOR_COL, BEFORE_COL, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, LIST_COL, LOT_COL, ORDER_COL, RECALC_COL, RECEIVED_COL, RESEND_COL, SCHEMA_COL,
   STATE_COL, TABLE_COL, TYPE_COL, BUCKETS, bucketOf, chunk, freeTableId, groupBy, isBlank, isTrue, parseJson,
 } from './common.js';
-import { REFUSED, STATES, compareOrder, completeLists, destColumns, lastMark, latestByKey, pendingLists, sentColumns } from './journal.js';
+import { REFUSED, STATES, compareOrder, compareVersion, completeLists, destColumns, lastMark, latestByKey, pendingLists, sentColumns } from './journal.js';
 import { exchangeColumns } from './exports.js';
 import { noteSent, sentElements } from './descriptions.js';
 
@@ -456,6 +456,13 @@ function consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, 
   };
 }
 
+// Les versions pas encore recopiées, de la plus ancienne à la plus récente (date de MajLe, puis ordre d'arrivée dans le
+// journal). Le lot de la SOURCE range ses lignes de la plus récente à la plus ancienne (voir `lotPackLines`) : les ajouter
+// dans l'ordre du journal les rangeait à l'envers dans la destination (Antoine, 18 novembre : Bob, Alice, Henri IV, Jacques
+// à la SOURCE, Jacques, Henri IV, Alice, Bob à la CIBLE). À date égale, l'ordre du lot est gardé : c'est celui de la table.
+const inArrivalOrder = latest => [...latest].filter(([, version]) => !isTrue(version.row[APPLIED_COL]))
+  .sort(([, a], [, b]) => compareVersion(a, b));
+
 // Effet de la dernière version de chaque clé pas encore recopiée, noté dans `plan` : écrit,
 // refusé, en attente de ses fichiers (Échange, voir waitingVersions) ou d'une décision (règles d'un
 // Échange, `decisions` d'abord). Une version qui attend ses fichiers reste dans le journal, sans
@@ -463,8 +470,7 @@ function consolidationContext({ journalRows, copyCols, matchCol, exchange, hub, 
 const STATS = { ajout: 'added', modif: 'updated' };
 const WRITES = new Set(['ajout', 'modif']);
 function planVersions(ctx, plan, latest, decisions) {
-  for (const [key, version] of latest) {
-    if (isTrue(version.row[APPLIED_COL])) continue;
+  for (const [key, version] of inArrivalOrder(latest)) {
     const state = versionEffect(ctx, key, version, plan.gone);
     const rule = ctx.rules && STATES.includes(state) ? decisions.get(version.id) || ctx.rules[state] : RULES[0];
     if (rule === 'refuser') {
