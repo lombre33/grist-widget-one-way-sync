@@ -235,7 +235,17 @@
 //         colonnes et noms de fichiers que les codes et les listes de fichiers portent sont nettoyés comme les autres textes dits par l'autre
 //         document (`cleanLabel`, `safeName`). Un hôte qui montre les objections d'une formule reçoit des noms de plus dans `unsafe` (un nom privé,
 //         un caractère hors ASCII) ; rien d'autre ne change pour lui.
-export const ENGINE_VERSION = '5.0.2';
+// 5.0.3 (18 novembre 2026, syncPlus 0.30.5, recopie de la CIBLE quand la comparaison est bloquée) : correctif, sans ajout ni retrait au port, aux
+//         tables ni aux codes (`CODE_FORMAT` 2, texte des formules de `Synchro` inchangé : `formulas-golden`). **Cas vécu sur DINUM** : la
+//         comparaison de Grist (`GET /compare`, par `docChanges`) est refusée en route par un 403 sans en-tête CORS (un mandataire ou un
+//         pare-feu entre le navigateur et Grist) : `fetch` lève une erreur sans code, `docChanges` rend `{ hash, tables: null }` (contrat
+//         inchangé, voir `tests/unit/doc-changes.test.mjs`). La boucle (`due` de `target/loop.js`) le lisait comme « rien n'a changé » : le
+//         passage de recopie n'avait plus lieu que toutes les 5 minutes (`QUIET_MS`), au lieu de 10 secondes (mesuré dans un vrai Grist, requêtes
+//         coupées : 221 s pour une cellule vidée, 301 s pour une ligne supprimée). Maintenant `changeVerdict` et `nextCompare` (`logic/rhythm.js`)
+//         distinguent une réponse, une comparaison sans réponse et un refus : sans réponse, la boucle garde le rythme d'avant la comparaison (10 s
+//         tant que des lignes arrivent, puis une minute) et, après `COMPARE_TRIES` (3) coups d'œil sans réponse de suite, laisse la comparaison
+//         (`comparing()` dit faux au diagnostic, comme pour un refus de droits). Un hôte n'a rien à changer.
+export const ENGINE_VERSION = '5.0.3';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

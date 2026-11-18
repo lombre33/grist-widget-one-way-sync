@@ -14,6 +14,7 @@ import {
   restoreActions, rowNumbers,
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
+import { changeVerdict, nextCompare } from '../logic/rhythm.js';
 import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short, waitingVersions } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
@@ -81,8 +82,8 @@ let lastArrival = Date.now(); // dernière arrivée dans un journal (ou retour s
 let lastPass = 0; // début du dernier passage
 // Coup d'œil sur le document (voir due) : son état au coup d'œil précédent (`hash`), les journaux
 // et destinations du dernier passage (`tables`), un journal en lien public (`pull`) ; `compare`
-// passe à faux si Grist refuse.
-const watch = { hash: '', tables: new Set(), pull: false, compare: true };
+// passe à faux si Grist refuse la comparaison, ou n'y répond pas trois fois de suite (`fails`).
+const watch = { hash: '', tables: new Set(), pull: false, compare: true, fails: 0 };
 export const comparing = () => watch.compare; // pour le diagnostic
 let onChange = async () => {}; // l'onglet, redessiné quand un passage a changé quelque chose
 const inflow = new Map(); // journal -> { ids, at } : lignes reçues vues au passage précédent
@@ -110,21 +111,25 @@ export function startAutoConsolidation(render) {
 // (docChanges) : un journal où des lignes sont arrivées, une destination retouchée à la main (elle
 // est alors relue), ou le schéma. Sinon un passage toutes les QUIET_MS. Un lien public, que rien
 // ne signale ici, et le cas où Grist refuse la comparaison (droits) gardent le rythme d'avant :
-// toutes les POLL_MS tant que des lignes arrivent, puis toutes les minutes.
+// toutes les POLL_MS tant que des lignes arrivent, puis toutes les minutes. Il en va de même quand
+// Grist ne répond pas du tout (réponse bloquée en route, réseau coupé : `rhythm.js`) : un coup
+// d'œil sans réponse ne dit pas « rien n'a changé », il ne repousse pas le passage de 5 minutes ;
+// après COMPARE_TRIES coups d'œil sans réponse de suite, la comparaison est laissée.
 async function due() {
   if (busy) return false; // un passage en cours : le coup d'œil attend le suivant
   const elapsed = Date.now() - lastPass;
   const steady = elapsed >= (Date.now() - lastArrival > IDLE_MS ? IDLE_MS : POLL_MS);
   if (watch.compare) {
     const changes = await docChanges(watch.hash).catch(() => ({ hash: watch.hash, tables: null }));
-    if (changes) {
+    const verdict = changeVerdict(changes, watch.hash);
+    ({ fails: watch.fails, keep: watch.compare } = nextCompare(watch.fails, verdict));
+    if (verdict === 'answered') {
       const touched = changes.hash === watch.hash ? [] : touchedTables(changes.tables, watch.tables);
       watch.hash = changes.hash;
       if (touched === null) settled.clear();
       else for (const [key, was] of settled) if ([was.dest, ...(was.deps || [])].some(table => touched.includes(table))) settled.delete(key);
       return elapsed >= QUIET_MS || touched === null || touched.length > 0 || (watch.pull && steady);
     }
-    watch.compare = false;
   }
   return steady;
 }

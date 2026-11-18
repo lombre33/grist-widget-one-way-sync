@@ -397,7 +397,24 @@ avec l'origine). Une copie change **trois valeurs** : `GRIST_ORIGINS`, la CSP, `
 - **Figures** : cinq en SVG et PNG (`auto-heberger-principe`, `-verrous`, `-trois-modifications` (relue dans les vraies lignes de `js/config.js` et `index.html`), `-mises-a-jour`) et deux captures réelles (`-instance-absente`, `-hors-de-grist`), toutes par `node tests/tools/figures-auto-hebergement.mjs` (Playwright). **Le forum** a une ligne de plus
   (lien vers le guide du dépôt public, qui n'existera qu'à la publication de la Bêta) et son zip est refait.
 
-## État : V0.30.4 (17 novembre 2026, audit de sécurité ++)
+## État : V0.30.5 (18 novembre 2026, recopie de la CIBLE quand la comparaison est bloquée)
+
+V0.30.5 (retour d'un testeur de la Bêta 0.30.4, relayé par Antoine, 18 novembre : « l'ajout de données dans la SOURCE est bien mis à jour dans la CIBLE, mais la suppression n'est pas mise à jour. Est-ce normal ? », puis, table à un seul sens :
+elle a ajouté une ligne à la main (arrivée), puis « supprimé » la ligne en vidant la cellule : « l'autre côté n'a pas bougé » ; et Antoine, sur DINUM : des requêtes `/sql` « bloquées » par CORS, 403 sans `Access-Control-Allow-Origin`, « ça semble bloquer les mises à jour »).
+Moteur **5.0.3** (correctif : port, tables, codes et texte des formules de `Synchro` inchangés, `formulas-golden` vert ; dit dans `GFS-ETAT.md`).
+- **Ce n'était pas un défaut de la suppression** : par défaut la CIBLE applique toute suppression de la SOURCE (V0.13.4), et une cellule vidée est une modification qui arrive comme le reste. Rejoué dans un vrai Grist 1.7.22 : cellule vidée (`''` et `null`),
+  ligne entièrement vide, vraie suppression, suppression d'une ligne ajoutée à la main arrivent toutes en environ 10 s ; étape ajoutée à `typesSteps` de `tests/e2e/run.mjs` (cellules vidées de chaque type, ligne ajoutée à la main puis vidée).
+- **Cause trouvée** (reproduite, `tests/e2e/tools/probe-compare-blocked.mjs`) : quand la comparaison de Grist (`GET /compare`, `docChanges`) est coupée en route (mandataire ou pare-feu qui répond 403 sans en-tête CORS : le navigateur lève une `TypeError`, le widget ne voit aucun code),
+  `docChanges` rend `{ hash, tables: null }` (contrat gardé : `tests/unit/doc-changes.test.mjs`) et `due()` (`engine/target/loop.js`) le lisait comme « aucune table n'a changé » (même empreinte) : le passage de recopie n'avait plus lieu que toutes les 5 minutes (`QUIET_MS`).
+  Mesuré, `/compare` et `/sql` coupés : 221 s pour une cellule vidée, 301 s pour une ligne supprimée, au lieu de 10 s. Une personne qui regarde la CIBLE une minute croit que rien ne bouge. **Non confirmé sur DINUM** : la console d'Antoine ne montrait que `/sql` (que le widget sait perdre sans dommage) ;
+  c'est `/compare` qu'il faut voir bloqué pour que le défaut joue, ce que dit le diagnostic (`comparing()`).
+- **Correction** (`js/engine/logic/rhythm.js`, `changeVerdict`, `nextCompare`, `COMPARE_TRIES` = 3) : un coup d'œil sans réponse (`tables: null` et même empreinte ; un état perdu relu depuis HEAD a une empreinte neuve, un état inchangé rend un ensemble vide : vérifié sur la 1.7.22) n'est plus « rien n'a changé » : la boucle garde le rythme
+  d'avant la comparaison (10 s tant que des lignes arrivent, puis une minute) et, après trois coups d'œil sans réponse de suite, laisse la comparaison (`watch.compare` faux, `comparing()` faux au diagnostic) ; un refus (401, 403 lisible) la coupe tout de suite, comme avant ; une réponse remet le compte à zéro.
+  **Si un autre Grist rendait `tables: null` pour un état inchangé, la comparaison serait laissée au bout de 30 s** (rythme d'avant : 10 s puis 1 minute, pas de perte, seulement des lectures de plus) ; vérifié que la 1.7.22 rend `details.rightChanges.tableDeltas` vide.
+- Testé : unit 546 (`rhythm.test.mjs`) ; sonde `probe-compare-blocked.mjs` (vrai Grist, `LIMIT=150` s par recopie) ; `ONLY_TYPES=1`.
+- **Questions à poser au testeur** (listes dans le fil « Répercuter les suppressions de la SOURCE ») : le mode du partage (un sens ou Échange), la case « Garder ici les lignes supprimées dans la SOURCE », la page du widget ouverte côté CIBLE, l'état de la carte, le diagnostic copié (compare : oui ou non), et ce qui s'affiche après cinq minutes ou un clic sur « Synchroniser ».
+
+## État précédent : V0.30.4 (17 novembre 2026, audit de sécurité ++)
 
 V0.30.4 (Antoine, 17 novembre : « quand c'est fait audit sécurité ++ », puis « attention à ne pas te biaiser avec la mémoire, revérifie tout proprement, tous les risques de partages, d'injections, d'accès à la donnée […] il faut être super clean là »).
 Moteur **5.0.2** (correctif : port, tables, codes et texte des formules de `Synchro` inchangés, `formulas-golden` vert ; dit dans `GFS-ETAT.md`). Audit refait sur le code et dans un vrai Grist 1.7.22 (sondes de `tests/e2e/tools/`), sans s'en remettre aux audits d'avant.
