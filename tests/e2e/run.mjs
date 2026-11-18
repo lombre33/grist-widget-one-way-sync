@@ -1292,6 +1292,17 @@ try {
     const shown = async doc => (await records(doc, 'Fiches')).sort((a, b) => a.Nom.localeCompare(b.Nom)).map(r => COLS.map(c => r[c]));
     await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 2 && JSON.stringify(await shown(dst.doc)) === JSON.stringify(await shown(src.doc)), 'ajout et modification reçus', 90000);
     assert.deepEqual((await shown(dst.doc))[0], ['Alice', -0.5, -3, false, null, null, 'A', ['L', 'B'], 42]);
+    // Cellules vidées à la main : la valeur effacée à la SOURCE s'efface aussi ici, pour chaque type, et pour une ligne ajoutée à la main dont on
+    // vide la seule valeur (la ligne reste, vide, des deux côtés ; ce n'est pas une suppression de ligne).
+    await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Nom: 'Carl' }]]);
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).some(r => r.Nom === 'Carl'), 'ligne ajoutée à la main reçue', 90000);
+    const carl = (await records(src.doc, 'Fiches')).find(r => r.Nom === 'Carl');
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', carl.id, { Nom: '' }]]);
+    await waitFor(async () => (await records(dst.doc, 'Fiches')).length === 3 && !(await records(dst.doc, 'Fiches')).some(r => r.Nom === 'Carl'), 'cellule vidée de la ligne ajoutée à la main : vide ici aussi', 90000);
+    const bob = (await records(src.doc, 'Fiches')).find(r => r.Nom === 'Bob');
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', bob.id, { Nom: '', Montant: null, Entier: null, Etat: '', Multi: null, Libre: null }]]);
+    await waitFor(async () => JSON.stringify(await shown(dst.doc)) === JSON.stringify(await shown(src.doc)), 'cellules vidées (texte, nombre, entier, choix, liste, quelconque) reçues vides', 90000);
+    assert.equal((await records(dst.doc, 'Fiches')).length, 3, 'les lignes aux cellules vidées restent');
     step('Types : chaque type traverse l\'export avec son type et sa valeur (dates, choix, rang) ; le Blob est dit « ne part pas », sans case, et l\'invitation reste lisible');
   }
   // --- Changements de structure : une réception qui demande l'accord (case décochée d'emblée) ne crée pas la colonne que la SOURCE
