@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   autoPauseKind, hookBusy, conditionExport, exchangeColumns, exchangeTables, exportDrift, exportEmail, exportStatus, exportableColumns, failureStatus, NO_UNBLOCK, SLOW_MS, exportCondition, exportRowsActions, exportTables, hookErrorKey,
-  hookLabel, hookMemo, hookName, memoDoc, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
+  hookJournal, hookLabel, hookMemo, hookName, memoDoc, hookStatus, hooksOf, isFileColumn, optionsActions, ownJournal, queueBlocker, readTables, tooLarge,
 } from '../../js/engine/logic/exports.js';
 import { hookDoc, hookShown } from '../../js/source/shown.js';
 import { sentColumns } from '../../js/engine/logic/journal.js';
@@ -180,11 +180,20 @@ test('erreurs d\'envoi vues sur un vrai Grist : quota, serveur, connexion coupé
   const gone = hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Table not found \\"Journal_Annuaire\\""}', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: '404 {"error":"Table not found \\"Journal_Annuaire\\""}' } });
   assert.equal(hookErrorKey(gone, now), 'send.error.journal');
   assert.equal(hookErrorKey(hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Share not known"}', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: '404 {"error":"Share not known"}' } }), now), 'send.error.link');
-  assert.equal(deadLink(gone), true);
+  assert.equal(autoPauseKind(gone, now), 'journal', 'mort aussi, mais le widget le dit avec ses mots (supprimé ou renommé)');
+  assert.equal(deadLink(hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: '404 {"error":"Share not known"}', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: '404 {"error":"Share not known"}' } })), true);
   assert.ok(NO_UNBLOCK.includes('send.error.journal'));
   // Ce que vider la file ne règle pas : la carte ne propose pas « Débloquer la file ».
   for (const key of ['send.error.link', 'send.error.rate', 'send.error.server', 'send.error.network', 'send.error.slow']) assert.ok(NO_UNBLOCK.includes(key));
   for (const key of ['send.error.size', 'send.error.column', 'send.error.other']) assert.ok(!NO_UNBLOCK.includes(key));
+});
+
+test('hookJournal : le journal que le webhook vise, lu dans son adresse, jamais la clé', () => {
+  const at = url => ({ fields: { url } });
+  assert.equal(hookJournal(at('https://grist.example/o/equipe/api/s/AbC123/tables/Journal_Annuaire/records?flat=1')), 'Journal_Annuaire');
+  assert.equal(hookJournal(at('http://localhost:8484/api/s/AbC123/tables/Mon_journal/records?flat=1')), 'Mon_journal');
+  for (const url of ['', 'pas une adresse', 'https://grist.example/api/docs/x/tables/T/records', undefined]) assert.equal(hookJournal(at(url)), '', String(url));
+  assert.equal(hookJournal({}), '');
 });
 
 test('état d\'un destinataire et d\'un export : pastille, erreur dite simplement', () => {
@@ -316,7 +325,7 @@ test('pause d\'office : seulement ce qui ne revient pas tout seul (lien ou journ
   const gone = hook({ status: 'retrying', lastHttpStatus: 404, lastErrorMessage: 'Table not found "J"', lastEventBatch: { status: 'failure', httpStatus: 404, errorMessage: 'Table not found "J"' } });
   const silent = hook({ status: 'sending', updatedTime: now - SLOW_MS - 1000, lastHttpStatus: 200, lastEventBatch: { status: 'success', httpStatus: 200 } });
   assert.equal(autoPauseKind(link, now), 'link');
-  assert.equal(autoPauseKind(gone, now), 'link');
+  assert.equal(autoPauseKind(gone, now), 'journal');
   assert.equal(autoPauseKind(silent, now), 'slow');
   assert.equal(autoPauseKind(hook({ status: 'sending', updatedTime: now - 5000, lastHttpStatus: 200 }), now), '', 'un envoi en cours depuis peu');
   for (const code of [429, 500, 503]) assert.equal(autoPauseKind(hook({ status: 'retrying', lastHttpStatus: code, lastEventBatch: { status: 'failure', httpStatus: code } }), now), '', `${code} passe tout seul`);

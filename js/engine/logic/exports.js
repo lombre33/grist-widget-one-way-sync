@@ -2,6 +2,7 @@
 // dans Synchro ; ses destinataires (un webhook filtré sur l'export) ; ce qu'un Échange renvoie. Les
 // règles d'accès du lien public sont dans acl.js.
 import { AUTHOR_COL, DELETE_COL, EXPORT_COL, HEX16, KEY_COL, KIND, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL, SENT_TYPE, SYNC_TABLE, TABLE_COL, TYPE_COL, is, parseJson } from './common.js';
+import { parseWebhookUrl } from './codes.js';
 import { rowFilter } from './filters.js';
 import { columnOptions, ruleStyle, ruleStyles } from './options.js';
 import { currencyOf } from './docformat.js';
@@ -372,12 +373,17 @@ export function hookErrorKey(h, now = Date.now()) {
 // Lien de réception mort (clé de formulaire inconnue, réception arrêtée) : l'envoi échoue et échouera toujours.
 export const DEAD_KEYS = ['send.error.link', 'send.error.journal'];
 
-// Pourquoi le widget met ce destinataire en pause d'office : 'link' (lien ou journal mort), 'slow' (un envoi attend
-// une réponse qui ne vient pas : Grist n'a pas de délai, vu au test de charge, 20 minutes sans reprise et la file
-// du document bloquée), '' sinon. Les erreurs qui passent d'elles-mêmes (quota, panne passagère) n'en sont pas.
+// Table que le webhook vise chez le destinataire, son journal de réception, lue dans l'adresse du webhook (jamais la clé) :
+// c'est le nom que Grist ne trouve plus quand la personne a supprimé ou renommé son journal. '' si l'adresse n'est pas celle d'un journal.
+export const hookJournal = h => (parseWebhookUrl((h.fields || {}).url) || {}).table || '';
+
+// Pourquoi le widget met ce destinataire en pause d'office : 'link' (lien mort), 'journal' (le lien marche mais la table
+// du journal est introuvable chez la personne : supprimée ou renommée), 'slow' (un envoi attend une réponse qui ne vient
+// pas : Grist n'a pas de délai, vu au test de charge, 20 minutes sans reprise et la file du document bloquée), '' sinon. Les erreurs qui passent d'elles-mêmes (quota, panne passagère) n'en sont pas.
 export function autoPauseKind(h, now = Date.now()) {
   if (!h.fields.enabled || hookStatus(h, now)[0] !== 'error') return '';
   const key = hookErrorKey(h, now);
+  if (key === 'send.error.journal') return 'journal';
   if (DEAD_KEYS.includes(key)) return 'link';
   return key === 'send.error.slow' ? 'slow' : '';
 }

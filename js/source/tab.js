@@ -4,7 +4,7 @@
 import { EXPORT_COL, KIND, LOT_COL, RESEND_COL, SCHEMA_COL, SYNC_TABLE, TABLE_COL, TYPE_COL, nowS } from '../engine/logic/common.js';
 import { known } from '../engine/errors.js';
 import { maskKey } from '../engine/logic/codes.js';
-import { conditionExport, driftDetails, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
+import { conditionExport, driftDetails, exportDrift, exportEmail, exportStatus, exportTables, failureStatus, hookBusy, hookErrorKey, hookJournal, hookStatus, hooksOf, NO_UNBLOCK, queueBlocker, readTables } from '../engine/logic/exports.js';
 import { editorsEditStructure, hiddenTables } from '../engine/logic/acl.js';
 import { STATES, parseLot } from '../engine/logic/journal.js';
 import { eventsOf, recentDrops, vanishedRecipients } from '../engine/logic/notes.js';
@@ -450,7 +450,7 @@ function errorText(h, syncCols) {
   const fault = columnFault(h.usage, syncCols);
   if (fault === 'stray') return t('send.error.stray', { col: refusedColumn(h.usage) });
   if (fault === 'gone') return t('send.error.gone', { col: refusedColumn(h.usage) });
-  return t(hookErrorKey(h), { col: refusedColumn(h.usage) || '?', status: failureStatus(h) || '' });
+  return t(hookErrorKey(h), { col: refusedColumn(h.usage) || '?', status: failureStatus(h) || '', table: hookJournal(h) || '?' });
 }
 
 // Un destinataire : sa fiche (mémo du webhook), son état, et ce qu'on peut faire pour lui seul. Son
@@ -468,6 +468,9 @@ function personRow(exp, h, ownerOnly, out, { syncCols, note }) {
     personActions(exp, h, { status, ownerOnly, out, syncCols }));
 }
 
+// Texte d'une pause d'office selon sa raison (autoPauseKind) ; une raison inconnue ou ancienne ('link') garde le texte général.
+const PAUSE_TEXT = { slow: 'send.paused.slow', journal: 'send.paused.journal' };
+
 // Les avis d'une personne : adresse refusée, autre document, clé de signature absente, renforcement, pause.
 function personNotices(exp, h, status, note) {
   const autoPaused = status === 'paused' ? note.pauses.find(p => p.hook === h.id && p.auto) : null;
@@ -479,7 +482,7 @@ function personNotices(exp, h, status, note) {
     // l'avis d'erreur ne reste que lorsqu'il ne l'est pas (en pause) ou déjà en cours.
     exp.unkeyed.has(h.id) && !renfPossible(exp, h) ? message('err', t('send.person.noKey')) : null,
     reinforceLine(exp, h),
-    autoPaused ? message('info', t(autoPaused.why === 'slow' ? 'send.paused.slow' : 'send.paused.auto')) : null,
+    autoPaused ? message('info', t(PAUSE_TEXT[autoPaused.why] || 'send.paused.auto', { table: hookJournal(h) || '?' })) : null,
     status === 'paused' && !autoPaused ? message('info', t('send.paused.manual')) : null,
   ];
 }

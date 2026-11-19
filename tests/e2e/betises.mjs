@@ -118,6 +118,26 @@ const cases = {
   journalColonneDonnee: { note: 'CIBLE : colonne de données (Ville) supprimée du journal', side: 'dst', act: async p => { await applyActions(p.dst.doc, [['RemoveColumn', p.journal, 'Ville']]); } },
   journalSupprime: { note: 'CIBLE : table journal supprimée', side: 'dst', act: p => applyActions(p.dst.doc, [['RemoveTable', p.journal]]), expectDst: /Réception supprimée : Annuaire.*encore là/s },
   // La personne efface le journal et la table reçue pour tout recommencer : le widget le dit, puis elle retire l'avis.
+  // La personne renomme le journal (retour d'un testeur, 19 novembre) : la SOURCE écrit toujours sous l'ancien nom, que Grist ne trouve
+  // plus. Les deux cartes le disent (renommé, pas supprimé), le nom à rendre est cité, et rendu à son nom l'avis part.
+  journalRenomme: {
+    note: 'CIBLE : table journal renommée (Mon_journal)', side: 'dst',
+    act: p => applyActions(p.dst.doc, [['RenameTable', p.journal, 'Mon_journal']]),
+    expect: /« Journal_Annuaire » qui reçoit vos envois est introuvable.*supprimée, ou renommée/s,
+    expectDst: /Journal renommé : Annuaire.*« Journal_Annuaire » : il s’appelle maintenant « Mon_journal ».*ne le reconnaît plus comme un journal.*Redonnez à la table « Mon_journal » son nom d’origine, exactement « Journal_Annuaire »/s,
+    after: async (p) => {
+      await applyActions(p.dst.doc, [['RenameTable', 'Mon_journal', p.journal]]);
+      const dst = await read(p.dv, p.dst.url, null);
+      return `rendu à son nom : avis encore là ? ${/Journal renommé/.test(dst) ? 'OUI (anormal)' : 'non'} ; marque du partage : ${(await records(p.dst.doc, '_grist_Shares'))[0].description}`;
+    },
+  },
+  journalRenommePrefixe: {
+    note: 'CIBLE : table journal renommée en gardant le préfixe (Journal_annuaire2)', side: 'dst',
+    act: p => applyActions(p.dst.doc, [['RenameTable', p.journal, 'Journal_annuaire2']]),
+    expect: /« Journal_Annuaire » qui reçoit vos envois est introuvable/,
+    expectDst: /Journal renommé : Annuaire.*maintenant « Journal_annuaire2 »(?!.*ne le reconnaît plus)/s,
+    after: async p => `marque du partage gardée : ${(await records(p.dst.doc, '_grist_Shares'))[0].description}`,
+  },
   journalEtTableSupprimes: {
     note: 'CIBLE : table journal et table reçue supprimées', side: 'dst', probe: false,
     act: p => applyActions(p.dst.doc, [['RemoveTable', p.journal], ['RemoveTable', p.dest]]),

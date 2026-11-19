@@ -13,7 +13,7 @@ import { recordEvent, syncRows, updateSourceNote } from './synchro.js';
 // Mise en pause : un webhook désactivé perd son historique d'envoi (Grist remet son état à zéro),
 // il ne peut donc pas dire depuis quand il ne livre plus. On note la plus récente MajLe des tables
 // de l'export (heure du serveur, sans écart d'horloge avec le navigateur) et leurs colonnes.
-// `auto` : la pause vient du widget ('link' ou 'slow', voir autoPauseKind), la carte le dit.
+// `auto` : la pause vient du widget ('link', 'journal' ou 'slow', voir autoPauseKind), la carte le dit.
 export async function pauseHook(exportId, tables, h, { auto = '' } = {}) {
   let at = 0;
   for (const { table } of tables) for (const r of await fetchRows(table).catch(() => [])) at = Math.max(at, r[ORDER_COL] || 0);

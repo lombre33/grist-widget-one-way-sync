@@ -1,7 +1,7 @@
 // Onglet « Recevoir » (document CIBLE) : une carte par export reçu, avec ses tables, ce qui manque,
 // les arrivées suspectes, les valeurs retouchées à la main et l'historique des changements. Un
 // journal encore vide attend son lien.
-import { RECEIVED_COL, TYPE_COL, isBlank } from '../engine/logic/common.js';
+import { JOURNAL_PREFIX, RECEIVED_COL, TYPE_COL, isBlank } from '../engine/logic/common.js';
 import { REFUSED, STATES, awaitingPartner } from '../engine/logic/journal.js';
 import { FILE_MAX, fileList } from '../engine/logic/files.js';
 import { docIdentity, fetchRows, isOwner, isReadOnly, journalStats, readSchema } from '../grist.js';
@@ -391,6 +391,7 @@ const linkButton = group => button(t(group.waiting ? 'recv.action.continue' : 'r
 // formulaire dit encore ce qui existait. Seul un propriétaire retire l'avis (et avec lui l'ancienne clé
 // d'écriture).
 function lostCard(lost, owner) {
+  if (lost.renamedTo) return renamedCard(lost);
   const list = there => lost.dests.filter(d => d.there === there).map(d => d.dest);
   const [gone, kept] = [list(false), list(true)];
   const clean = async () => {
@@ -408,6 +409,19 @@ function lostCard(lost, owner) {
     el('div', { class: 'card-actions' }, owner
       ? button(t('recv.lost.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), clean), 'btn-danger-text')
       : el('span', { class: 'muted small' }, t('recv.lost.owner'))));
+}
+
+// Journal renommé (voir lostReceptions) : il existe encore, mais la SOURCE écrit sous l'ancien nom, que Grist ne trouve plus
+// (« Table not found »). Pas de bouton : retirer l'avis effacerait le partage, donc le lien dont la SOURCE se sert encore ; la
+// personne rend son nom au journal, ou annule.
+function renamedCard(lost) {
+  const names = { old: lost.journal, now: lost.renamedTo };
+  return el('article', { class: 'card', 'data-renamed-journal': lost.journal },
+    el('div', { class: 'card-head' }, el('strong', {}, t('recv.renamed.title', { name: lost.name || lost.journal })), pill(t('recv.status.error'), 'err')),
+    el('p', { class: 'small' }, t('recv.renamed.body', names)),
+    lost.recognized ? null : el('p', { class: 'small' }, t('recv.renamed.unseen', { ...names, prefix: JOURNAL_PREFIX })),
+    el('p', { class: 'small' }, t('recv.renamed.effect')),
+    el('p', { class: 'small' }, t('recv.renamed.how', names)));
 }
 
 // Une carte qui ne peut pas se dessiner (journal abîmé) n'empêche pas les autres de l'être : elle

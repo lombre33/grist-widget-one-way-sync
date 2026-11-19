@@ -263,7 +263,17 @@
 //         existe déjà ici n'est pas déplacée par une modification. **Limite** : l'ordre suivi est celui des dates de création ou d'envoi, pas la
 //         position (`manualSort`) de la SOURCE : une ligne glissée ou insérée au milieu de la SOURCE n'est pas replacée (changer l'ordre n'envoie
 //         rien), elle arrive à la fin si elle est nouvelle. Un hôte n'a rien à changer.
-export const ENGINE_VERSION = '5.0.5';
+// 5.1.0 (19 novembre 2026, retour d'un testeur : « j'avais renommé la table du journal » ; le porteur : « peut-on avoir un message
+//         d'erreur qui se déclenche dans ce cas ») : un journal renommé n'est plus pris pour un journal supprimé. Ajouts, rien de
+//         retiré : `shareTables`, `renamedSince` (`logic/lost.js`), `lostReceptions(schema, shares, onTable)` rend de plus `renamedTo`
+//         (le journal existe encore sous un autre nom, retrouvé par la table du formulaire de la réception et sa note) et `recognized`
+//         (son nom commence encore par le préfixe des journaux) ; `readLost` les remplit ; `markReceptions` ne réécrit plus la marque
+//         d'un journal renommé (elle garde le nom que la SOURCE vise encore) ; `hookJournal(h)` (`logic/exports.js`) lit dans l'adresse
+//         du webhook le journal visé ; `autoPauseKind` rend 'journal' (et non plus 'link') pour « Table not found », donc la note SOURCE
+//         d'une pause d'office porte `why: 'journal'` (un hôte qui ne connaît que 'link' et 'slow' montre son texte général). Port,
+//         tables, codes et texte des formules inchangés. Un hôte qui montrait la carte « Réception supprimée » en montre une
+//         « Journal renommé » (sans bouton : retirer l'avis effacerait le lien) quand `renamedTo` n'est pas vide.
+export const ENGINE_VERSION = '5.1.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

@@ -7,7 +7,7 @@ import { readSchema } from '../../js/engine/port.js';
 import { createReception } from '../../js/engine/target/receive.js';
 import { dismissLost, markReceptions, readLost } from '../../js/engine/target/lost.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
-import { readMark } from '../../js/engine/logic/lost.js';
+import { lostReceptions, readMark, renamedSince, shareTables } from '../../js/engine/logic/lost.js';
 import { fakePair } from './engine-fake.mjs';
 import { engineAs, exportAnnuaire, invite } from './engine-wire.mjs';
 
@@ -99,4 +99,68 @@ test('markReceptions : ajoute la marque à une réception d\'avant, la tient à 
 test('une description d\'une autre personne ou abîmée n\'est jamais prise pour une marque', () => {
   for (const text of ['', 'bonjour', '{"syncPlus":null}', '{"syncPlus":{"journal":"a b"}}', '{"syncPlus":{"journal":"X;DROP"}}', '[]', 'null']) assert.equal(readMark(text), null, text);
   assert.deepEqual(readMark('{"syncPlus":{"journal":"Journal_X","name":"Annu‮aire","dests":["A","b c",7]}}'), { journal: 'Journal_X', name: 'Annu aire', dests: ['A'] });
+});
+
+// Journal renommé (retour d'un testeur, 19 novembre) : la SOURCE écrit toujours sous l'ancien nom, que Grist ne trouve plus.
+test('journal renommé : la réception est dite renommée, pas supprimée, avec son nouveau nom', async () => {
+  const { target } = await reception({ arrange: true });
+  assert.equal((await readLost()).length, 0);
+  target.apply([['RenameTable', 'Journal_Annuaire', 'Mon_journal']]);
+  const [lost] = await readLost();
+  assert.deepEqual([lost.journal, lost.name, lost.renamedTo, lost.recognized], ['Journal_Annuaire', 'Annuaire', 'Mon_journal', false]);
+  assert.deepEqual(lost.dests, [{ dest: 'Annuaire_recu', there: true }]);
+  // Rendu à son nom, il n'y a plus rien à dire.
+  target.apply([['RenameTable', 'Mon_journal', 'Journal_Annuaire']]);
+  assert.deepEqual(await readLost(), []);
+});
+
+test('journal supprimé : jamais dit renommé, même si une autre table a un nom qui y ressemble', async () => {
+  const { target } = await reception({ arrange: true });
+  target.addTable('Mon_journal', [{ id: 'x', type: 'Text' }]);
+  target.apply([['RemoveTable', 'Journal_Annuaire']]);
+  const [lost] = await readLost();
+  assert.deepEqual([lost.renamedTo, lost.recognized], ['', false]);
+});
+
+test('journal renommé en gardant le préfixe : le widget le connaît encore, mais la réception est dite renommée', async () => {
+  const { target } = await reception({ arrange: true });
+  target.apply([['RenameTable', 'Journal_Annuaire', 'Journal_annuaire2']]);
+  const [lost] = await readLost();
+  assert.deepEqual([lost.journal, lost.renamedTo, lost.recognized], ['Journal_Annuaire', 'Journal_annuaire2', true]);
+  assert.deepEqual(receivedJournals(await readSchema()).map(r => r.journal), ['Journal_annuaire2'], 'il reste une réception pour le widget');
+});
+
+test('markReceptions : un journal renommé garde la marque, qui dit le nom que la SOURCE vise ; rendu à son nom, elle suit de nouveau', async () => {
+  const { target } = await reception({ arrange: true });
+  target.apply([['RenameTable', 'Journal_Annuaire', 'Journal_annuaire2']]);
+  const receptions = receivedJournals(await readSchema());
+  assert.equal(await markReceptions(receptions), false, 'la marque n\'est pas réécrite au nouveau nom');
+  assert.equal(readMark(target.fetchRows('_grist_Shares')[0].description).journal, 'Journal_Annuaire');
+  assert.equal((await readLost()).length, 1, 'et la réception reste signalée');
+  target.apply([['RenameTable', 'Journal_annuaire2', 'Journal_Annuaire']]);
+  assert.deepEqual(await readLost(), []);
+  receptions[0].journal = 'Journal_Annuaire';
+  receptions[0].note.tables.push({ table: 'Villes', dest: 'Villes_recu', columns: [] });
+  assert.equal(await markReceptions(receptions), true, 'à son nom d\'origine, la marque est tenue à jour');
+});
+
+test('renamedSince : seulement quand la marque cite un journal qui n\'existe plus sous ce nom', () => {
+  const schema = { has: id => id === 'Journal_B' };
+  assert.equal(renamedSince(schema, { journal: 'Journal_A' }, 'Journal_B'), true);
+  assert.equal(renamedSince(schema, { journal: 'Journal_B' }, 'Journal_B'), false, 'même nom');
+  assert.equal(renamedSince({ has: () => true }, { journal: 'Journal_A' }, 'Journal_B'), false, 'l\'ancien nom existe encore (autre table)');
+  assert.equal(renamedSince(schema, null, 'Journal_B'), false, 'pas de marque');
+});
+
+test('shareTables : la table du formulaire de chaque partage ; une page de plusieurs formulaires ne dit rien', () => {
+  const forms = new Map([['Journal_A', { viewRef: 1, shared: 0 }], ['Journal_B', { viewRef: 2, shared: 1 }], ['Journal_C', { viewRef: 3, shared: 0 }]]);
+  const pages = [{ viewRef: 1, shareRef: 10 }, { viewRef: 2, shareRef: 11 }, { viewRef: 3, shareRef: 0 }];
+  assert.deepEqual([...shareTables(forms, pages)], [[10, 'Journal_A']]);
+});
+
+test('lostReceptions : sans table de formulaire connue, un journal absent reste « supprimé »', async () => {
+  const { target } = await reception({ arrange: true });
+  target.apply([['RenameTable', 'Journal_Annuaire', 'Mon_journal']]);
+  const [lost] = lostReceptions(await readSchema(), target.fetchRows('_grist_Shares'));
+  assert.equal(lost.renamedTo, '');
 });

@@ -239,6 +239,15 @@ Recevoir le dit : « Réception supprimée : <export> », ce qui reste des table
 note dans le partage du formulaire, que Grist garde quand la page disparaît ; « Retirer cet avis »
 l'efface, avec l'ancienne clé d'écriture. Pas de note pour une réception par lien public (pas de
 formulaire).
+
+**Journal renommé.** Si quelqu'un renomme la table du journal (`Journal_<export>`), elle existe encore
+mais la SOURCE écrit toujours sous l'ancien nom, que Grist ne trouve plus : plus rien n'arrive. L'onglet
+Recevoir le dit : « Journal renommé : <export> », avec l'ancien et le nouveau nom, et ce qu'il faut faire
+(redonner à la table exactement son nom d'origine, dans « Données source », ou annuler avec Ctrl+Z ; les
+envois en attente repartent seuls). Il n'y a pas de bouton « Retirer cet avis » : l'effacer ferait perdre
+le lien dont la SOURCE se sert encore. Côté SOURCE, la carte du destinataire dit que la table « <journal> »
+qui reçoit les envois est introuvable (supprimée, ou renommée) et, si le destinataire a été mis en pause
+d'office, que reprendre ses envois suffit une fois le nom rendu.
 La case **Journal réservé aux éditeurs** (cochée) cache le journal aux lecteurs du document : il
 garde les versions reçues et ce qu'elles ont remplacé.
 
@@ -739,6 +748,7 @@ document en lecture seule) présente les nouveautés, puis, sur un second écran
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |
 | Un envoi est en erreur, « Invalid column « A » » | Une colonne qui n'est pas au widget (A, B, C d'une table faite à la main) est dans la table Synchro de la SOURCE : chaque envoi l'emporte, le journal la refuse | La carte **Colonnes en trop dans la table Synchro** les liste ; **Retirer** après sauvegarde de ce qu'elles contiennent, puis le widget débloque la file |
 | « Une table nommée Synchro existe déjà » | Une table de ce nom n'est pas celle du widget, qui ne la reprend pas | Accepter de la renommer (elle garde son contenu) ; le widget crée ensuite la sienne |
+| « Journal renommé » (CIBLE) ou « la table … qui reçoit vos envois est introuvable » (SOURCE) | La table du journal de la réception a été renommée ou supprimée dans la CIBLE : la SOURCE écrit toujours sous l'ancien nom, Grist ne la trouve plus | Rendre à la table exactement son nom d'origine (ou Ctrl+Z), puis reprendre les envois du destinataire s'il a été mis en pause |
 | « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |

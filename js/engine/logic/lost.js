@@ -8,6 +8,8 @@
 // le document en garde le texte lisible par qui lit `_grist_Shares`. Une réception sans formulaire (lien
 // public) n'a pas de partage, donc pas de marque.
 import { cleanLabel } from './codes.js';
+import { JOURNAL_PREFIX } from './common.js';
+import { journalNote } from './received.js';
 
 const MARK_KEY = 'syncPlus';
 // Identifiant de table Grist, tel qu'un journal ou une destination le porte.
@@ -31,17 +33,41 @@ export function readMark(description) {
   return { journal: mark.journal, name: cleanLabel(mark.name), dests };
 }
 
-// Réceptions dont le journal n'existe plus : `[{ journal, name, shares, dests: [{ dest, there }] }]`
-// (`shares` : les lignes de `_grist_Shares` qui la portent ; `there` : la table qui recevait existe
-// encore). `schema` : voir readSchema ; `shares` : les lignes de `_grist_Shares`.
-export function lostReceptions(schema, shares) {
+// Table qui porte le formulaire de chaque partage : `Map(numéro du partage -> table)`. `forms` : voir formPages (table ->
+// { viewRef, shared }) ; `pages` : les lignes de `_grist_Pages`. Une page qui montre plusieurs formulaires ne dit rien.
+export function shareTables(forms, pages) {
+  const shareOf = new Map(pages.filter(page => page.shareRef).map(page => [page.viewRef, page.shareRef]));
+  const out = new Map();
+  for (const [table, form] of forms) {
+    const share = shareOf.get(form.viewRef);
+    if (share && !form.shared && !out.has(share)) out.set(share, table);
+  }
+  return out;
+}
+
+// Réceptions dont le journal n'existe plus sous son nom : `[{ journal, name, shares, dests: [{ dest, there }],
+// renamedTo, recognized }]` (`shares` : les lignes de `_grist_Shares` qui la portent ; `there` : la table qui recevait
+// existe encore). `renamedTo` : le journal existe encore sous un autre nom (la SOURCE écrit toujours sous l'ancien, que
+// Grist ne trouve plus : « Table not found »), sinon ''. On le retrouve par la table du formulaire de la réception
+// (`onTable` : voir shareTables), qui suit la table quand on la renomme, et par sa note, que seul un journal porte.
+// `recognized` : le widget le reconnaît encore comme journal (son nom commence par le préfixe des journaux).
+// `schema` : voir readSchema ; `shares` : les lignes de `_grist_Shares`.
+export function lostReceptions(schema, shares, onTable = new Map()) {
   const lost = new Map();
   for (const share of shares) {
     const mark = readMark(share.description);
     if (!mark || schema.has(mark.journal)) continue;
     const known = lost.get(mark.journal);
     if (known) known.shares.push(share.id);
-    else lost.set(mark.journal, { journal: mark.journal, name: mark.name, shares: [share.id], dests: mark.dests.map(dest => ({ dest, there: schema.has(dest) })) });
+    else lost.set(mark.journal, { journal: mark.journal, name: mark.name, shares: [share.id], dests: mark.dests.map(dest => ({ dest, there: schema.has(dest) })), renamedTo: '', recognized: false });
+  }
+  for (const entry of lost.values()) {
+    const found = entry.shares.map(id => onTable.get(id)).find(table => table && schema.has(table) && (journalNote(schema, table) || {}).export);
+    if (found) Object.assign(entry, { renamedTo: found, recognized: found.startsWith(JOURNAL_PREFIX) });
   }
   return [...lost.values()];
 }
+
+// Le journal a-t-il été renommé depuis que la marque de son partage a été écrite ? Alors le nom de la marque est celui que
+// la SOURCE vise toujours : on le garde (markReceptions ne la réécrit pas) tant que le journal n'a pas repris son nom.
+export const renamedSince = (schema, mark, journal) => Boolean(mark) && mark.journal !== journal && !schema.has(mark.journal);

@@ -553,6 +553,7 @@
         "« Une table nommée Synchro existe déjà » : le widget ne reprend pas la table de quelqu’un d’autre. Renommer cette table (le widget le propose, elle garde tout son contenu) : il crée ensuite la sienne.",
         "Le widget affiche « besoin de l’accès complet » : ouvrir le panneau de droite de Grist, cliquer sur le widget, puis « Accepter » (ou « Accès complet au document ») dans « Niveau d’accès ».",
         "Carte « Réception supprimée » dans Recevoir : le journal de la réception n’existe plus dans ce document. Si la suppression est récente, l’annuler (Ctrl+Z, ou « Historique du document ») ; sinon demander à la SOURCE de révoquer cette réception puis de vous inviter de nouveau. « Retirer cet avis » efface la carte.",
+        "Carte « Journal renommé » dans Recevoir (côté SOURCE : « la table … qui reçoit vos envois est introuvable ») : quelqu’un a renommé la table du journal de la réception. La SOURCE écrit toujours sous l’ancien nom, que Grist ne trouve plus, donc plus rien n’arrive. Redonner à la table exactement son nom d’origine (dans « Données source », cliquer sur le nom de la table) ou annuler avec Ctrl+Z : les envois en attente repartent seuls. Si la SOURCE a déjà mis la réception en pause, lui demander de reprendre ses envois.",
         "Un code est refusé avec « Ce code vient de la version … du widget, plus récente que celle de ce document » : les deux documents doivent utiliser le widget à la même adresse. Recharger la page du widget, puis recoller le code ; rien à refaire dans l’autre document."
       ],
       "en": [
@@ -568,6 +569,7 @@
         "“A table named Synchro already exists”: the widget does not take over someone else’s table. Rename that table (the widget offers to; it keeps all its content): it then creates its own.",
         "The widget shows “needs full access”: open Grist’s right panel, click the widget, then “Accept” (or “Full document access”) under “Access level”.",
         "“Reception deleted” card in Receive: the reception’s journal no longer exists in this document. If the deletion is recent, undo it (Ctrl+Z, or “Document history”); otherwise ask the SOURCE to revoke this reception and invite you again. “Remove this notice” clears the card.",
+        "“Journal renamed” card in Receive (on the SOURCE side: “the table … that receives your sends can’t be found”): someone renamed the reception’s journal table. The SOURCE still writes under the old name, which Grist can no longer find, so nothing arrives. Give the table exactly its original name back (in “Raw data”, click the table’s name) or undo with Ctrl+Z: the waiting sends then go through by themselves. If the SOURCE has already paused the reception, ask it to resume its sends.",
         "A code is refused with “This code comes from version … of the widget, newer than the one in this document”: both documents must use the widget from the same address. Reload the widget page, then paste the code again; nothing to redo in the other document."
       ]
     },
