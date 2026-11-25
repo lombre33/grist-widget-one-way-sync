@@ -71,6 +71,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .topbar { gap: 6px; padding: 0 6px 0 8px; }
   .tabs button { padding: 9px 6px; }
 }
+/* Quatre onglets depuis l'onglet « Copie » : à 360 px la barre débordait de 14 px en français. */
+@media (max-width: 380px) {
+  .topbar { gap: 4px; }
+  .tabs button { padding: 9px 4px; }
+}
 .icon-button { border: 0; background: none; width: 30px; height: 30px; border-radius: var(--radius); cursor: pointer; display: grid; place-items: center; color: var(--text-muted); }
 .icon-button:hover { background: var(--surface-sunken); color: var(--text); }
 

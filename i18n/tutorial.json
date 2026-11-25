@@ -533,6 +533,39 @@
     "images": []
   },
   {
+    "id": "copy",
+    "role": "both",
+    "title": {
+      "fr": "Copier la structure de tables, une seule fois (onglet Copie)",
+      "en": "Copy the structure of tables, once (Copy tab)"
+    },
+    "text": {
+      "fr": [
+        "L’onglet « Copie » reprend les tables d’un document dans un autre : colonnes, types, listes de choix, formats… en une fois. Aucune ligne de données n’est copiée, et rien ne relie ensuite les deux documents : pour tenir des données à jour, utilisez Envoyer et Recevoir.",
+        "1. Dans le document qui a les tables, ouvrir l’onglet « Copie », volet « Copier d’ici ». Cocher les tables à copier. Si une colonne Référence vise une table que vous ne copiez pas, le widget le dit et propose de l’ajouter.",
+        "2. Cocher ce qui part avec les colonnes : libellés, descriptions, listes de choix, formats, colonne affichée des références, liens dans les deux sens, formules. Tout est décoché d’emblée : ce qui n’est pas coché n’est pas écrit dans le texte. Les formules demandent une confirmation (c’est du code Python).",
+        "3. Cliquer sur « Copier le texte ».",
+        "4. Dans l’autre document, ouvrir l’onglet « Copie », volet « Coller ici », et coller le texte. Rien n’est écrit tant que vous n’avez pas cliqué sur « Créer dans ce document » : le widget montre d’abord ce qu’il ferait. Pour chaque table du texte, vous choisissez de la créer (sous le nom que vous voulez), d’ajouter ses colonnes à une table de ce document, ou de la laisser de côté ; les colonnes peuvent être décochées une à une.",
+        "5. Cliquer sur « Créer dans ce document » puis confirmer. Ctrl+Z (ou l’Historique du document de Grist) défait la création.",
+        "Ce que le widget ne fait jamais : modifier une table ou une colonne qui existe déjà (en « Ajouter à une table », les colonnes déjà présentes sont laissées telles quelles), copier des lignes, des règles d’accès, des pages ou des vues, ou utiliser un nom réservé à Grist ou à Sync+ (Synchro, Journal_…).",
+        "Formules : elles ne sont posées que si un propriétaire de ce document coche « Poser aussi les formules (Python) », après les avoir lues dans une fenêtre qui demande de confirmer. Une formule qui sort du calcul (fichiers, réseau, modules non permis) est refusée : sa colonne est créée vide, et le widget le dit. Sans cette case, les colonnes calculées sont créées vides.",
+        "« Aucune table trouvée » : le texte doit venir de l’onglet « Copie » (ou de la Code View de Grist), en entier."
+      ],
+      "en": [
+        "The “Copy” tab brings tables from one document into another: columns, types, choice lists, formats… in one go. No data rows are copied, and nothing links the two documents afterwards: to keep data up to date, use Send and Receive.",
+        "1. In the document that has the tables, open the “Copy” tab, “Copy from here”. Tick the tables to copy. If a Reference column points at a table you are not copying, the widget says so and offers to add it.",
+        "2. Tick what goes with the columns: labels, descriptions, choice lists, formats, the column a reference shows, two-way links, formulas. Everything starts unticked: what you do not tick is not written in the text. Formulas ask for a confirmation (they are Python code).",
+        "3. Click “Copy the text”.",
+        "4. In the other document, open the “Copy” tab, “Paste here”, and paste the text. Nothing is written until you click “Create in this document”: the widget first shows what it would do. For each table in the text you choose to create it (under the name you want), to add its columns to a table of this document, or to leave it out; columns can be unticked one by one.",
+        "5. Click “Create in this document” then confirm. Ctrl+Z (or Grist’s Document history) undoes the creation.",
+        "What the widget never does: change a table or column that already exists (with “Add to a table”, columns already there are left as they are), copy rows, access rules, pages or views, or use a name reserved to Grist or Sync+ (Synchro, Journal_…).",
+        "Formulas: they are only set if an owner of this document ticks “Also add the formulas (Python)”, after reading them in a window that asks to confirm. A formula that reaches outside the calculation (files, network, modules not allowed) is refused: its column is created empty, and the widget says so. Without this box, computed columns are created empty.",
+        "“No table found”: the text must come from the “Copy” tab (or from Grist’s Code View), in full."
+      ]
+    },
+    "images": ["47-copie-copier", "48-copie-coller", "49-copie-formules"]
+  },
+  {
     "id": "trouble",
     "role": "both",
     "title": {

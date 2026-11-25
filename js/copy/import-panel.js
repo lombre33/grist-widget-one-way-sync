@@ -88,9 +88,9 @@ function paintFormulas(view, plan) {
   note.textContent = n === 0 ? t('copy.import.formulas.none') : (view.ctx.owner ? '' : t('copy.import.formulas.owner'));
 }
 
-// Les cases des éléments repris avec les colonnes : redessinées seulement quand ce qu'elles comptent change (pas à chaque frappe).
+// Les cases des éléments repris avec les colonnes : redessinées seulement quand ce qu'elles comptent change (pas à chaque frappe ni à chaque case).
 function paintElements(view, plan) {
-  const signature = JSON.stringify([plan.counts, [...view.ctx.imp.omit]]);
+  const signature = JSON.stringify(plan.counts); // les cases gardent leur état : seul un autre compte les redessine (le focus reste où il est)
   if (signature === view.elementsSignature) return;
   view.elementsSignature = signature;
   view.boxes.elements.replaceChildren(section('copy.import.elements', 'copy.import.elements.sub',

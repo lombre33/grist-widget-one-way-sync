@@ -536,6 +536,34 @@ lien public en lecture seule, requêtes anonymes et navigateur sans compte ; son
   résultat et n'est plus recopiée. Jamais sur une colonne qui existait déjà, sur `id_sync`, ni en Échange. Rien n'est noté
   de plus dans la note du journal (l'état se lit dans la destination).
 
+## Copie unique de structure (onglet Copie, V1)
+
+L'onglet Copie reprend la structure de tables d'un document dans un autre, sans ligne de données et sans lien ensuite. Ce qui le distingue des envois :
+aucun webhook, aucune clé, aucune table technique, aucun réseau ; le texte (la « Code View » de Grist) passe par le presse-papiers de la personne.
+
+- **Ce qui est lu** : `_grist_Tables`, `_grist_Tables_column`, `_grist_Views_section`, `_grist_DocInfo`, à l'ouverture de l'onglet, par `grist.docApi`
+  (droits de la personne). Le texte d'un export ne porte que le nom, le type, et ce que la personne a coché (libellés, descriptions, listes de choix,
+  formats, colonne affichée, liens dans les deux sens, formules ; tout est décoché d'emblée) : jamais une valeur de cellule.
+- **Ce qui est écrit** : seulement ce que la personne a demandé par un clic confirmé, dans **un seul lot** d'actions (`AddTable`, `AddVisibleColumn`), puis
+  des réglages qui n'ont pas d'équivalent dans le lot (descriptions, colonne affichée, identifiant de colonne, lien dans les deux sens) : leur échec est dit,
+  sans rien défaire. Le plan est **refait au moment d'écrire**, sur le document tel qu'il est alors (`copyNotReady` si une table du même nom est arrivée
+  entre l'aperçu et le clic : rien n'est écrit). Ctrl+Z et l'Historique du document de Grist défont la création.
+- **Jamais** : modifier ou supprimer une table ou une colonne qui existe (« Ajouter à une table » laisse les colonnes présentes telles quelles et le dit),
+  écrire une ligne, une règle d'accès, une page, une vue, une section du widget.
+- **Noms réservés** : `Synchro`, `Synchro_…`, `Journal_…`, noms qui commencent par un tiret bas ou par `_grist_`, et côté colonnes `id`, `manualSort`,
+  `id_sync`, `MajLe`, `RecalculLe`, `Sync_…`, `Synchro_…`, `gristHelper_…` : refusés à la lecture du texte **et** quand la personne les tape à la main
+  (le moteur le contrôle une seconde fois à l'écriture, `copyReserved`).
+- **Formules** : le texte est de confiance moindre, comme un code reçu : une formule n'est posée que si la personne le demande (`withFormulas`), qu'elle est
+  **propriétaire** du document (`copyFormulasOwner`, vérifié à l'écriture aussi), qu'une fenêtre lui a montré chaque formule avec une case « J'ai lu ces
+  formules », et que la **même lecture que pour les formules reçues d'une SOURCE** (`formulaProblems` : mots interdits, modules, noms privés, colonnes et
+  tables citées absentes) n'y trouve rien. Une formule refusée laisse sa colonne **vide**, et le dit. Sans la case, toutes les colonnes calculées sont
+  créées vides. Comme ailleurs, la lecture est un garde-fou, pas une preuve : la barrière qui compte est le clic d'un propriétaire qui a lu, et le bac
+  à sable de l'instance (`GRIST_SANDBOX_FLAVOR`).
+- **Texte hostile** : la lecture est bornée (2 millions de caractères, 100 tables, 500 colonnes par table), ne lit jamais le texte comme du code
+  (analyse de lignes et de chaînes, aucune évaluation), nettoie les libellés et descriptions (pas de caractère de contrôle ni de sens d'écriture), et ne
+  retient des options qu'une liste blanche de clés aux valeurs contrôlées. Une référence vers une table inconnue devient « Any », avec une remarque.
+- **Droits** : l'écriture se fait avec ceux de la personne ; un document en lecture seule n'a que le volet « Copier d'ici ».
+
 ## Chaîne d'approvisionnement
 
 Le widget a un **accès complet** au document : qui peut modifier son code peut lire et écrire le

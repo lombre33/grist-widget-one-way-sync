@@ -397,6 +397,38 @@ avec l'origine). Une copie change **trois valeurs** : `GRIST_ORIGINS`, la CSP, `
 - **Figures** : cinq en SVG et PNG (`auto-heberger-principe`, `-verrous`, `-trois-modifications` (relue dans les vraies lignes de `js/config.js` et `index.html`), `-mises-a-jour`) et deux captures réelles (`-instance-absente`, `-hors-de-grist`), toutes par `node tests/tools/figures-auto-hebergement.mjs` (Playwright). **Le forum** a une ligne de plus
   (lien vers le guide du dépôt public, qui n'existera qu'à la publication de la Bêta) et son zip est refait.
 
+## Copie unique de structure (V1, branche `claude/project-thread-wwc7x7`, 25 novembre 2026, hors Bêta)
+
+Antoine, 25 novembre : « peux-tu lancer une étude sur l'intégration en toi du widget import export (github de grist factory). du coup ça serait ton option
+"one shot", ça sera plus simple de maintenir un seul widget pour moi », carte de décision « Structure seule d'abord » (les données se copieront plus tard,
+à part), « on peut y aller », puis « ça sera pour la V1 du widget ». **Le travail est sur la branche du fil, ni sur `main` ni dans la Bêta** (pas de 0.x,
+rien transmis à grist-factory, pas de gwaudit). Étude : `import-export-widget-integration-study-2026-11-25` en mémoire du projet. Moteur **5.2.0** (mineure :
+ajouts seulement ; `PORT_SHAPE`, tables, `CODE_FORMAT` et texte des formules de `Synchro` inchangés, `formulas-golden` vert).
+- **Onglet « Copie »** (`js/copy/`), deux volets : **Copier d'ici** (tables, colonnes à laisser de côté, éléments repris avec elles : libellés, descriptions,
+  descriptions de tables, listes de choix, format des cellules, colonne affichée, liens dans les deux sens, formules ; **tout décoché d'emblée**, formules après
+  confirmation) et **Coller ici** (aperçu sans rien écrire, par table du texte : créer / ajouter à une table d'ici / laisser de côté, colonnes décochables,
+  éléments, case des formules réservée aux propriétaires avec fenêtre de lecture, « Créer dans ce document » confirmé). Le transport est le **presse-papiers**
+  (texte « Code View » de Grist) : aucun réseau, aucune table technique, aucun lien ensuite. Écran `js/copy/*.js`, tout le reste dans `js/engine/`.
+- **Moteur** : `engine/copy.js` (`readCopyDocument`, `previewImport`, `importText`), `logic/code-view-parse.js` (lecture bornée : 2 000 000 caractères, 100 tables,
+  500 colonnes, jamais évaluée), `code-view-write.js`, `copy-read.js`, `copy-resolve.js`, `copy-elements.js`, `copy-plan.js`, `copy-actions.js`, `py-text.js`.
+  Règles : noms réservés refusés à la lecture **et** quand la personne les tape (`copy.validation.reservedId`, contrôle repris à l'écriture, `copyReserved`) ;
+  jamais de modification d'une table ou colonne qui existe (« Ajouter » laisse les colonnes présentes, `copy.warn.columnsExist`) ; formules posées seulement avec
+  `withFormulas` **et** propriétaire (`copyFormulasOwner`) **et** `formulaProblems` sans objection (sinon colonne créée vide + remarque) ; plan **refait au moment
+  d'écrire** (`copyNotReady` si une table est arrivée entre l'aperçu et le clic) ; un seul lot atomique (`AddTable`, `AddVisibleColumn`) puis réglages non atomiques
+  (descriptions, `visibleCol` + `SetDisplayFormula`, `untieColIdFromLabel`, `ModifyColumn { reverseCol }`) dont l'échec est dit sans rien défaire.
+- **Vérifié dans un vrai Grist 1.7** (`ONLY_COPY=1`, `copySteps` de `tests/e2e/run.mjs`, aussi dans le parcours complet après `tabSteps`) : une Référence vers une
+  table créée dans le même lot, la colonne affichée, le lien dans les deux sens (`reverseCol` posé des deux côtés), Choix (liste), monnaie EUR, formule posée
+  (`$Age * 2`) et formule refusée (`open(...)`, colonne vide), aucune ligne copiée, nom pris qui bloque le bouton, « Ajouter à une table » sans toucher à `Libelle`
+  ni à sa ligne. Aucune erreur en console.
+- **Piège vu** : un onglet cliqué pendant la lecture de `isOwnerHere()` au démarrage était écrasé par l'accueil (`showHome` après l'`await`) : `openFirstScreen`
+  ne montre plus l'accueil si `picked` est posé (`js/main.js`). Dans les essais, les textes de `t()` ont des espaces insécables autour de `« »` et avant `: ; ? !` :
+  les expressions régulières y mettent `\s`.
+- **Barre du haut à quatre onglets** : à 360 px elle débordait de 14 px en français (`@media (max-width: 380px)` de `css/style.css` : onglets à 4 px de marge, écart de 4 px) ;
+  l'e2e (`copyBody`) réduit l'iframe à 420, 380 et 360 px et vérifie que ni la barre ni la page ne débordent. Captures `47-copie-copier`, `48-copie-coller`,
+  `49-copie-formules` (`CAPTURES=1 ONLY_COPY=1`), dans le tutoriel intégré et `docs/04`.
+- **Pas fait, dit** : les données (« copie unique de données », à part) ; pages, vues, règles d'accès ; une Référence « générique » ; suivre un renommage. Le widget
+  d'import/export de grist-factory (`Grist_Table_structure_import`) n'est pas modifié : il reste tel quel tant que l'option n'est pas publiée.
+
 ## État : V0.30.8 (19 novembre 2026, message clair quand le journal de la CIBLE est renommé)
 
 V0.30.8 (retour du testeur de la Bêta dont la « suppression » n'arrivait pas, relayé par Antoine, 19 novembre : « c'est bon ça marche pour la suppression aussi, je crois que l'erreur venait du fait que j'avais renommé la table du journal » ; Antoine : « peut-on avoir

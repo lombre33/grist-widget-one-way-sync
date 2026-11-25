@@ -713,6 +713,50 @@ d'origine. Deux limites :
 Le widget refuse les **boucles** : renvoyer une table reçue vers le document d'où elle vient, ou
 une table vers elle-même. Pour une synchro dans les deux sens, utiliser l'[Échange](#échange-dans-les-deux-sens).
 
+## Copier la structure de tables, une seule fois (onglet Copie)
+
+L'onglet **Copie** reprend les tables d'un document dans un autre : colonnes, types, listes de choix, formats… en une seule fois. **Aucune ligne de
+données n'est copiée** et rien ne relie ensuite les deux documents (pour tenir des données à jour, utiliser Envoyer et Recevoir). Le texte passe par le
+presse-papiers : aucun réseau, aucune table technique, aucun code à échanger. Chaque document a le widget, avec l'accès complet.
+
+**Copier d'ici** (le document qui a les tables) :
+
+1. Onglet **Copie**, volet **Copier d'ici**. Cocher les tables à copier. Si une colonne Référence vise une table que vous ne copiez pas, un avis le dit
+   et propose de l'**ajouter** ; sinon la colonne arrivera en type « Any ». Les colonnes d'une table peuvent être décochées une à une.
+2. **Copié avec les colonnes** : libellés, descriptions des colonnes et des tables, listes de choix, format des cellules (nombres, dates, monnaie,
+   couleurs), colonne affichée des références, liens dans les deux sens, formules. **Tout est décoché d'emblée** : ce qui n'est pas coché n'est pas écrit
+   dans le texte. Cocher les formules ouvre une fenêtre qui rappelle que c'est du code Python.
+3. **Copier le texte** : c'est la « Code View » de Grist, que le widget lit aussi.
+
+![Copier d'ici : éléments repris et texte à copier](images/47-copie-copier.png)
+
+**Coller ici** (l'autre document) :
+
+4. Onglet **Copie**, volet **Coller ici**, coller le texte. Le widget montre ce qu'il ferait, sans rien écrire. Pour chaque table du texte :
+   **Créer une table** (sous le nom proposé ou un autre), **Ajouter à une table de ce document** (seules les colonnes qui manquent sont ajoutées) ou
+   **Laisser de côté** (utile quand la table existe déjà ici et que d'autres tables du texte la visent). Les colonnes peuvent être décochées une à une,
+   et les éléments repris avec elles aussi.
+5. **Créer dans ce document**, puis confirmer. Ctrl+Z (ou l'Historique du document de Grist) défait la création.
+
+![Coller ici : le texte collé et ce qu'il ferait](images/48-copie-coller.png)
+![Les formules sont lues avant d'être posées](images/49-copie-formules.png)
+
+Ce que le widget ne fait **jamais** : modifier une table ou une colonne qui existe déjà (une colonne déjà présente est laissée telle quelle, et le dit),
+copier des lignes, des règles d'accès, des pages ou des vues, utiliser un nom réservé à Grist ou à Sync+ (`Synchro`, `Journal_…`, noms commençant par un
+tiret bas), ou refaire un lien dans les deux sens vers une colonne qui n'est pas créée en même temps.
+
+**Formules** : elles ne sont posées que si un **propriétaire** de ce document coche « Poser aussi les formules (Python) », après les avoir lues dans une
+fenêtre (une case « J'ai lu ces formules » est exigée). La lecture est la même que pour les formules reçues d'une SOURCE : une formule qui sort du calcul
+(fichiers, réseau, modules non permis, noms de colonnes ou de tables absents) est refusée, sa colonne est créée **vide** et le widget le dit. Sans la case,
+toutes les colonnes calculées sont créées vides. La lecture est un garde-fou, pas une preuve : ne collez que des textes dont vous connaissez la source.
+
+| Message | Que faire |
+|---|---|
+| « Aucune table trouvée » | Le texte doit venir de l'onglet Copie (ou de la Code View de Grist), en entier |
+| « Une table de ce nom existe déjà » | Changer le nom, ou choisir **Ajouter à une table**, ou **Laisser de côté** |
+| « Le document a changé depuis l'aperçu » | Une table du même nom est arrivée entre l'aperçu et le clic : rien n'est écrit, refaire l'aperçu |
+| « colonne … devait afficher … » | La table visée n'a pas cette colonne : la colonne affiche les numéros de ligne, à régler à la main |
+
 ## Renforcer la sécurité d'un partage plus ancien
 
 Un partage branché avec une version d'avant les clés de signature (Alpha) **continue de fonctionner, rien n'est obligatoire**. Pour qu'il soit

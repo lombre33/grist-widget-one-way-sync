@@ -3,7 +3,7 @@
 // aucune table technique, aucun lien entre les deux documents ensuite.
 import { t } from '../i18n.js';
 import { el } from '../ui.js';
-import { isOwner } from '../engine/port.js';
+import { isOwner } from '../grist.js';
 import { readCopyDocument } from '../engine/copy.js';
 import { ELEMENTS } from '../engine/logic/copy-elements.js';
 import { exportPanel } from './export-panel.js';

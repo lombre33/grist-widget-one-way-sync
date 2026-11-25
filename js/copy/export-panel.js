@@ -54,10 +54,14 @@ export function exportPanel(doc, exp) {
   };
 
   // Ce qui part avec les colonnes : décoché d'emblée, la personne coche ce qu'elle veut envoyer.
+  let shown = ''; // les comptes dessinés : les cases ne sont refaites que s'ils changent (leur explication ouverte et leur focus restent)
   const paintElements = () => {
-    if (exp.tableIds.length === 0) return elementsBox.replaceChildren();
+    if (exp.tableIds.length === 0) { shown = ''; return elementsBox.replaceChildren(); }
+    const counts = exportCounts(doc, selection());
+    if (JSON.stringify(counts) === shown) return undefined;
+    shown = JSON.stringify(counts);
     return elementsBox.replaceChildren(section('copy.export.elements', 'copy.export.elements.sub', elementBoxes({
-      counts: exportCounts(doc, selection()), omit: exp.omit,
+      counts, omit: exp.omit,
       onChange: async (element, box) => {
         if (element === 'formulas' && box.checked && !(await confirmFormulas())) { box.checked = false; exp.omit.add('formulas'); }
         paintText();

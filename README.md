@@ -170,6 +170,10 @@ aussi dans le widget (onglet **Tutoriel**), et chaque étape des assistants a so
 - **Partages plus anciens** (0.21) : un partage branché avant les clés de signature (l'Alpha) continue
   de fonctionner, rien n'est obligatoire ; « Renforcer la sécurité » le protège comme les nouveaux,
   personne par personne, et une fenêtre « Nouveautés » le propose une fois par version.
+- **Copie unique de structure** (V1, onglet *Copie*) : reprendre les tables d'un document dans un autre, une seule fois, sans
+  aucune ligne de données et sans lien ensuite : colonnes, types, listes de choix, formats, colonne affichée des références, liens dans les deux sens
+  et, sur clic d'un propriétaire après lecture, formules. Le texte (la « Code View » de Grist) passe par le presse-papiers : aucun réseau, aucune
+  table technique. Rien n'est écrit avant un clic confirmé, et une table ou une colonne qui existe n'est jamais modifiée.
 - **Aide intégrée** : tutoriel en images, « Qui fait quoi ? », consignes prêtes à envoyer par
   courriel. Français et anglais, thème clair ou sombre.
 

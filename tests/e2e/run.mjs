@@ -2840,7 +2840,18 @@ try {
     const full = await text.inputValue();
     for (const expected of [/EUR/, /Interne/, /reverse_of/, /visible_col/]) assert.match(full, expected);
     assert.ok(!/Anna|Accueil/.test(full), 'toujours aucune donnée');
-    await shot('43-copie-copier');
+    await shot('47-copie-copier');
+    // Panneau étroit : quatre onglets dans la barre du haut, et ni la barre ni la page ne débordent (l'iframe du widget est réduite à la main).
+    const frame = page.locator('iframe').first();
+    for (const width of [420, 380, 360]) {
+      await frame.evaluate((node, w) => { node.style.width = `${w}px`; node.style.maxWidth = `${w}px`; }, width);
+      await page.waitForTimeout(300);
+      const overflow = await widget().locator('body').evaluate(() => ({
+        bar: document.querySelector('.topbar').scrollWidth - document.querySelector('.topbar').clientWidth,
+        page: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+      assert.ok(overflow.bar <= 0 && overflow.page <= 0, `largeur ${width} px : ni la barre ni la page ne débordent (${JSON.stringify(overflow)})`);
+    }
+    await frame.evaluate((node) => { node.style.width = ''; node.style.maxWidth = ''; });
     step('Copie : le texte ne porte que la structure ; les listes de choix, formats, colonnes affichées, liens et formules partent quand on les coche (formules après confirmation)');
 
     // --- Coller ici, dans un document vide : tables créées, formules non posées (colonnes vides), aucune donnée.
@@ -2860,7 +2871,7 @@ try {
     await pasteIn(dst, full);
     await widget().getByText(/Créer la table\s«\sContacts\s»/).first().waitFor();
     await widget().getByText('Colonnes calculées (formule ou formule de déclenchement), créées vides', { exact: false }).first().waitFor();
-    await shot('44-copie-coller');
+    await shot('48-copie-coller');
     await create();
     const contacts = await colsOf(dst.doc, 'Contacts');
     const services = await colsOf(dst.doc, 'Services');
@@ -2881,7 +2892,7 @@ try {
     await dialog().getByText('Poser ces formules dans ce document ?').waitFor();
     assert.ok(await dialogButton('Poser les formules').isDisabled(), 'grisé tant que les formules ne sont pas lues');
     await dialog().getByRole('checkbox', { name: /J’ai lu ces formules/ }).check();
-    await shot('45-copie-formules', 'modal');
+    await shot('49-copie-formules', 'modal');
     await dialogButton('Poser les formules').click();
     await widget().getByText(/Colonne\s«\sPiege\s»\s:\sformule non posée/).waitFor();
     await create();
