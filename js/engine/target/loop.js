@@ -72,7 +72,18 @@ const FIX_HOLD_S = 60;
 // pièces jointes attendues, trop grosses ({ waiting, big, public }). `offers` : tables proposées
 // par journal ([{ table, columns, n }]). `readOnly` : le document refuse l'écriture (lecteur).
 // `lastVisit` : date de la visite précédente sur ce document (secondes), ou 0.
-export const state = { results: new Map(), offers: new Map(), readOnly: false, viewer: false, lastVisit: null };
+// `failure` : le passage de recopie lui-même échoue (hors d'un journal : schéma illisible, Grist injoignable, droits) ; { n (échecs de
+// suite), text, at }. Rien d'autre ne le dit à l'écran : un passage qui échoue laisse chaque carte sur son dernier état (« À jour »).
+export const state = { results: new Map(), offers: new Map(), readOnly: false, viewer: false, lastVisit: null, failure: null };
+// Nombre d'échecs de suite à partir duquel l'onglet le dit (un seul : le document qui se recharge, un réseau qui tousse une seconde).
+export const FAILURE_SHOWN = 2;
+const failureShown = () => Boolean(state.failure && state.failure.n >= FAILURE_SHOWN);
+// Après un échec, le passage suivant ne attend pas un changement que Grist signalerait (il a déjà été vu et consommé) ni les 5 minutes
+// du repos : il revient à intervalles croissants (10 s, 20 s, 40 s… au plus 2 minutes).
+const RETRY_MIN_MS = 10000;
+const RETRY_MAX_MS = 120000;
+let retryAt = 0;
+export const retryDelay = n => Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** Math.max(0, n - 1));
 export const tableKey = (journal, table) => `${journal}|${table}`;
 // Refus de Grist faute de droits (lecteur) : le widget passe en lecture seule.
 export const isAccessError = e => /access|denied|blocked|permission/i.test(e.message);
@@ -96,9 +107,17 @@ let choices = new Map(); // les décisions prises en compte par le passage en co
 
 export function startAutoConsolidation(render) {
   onChange = render;
+  // Le coup d'œil suivant est armé quoi qu'il arrive : un échec isolé (réponse de Grist perdue, dessin raté) ne doit jamais
+  // arrêter la recopie jusqu'à ce que la page soit rouverte (audit du 25 novembre : la boucle s'arrêtait sans un mot).
   const tick = async () => {
-    if (page.visible() && await due()) await consolidateAll();
-    setTimeout(tick, POLL_MS);
+    try {
+      if (page.visible() && await due()) await consolidateAll();
+    } catch (e) {
+      console.warn(e);
+      noteError(e);
+    } finally {
+      setTimeout(tick, POLL_MS);
+    }
   };
   setTimeout(tick, POLL_MS);
   page.onShow(() => {
@@ -117,6 +136,11 @@ export function startAutoConsolidation(render) {
 // après COMPARE_TRIES coups d'œil sans réponse de suite, la comparaison est laissée.
 async function due() {
   if (busy) return false; // un passage en cours : le coup d'œil attend le suivant
+  if (state.failure) {
+    if (Date.now() < retryAt) return false;
+    settled.clear(); // ce que Grist a signalé depuis l'échec n'a pas été relu : tout l'est
+    return true;
+  }
   const elapsed = Date.now() - lastPass;
   const steady = elapsed >= (Date.now() - lastArrival > IDLE_MS ? IDLE_MS : POLL_MS);
   if (watch.compare) {
@@ -736,17 +760,22 @@ export async function consolidateAll({ reread = false } = {}) {
   busy = true;
   if (reread) settled.clear();
   let changed = false;
+  const shown = failureShown();
   try {
     await readLastVisit();
     changed = await withLock('gristsync-consolidation', passAll);
+    state.failure = null;
   } catch (e) {
-    // Document illisible (droits, réseau) : la boucle continue, le prochain passage réessaie.
+    // Document illisible (droits, réseau) : la boucle continue, le prochain passage réessaie. L'écran le dit au deuxième échec de suite.
     if (isAccessError(e)) state.readOnly = true;
+    state.failure = { n: (state.failure ? state.failure.n : 0) + 1, text: errorText(e), at: nowS() };
+    retryAt = Date.now() + retryDelay(state.failure.n);
     console.warn(e);
     noteError(e);
   } finally {
     busy = false;
   }
-  if (changed) await onChange();
+  // Le redessin de l'onglet ne doit pas faire échouer le passage : la recopie a eu lieu, seul l'écran est en retard.
+  if (changed || failureShown() !== shown) await Promise.resolve().then(onChange).catch((e) => { console.warn(e); noteError(e); });
   return changed;
 }

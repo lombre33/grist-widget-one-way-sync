@@ -7,7 +7,7 @@ import { readSchema } from '../../js/engine/port.js';
 import { createReception } from '../../js/engine/target/receive.js';
 import { dismissLost, markReceptions, readLost } from '../../js/engine/target/lost.js';
 import { receivedJournals } from '../../js/engine/logic/received.js';
-import { lostReceptions, readMark, renamedSince, shareTables } from '../../js/engine/logic/lost.js';
+import { lostReceptions, readMark, renamedSince, shareTables, unreadableJournals } from '../../js/engine/logic/lost.js';
 import { fakePair } from './engine-fake.mjs';
 import { engineAs, exportAnnuaire, invite } from './engine-wire.mjs';
 
@@ -163,4 +163,41 @@ test('lostReceptions : sans table de formulaire connue, un journal absent reste 
   target.apply([['RenameTable', 'Journal_Annuaire', 'Mon_journal']]);
   const [lost] = lostReceptions(await readSchema(), target.fetchRows('_grist_Shares'));
   assert.equal(lost.renamedTo, '');
+});
+
+// La note du journal (options de sa colonne Synchro_Ids) remise à zéro : le widget ne reconnaît plus la réception (receivedJournals), donc
+// ne recopie plus rien, alors que le formulaire reste publié et que la SOURCE continue d'écrire sans erreur (audit du 25 novembre).
+function wipeNote(target, journal = 'Journal_Annuaire') {
+  const table = target.fetchRows('_grist_Tables').find(tb => tb.tableId === journal);
+  const column = target.fetchRows('_grist_Tables_column').find(c => c.parentId === table.id && c.colId === 'Synchro_Ids');
+  target.apply([['UpdateRecord', '_grist_Tables_column', column.id, { widgetOptions: '', description: '' }]]);
+}
+
+test('note du journal effacée : la réception est dite illisible (et non plus perdue sans un mot), avec ses tables', async () => {
+  const { target } = await reception({ arrange: true });
+  assert.deepEqual(await readLost(), []);
+  wipeNote(target);
+  assert.deepEqual(receivedJournals(await readSchema()), [], 'le widget ne la reconnaît plus');
+  const [lost] = await readLost();
+  assert.deepEqual([lost.unreadable, lost.journal, lost.name, lost.renamedTo], [true, 'Journal_Annuaire', 'Annuaire', '']);
+  assert.deepEqual(lost.dests, [{ dest: 'Annuaire_recu', there: true }]);
+  assert.equal(lost.shares.length, 1, 'le partage (la clé d\'écriture) est là : il ne faut pas le retirer');
+});
+
+test('note du journal effacée et marque absente : un journal à la forme d\'un journal est dit illisible quand même', async () => {
+  const { target } = await reception({ arrange: true });
+  target.apply([['UpdateRecord', '_grist_Shares', target.fetchRows('_grist_Shares')[0].id, { description: '' }]]);
+  wipeNote(target);
+  const [lost] = await readLost();
+  assert.deepEqual([lost.unreadable, lost.journal, lost.name, lost.shares.length], [true, 'Journal_Annuaire', '', 0]);
+});
+
+test('unreadableJournals : rien pour une réception lisible, pour une table d\'une autre personne, ni pour un journal supprimé', async () => {
+  const { target } = await reception({ arrange: true });
+  assert.deepEqual(unreadableJournals(await readSchema(), target.fetchRows('_grist_Shares')), []);
+  target.addTable('Journal_a_moi', [{ id: 'x', type: 'Text' }]); // un nom qui ressemble, sans la forme d'un journal
+  assert.deepEqual(unreadableJournals(await readSchema(), target.fetchRows('_grist_Shares')), []);
+  target.apply([['RemoveTable', 'Journal_Annuaire']]);
+  assert.deepEqual(unreadableJournals(await readSchema(), target.fetchRows('_grist_Shares')), [], 'supprimé : c\'est « perdu », pas « illisible »');
+  assert.equal((await readLost()).length, 1);
 });

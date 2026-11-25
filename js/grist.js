@@ -19,9 +19,14 @@ import { createRestPort } from './engine/rest-port.js';
 
 // Requête vers une instance Grist de la liste (config.js), jamais ailleurs, sans les cookies de
 // la personne (le jeton, quand il en faut un, est dans l'adresse).
-async function gristFetch(url, options = {}) {
+// Une requête qui n'a pas de réponse au bout de ce délai est abandonnée : sans cela, une réponse qui n'arrive jamais (mandataire qui
+// retient la requête, réseau qui ne coupe pas) suspend la boucle qui l'attend, et la recopie s'arrête sans une erreur (audit du
+// 25 novembre : /compare retenue en route, rien n'arrivait plus et la carte restait « À jour »). Les fichiers ont plus de temps.
+const REQUEST_MS = 120000;
+const TRANSFER_MS = 600000;
+async function gristFetch(url, options = {}, ms = REQUEST_MS) {
   if (!GRIST_ORIGINS.includes(new URL(url).origin)) throw new Error('otherInstance');
-  return fetch(url, { ...options, credentials: 'omit' });
+  return fetch(url, { signal: AbortSignal.timeout(ms), ...options, credentials: 'omit' });
 }
 
 // Adresse REST du document courant suivie de `path`, avec un jeton d'accès court : en lecture
@@ -83,7 +88,9 @@ async function answerOf(response, limit = 200) {
 // lui, et reste lisible. L'erreur dit quelle requête a échoué (`méthode chemin`, jamais l'adresse complète ni le jeton) et garde son type
 // (`unreachable` de ui.js la reconnaît : le document qui se recharge en passant ne fait pas peur).
 const unreachableError = (e, method, path) => Object.assign(new TypeError('gristUnreachable'), { vars: { request: `${method} ${path}` }, cause: e });
-const onlyUnreachable = (method, path) => (e) => { throw e instanceof TypeError ? unreachableError(e, method, path) : e; };
+// Une requête abandonnée faute de réponse (`TimeoutError`) se dit comme une requête qui n'a pas pu être lue : Grist n'a pas répondu.
+const timedOut = e => Boolean(e) && (e.name === 'TimeoutError' || e.name === 'AbortError');
+const onlyUnreachable = (method, path) => (e) => { throw e instanceof TypeError || timedOut(e) ? unreachableError(e, method, path) : e; };
 
 const http = {
   // REST du document courant, avec le jeton de la personne (`full`) ou en lecture seule. Grist exige
@@ -95,7 +102,7 @@ const http = {
       method,
       headers: method === 'GET' ? {} : { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: timeout ? AbortSignal.timeout(timeout) : undefined,
+      ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}),
     }).catch(onlyUnreachable(method, path)));
   },
   // Sans jeton : écriture anonyme en JSON (l'en-tête Content-Type suffit à Grist), fiche d'un partage,
@@ -105,12 +112,12 @@ const http = {
       method,
       headers: method === 'GET' ? {} : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: timeout ? AbortSignal.timeout(timeout) : undefined,
+      ...(timeout ? { signal: AbortSignal.timeout(timeout) } : {}),
     }), 120);
   },
   async download(id) {
     const path = `/attachments/${Number(id)}/download`;
-    const response = await gristFetch(await authUrl(path)).catch(onlyUnreachable('GET', path));
+    const response = await gristFetch(await authUrl(path), {}, TRANSFER_MS).catch(onlyUnreachable('GET', path));
     if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status });
     return new Uint8Array(await response.arrayBuffer());
   },
@@ -119,7 +126,7 @@ const http = {
     form.append('upload', new Blob([bytes]), name);
     const response = await gristFetch(await authUrl('/attachments', { full: true }), {
       method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: form,
-    }).catch(onlyUnreachable('POST', '/attachments'));
+    }, TRANSFER_MS).catch(onlyUnreachable('POST', '/attachments'));
     return (await answerOf(response)).body[0];
   },
   docBaseUrl: async () => (await docIdentity()).baseUrl,

@@ -21,6 +21,7 @@ import { newsSeen, openNews } from './news.js';
 import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
 import { startEngine } from './engine/index.js';
 import { syncPort } from './sync-port.js';
+import { installSafetyNet } from './safety-net.js';
 
 const $ = id => document.getElementById(id);
 const RETRY_MS = 3000; // Grist injoignable un instant : nouvel essai de l'onglet
@@ -138,6 +139,7 @@ function diagnosticBlock() {
 }
 
 async function start() {
+  installSafetyNet();
   startEngine({ port: syncPort, version: VERSION }); // le moteur parle à Grist par ce port (js/sync-port.js), noms de tables d'avant
   applyTheme();
   translatePage();

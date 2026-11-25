@@ -3,6 +3,7 @@
 // copier, liste avec recherche.
 import { t } from './i18n.js';
 import { errorText, failure, known, noteError, recentErrors } from './engine/errors.js';
+import { guarded } from './guard.js';
 
 // Recherche sans accents ni majuscules : chaque mot tapé doit se trouver dans le libellé.
 const fold = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -14,7 +15,7 @@ export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attrs)) {
     if (value === undefined || value === null || value === false) continue;
-    if (name.startsWith('on')) node.addEventListener(name.slice(2), value);
+    if (name.startsWith('on')) node.addEventListener(name.slice(2), guarded(value));
     else if (name === 'class') node.className = value;
     else node.setAttribute(name, value === true ? '' : value);
   }

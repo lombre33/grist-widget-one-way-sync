@@ -3,7 +3,7 @@
 // reste et dit ce qui a été perdu.
 import { apply, fetchRows, readSchema } from '../port.js';
 import { formPages } from '../pages.js';
-import { lostReceptions, readMark, receptionMark, renamedSince, shareTables } from '../logic/lost.js';
+import { lostReceptions, readMark, receptionMark, renamedSince, shareTables, unreadableJournals } from '../logic/lost.js';
 
 // Pose la marque sur le partage du formulaire de chaque réception qui n'en a pas (ou plus à jour : une
 // table rangée plus tard change la liste des destinations). `receptions` : [{ journal, note }], voir
@@ -27,12 +27,13 @@ export async function markReceptions(receptions) {
   return actions.length > 0;
 }
 
-// Réceptions dont le journal a été supprimé ou renommé, que le document dit encore (voir lostReceptions). Une personne
+// Réceptions dont le journal a été supprimé, renommé ou dont la note est illisible, que le document dit encore (voir lostReceptions et
+// unreadableJournals). Une personne
 // qui ne lit pas `_grist_Shares` n'en voit aucune.
 export async function readLost() {
   try {
     const [schema, shares, forms, pages] = await Promise.all([readSchema(), fetchRows('_grist_Shares'), formPages(), fetchRows('_grist_Pages')]);
-    return lostReceptions(schema, shares, shareTables(forms, pages));
+    return [...lostReceptions(schema, shares, shareTables(forms, pages)), ...unreadableJournals(schema, shares)];
   } catch (e) {
     return [];
   }

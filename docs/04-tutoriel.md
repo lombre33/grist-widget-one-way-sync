@@ -263,6 +263,24 @@ envois en attente repartent seuls). Il n'y a pas de bouton « Retirer cet avis �
 le lien dont la SOURCE se sert encore. Côté SOURCE, la carte du destinataire dit que la table « <journal> »
 qui reçoit les envois est introuvable (supprimée, ou renommée) et, si le destinataire a été mis en pause
 d'office, que reprendre ses envois suffit une fois le nom rendu.
+**Réception illisible.** Si ce que le widget garde dans le journal (sa note, dans les options de la colonne
+`Synchro_Ids`) est effacé ou abîmé, le journal est là et le formulaire reste ouvert, mais le widget ne sait plus
+d'où viennent les envois ni où les ranger : plus rien n'est recopié, et la SOURCE ne le voit pas (ses envois
+réussissent et s'accumulent). L'onglet Recevoir le dit : « Réception illisible : <export> », avec ce qu'il faut
+faire (annuler avec Ctrl+Z ou « Historique du document », sinon demander à la SOURCE de révoquer puis de réinviter).
+Pas de bouton « Retirer cet avis » : le partage du formulaire est encore en service.
+
+**La recopie échoue.** Quand le widget n'arrive plus à lire ou écrire le document (Grist injoignable, droits,
+réseau) deux fois de suite, un bandeau rouge « La recopie des données reçues dans vos tables échoue » le dit, avec
+l'heure du dernier essai et la cause. Rien n'est perdu (les envois restent dans le journal) ; le widget réessaie
+seul, à intervalles croissants (10 s, 20 s, 40 s… au plus 2 minutes), et le bandeau part quand ça repart. Le
+bouton **Synchroniser** le dit aussi au lieu d'afficher « tout est à jour ». Une requête à Grist qui ne répond pas
+au bout de 2 minutes est abandonnée (elle suspendait la recopie).
+
+**Une opération n'a pas abouti.** Une action qui échoue sans message propre (un clic dont Grist refuse l'écriture,
+une relecture qui plante) affiche son erreur dans un bandeau rouge en haut du widget, jusqu'à ce qu'on le ferme.
+Les actions des cartes (« Arrêter la réception », « Couper le lien »…) disent leur échec sur l'onglet même, avec la
+raison que Grist donne (par exemple « Une règle d'accès de ce document empêche le widget d'écrire ici »).
 La case **Journal réservé aux éditeurs** (cochée) cache le journal aux lecteurs du document : il
 garde les versions reçues et ce qu'elles ont remplacé.
 
@@ -764,6 +782,8 @@ document en lecture seule) présente les nouveautés, puis, sur un second écran
 | Un envoi est en erreur, « Invalid column « A » » | Une colonne qui n'est pas au widget (A, B, C d'une table faite à la main) est dans la table Synchro de la SOURCE : chaque envoi l'emporte, le journal la refuse | La carte **Colonnes en trop dans la table Synchro** les liste ; **Retirer** après sauvegarde de ce qu'elles contiennent, puis le widget débloque la file |
 | « Une table nommée Synchro existe déjà » | Une table de ce nom n'est pas celle du widget, qui ne la reprend pas | Accepter de la renommer (elle garde son contenu) ; le widget crée ensuite la sienne |
 | « Journal renommé » (CIBLE) ou « la table … qui reçoit vos envois est introuvable » (SOURCE) | La table du journal de la réception a été renommée ou supprimée dans la CIBLE : la SOURCE écrit toujours sous l'ancien nom, Grist ne la trouve plus | Rendre à la table exactement son nom d'origine (ou Ctrl+Z), puis reprendre les envois du destinataire s'il a été mis en pause |
+| « Réception illisible » (CIBLE) | La note du journal (options de la colonne `Synchro_Ids`) a été effacée ou abîmée : le widget ne recopie plus, la SOURCE continue d'envoyer sans erreur | Ctrl+Z ou « Historique du document » ; sinon la SOURCE révoque cette personne et la réinvite |
+| « La recopie des données reçues dans vos tables échoue » (CIBLE) | Le widget n'arrive plus à lire ou écrire le document : Grist injoignable, droits, réseau, requête sans réponse | Rien à faire d'urgence (rien n'est perdu, le widget réessaie seul) ; lire la cause dans le bandeau, recharger la page si elle dure |
 | « Ce lien n'écrit pas dans le journal de cette réception » | Lien d'un autre formulaire, ou d'un autre document | Copier le lien du formulaire dont le widget donne la page |
 | « Arrivées suspectes » ou « Lien commun à d'autres formulaires » | Le lien du formulaire est peut-être connu d'un autre | **Couper le lien**, puis demander une nouvelle invitation à la SOURCE |
 | « Grist 1.7.11 ou plus récent » au branchement | L'instance ne sait pas filtrer un webhook | Mettre Grist à jour |

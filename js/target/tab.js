@@ -13,7 +13,7 @@ import { updateJournalNote } from '../engine/target/journals.js';
 import { dismissLost, markReceptions, readLost } from '../engine/target/lost.js';
 import { receivedJournals, receivedKey } from '../engine/logic/received.js';
 import { currencyOf, formatGap } from '../engine/logic/docformat.js';
-import { consolidateAll, decide, forgetJournal, isAccessError, relink, restoreSource, restyle, state, tableKey } from '../engine/target/loop.js';
+import { FAILURE_SHOWN, consolidateAll, decide, forgetJournal, isAccessError, relink, restoreSource, restyle, state, tableKey } from '../engine/target/loop.js';
 import { alignDocFormat, readDocFormat } from '../engine/target/style.js';
 import { SHOWN } from '../engine/logic/report.js';
 import { TALLY_GRACE_S } from '../engine/logic/tally.js';
@@ -96,6 +96,8 @@ export async function reinforceReceptions() {
     .filter(({ journal, note }) => !note.retour && !note.sceau && !receivedKey(schema, journal, note)).length;
 }
 
+// Action d'un bouton de la carte dont l'échec se lit sur l'onglet (zone `.out`), comme les autres (Reprendre, Effacer l'historique…).
+const acting = action => e => run(e.currentTarget, container.querySelector('.out'), action);
 const button = (label, iconName, onclick, kind = '') => smallButton(label, iconName, onclick, { kind, disabled: state.readOnly });
 
 // Instance de CE document : le lien vers le document de la SOURCE en est refait (il ne quitte pas l'instance).
@@ -120,8 +122,16 @@ async function prepareReceptions(groups, { owner, periodic }, out) {
   }
 }
 
+// Le passage de recopie échoue (voir state.failure) : l'avis dit quand, pourquoi, et que rien n'est perdu.
+const failureNotice = () => message('err', t('recv.passFailed', { at: timeText(state.failure.at), detail: state.failure.text }));
+
 function targetToolbar(groups, out) {
-  const sync = async () => { if ((await consolidateAll({ reread: true })) === false) out.replaceChildren(message('ok', t('recv.sync.none'))); };
+  // « Synchroniser » : un passage qui échoue ne dit pas « tout est à jour » (il rend faux, comme un passage sans rien de nouveau).
+  const sync = async () => {
+    const changed = await consolidateAll({ reread: true });
+    if (state.failure) out.replaceChildren(failureNotice());
+    else if (changed === false) out.replaceChildren(message('ok', t('recv.sync.none')));
+  };
   return el('div', { class: 'toolbar' },
     el('button', { class: 'btn btn-primary', type: 'button', disabled: state.readOnly, onclick: () => receiveWizard(null, renderTarget) }, icon('plus'), t('recv.new')),
     el('button', { class: 'btn', type: 'button', disabled: state.readOnly || !groups.length, onclick: e => run(e.currentTarget, out, sync) }, icon('refresh'), t('recv.action.sync')));
@@ -155,6 +165,7 @@ function targetPage(groups, cards, { owner, out }) {
   const empty = el('p', { class: 'muted' }, t(state.readOnly ? 'recv.emptyViewer' : 'recv.empty'));
   return [targetToolbar(groups, out),
     state.readOnly ? message('warn', t('common.readonly')) : null,
+    state.failure && state.failure.n >= FAILURE_SHOWN ? failureNotice() : null,
     owner ? rulesRefusedNotice() : null,
     out,
     lostList.length ? el('div', { class: 'cards' }, lostList.map(lost => lostCard(lost, owner))) : null,
@@ -296,7 +307,7 @@ function gapNotes(group) {
 function linkNotes(group) {
   const { note } = group;
   return [
-    group.shared && !group.public ? alertBlock(t('recv.shared.title'), [t('recv.shared.body', { n: group.shared })], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text')]) : null,
+    group.shared && !group.public ? alertBlock(t('recv.shared.title'), [t('recv.shared.body', { n: group.shared })], [button(t('recv.suspect.cut'), 'unlink', acting(() => cutLink(group)), 'btn-danger-text')]) : null,
     note.suspect ? suspectBlock(group) : null,
     (state.offers.get(group.journal) || []).map(o => el('div', { class: 'offer' }, el('span', { class: 'small' }, t('recv.offer.line', { table: o.table, n: o.n })),
       button(t('recv.offer.place'), 'plus', e => run(e.currentTarget, container.querySelector('.out'), () => offerDialog(group, o, renderTarget)), 'btn-primary'))),
@@ -351,7 +362,7 @@ function syncCard(group) {
       group.waiting || note.mode === 'echange' || !sentKinds(group).length ? null : button(t('recv.action.restyle'), 'column', e => run(e.currentTarget, container.querySelector('.out'), () => restyleReception(group))),
       group.waiting || !group.owner ? null : button(t('recv.action.clean'), 'trash', e => run(e.currentTarget, container.querySelector('.out'), () => cleanReception(group))),
       group.waiting ? null : reportButton(),
-      button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
+      button(t('recv.action.stop'), 'stop', acting(() => stopReceiving(group)), 'btn-danger-text')));
 }
 
 // Le widget n'est sur la page d'aucune table de cette réception (voir widget-page.js) : la recopie s'arrête dès que la personne
@@ -391,6 +402,7 @@ const linkButton = group => button(t(group.waiting ? 'recv.action.continue' : 'r
 // formulaire dit encore ce qui existait. Seul un propriétaire retire l'avis (et avec lui l'ancienne clé
 // d'écriture).
 function lostCard(lost, owner) {
+  if (lost.unreadable) return unreadableCard(lost);
   if (lost.renamedTo) return renamedCard(lost);
   const list = there => lost.dests.filter(d => d.there === there).map(d => d.dest);
   const [gone, kept] = [list(false), list(true)];
@@ -424,6 +436,17 @@ function renamedCard(lost) {
     el('p', { class: 'small' }, t('recv.renamed.how', names)));
 }
 
+// Journal dont la note est illisible (voir unreadableJournals) : il est là, le formulaire aussi, et la SOURCE y dépose ses envois
+// sans erreur, mais le widget ne sait plus d'où ils viennent ni où les ranger. Pas de bouton : il n'y a rien à retirer, c'est la note
+// qu'il faut rétablir (Ctrl+Z), ou la réception à refaire.
+function unreadableCard(lost) {
+  return el('article', { class: 'card', 'data-unreadable-journal': lost.journal },
+    el('div', { class: 'card-head' }, el('strong', {}, t('recv.unreadable.title', { name: lost.name || lost.journal })), pill(t('recv.status.error'), 'err')),
+    el('p', { class: 'small' }, t('recv.unreadable.body', { journal: lost.journal })),
+    el('p', { class: 'small' }, t('recv.unreadable.effect')),
+    el('p', { class: 'small' }, t('recv.unreadable.how', { journal: lost.journal })));
+}
+
 // Une carte qui ne peut pas se dessiner (journal abîmé) n'empêche pas les autres de l'être : elle
 // garde son nom, l'erreur, et de quoi couper le lien ou arrêter la réception.
 function safeCard(group) {
@@ -436,8 +459,8 @@ function safeCard(group) {
       el('div', { class: 'card-head' }, el('strong', {}, String(group.note.name || group.journal)), pill(t('recv.status.error'), 'err')),
       message('err', errorText(e)),
       el('div', { class: 'card-actions' },
-        group.public ? null : button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text'),
-        button(t('recv.action.stop'), 'stop', () => stopReceiving(group), 'btn-danger-text')));
+        group.public ? null : button(t('recv.suspect.cut'), 'unlink', acting(() => cutLink(group)), 'btn-danger-text'),
+        button(t('recv.action.stop'), 'stop', acting(() => stopReceiving(group)), 'btn-danger-text')));
   }
 }
 
@@ -456,7 +479,7 @@ function suspectBlock(group) {
     n ? t('recv.suspect.rejected', { n, at: dateText(at * 1000) }) : null,
     flood ? t('recv.suspect.flood', { at: dateText(flood * 1000) }) : null,
     t('recv.suspect.help'),
-  ], [button(t('recv.suspect.cut'), 'unlink', () => cutLink(group), 'btn-danger-text'), button(t('recv.suspect.dismiss'), 'ignore', dismiss)]);
+  ], [button(t('recv.suspect.cut'), 'unlink', acting(() => cutLink(group)), 'btn-danger-text'), button(t('recv.suspect.dismiss'), 'ignore', dismiss)]);
 }
 
 // Couper le lien : le formulaire de cette réception prend une nouvelle clé, sur sa propre page. La

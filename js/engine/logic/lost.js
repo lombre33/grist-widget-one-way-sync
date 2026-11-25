@@ -8,7 +8,7 @@
 // le document en garde le texte lisible par qui lit `_grist_Shares`. Une réception sans formulaire (lien
 // public) n'a pas de partage, donc pas de marque.
 import { cleanLabel } from './codes.js';
-import { JOURNAL_PREFIX } from './common.js';
+import { JOURNAL_PREFIX, TYPE_COL } from './common.js';
 import { journalNote } from './received.js';
 
 const MARK_KEY = 'syncPlus';
@@ -71,3 +71,34 @@ export function lostReceptions(schema, shares, onTable = new Map()) {
 // Le journal a-t-il été renommé depuis que la marque de son partage a été écrite ? Alors le nom de la marque est celui que
 // la SOURCE vise toujours : on le garde (markReceptions ne la réécrit pas) tant que le journal n'a pas repris son nom.
 export const renamedSince = (schema, mark, journal) => Boolean(mark) && mark.journal !== journal && !schema.has(mark.journal);
+
+// Journal qui existe mais dont la note est illisible (colonne `Synchro_Ids` remise à zéro, options effacées ou abîmées) :
+// `receivedJournals` ne le reconnaît plus, donc le widget ne recopie plus rien pour lui, alors que le formulaire reste publié
+// et que la SOURCE continue d'y déposer ses envois sans la moindre erreur (audit du 25 novembre : rien ne le disait). Deux
+// façons de le voir : le partage du formulaire porte la marque d'une réception dont la table est là mais sans note, ou une
+// table au nom d'un journal et à la forme d'un journal (elle a la colonne du type de ligne) n'a pas de note. Rend
+// `[{ journal, name, shares, dests, unreadable: true }]` (même forme que lostReceptions, `dests` : ce que la marque en dit).
+const readableNote = (schema, table) => {
+  const note = journalNote(schema, table);
+  return Boolean(note && note.export && Array.isArray(note.tables));
+};
+// A la forme d'un journal : la table existe et a la colonne du type de ligne (le webhook de la SOURCE l'y remplit).
+const shaped = (schema, table) => schema.has(table) && (schema.columns(table) || []).some(c => c.colId === TYPE_COL);
+export function unreadableJournals(schema, shares) {
+  const found = new Map();
+  const entry = (journal, name = '') => {
+    if (!found.has(journal)) found.set(journal, { journal, name, shares: [], dests: [], renamedTo: '', recognized: true, unreadable: true });
+    return found.get(journal);
+  };
+  for (const share of shares) {
+    const mark = readMark(share.description);
+    if (!mark || !shaped(schema, mark.journal) || readableNote(schema, mark.journal)) continue;
+    const known = entry(mark.journal, mark.name);
+    known.shares.push(share.id);
+    known.dests = mark.dests.map(dest => ({ dest, there: schema.has(dest) }));
+  }
+  for (const id of schema.tableIds) {
+    if (id.startsWith(JOURNAL_PREFIX) && shaped(schema, id) && !readableNote(schema, id)) entry(id);
+  }
+  return [...found.values()];
+}

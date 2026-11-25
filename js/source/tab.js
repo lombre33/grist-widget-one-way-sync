@@ -602,10 +602,18 @@ async function tickFlows() {
     watchFlows(loading ? FLOW_MS : IDLE_MS);
     return;
   }
-  const { moving, changed } = refreshPeople(hooks, refreshFlows(charge, hooks, conditions, loading > 0));
-  const moved = await accessChanged();
-  if ((changed || moved) && !document.querySelector('.scrim')) await refreshSource();
-  else watchFlows(moving || changed || moved ? FLOW_MS : restMs());
+  try {
+    const { moving, changed } = refreshPeople(hooks, refreshFlows(charge, hooks, conditions, loading > 0));
+    const moved = await accessChanged();
+    if ((changed || moved) && !document.querySelector('.scrim')) await refreshSource();
+    else watchFlows(moving || changed || moved ? FLOW_MS : restMs());
+  } catch (e) {
+    // Un dessin raté ne doit pas arrêter la relecture de l'état des destinataires : sans cela la carte garde un état
+    // périmé (« En pause », « Envoi en cours »…) jusqu'à la réouverture de la page.
+    console.warn(e);
+    noteError(e);
+    if (!flowTimer) watchFlows(IDLE_MS);
+  }
 }
 
 // Rythme de relecture au repos : plus rapproché quand la personne est en train de régler le lien public dans Grist.
