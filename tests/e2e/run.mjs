@@ -2780,8 +2780,136 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_ORDER=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, ORDER: orderSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Copie unique de structure (onglet « Copie », V1) : le texte « Code View » de deux tables passe de A à B par le presse-papiers, sans
+  // aucune donnée. Dans un vrai Grist : le texte copié (éléments cochés d'un par un, formules confirmées), puis trois documents qui
+  // le reçoivent (tables créées sans les formules, avec les formules lues, et dans une table qui existe déjà).
+  async function copySteps() {
+    try {
+      await copyBody();
+    } catch (e) {
+      console.log('écran à ce moment :', JSON.stringify((await widget().locator('body').innerText().catch(() => '?')).slice(0, 1500)));
+      throw e;
+    }
+  }
+  async function copyBody() {
+    const colsOf = async (doc, table) => {
+      const ref = await tableRef(doc, table);
+      return new Map((await records(doc, '_grist_Tables_column')).filter(c => c.parentId === ref).map(c => [c.colId, c]));
+    };
+    const src = await newDocWithWidget('Copie SOURCE', [
+      ['AddTable', 'Services', [
+        { id: 'Libelle', type: 'Text' },
+        { id: 'Budget', type: 'Numeric', widgetOptions: JSON.stringify({ numMode: 'currency', currency: 'EUR' }) },
+        { id: 'Famille', type: 'Choice', widgetOptions: JSON.stringify({ choices: ['Interne', 'Externe'] }) }]],
+      ['AddTable', 'Contacts', [
+        { id: 'Nom', type: 'Text' }, { id: 'Service', type: 'Ref:Services' }, { id: 'Age', type: 'Int' },
+        { id: 'Total', type: 'Int', isFormula: true, formula: '$Age * 2' },
+        { id: 'Piege', type: 'Text', isFormula: true, formula: 'open("/etc/hostname").read()' }]],
+      ['BulkAddRecord', 'Services', [null, null], { Libelle: ['Accueil', 'Compta'], Budget: [100, 200], Famille: ['Interne', 'Externe'] }],
+      ['BulkAddRecord', 'Contacts', [null], { Nom: ['Anna'], Service: [1], Age: [30] }],
+    ]);
+    // Une colonne affichée (le libellé du service) et un lien dans les deux sens (Services.Equipe, liste des contacts du service).
+    const libelle = (await colsOf(src.doc, 'Services')).get('Libelle').id;
+    await applyActions(src.doc, [
+      ['ModifyColumn', 'Contacts', 'Service', { visibleCol: libelle }],
+      ['SetDisplayFormula', 'Contacts', null, (await colsOf(src.doc, 'Contacts')).get('Service').id, '$Service.Libelle'],
+      ['AddColumn', 'Services', 'Equipe', { type: 'RefList:Contacts' }],
+    ]);
+    await applyActions(src.doc, [['ModifyColumn', 'Contacts', 'Service', { reverseCol: (await colsOf(src.doc, 'Services')).get('Equipe').id }]]);
+
+    // --- Copier d'ici : cocher Contacts, la table Services qu'elle vise est proposée, puis ce qui part avec les colonnes.
+    await openWidgetTab(src.url, 'Copie');
+    await widget().getByRole('heading', { name: 'Copie unique de structure' }).waitFor({ timeout: 60000 });
+    assert.equal(await widget().getByRole('button', { name: 'Copier d’ici' }).getAttribute('aria-pressed'), 'true', 'le volet « Copier d’ici » s’ouvre d’abord');
+    await widget().getByText('Cochez au moins une table pour obtenir le texte.').waitFor();
+    await widget().getByRole('checkbox', { name: /^Contacts/ }).check();
+    await widget().getByText(/La table\s«\sServices\s»\sest visée par/).waitFor();
+    await widget().getByRole('button', { name: 'Ajouter « Services »' }).click();
+    const text = widget().locator('textarea.code[readonly]');
+    await waitFor(async () => /class Services/.test(await text.inputValue()), 'les deux tables dans le texte');
+    const bare = await text.inputValue();
+    assert.ok(/class Contacts/.test(bare) && !/Anna|Accueil/.test(bare), 'le texte ne porte que la structure, aucune donnée');
+    assert.ok(!/EUR|Interne/.test(bare), 'rien de ce qui n’est pas coché ne part (formats, choix)');
+    for (const element of ['Listes de choix', 'Format des cellules', 'Colonne affichée des références', 'Liens dans les deux sens']) {
+      await widget().getByRole('checkbox', { name: new RegExp(`^${element}`) }).check();
+    }
+    await widget().getByRole('checkbox', { name: /^Formules/ }).check();
+    await dialog().getByText('Copier aussi les formules ?').waitFor();
+    await dialogButton('Copier les formules').click();
+    await waitFor(async () => /Total/.test(await text.inputValue()) && /\$Age \* 2/.test(await text.inputValue()), 'les formules dans le texte');
+    const full = await text.inputValue();
+    for (const expected of [/EUR/, /Interne/, /reverse_of/, /visible_col/]) assert.match(full, expected);
+    assert.ok(!/Anna|Accueil/.test(full), 'toujours aucune donnée');
+    await shot('43-copie-copier');
+    step('Copie : le texte ne porte que la structure ; les listes de choix, formats, colonnes affichées, liens et formules partent quand on les coche (formules après confirmation)');
+
+    // --- Coller ici, dans un document vide : tables créées, formules non posées (colonnes vides), aucune donnée.
+    const pasteIn = async (doc, source) => {
+      await openWidgetTab(doc.url, 'Copie');
+      await widget().getByRole('button', { name: 'Coller ici' }).click();
+      await widget().locator('textarea.code:not([readonly])').fill(source);
+      await widget().locator('[data-copy-table="Contacts"]').waitFor({ timeout: 30000 });
+    };
+    const create = async () => {
+      await widget().getByRole('button', { name: 'Créer dans ce document' }).click();
+      await dialog().getByText('Créer dans ce document ?').waitFor();
+      await dialogButton('Créer').click();
+      await widget().locator('[data-copy-done]').waitFor({ timeout: 60000 });
+    };
+    const dst = await newDocWithWidget('Copie CIBLE');
+    await pasteIn(dst, full);
+    await widget().getByText(/Créer la table\s«\sContacts\s»/).first().waitFor();
+    await widget().getByText('Colonnes calculées (formule ou formule de déclenchement), créées vides', { exact: false }).first().waitFor();
+    await shot('44-copie-coller');
+    await create();
+    const contacts = await colsOf(dst.doc, 'Contacts');
+    const services = await colsOf(dst.doc, 'Services');
+    assert.equal(contacts.get('Service').type, 'Ref:Services', 'la référence vise la table créée avec elle');
+    assert.equal(contacts.get('Service').visibleCol, services.get('Libelle').id, 'la colonne affichée est refaite');
+    assert.equal(contacts.get('Service').reverseCol, services.get('Equipe').id, 'le lien dans les deux sens est refait');
+    assert.equal(services.get('Famille').type, 'Choice');
+    assert.deepEqual(JSON.parse(services.get('Famille').widgetOptions).choices, ['Interne', 'Externe']);
+    assert.equal(JSON.parse(services.get('Budget').widgetOptions).currency, 'EUR');
+    assert.ok(!contacts.get('Total').isFormula && !contacts.get('Piege').isFormula, 'sans la case, les colonnes calculées sont créées vides');
+    assert.equal((await records(dst.doc, 'Contacts')).length + (await records(dst.doc, 'Services')).length, 0, 'aucune ligne copiée');
+    step('Copie : tables créées dans un document vide (référence, colonne affichée, lien dans les deux sens, choix, monnaie), formules non posées, aucune donnée');
+
+    // --- Les formules : lues avant d'être posées ; celle qui sort du calcul est refusée, sa colonne reste vide.
+    const withFormulas = await newDocWithWidget('Copie CIBLE formules');
+    await pasteIn(withFormulas, full);
+    await widget().getByRole('checkbox', { name: /^Poser aussi les formules/ }).check();
+    await dialog().getByText('Poser ces formules dans ce document ?').waitFor();
+    assert.ok(await dialogButton('Poser les formules').isDisabled(), 'grisé tant que les formules ne sont pas lues');
+    await dialog().getByRole('checkbox', { name: /J’ai lu ces formules/ }).check();
+    await shot('45-copie-formules', 'modal');
+    await dialogButton('Poser les formules').click();
+    await widget().getByText(/Colonne\s«\sPiege\s»\s:\sformule non posée/).waitFor();
+    await create();
+    const posed = await colsOf(withFormulas.doc, 'Contacts');
+    assert.ok(posed.get('Total').isFormula && posed.get('Total').formula === '$Age * 2', 'la formule lue et acceptée est posée');
+    assert.ok(!posed.get('Piege').isFormula, 'la formule refusée n’est pas posée : colonne vide');
+    step('Copie : les formules sont lues avant d’être posées (confirmation), celle qui lit un fichier est refusée et sa colonne reste vide');
+
+    // --- Dans une table qui existe déjà : un nom pris bloque, « Ajouter à une table » ne touche à rien d'existant.
+    const there = await newDocWithWidget('Copie CIBLE existante', [
+      ['AddTable', 'Services', [{ id: 'Libelle', type: 'Text' }]],
+      ['AddRecord', 'Services', null, { Libelle: 'Existant' }],
+    ]);
+    await pasteIn(there, full);
+    await widget().locator('[data-copy-table="Services"]').getByText('Une table de ce nom existe déjà dans ce document').waitFor();
+    assert.ok(await widget().getByRole('button', { name: 'Créer dans ce document' }).isDisabled(), 'bloqué tant qu’un nom est pris');
+    await widget().locator('[data-copy-table="Services"] .mode-select').selectOption('add');
+    await widget().locator('[data-copy-table="Services"]').getByText(/colonnes déjà présentes, elles ne sont pas touchées\s:\sLibelle/).waitFor();
+    await create();
+    const filled = await colsOf(there.doc, 'Services');
+    assert.ok(filled.has('Budget') && filled.has('Famille'), 'les colonnes qui manquaient sont ajoutées');
+    assert.equal((await records(there.doc, 'Services')).map(r => r.Libelle).join(), 'Existant', 'la table et ses lignes ne sont pas touchées');
+    assert.equal((await colsOf(there.doc, 'Contacts')).get('Service').type, 'Ref:Services', 'Contacts vise la table d’ici');
+    step('Copie : un nom pris bloque avec son explication ; « Ajouter à une table » complète sans toucher aux colonnes ni aux lignes qui existent');
+  }
+
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_ORDER=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1, ONLY_COPY=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, ORDER: orderSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps, COPY: copySteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3827,6 +3955,7 @@ try {
   await renfSteps();
   await newsSteps();
   await tabSteps();
+  await copySteps();
 
   assert.deepEqual(errors, [], 'aucune erreur dans la console');
   console.log('Parcours complet : OK');

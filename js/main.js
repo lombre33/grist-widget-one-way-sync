@@ -204,7 +204,11 @@ async function openFirstScreen() {
   // Une table Synchro sans export (posée par protectSync, puis l'assistant fermé) ne dit pas que ce document envoie : l'accueil.
   else if ((ownsSync(schema) && readSourceNote(schema).exports.length) || await lostSynchro(schema)) await select('send');
   else if ((await readLost()).length) await select('receive');
-  else showHome(await isOwnerHere() === false);
+  else {
+    // Un onglet cliqué pendant cette lecture est déjà ouvert : l'accueil ne doit pas l'écraser.
+    const notOwner = await isOwnerHere() === false;
+    if (!picked) showHome(notOwner);
+  }
   if (journals.length) consolidateAll();
   await showNews(schema, journals);
 }
