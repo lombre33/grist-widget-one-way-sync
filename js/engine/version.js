@@ -287,7 +287,19 @@
 //         ligne repart une fois à chaque chargement du document (Grist recalcule alors toutes les formules ; sans effet chez le destinataire). Un
 //         hôte dont le port bâtit son propre schéma sans `sourceTableIds` retombe sur `tableIds` (aucun résumé, comme avant). Port, tables, codes
 //         (`CODE_FORMAT` 2) et texte des formules de `Synchro` inchangés.
-export const ENGINE_VERSION = '5.2.0';
+// 5.3.0 (25 novembre 2026, audit de fiabilité demandé par le porteur : « pas d'erreur silencieuse, y compris en edge case ») : la recopie ne s'arrête
+//         plus sans le dire. Ajouts, rien de retiré : la boucle de recopie (`startAutoConsolidation`) survit à un `onChange` (le dessin de
+//         l'hôte) qui échoue, un passage en échec est gardé dans `state.failure` (`{ n, text, at }`, remis à null au premier passage
+//         réussi) avec un nouvel essai espacé (`retryDelay` : 10 s, 20 s, 40 s… 2 minutes ; `FAILURE_SHOWN` = 2 échecs avant de le dire),
+//         `onChange` est rappelé quand le dit change ; `logic/lost.js` : `unreadableJournals(schema, shares)` (un journal dont la note est
+//         effacée ou abîmée : le moteur ne le reconnaît plus, le formulaire reste publié et la SOURCE continue d'y déposer sans erreur) et
+//         `readLost` (`target/lost.js`) rend ces entrées en plus (`unreadable: true`). **Pour un hôte** : afficher `state.failure` s'il
+//         veut le dire (syncPlus : bandeau « La recopie des données reçues dans vos tables échoue ») et traiter `unreadable` comme une
+//         carte d'erreur sans bouton (le partage du formulaire est encore en service : ne pas l'effacer). Le comportement de la boucle
+//         change pour tout hôte : un passage qui échoue est réessayé de plus en plus tard (au plus toutes les 2 minutes) au lieu de
+//         toutes les 10 secondes ; un hôte dont le dessin échouait ne perd plus sa boucle. Port, tables, codes (`CODE_FORMAT` 2) et
+//         texte des formules de `Synchro` inchangés (`formulas-golden`).
+export const ENGINE_VERSION = '5.3.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir
