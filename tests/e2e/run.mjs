@@ -1374,6 +1374,9 @@ try {
     const { cols } = await summaryMeta();
     for (const id of ['id_sync', 'MajLe', 'RecalculLe']) assert.equal(cols.find(c => c.colId === id)?.isFormula, true, `${id} est une colonne de formule`);
     assert.ok(!cols.some(c => !c.isFormula && ['id_sync', 'MajLe'].includes(c.colId)), 'aucune colonne de données ajoutée');
+    const majleFormula = async () => (await summaryMeta()).cols.find(c => c.colId === 'MajLe').formula;
+    const majleBefore = await majleFormula();
+    assert.match(majleBefore, /\("Montant", ""\)/, 'la formule de MajLe lit les colonnes envoyées');
     const code = await plainInvitation();
     await approve(await accept(dst.doc, dst.url, code, `« Résumé » : table ${SUMMARY}.`), { url: src.url });
     await openWidget(dst.url);
@@ -1412,6 +1415,8 @@ try {
 
     // Pas d'Échange pour une table de résumé : le mode est grisé, avec la raison.
     await openWidget(src.url);
+    // L'affichage de l'onglet ne réécrit pas la formule de MajLe (sinon toute la table repartirait à chaque affichage).
+    assert.equal(await majleFormula(), majleBefore, 'MajLe est restée la même après le rechargement et l\'affichage de l\'onglet');
     await button('Nouvel export').click();
     await dialog().getByRole('checkbox', { name: SUMMARY }).check();
     await dialogButton('Continuer').click();
