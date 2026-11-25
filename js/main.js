@@ -18,6 +18,7 @@ import { isOwnerHere, lostSynchro, reinforceFacts, refreshSource, renderSource }
 import { startAutoCatchUp } from './engine/source/resend.js';
 import { receiveOffered, refreshTarget, reinforceReceptions, renderTarget } from './target/tab.js';
 import { newsSeen, openNews } from './news.js';
+import { renderCopy } from './copy/tab.js';
 import { consolidateAll, startAutoConsolidation } from './engine/target/loop.js';
 import { startEngine } from './engine/index.js';
 import { syncPort } from './sync-port.js';
@@ -60,7 +61,7 @@ async function select(tab, retry = true) {
   showScreen(view);
   if (tab === 'help') return view.append(tutorialView(el('div', { class: 'form' }, el('p', { class: 'small' }, t('guide.install')), copyField(widgetUrl()))));
   try {
-    await (tab === 'send' ? renderSource(view) : renderTarget(view));
+    await ({ send: renderSource, copy: renderCopy }[tab] ?? renderTarget)(view);
   } catch (e) {
     // Grist injoignable un instant : un nouvel essai, puis le message ; la console n'en garde que
     // la trace.
@@ -82,7 +83,8 @@ function showHome(notOwner = false) {
     el('span', { class: 'tile-title' }, title), el('span', { class: 'tile-desc' }, desc));
   showScreen(el('h2', { class: 'home-title' }, t('home.title')),
     notOwner ? message('info', t('home.notOwner')) : null,
-    el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc'))),
+    el('div', { class: 'tiles' }, tile('send', t('home.send'), t('home.send.desc')), tile('receive', t('home.receive'), t('home.receive.desc')),
+      tile('copy', t('home.copy'), t('home.copy.desc'))),
     roleGuide({}));
 }
 
