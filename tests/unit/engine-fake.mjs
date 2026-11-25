@@ -22,7 +22,7 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
     if (table.columns.some(c => c.colId === colId)) throw new Error(`Column already exists "${colId}"`);
     table.columns.push({
       id: nextColumn++, parentId: table.id, parentPos: table.columns.length + 1, colId, type: 'Text', isFormula: false, formula: '', label: colId, description: '',
-      displayCol: 0, recalcWhen: 0, recalcDeps: null, widgetOptions: '', visibleCol: 0, rules: null, ...info,
+      displayCol: 0, recalcWhen: 0, recalcDeps: null, widgetOptions: '', visibleCol: 0, reverseCol: 0, rules: null, ...info,
     });
     for (const row of table.rows) row[colId] = null;
   };
@@ -103,13 +103,24 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
         // Comme Grist, la table a une section de données brutes ; sa description est celle de la table.
         table.rawSection = runMeta('AddRecord', '_grist_Views_section', [null, { tableRef: table.id, parentKey: 'record', description: '' }]);
         for (const { id, ...info } of args[0]) addColumn(table, id, info);
-        return { table_id: tableId };
+        return { table_id: tableId, table_ref: table.id, columns: table.columns.map(c => c.colId) };
       }
-      case 'AddColumn': case 'AddVisibleColumn': addColumn(need(tableId), args[0], args[1]); return null;
+      case 'AddColumn': case 'AddVisibleColumn': {
+        const table = need(tableId);
+        addColumn(table, args[0], args[1]);
+        const added = table.columns.find(c => c.colId === args[0]);
+        return { colId: added.colId, colRef: added.id };
+      }
       case 'ModifyColumn': {
         const column = need(tableId).columns.find(c => c.colId === args[0]);
         if (!column) throw new Error(`Column not found "${args[0]}"`);
-        Object.assign(column, args[1]);
+        const { untieColIdFromLabel, ...changes } = args[1]; // Grist n'en fait qu'un réglage de l'identifiant
+        Object.assign(column, changes);
+        // Un lien dans les deux sens met l'autre bout d'accord, comme Grist.
+        if (changes.reverseCol) {
+          const other = columnRows().find(c => c.id === changes.reverseCol);
+          if (other) other.reverseCol = column.id;
+        }
         return null;
       }
       case 'RemoveColumn': {

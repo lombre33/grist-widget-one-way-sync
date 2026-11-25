@@ -273,7 +273,18 @@
 //         d'une pause d'office porte `why: 'journal'` (un hôte qui ne connaît que 'link' et 'slow' montre son texte général). Port,
 //         tables, codes et texte des formules inchangés. Un hôte qui montrait la carte « Réception supprimée » en montre une
 //         « Journal renommé » (sans bouton : retirer l'avis effacerait le lien) quand `renamedTo` n'est pas vide.
-export const ENGINE_VERSION = '5.1.0';
+// 5.2.0 (25 novembre 2026, V1 de syncPlus, hors Bêta : la « copie unique » de structure, issue du widget d'import et d'export de
+//         structure de table de Grist Factory) : le moteur lit et écrit le texte « Code View » de tables (classes `@grist.UserTable`,
+//         étendu de `label`, `description`, `choices`, `widget_options`, `visible_col`, `reverse_of`), et crée des tables ou des colonnes
+//         d'après un tel texte, une seule fois, sans lien entre les deux documents. Ajouts seulement : `js/engine/copy.js`
+//         (`readCopyDocument`, `previewImport`, `importText`), `logic/copy-plan.js` (`prepareExport`, `exportCounts`, `planImport`) et leurs
+//         modules purs (`py-text`, `code-view-*`, `copy-*`). Port (`PORT_SHAPE`), noms de tables, `CODE_FORMAT`, texte des formules de
+//         `Synchro` inchangés. Lit `_grist_Tables`, `_grist_Tables_column`, `_grist_Views_section`, `_grist_DocInfo` ; écrit des tables et
+//         colonnes (`AddTable`, `AddVisibleColumn`, `ModifyColumn`, `SetDisplayFormula`) et la description de la section de données brutes. Jamais
+//         de valeur de table, de règle d'accès, de page ni de webhook ; jamais une table ou colonne du widget (`Synchro*`, `Journal_*`,
+//         `id_sync`, `MajLe`…) ni une qui existe déjà. Les formules ne sont posées que si l'hôte le demande (`withFormulas`), que la personne est
+//         propriétaire (`isOwner`) et que `formulaProblems` n'y trouve rien.
+export const ENGINE_VERSION = '5.2.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

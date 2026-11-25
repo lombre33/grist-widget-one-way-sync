@@ -339,6 +339,32 @@ on refasse les références fonctionnelles » ; choix sur la carte : « Par colo
 - **Port** : inchangé. Essais : `tests/unit/links.test.mjs`, `engine-refs.test.mjs` (SOURCE puis CIBLE sur deux Grist en mémoire, liste incomplète
   puis complétée, `relink`), e2e `ONLY_LINKS=1` (vrai Grist).
 
+## La copie unique de structure (5.2.0)
+
+Antoine, 25 novembre : « ça serait ton option « one shot », ça sera plus simple de maintenir un seul widget pour moi » (le widget d'import et d'export de
+structure de table de Grist Factory) ; carte : « Structure seule d'abord » ; pour la V1 de syncPlus, hors Bêta. Copier la **structure** de tables (types,
+libellés, descriptions, listes de choix, formats, colonnes affichées, liens dans les deux sens, formules sur demande) d'un document à un autre par un texte à
+copier-coller, une seule fois : aucune valeur de table, aucun lien entre les deux documents, aucune table technique.
+- **Le texte** est le « Code View » de Grist (`@grist.UserTable`, `class Table:`), étendu d'arguments facultatifs (`label`, `description`, `choices`,
+  `widget_options`, `visible_col`, `reverse_of`) : `generateCode(tables)` (`logic/code-view-write.js`) l'écrit, `parseCodeView(texte)` (`code-view-parse.js`) le lit
+  (jamais exécuté : motifs fixes, `py-text.js`). Bornes : `TEXT_MAX`, `TABLES_MAX`, `COLUMNS_MAX`. Une table ou une colonne qui porte un nom du widget ou de Grist
+  (`isReservedTableId`, `isReservedColumnId`) est ignorée à la lecture, avec une remarque.
+- **Export** : `readCopyDocument()` (`copy.js`) lit le document, `prepareExport(doc, { tableIds, excluded?, omit? })` (`logic/copy-plan.js`) rend `{ text, notes, counts,
+  referenced }` ; `exportCounts` compte ce que chaque élément (`ELEMENTS` de `copy-elements.js`) porte pour que l'hôte propose de les laisser de côté. La monnaie du document
+  part avec une colonne « Devise » qui n'en dit pas. Une formule de déclenchement qui se recalcule, ou trop longue, ne part pas : c'est dit (`notes`).
+- **Import** : `previewImport(texte, choices)` rend `{ parsed, plan }` sans rien écrire ; `importText(texte, choices)` écrit. `choices` : `targets` (identifiant de table
+  du texte vers `{ mode: 'create' | 'add' | 'skip', tableId }`, créer sous le nom que Grist garderait par défaut), `excluded`, `omit`, `withFormulas`. Le plan dit, par
+  table, ses colonnes résolues et son `problem` (clé `copy.validation.*` : identifiant invalide, déjà pris, réservé, table inconnue), et `warnings`, `counts`, `work`, `ready`.
+  `importText` **refait le plan au moment d'écrire**, sur le document tel qu'il est alors, et refuse (`copyNotReady`) s'il n'est plus prêt : rien n'est écrit. Tout part dans
+  un seul lot (`AddTable`, `AddVisibleColumn`), que Grist défait en entier s'il échoue ; viennent ensuite, hors lot, ce que ces actions ne savent pas faire (descriptions,
+  colonne affichée d'une Référence, identifiant qui ne suit plus son étiquette, lien dans les deux sens) : un échec y est dit (`notes`), sans rien défaire.
+- **Garde-fous** : une table ou colonne qui existe déjà n'est jamais modifiée (en « ajouter à une table », les colonnes déjà là sont laissées telles quelles) ; jamais de
+  table ou de colonne du widget (`refusedNames`, aussi une destination choisie à la main) ; les formules ne sont posées que sur demande **et** pour un propriétaire (`isOwner`,
+  sinon `copyFormulasOwner`) **et** si `formulaProblems` (la lecture de `column-formulas.js`, plus stricte ici : les tables citables sont celles qu'on crée) n'y trouve rien ; sinon
+  la colonne est créée vide et c'est dit. Un lien dans les deux sens ne se fait qu'entre deux colonnes créées ensemble.
+- **Port** : inchangé (`fetchRows`, `apply`, `isOwner`, `withLock`). Essais : `tests/unit/code-view.test.mjs`, `copy-schema.test.mjs`, `engine-copy.test.mjs` (A vers B sur deux
+  documents en mémoire : types, libellés, colonne affichée, liens, formules refusées, noms réservés, table qui existe, document qui change entre l'aperçu et le clic).
+
 ## Forme des codes relevée (5.0.0)
 
 `CODE_FORMAT` (`logic/codes.js`, exporté) passe de 1 à 2. **Pourquoi** : une CIBLE d'avant la 4.11.0 ferait d'une colonne `list` (Liste de références) une
