@@ -55,12 +55,14 @@ const savedLinks = exp => (exp && !exp.echange
 
 // 1. Tables de l'export. Une table introuvable (renommée, effacée) en sort.
 async function showTables(ctx) {
-  const tables = (await readSchema()).tableIds.filter(isUserTable);
+  const schema = await readSchema();
+  // Les tables de résumé de Grist s'envoient aussi (voir summary.js), sauf dans un Échange : le retour ne pourrait pas s'y recopier.
+  const tables = (schema.sourceTableIds || schema.tableIds).filter(isUserTable).filter(id => !(ctx.exp?.echange && schema.summary?.(id)));
   ctx.chosen = ctx.chosen.filter(table => tables.includes(table));
   const report = ctx.report = el('div', { class: 'report' });
   const next = { label: t('common.next'), kind: 'btn-primary', disabled: !ctx.chosen.length, onClick: () => run(null, report, () => showColumns(ctx)) };
   const list = checkList({
-    items: tables.map(id => ({ value: id, label: id })), checked: ctx.chosen, label: t('send.step.tables'),
+    items: tables.map(id => ({ value: id, label: id, hint: summaryHint(schema, id) })), checked: ctx.chosen, label: t('send.step.tables'),
     onChange: (values) => {
       // Une table cochée ici n'est plus « ajoutée pour un lien » : elle repart de ses colonnes et de son filtre habituels.
       for (const table of values.filter(v => !ctx.chosen.includes(v))) for (const map of [ctx.extras, ctx.pulls, ctx.selected, ctx.filters]) map.delete(table);
@@ -69,6 +71,12 @@ async function showTables(ctx) {
   });
   ctx.wizard.show(0, [el('p', {}, t(ctx.exp ? 'send.edit.tables' : 'send.tables.help')), list, report, stepHelp(['s-tables']),
     ctx.exp ? null : roleGuide({ you: 'source', current: 0 })], [cancel, next]);
+}
+
+// « résumé de Contacts par Ville » à côté d'une table de résumé de Grist, rien pour une autre table.
+function summaryHint(schema, table) {
+  const summary = schema.summary?.(table);
+  return summary ? t('send.tables.summary', { source: summary.source || '?', by: summary.by.join(', ') || '—' }) : undefined;
 }
 
 // Fiche d'une table à l'étape Contenu : par défaut toutes ses colonnes et toutes ses lignes, dit
@@ -103,7 +111,8 @@ function columnsBlock(ctx, schema, table, relayed) {
   const refs = el('div', { class: 'ref-slot' }); // les colonnes Référence de la table (voir export-links.js)
   ctx.refSlots.set(table, refs);
   return el('div', { class: 'form table-block' }, el('h3', {}, table),
-    relayed ? message('info', t('send.columns.relay')) : null, summary,
+    relayed ? message('info', t('send.columns.relay')) : null,
+    schema.summary?.(table) ? message('info', t('send.columns.summary', { by: schema.summary(table).by.join(', ') })) : null, summary,
     unsent.length ? message('info', t('send.columns.unsent', { cols: unsent.join(', ') })) : null,
     el('div', { class: 'block-actions' },
       togglePart(columns, t('send.columns.pick'), ctx.selected.get(table).length !== usable.length),

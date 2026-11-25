@@ -9,6 +9,7 @@ import {
 } from '../logic/common.js';
 import { cleanLabel } from '../logic/codes.js';
 import { RECALC_SPEC, majleAction, prepareSourceActions, syncColumns, syncFormulas } from '../logic/formulas.js';
+import { summaryActions } from '../logic/summary.js';
 import { endNotice, exportRowsActions, exportTables, hooksOf, optionsActions } from '../logic/exports.js';
 import { filterColumns } from '../logic/filters.js';
 import { docFormatOf } from '../logic/docformat.js';
@@ -233,11 +234,16 @@ export async function refreshMajLe(schema = null, rows = null) {
   const tables = [...sent].filter(([table]) => schema.has(table));
   // RecalculLe (repère des annulations) remise en état si elle manque ou a été changée à la main.
   const recalc = table => schema.columns(table).find(c => c.colId === RECALC_COL);
+  // Une table de résumé a ses trois colonnes en formules, remises d'accord ensemble (voir summaryActions).
+  const summaryOf = table => schema.summary?.(table);
+  const ordinary = tables.filter(([table]) => !summaryOf(table));
   const actions = [
-    ...tables.flatMap(([table]) => (recalc(table) ? [] : prepareSourceActions(table, [RECALC_COL]))),
-    ...tables.filter(([table]) => recalc(table) && (recalc(table).type !== RECALC_SPEC.type || recalc(table).formula !== RECALC_SPEC.formula))
+    ...ordinary.flatMap(([table]) => (recalc(table) ? [] : prepareSourceActions(table, [RECALC_COL]))),
+    ...ordinary.filter(([table]) => recalc(table) && (recalc(table).type !== RECALC_SPEC.type || recalc(table).formula !== RECALC_SPEC.formula))
       .map(([table]) => ['ModifyColumn', table, RECALC_COL, RECALC_SPEC]),
-    ...tables.map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean),
+    ...ordinary.map(([table, ids]) => majleAction(schema.columns(table), [...ids])).filter(Boolean),
+    ...tables.filter(([table]) => summaryOf(table))
+      .flatMap(([table, ids]) => summaryActions(table, schema.columns(table), summaryOf(table).by, [...ids], { refresh: true })),
   ];
   await apply(actions);
   return actions.length > 0;

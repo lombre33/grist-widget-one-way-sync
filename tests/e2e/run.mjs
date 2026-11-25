@@ -1333,6 +1333,121 @@ try {
     await sameOrder('trois lignes ajoutées coup sur coup', 10);
     step('Ordre : les lignes arrivent chez la CIBLE dans l\'ordre de la SOURCE (envoi de l\'existant, paquet, ajouts coup sur coup), plus à l\'envers');
   }
+  // --- Tables de résumé de Grist : une table « Résumer » (une ligne par groupe) s'envoie comme une autre. Grist refuse toute colonne de
+  // données dans un résumé : la clé id_sync est une formule (empreinte des valeurs du regroupement) et MajLe aussi (elle lit les colonnes
+  // envoyées : seule la ligne du groupe touché repart). La CIBLE reçoit une table ordinaire : groupe nouveau = ligne ajoutée, agrégat
+  // modifié = ligne modifiée, groupe disparu = ligne effacée. Pas d'Échange. Un regroupement changé fait changer la table de nom : dit.
+  async function summarySteps() {
+    const src = await newDocWithWidget('Résumé SOURCE', [
+      ['AddTable', 'Fiches', [{ id: 'Ville', type: 'Text' }, { id: 'Service', type: 'Text' }, { id: 'Montant', type: 'Numeric' }]],
+      ['BulkAddRecord', 'Fiches', [null, null, null, null], { Ville: ['Pau', 'Pau', 'Lyon', 'Lyon'], Service: ['A', 'B', 'A', 'A'], Montant: [10, 20, 30, 40] }],
+    ]);
+    const colRef = async (table, colId) => (await records(src.doc, '_grist_Tables_column')).find(c => c.colId === colId && c.parentId === (table.id)).id;
+    const fiches = (await records(src.doc, '_grist_Tables')).find(tb => tb.tableId === 'Fiches');
+    const section = (await applyActions(src.doc, [['CreateViewSection', fiches.id, 0, 'record', [await colRef(fiches, 'Ville')], null]])).retValues[0].sectionRef;
+    const SUMMARY = 'Fiches_summary_Ville';
+    const shown = async doc => (await records(doc, SUMMARY)).map(r => `${r.Ville}:${r.count}:${r.Montant}`).sort();
+    assert.deepEqual(await shown(src.doc), ['Lyon:2:70', 'Pau:2:30']);
+    const dst = await newDocWithWidget('Résumé CIBLE');
+    await openWidget(src.url);
+    await widget().locator('.tile', { hasText: 'Envoyer des tables' }).click();
+    // La table de résumé est proposée, avec son regroupement ; ses colonnes sont celles du résumé, sans la colonne `group` (la liste des lignes résumées).
+    await button('Nouvel export').click();
+    const box = dialog().getByRole('checkbox', { name: SUMMARY });
+    await box.waitFor();
+    assert.match(await dialog().innerText(), /résumé de Fiches par Ville/, 'la table de résumé dit ce qu\'elle résume');
+    await box.check();
+    await dialogButton('Continuer').click();
+    await dialog().getByText(/Table de résumé de Grist \(regroupement\s:\sVille\)/).waitFor();
+    await dialog().getByRole('button', { name: 'Choisir les colonnes' }).first().click();
+    assert.equal(await dialog().getByRole('checkbox', { name: /^group\b/ }).count(), 0, 'la liste des lignes résumées (group) n\'est pas offerte');
+    for (const name of ['Ville', 'count', 'Montant']) assert.equal(await dialog().getByRole('checkbox', { name: new RegExp(`^${name}\\b`) }).first().isChecked(), true, `${name} est cochée`);
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Résumé');
+    await dialogButton('Créer l’export').click();
+    await dialog().getByText('Export « Résumé » créé.').waitFor({ timeout: 120000 });
+    // Les colonnes du widget sont des formules (Grist n'accepte pas de colonne de données dans un résumé).
+    const summaryMeta = async () => {
+      const tb = (await records(src.doc, '_grist_Tables')).find(x => x.summarySourceTable);
+      return { tb, cols: (await records(src.doc, '_grist_Tables_column')).filter(c => c.parentId === tb.id) };
+    };
+    const { cols } = await summaryMeta();
+    for (const id of ['id_sync', 'MajLe', 'RecalculLe']) assert.equal(cols.find(c => c.colId === id)?.isFormula, true, `${id} est une colonne de formule`);
+    assert.ok(!cols.some(c => !c.isFormula && ['id_sync', 'MajLe'].includes(c.colId)), 'aucune colonne de données ajoutée');
+    const code = await plainInvitation();
+    await approve(await accept(dst.doc, dst.url, code, `« Résumé » : table ${SUMMARY}.`), { url: src.url });
+    await openWidget(dst.url);
+    await waitFor(async () => (await shown(dst.doc)).length === 2, 'les deux groupes sont reçus', 90000);
+    assert.deepEqual(await shown(dst.doc), await shown(src.doc), 'la CIBLE a les groupes de la SOURCE');
+    const keys = async doc => (await records(doc, SUMMARY)).map(r => r.id_sync);
+    assert.equal(new Set(await keys(src.doc)).size, 2, 'une clé par groupe');
+    assert.deepEqual((await keys(dst.doc)).sort(), (await keys(src.doc)).sort(), 'la clé de la CIBLE est celle de la SOURCE');
+    step('Résumé : la table de résumé est proposée (sans la colonne group), ses colonnes du widget sont des formules, la CIBLE reçoit une ligne par groupe avec leur clé');
+
+    // Un agrégat qui change : seule la ligne du groupe touché est modifiée chez la CIBLE (les valeurs de l'autre groupe sont intactes).
+    const lyon = (await records(dst.doc, SUMMARY)).find(r => r.Ville === 'Lyon');
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 1, { Montant: 11 }]]);
+    await waitFor(async () => (await shown(dst.doc)).includes('Pau:2:31'), 'la somme du groupe Pau est mise à jour', 90000);
+    assert.deepEqual((await records(dst.doc, SUMMARY)).find(r => r.Ville === 'Lyon'), lyon, 'le groupe Lyon n\'a pas bougé');
+    // Un groupe nouveau : une ligne ajoutée. Un membre retiré d'un groupe qui reste : l'agrégat suit.
+    await applyActions(src.doc, [['AddRecord', 'Fiches', null, { Ville: 'Nice', Service: 'A', Montant: 5 }]]);
+    await waitFor(async () => (await shown(dst.doc)).includes('Nice:1:5'), 'le nouveau groupe Nice arrive', 90000);
+    await applyActions(src.doc, [['RemoveRecord', 'Fiches', 4]]);
+    await waitFor(async () => (await shown(dst.doc)).includes('Lyon:1:30'), 'un membre retiré : l\'agrégat de Lyon suit', 90000);
+    // Un groupe qui disparaît : sa ligne est effacée chez la CIBLE.
+    await applyActions(src.doc, [['RemoveRecord', 'Fiches', 5]]);
+    await waitFor(async () => !(await shown(dst.doc)).some(x => x.startsWith('Nice:')), 'le groupe disparu est effacé', 90000);
+    assert.deepEqual(await shown(dst.doc), await shown(src.doc));
+    step('Résumé : un agrégat modifié ne touche que sa ligne, un groupe nouveau arrive, un membre retiré met l\'agrégat à jour, un groupe disparu est effacé');
+
+    // Le document SOURCE se recharge : Grist recalcule toutes les formules, donc chaque ligne repart une fois, sans effet chez la CIBLE.
+    const before = await records(dst.doc, SUMMARY);
+    await api('POST', `/docs/${src.doc}/force-reload`);
+    await new Promise(r => setTimeout(r, 6000));
+    await applyActions(src.doc, [['UpdateRecord', 'Fiches', 2, { Montant: 21 }]]);
+    await waitFor(async () => (await shown(dst.doc)).includes('Pau:2:32'), 'après le rechargement, une modification arrive encore', 90000);
+    assert.deepEqual((await records(dst.doc, SUMMARY)).find(r => r.Ville === 'Lyon'), before.find(r => r.Ville === 'Lyon'), 'rien n\'a changé pour Lyon');
+    assert.equal((await records(dst.doc, SUMMARY)).length, 2, 'ni doublon ni perte après le rechargement');
+    step('Résumé : après le rechargement du document SOURCE, ni doublon ni perte, les modifications suivantes arrivent');
+
+    // Pas d'Échange pour une table de résumé : le mode est grisé, avec la raison.
+    await openWidget(src.url);
+    await button('Nouvel export').click();
+    await dialog().getByRole('checkbox', { name: SUMMARY }).check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialog().getByLabel('Nom de l’export').fill('Résumé seul');
+    await dialogButton('Créer l’export').click();
+    await dialog().getByText('Export « Résumé seul » créé.').waitFor({ timeout: 120000 });
+    await dialogButton('Ajouter un destinataire').click();
+    const echange = dialog().getByRole('radio', { name: /Dans les deux sens/ });
+    await echange.waitFor();
+    assert.equal(await echange.isDisabled(), true, 'l\'Échange est grisé pour une table de résumé');
+    await dialog().getByRole('button', { name: /Aide\s:\sDans les deux sens/ }).click();
+    await dialog().getByText(new RegExp(`${SUMMARY} est une table de résumé`)).waitFor();
+    await dialogButton('Annuler').click();
+    step('Résumé : l\'Échange est grisé pour une table de résumé, avec la raison');
+
+    // Le regroupement change dans Grist : la table de résumé change de nom, l'export le dit. « Modifier » reprend la nouvelle table, dont la clé
+    // (recopiée par Grist avec l'ancienne formule) est remise d'accord : une clé par groupe, pas de doublon.
+    await applyActions(src.doc, [['UpdateSummaryViewSection', section, [await colRef(fiches, 'Ville'), await colRef(fiches, 'Service')]]]);
+    const SUMMARY2 = 'Fiches_summary_Service_Ville';
+    await openWidget(src.url);
+    await widget().getByText(/Table introuvable \(renommée ou supprimée\)\s:\s/).first().waitFor({ timeout: 60000 });
+    await widget().getByText(/Une table de résumé change de nom quand on change son regroupement/).first().waitFor();
+    const card = widget().locator('article.card', { hasText: 'Résumé' }).filter({ hasNotText: 'Résumé seul' });
+    await card.getByRole('button', { name: 'Modifier', exact: true }).click();
+    await dialog().getByRole('checkbox', { name: SUMMARY2 }).check();
+    await dialogButton('Continuer').click();
+    await dialogButton('Continuer').click();
+    await dialogButton('Enregistrer').click();
+    await dialog().getByText(/Enregistré\s:/).waitFor({ timeout: 120000 });
+    await dialogButton('Fermer').click();
+    const later = (await records(src.doc, SUMMARY2)).map(r => r.id_sync);
+    assert.equal(later.length, 3, 'trois groupes (Ville, Service)');
+    assert.equal(new Set(later).size, 3, 'une clé distincte par groupe : la formule de clé suit le nouveau regroupement');
+    step('Résumé : le regroupement changé fait changer la table de nom (dit sur la carte), « Modifier » la reprend avec une clé par groupe');
+  }
   // --- Changements de structure : une réception qui demande l'accord (case décochée d'emblée) ne crée pas la colonne que la SOURCE
   // ajoute à l'export, la propose avec son détail ; « Appliquer » la crée et la remplit ; une colonne retirée de l'export est dite ;
   // « Appliquer, puis traiter automatiquement » ne demande plus la suivante ; une réception d'avant (sans choix) crée toute seule.
@@ -2780,8 +2895,8 @@ try {
     step('Protection : Grist refuse les règles (colonne effacée) — message précis, aucun export, avis dans l\'onglet, règle d\'autrui intacte ; corrigée, tout reprend');
   }
 
-  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_ORDER=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
-  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, ORDER: orderSteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
+  // Une seule série d'étapes (ONLY_EXCHANGE=1, ONLY_OPTIONS=1, ONLY_CHOICES=1, ONLY_TYPES=1, ONLY_ORDER=1, ONLY_SUMMARY=1, ONLY_STRUCTURE=1, ONLY_ADOPT=1, ONLY_NEWCOLS=1, ONLY_LAYOUT=1, ONLY_LINKS=1, ONLY_FORMAT=1, ONLY_FORMULAS=1, ONLY_FILES=1, ONLY_EXCHANGE_FILES=1, ONLY_STRAYS=1, ONLY_DOCLINK=1, ONLY_PROTECT=1, ONLY_CLEAN=1, ONLY_HISTORY=1, ONLY_PUBLIC=1, ONLY_WIDGETPAGE=1, ONLY_RENF=1, ONLY_NEWS=1, ONLY_ACCESS=1, ONLY_TABS=1).
+  const only = Object.entries({ EXCHANGE: exchangeSteps, OPTIONS: optionsSteps, CHOICES: choicesSteps, TYPES: typesSteps, ORDER: orderSteps, SUMMARY: summarySteps, STRUCTURE: structureSteps, ADOPT: adoptSteps, NEWCOLS: newColumnsSteps, LAYOUT: layoutSteps, LINKS: linksSteps, FORMAT: formatSteps, FORMULAS: formulasSteps, FILES: filesSteps, EXCHANGE_FILES: exchangeFilesSteps, STRAYS: straySteps, DOCLINK: docLinkSteps, PROTECT: protectSteps, CLEAN: cleanSteps, HISTORY: historySteps, PUBLIC: publicStaySteps, RENF: renfSteps, NEWS: newsSteps, WIDGETPAGE: widgetPageSteps, TABS: tabSteps, ACCESS: accessSteps }).find(([name]) => process.env[`ONLY_${name}`]);
   if (only) {
     await only[1]();
     assert.deepEqual(errors, [], 'aucune erreur dans la console');
@@ -3810,6 +3925,7 @@ try {
   await choicesSteps();
   await typesSteps();
   await orderSteps();
+  await summarySteps();
   await structureSteps();
   await adoptSteps();
   await newColumnsSteps();

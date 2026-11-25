@@ -120,7 +120,7 @@ function exportState(id, { note, rows, schema, acl, recipients }) {
   return {
     ...entry, tables, recipients, invitations: note.invitations.filter(i => i.export === id),
     // Lien public : une règle d'accès posée depuis cache une partie de ce qu'il montre à tous.
-    hidden: entry.public ? hiddenTables(acl.resources, acl.rules, readTables(tables)) : [],
+    hidden: entry.public ? hiddenTables(acl.resources, acl.rules, readTables(tables, schema)) : [],
     // Renforcé : les éditeurs peuvent réécrire les formules de Synchro (droit de structure).
     structure: Boolean(entry.renforce) && editorsEditStructure(acl.resources, acl.rules),
     email: exportEmail(mine, id),
@@ -317,7 +317,7 @@ const exportNotes = (exp, newColumnsActions) => [
   !exp.tables.length && !exp.retour ? message('err', t('send.export.rowsGone')) : null,
   exp.hidden.length ? message('err', t('send.public.hiddenNow', { tables: exp.hidden.join(', ') })) : null,
   exp.structure ? message('warn', t('send.renforce.structure')) : null,
-  exp.lost.length ? message('warn', t('send.export.lost', { tables: exp.lost.join(', ') })) : null,
+  exp.lost.length ? message('warn', [t('send.export.lost', { tables: exp.lost.join(', ') }), ...(exp.lost.some(table => table.includes('_summary_')) ? [t('send.export.lost.summary')] : [])].join(' ')) : null,
   driftNotice(exp),
   newColumnsNotice(exp, newColumnsActions),
   filesPending(exp.id) ? message('info', t('send.files.pending', { n: filesPending(exp.id) })) : null,

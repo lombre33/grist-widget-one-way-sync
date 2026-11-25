@@ -647,6 +647,15 @@ d'un document :
   conversion d'une colonne en Référence ne touche que les colonnes créées par le widget ; une colonne remplie de texte n'est refaite que sur le
   clic d'un propriétaire, qui remplace ses cellules par le lien envoyé (Ctrl+Z défait). Une Liste de références dont la liste de clés a été
   falsifiée ne peut viser que des lignes de la table reçue de cet export (les clés sont résolues dans cette table, 0 ou vide sinon).
+- **Tables de résumé de Grist (0.31)** : une table de résumé s'envoie comme une table ordinaire, c'est un choix de la personne qui envoie. Grist n'y
+  accepte aucune colonne de données (vérifié, 1.7.22) : le widget y ajoute `id_sync` et `MajLe` en colonnes de **formule** (la clé est une empreinte
+  SHA-1 des valeurs du regroupement, `MajLe` lit la clé et les colonnes envoyées puis rend l'heure du recalcul). Ce sont des formules écrites par le
+  widget, jamais reçues d'un autre document : rien de nouveau à lire côté CIBLE, le texte des formules de `Synchro` ne change pas. La colonne `group`
+  (liste des lignes du groupe) ne part jamais. Comme pour une table ordinaire, le webhook lit les lignes sans les règles d'accès : un export en lien
+  public vérifie qu'aucune règle d'autrui ne cache de lignes ou de colonnes de la table résumée **ni de la table que le résumé calcule**
+  (`readTables(tables, schema)`), sans quoi les sommes en diraient trop. Pas d'Échange avec un résumé (refusé par `startReturn` et `saveChosenExport`),
+  donc aucun chemin d'écriture de la CIBLE vers un résumé. **Limite dite** : Grist recalcule toutes les formules au chargement du document, donc chaque
+  ligne d'un résumé envoyé repart une fois à chaque chargement (sans effet chez le destinataire si rien n'a changé : `sameValue`).
 - **Ce que le journal garde, et le bouton « Effacer l'historique » (0.19.1)** : le journal d'une réception garde la dernière version de
   chaque clé (copie de ce qui est dans la destination), l'avant de chaque modification et le numéro des lignes supprimées (`Sync_Avant`), et les
   valeurs de la dernière version d'une clé supprimée à la SOURCE. Décision du porteur (12 novembre) : aucune purge automatique. Un

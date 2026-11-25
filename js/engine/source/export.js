@@ -15,11 +15,14 @@ import { knownColumns } from '../logic/new-columns.js';
 import { exchangeRules } from '../logic/consolidation.js';
 import { STATES } from '../logic/journal.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
+import { filterColumns } from '../logic/filters.js';
+import { summaryActions } from '../logic/summary.js';
 import { receivedDests } from '../logic/received.js';
 import { apply, fetchRows, readSchema, renameWebhook } from '../port.js';
 import { failure } from '../errors.js';
 import { recordEvent, saveExport, syncRows, updateSourceNote } from './synchro.js';
 import { resendTables } from './resend.js';
+import { refuseSummaryExchange } from './summary.js';
 
 // Tables prêtes à partir (id_sync, MajLe…) et leurs colonnes choisies. Une table reçue (relais)
 // garde la clé de son document d'origine : une ligne ajoutée ici à la main reste sans clé, donc
@@ -37,8 +40,14 @@ async function prepareTables(selection, links, { style = false, notes = false, t
   const relays = receivedDests(schema).map(d => d.dest);
   const tables = [];
   for (const { table, columns: picked, filter } of selection) {
-    await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
-    if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
+    // Une table de résumé n'a ni clé écrite ni MajLe déclenchée : deux colonnes de formule (voir summary.js).
+    const summary = schema.summary?.(table);
+    if (summary) {
+      await apply(summaryActions(table, schema.columns(table), summary.by, [...picked, ...filterColumns(filter)]));
+    } else {
+      await apply(prepareSourceActions(table, missingSyncColumns(schema.columns(table))));
+      if (!relays.includes(table)) await apply(fillKeyActions(table, await fetchRows(table), () => crypto.randomUUID()));
+    }
     const columns = exportableColumns(schema.columns(table), { extras: style, doc, notes }).filter(c => picked.includes(c.id));
     const styled = style ? withDoc(pruneRules(columns), doc) : columns;
     const noted = tableNote ? withTableNote(styled, tableNoteOf(schema.table(table), sections)) : styled;
@@ -52,7 +61,7 @@ async function prepareTables(selection, links, { style = false, notes = false, t
 // Export partagé par lien public : rien de ce qu'une règle d'accès cache ne doit s'y ajouter.
 async function refuseHidden(tables) {
   const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-  const hidden = hiddenTables(resources, rules, readTables(tables));
+  const hidden = hiddenTables(resources, rules, readTables(tables, await readSchema()));
   if (hidden.length) throw failure('publicHiddenEdit', { tables: hidden.join(', ') });
 }
 
@@ -79,6 +88,7 @@ async function noteExport(rules, id, name, extra = {}) {
 // `created` = l'export tel que l'écran de ses destinataires l'attend (création).
 export async function saveChosenExport({ exp = null, name, selection, links = false, style = false, notes = false, tableNote = false, layout = false, formulas = false, rules = null, autoCols = false }) {
   const sends = !exp?.echange;
+  if (exp?.echange) await refuseSummaryExchange(selection.map(tb => tb.table));
   const tables = await prepareTables(selection, links, { style: style && sends, notes: notes && sends, tableNote: tableNote && sends, layout: layout && sends, formulas: formulas && sends });
   if (exp?.public) await refuseHidden(tables);
   const id = exp ? exp.id : randomHex(8);

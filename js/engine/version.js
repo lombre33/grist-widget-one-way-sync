@@ -273,7 +273,21 @@
 //         d'une pause d'office porte `why: 'journal'` (un hôte qui ne connaît que 'link' et 'slow' montre son texte général). Port,
 //         tables, codes et texte des formules inchangés. Un hôte qui montrait la carte « Réception supprimée » en montre une
 //         « Journal renommé » (sans bouton : retirer l'avis effacerait le lien) quand `renamedTo` n'est pas vide.
-export const ENGINE_VERSION = '5.1.0';
+// 5.2.0 (25 novembre 2026, issue d'un utilisateur de l'Alpha : « synchronisation de tables calculées (summary tables) » ; l'exclusion venait
+//         de `schemaFrom`, sans raison de sécurité) : une table de résumé de Grist peut être envoyée comme une table ordinaire. Ajouts, rien de
+//         retiré : `schemaFrom` rend `sourceTableIds` (toutes les tables visibles, résumés compris ; `tableIds`, les destinations possibles
+//         d'une CIBLE, ne change pas), `summary(table)` (`{ source, by }` ou null) et, par colonne d'un résumé, `summaryBy` et `summaryGroup`
+//         (la colonne `group`, liste des lignes du groupe, ne part jamais) ; `logic/summary.js` (`summaryActions`, `summaryKeyFormula`,
+//         `summaryMajleFormula`, `summaryTables`) et `source/summary.js` (`refuseSummaryExchange`, erreur `exchangeSummary`) ; `readTables(tables,
+//         schema)` compte la table que résume un résumé (lien public). **Constat** (Grist 1.7.22) : un résumé refuse toute colonne de données
+//         (« cannot add a non-formula column to a summary table »), donc ni la clé `id_sync` (UUID) ni `MajLe` (formule de déclenchement) ne
+//         peuvent y vivre : ce sont deux colonnes de FORMULE (clé = empreinte des valeurs du regroupement, MajLe = heure du recalcul de la
+//         ligne, formule qui lit la clé et les colonnes envoyées), que les formules de `Synchro` lisent comme les autres : **leur texte ne change
+//         pas** (`formulas-golden`). Pas d'Échange avec un résumé (rien à y écrire en retour : `startReturn` et `saveChosenExport` refusent) ; chaque
+//         ligne repart une fois à chaque chargement du document (Grist recalcule alors toutes les formules ; sans effet chez le destinataire). Un
+//         hôte dont le port bâtit son propre schéma sans `sourceTableIds` retombe sur `tableIds` (aucun résumé, comme avant). Port, tables, codes
+//         (`CODE_FORMAT` 2) et texte des formules de `Synchro` inchangés.
+export const ENGINE_VERSION = '5.2.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

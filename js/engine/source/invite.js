@@ -28,6 +28,7 @@ import { hiddenTables } from '../logic/acl.js';
 import { receivedDests } from '../logic/received.js';
 import { createWebhook, deleteWebhook, docIdentity, fetchRows, readSchema, shareInfo, t } from '../port.js';
 import { appVersion } from '../version.js';
+import { refuseSummaryExchange } from './summary.js';
 import { failure } from '../errors.js';
 import { testUrl } from '../form-link.js';
 import { addDeleteColumns, markHub } from '../exchange.js';
@@ -117,7 +118,7 @@ export async function renewInvitation(inv) {
 // fenêtre (le document se recharge alors : voir syncRules).
 export async function enablePublicLink(exp) {
   const [resources, rules] = await Promise.all([fetchRows('_grist_ACLResources'), fetchRows('_grist_ACLRules')]);
-  const hidden = hiddenTables(resources, rules, readTables(exp.tables));
+  const hidden = hiddenTables(resources, rules, readTables(exp.tables, await readSchema()));
   if (hidden.length) throw failure('publicHidden', { tables: hidden.join(', ') });
   await updateSourceNote(note => setExport(note, exp.id, { public: true }));
   await saveExport(exp.id, exp.tables, { isPublic: true });
@@ -129,6 +130,7 @@ export async function enablePublicLink(exp) {
 // l'écran montre avec ensureForm (pages.js) et formWhere ; sans secret tant que linkReturn n'a pas fait
 // le code.
 export async function startReturn(exp, { renforce = false } = {}) {
+  await refuseSummaryExchange(exp.tables.map(tb => tb.table));
   let current = exp;
   if (renforce && !exp.renforce) {
     await updateSourceNote(note => setExport(note, exp.id, { renforce: true }));

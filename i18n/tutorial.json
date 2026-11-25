@@ -67,11 +67,13 @@
     "text": {
       "fr": [
         "Un export a un nom, des tables et leurs colonnes ; on y ajoute ensuite les personnes qui le reçoivent. Envoyer, Nouvel export, cocher les tables.",
-        "Dans les fenêtres du widget, un petit « ? » rond à côté d’une option ouvre son explication. Pour sortir d’une fenêtre : Annuler, la croix en haut à droite ou la touche Échap ; si vous avez changé quelque chose, le widget demande d’enregistrer ou d’abandonner."
+        "Dans les fenêtres du widget, un petit « ? » rond à côté d’une option ouvre son explication. Pour sortir d’une fenêtre : Annuler, la croix en haut à droite ou la touche Échap ; si vous avez changé quelque chose, le widget demande d’enregistrer ou d’abandonner.",
+        "Une table de résumé de Grist (Résumer une table par une ou plusieurs colonnes) se coche comme les autres : la liste la nomme « résumé de … par … ». Chaque ligne est un groupe ; elle arrive chez le destinataire comme une table ordinaire, à jour quand Grist recalcule le résumé. À savoir : si vous changez son regroupement dans Grist, la table change de nom, il faut alors la rajouter à l’export (Modifier) ; chaque ligne est renvoyée une fois à chaque chargement du document (sans effet chez le destinataire) ; elle n’entre pas dans un Échange. La colonne « group » (la liste des lignes du groupe) n’est pas envoyée."
       ],
       "en": [
         "An export has a name, tables and their columns; you then add the people who receive it. Send, New export, tick the tables.",
-        "In the widget’s windows, a small round “?” next to an option opens its explanation. To leave a window: Cancel, the cross at the top right or the Esc key; if you changed something, the widget asks whether to save or discard."
+        "In the widget’s windows, a small round “?” next to an option opens its explanation. To leave a window: Cancel, the cross at the top right or the Esc key; if you changed something, the widget asks whether to save or discard.",
+        "A Grist summary table (Summarize a table by one or more columns) is ticked like any other: the list names it “summary of … by …”. Each row is a group; it reaches the recipient as an ordinary table, up to date when Grist recalculates the summary. Good to know: if you change its grouping in Grist, the table is renamed and must be added to the export again (Edit); every row is sent again each time the document loads (no effect at the recipient); it cannot be part of an Exchange. The “group” column (the list of rows in the group) is not sent."
       ]
     },
     "images": ["02-source-tables"]

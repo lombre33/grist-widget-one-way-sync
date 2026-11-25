@@ -41,7 +41,7 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
   const columnRows = () => [...tables.values()].flatMap(tb => tb.columns);
 
   const records = {
-    _grist_Tables: () => [...tables].map(([tableId, tb]) => ({ id: tb.id, tableId, primaryViewId: 0, summarySourceTable: 0, rawViewSectionRef: tb.rawSection || 0 })),
+    _grist_Tables: () => [...tables].map(([tableId, tb]) => ({ id: tb.id, tableId, primaryViewId: 0, summarySourceTable: tb.summaryOf ? need(tb.summaryOf).id : 0, rawViewSectionRef: tb.rawSection || 0 })),
     _grist_Tables_column: columnRows,
   };
 
@@ -105,7 +105,11 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
         for (const { id, ...info } of args[0]) addColumn(table, id, info);
         return { table_id: tableId };
       }
-      case 'AddColumn': case 'AddVisibleColumn': addColumn(need(tableId), args[0], args[1]); return null;
+      case 'AddColumn': case 'AddVisibleColumn':
+        // Comme Grist 1.7 : une table de résumé n'accepte que des colonnes de formule.
+        if (need(tableId).summaryOf && !args[1].isFormula) throw new Error('[Sandbox] ValueError AddColumn: cannot add a non-formula column to a summary table');
+        addColumn(need(tableId), args[0], args[1]);
+        return null;
       case 'ModifyColumn': {
         const column = need(tableId).columns.find(c => c.colId === args[0]);
         if (!column) throw new Error(`Column not found "${args[0]}"`);
@@ -181,6 +185,19 @@ export function fakeDoc({ docId = 'abcdefghijkl', email = 'test@fake.local', nam
     // Une table de la personne, avec ses lignes (ce que Grist aurait déjà là).
     addTable(tableId, columns, rows = []) {
       run(['AddTable', tableId, columns]);
+      for (const row of rows) addRow(need(tableId), row);
+    },
+    // Une table de résumé de `source`, regroupée par les colonnes `by` (leurs identifiants dans `source`), avec ses colonnes de formule `aggregates`
+    // et sa colonne `group`, comme Grist les crée ; ses lignes sont posées par l'essai (le fake ne calcule rien).
+    addSummary(tableId, source, by, aggregates = [{ id: 'count', type: 'Int' }], rows = []) {
+      const parent = need(source);
+      const grouped = by.map(colId => parent.columns.find(c => c.colId === colId));
+      run(['AddTable', tableId, [
+        ...grouped.map(c => ({ id: c.colId, type: c.type, isFormula: false, summarySourceCol: c.id })),
+        { id: 'group', type: `RefList:${source}`, isFormula: true },
+        ...aggregates.map(a => ({ isFormula: true, ...a })),
+      ]]);
+      need(tableId).summaryOf = source;
       for (const row of rows) addRow(need(tableId), row);
     },
     addRow: (tableId, fields) => addRow(need(tableId), fields),

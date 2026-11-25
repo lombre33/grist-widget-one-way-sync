@@ -10,7 +10,8 @@
 // renforcée (`renforce`), il faut l'avoir comparé.
 import { nowS } from '../engine/logic/common.js';
 import { docUrl, maskKey } from '../engine/logic/codes.js';
-import { docIdentity } from '../grist.js';
+import { summaryTables } from '../engine/logic/summary.js';
+import { docIdentity, readSchema } from '../grist.js';
 import { VERSION } from '../config.js';
 import { ensureForm } from '../engine/pages.js';
 import { formWhere, linkFigures } from '../form-link.js';
@@ -80,7 +81,7 @@ async function showOptions(ctx) {
   ctx.wizard.show(STEP.options, [
     el('p', { class: 'muted small' }, t('send.person.tables', { tables: exp.tables.map(tb => tb.table).join(', ') })),
     el('p', { class: 'field-title', id: 'gristsync-mode-title' }, t('send.mode')),
-    modeChoices(exp, { more, strongBox, parts }),
+    modeChoices(exp, { more, strongBox, parts, summary: summaryTables(await readSchema(), exp.tables.map(tb => tb.table)) }),
     strongPart, docName.node, parts.public, parts.echange, report, stepHelp(['s-options', 'public']), roleGuide({ you: 'source', current: 0 }),
   ], [cancelButton(), { label: t('send.invite'), kind: 'btn-primary', onClick: () => run(null, report, async () => {
     await rememberDocName(docName.value());
@@ -90,18 +91,19 @@ async function showOptions(ctx) {
 
 // Les trois modes, le parcours principal (un seul sens) d'abord. Chacun a son nom, et son explication derrière un « ? » (avec la
 // raison quand il est grisé) ; choisir un mode montre sa partie (`parts`) et grise la sécurité renforcée pour le lien public.
-function modeChoices(exp, { more, strongBox, parts }) {
+function modeChoices(exp, { more, strongBox, parts, summary }) {
   const radio = (value, label, checked, disabled, help) => withHelp(el('label', { class: 'check' },
     el('input', { type: 'radio', name: 'gristsync-mode', value, checked, disabled, onchange: () => {
       strongBox.disabled = value === 'public';
       for (const [key, part] of Object.entries(parts)) part.classList.toggle('hidden', value !== key);
     } }), label), help, label);
-  const exchangeOk = more || (!exp.recipients.length && !exp.invitations.length && !exp.public);
+  const exchangeOk = !summary.length && (more || (!exp.recipients.length && !exp.invitations.length && !exp.public));
   return el('div', { class: 'form', role: 'radiogroup', 'aria-labelledby': 'gristsync-mode-title' },
     radio('reponse', t('send.mode.reply'), !more, more, t('send.mode.reply.help')),
     el('p', { class: 'muted small' }, t('send.mode.others')),
     radio('echange', more ? t('send.mode.echange.more') : t('send.mode.echange'), more, !exchangeOk,
-      t(more ? 'send.mode.echange.more.help' : exchangeOk ? 'send.mode.echange.what' : 'send.mode.echange.off')),
+      summary.length ? t('send.mode.echange.summary', { tables: summary.join(', ') })
+        : t(more ? 'send.mode.echange.more.help' : exchangeOk ? 'send.mode.echange.what' : 'send.mode.echange.off')),
     radio('public', exp.public ? t('send.mode.publicDone') : t('send.mode.public'), false, exp.public || more || exp.renforce,
       t(exp.public ? 'send.mode.publicDone.help' : exp.renforce ? 'send.mode.publicStrong' : more ? 'send.mode.public.off' : 'send.mode.public.help')));
 }

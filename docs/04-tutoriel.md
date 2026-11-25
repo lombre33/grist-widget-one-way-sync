@@ -89,6 +89,21 @@ quelque chose, le widget demande s'il faut **enregistrer** ou **abandonner** ces
 
 ![Choix des tables](images/02-source-tables.png)
 
+**Table de résumé de Grist** (Résumer une table par une ou plusieurs colonnes) : elle se coche comme
+les autres, la liste la nomme « résumé de … par … ». Chaque ligne est un groupe ; elle arrive chez
+le destinataire comme une table ordinaire, à jour quand Grist recalcule le résumé. À savoir :
+
+- Grist n'accepte aucune colonne de données dans un résumé : la clé de chaque ligne (une empreinte
+  des valeurs du regroupement) et sa date de modification sont deux colonnes de **formule** que le
+  widget ajoute (`id_sync`, `MajLe`). Ne les modifiez pas.
+- Si vous changez le regroupement dans Grist, la table change de nom (`Fiches_summary_Ville` devient
+  `Fiches_summary_Service_Ville`) : la carte de l'export signale la table introuvable, **Modifier**
+  et cocher la nouvelle.
+- Chaque ligne est renvoyée une fois à chaque chargement du document (Grist recalcule alors toutes
+  les formules) ; chez le destinataire, rien ne change si rien n'a changé.
+- La colonne `group` (la liste des lignes du groupe) n'est pas envoyée.
+- Pas d'**Échange** avec une table de résumé : le widget refuse (rien ne peut s'y recopier en retour).
+
 ### 2. Choisir le contenu
 
 L'étape **Contenu** est rangée par question. **Les données** : une fiche par table, où l'on coche les colonnes qui

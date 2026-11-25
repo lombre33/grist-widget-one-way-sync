@@ -16,9 +16,10 @@ import { formulasOffered, sourceDefault, sourceFormula, withFormulas } from './c
 // lit pas la SOURCE, ne saurait jamais que plus rien n'arrivera.
 export const endNotice = exportId => [{ [EXPORT_COL]: exportId, [TYPE_COL]: KIND.end }];
 
-// Colonnes de données et de formules d'une table SOURCE : hors colonnes de la synchro et colonnes internes de Grist.
+// Colonnes de données et de formules d'une table SOURCE : hors colonnes de la synchro et colonnes internes de Grist, dont la colonne
+// `group` d'une table de résumé (la liste de ses lignes résumées : des numéros de ligne que la CIBLE ne peut pas lire, voir summary.js).
 const INTERNAL = new Set(['manualSort', KEY_COL, ORDER_COL, RECALC_COL, DELETE_COL]);
-const dataColumns = cols => cols.filter(c => !INTERNAL.has(c.colId) && !c.colId.startsWith('gristHelper_'));
+const dataColumns = cols => cols.filter(c => !INTERNAL.has(c.colId) && !c.colId.startsWith('gristHelper_') && !c.summaryGroup);
 
 // Type sous lequel une colonne part, ou null si elle ne part pas. Une Référence part en texte, un rang
 // (PositionNumber) en nombre, un identifiant de ligne (Id) en entier. Un Blob ne part pas (décision d'Antoine,
@@ -113,9 +114,10 @@ export function pruneRules(columns) {
 export const withDoc = (columns, doc) => columns.map(({ doc: old, ...c }, i) => (i === 0 && doc && c.fmt ? { ...c, doc } : c));
 
 // Tables que lisent les formules de Synchro pour les tables d'un export (`tables`, voir
-// exportTables) : les siennes, et celles d'où vient le texte affiché de ses colonnes Référence.
-export const readTables = tables => [...new Set(tables.flatMap(({ table, columns }) => [table,
-  ...columns.map(c => (/^Ref(?:List)?:(\w+)$/.exec(c.source || '') || [])[1]).filter(Boolean)]))];
+// exportTables) : les siennes, celles d'où vient le texte affiché de ses colonnes Référence, et, avec le `schema`, la table que résume une
+// table de résumé (ses sommes viennent de toutes ses lignes : une règle d'accès qui en cache aussi les cache).
+export const readTables = (tables, schema = null) => [...new Set(tables.flatMap(({ table, columns }) => [table, schema?.summary?.(table)?.source,
+  ...columns.map(c => (/^Ref(?:List)?:(\w+)$/.exec(c.source || '') || [])[1])]).filter(Boolean))];
 
 // Colonne Pièces jointes (envoyée ou reçue).
 export const isFileColumn = c => c.type === 'Attachments';

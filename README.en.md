@@ -11,7 +11,7 @@ No server to host, no dependencies, and only the columns you pick leave the docu
 
 <img src="docs/images/14-cible-historique.png" width="820" alt="The widget in the receiving document: the “Annuaire” export is up to date and lists the rows added, changed and deleted since the last visit">
 
-<sub>Version 0.30.8 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
+<sub>Version 0.31.0 · Grist 1.7.11 or later · GPL-3.0 license · Grist Factory</sub>
 
 </div>
 
@@ -108,6 +108,11 @@ own picture help. The same walkthrough in French: [`docs/04-tutoriel.md`](docs/0
   column it shows (the default), the whole table, or the columns you tick; on the receiving side the column becomes a real Reference (or Reference list) to the
   received table, showing the same column. A column that already holds text there stays text until
   an owner clicks “Rebuild the references”.
+- **Grist summary tables**: a “Summarize” table (one row per group) is ticked like any other and
+  reaches the recipient as an ordinary table, up to date when Grist recalculates the summary. Grist
+  accepts no data column in a summary table: the key and the modification date are two formula
+  columns the widget adds. Changing the grouping in Grist renames the table (add it to the export
+  again); no Exchange with a summary table; every row is sent again each time the document loads.
 - **Column elements**: headers, colors, currency and simple conditional formatting rules
   (“Column formatting” box), column and table descriptions (separate boxes) can travel
   with the export; each box, unticked by default, says how many columns are concerned (Content step,

@@ -4,6 +4,7 @@
 // sont dans l'écran (js/source/keys.js).
 import { KEY_COL, ORDER_COL, chunk, nowS } from '../logic/common.js';
 import { fillKeyActions, missingSyncColumns, prepareSourceActions } from '../logic/formulas.js';
+import { summaryActions } from '../logic/summary.js';
 import { keyCountSql, keyCounts, keyProblems, repairActions } from '../logic/keys.js';
 import { apply, fetchRows, querySql, readSchema, selectRows } from '../port.js';
 
@@ -41,7 +42,16 @@ const keyRows = async table => (await selectRows(table, [KEY_COL])) || fetchRows
 // manquait, et repartent), puis donne une clé neuve aux lignes sans clé et aux doubles (la plus ancienne garde la sienne), et les
 // lignes touchées repartent comme après une modification. Rend le nombre de lignes renvoyées.
 export async function repairKeys(table) {
-  const missing = missingSyncColumns((await readSchema()).columns(table));
+  const schema = await readSchema();
+  const summary = schema.summary?.(table);
+  if (summary) {
+    // Table de résumé : rien à écrire dans ses lignes, ses colonnes sont des formules. On les remet d'accord ; la formule de MajLe lit la
+    // clé, donc des clés qui changent font repartir toutes les lignes (voir summary.js).
+    await apply(summaryActions(table, schema.columns(table), summary.by, []));
+    checked.delete(table);
+    return (await fetchRows(table)).length;
+  }
+  const missing = missingSyncColumns(schema.columns(table));
   if (missing.length) {
     await apply(prepareSourceActions(table, missing));
     checked.delete(table);
