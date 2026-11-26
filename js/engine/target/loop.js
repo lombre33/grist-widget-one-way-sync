@@ -15,7 +15,7 @@ import {
 } from '../logic/consolidation.js';
 import { resendValue } from '../logic/resend.js';
 import { changeVerdict, nextCompare } from '../logic/rhythm.js';
-import { nextTally, tallyDue, tallyGap } from '../logic/tally.js';
+import { nextLate, nextTally, tallyDue, tallyGap } from '../logic/tally.js';
 import { citedFiles, fillActions, resolveRows, short, waitingVersions } from '../logic/files.js';
 import { decideLinks, fillLinks, linkActions, planLinks, resolveLinks, targetRows, textFill, unlinkActions } from '../logic/links.js';
 import { backfillActions, acknowledged, structureChanges } from '../logic/structure.js';
@@ -260,22 +260,39 @@ async function unpack(journal, { key, seal, note: known }) {
   rows = checked.rows;
   if (checked.forged.length) await apply(chunk(checked.forged).map(ids => ['BulkRemoveRecord', journal, ids]));
   if (!plan.actions.length && !checked.forged.length) return { note, rows, left: 0 };
-  return { note: await noteArrivals(journal, note, { plan, forged: checked.forged.length, flood }), rows, left: plan.left };
+  return { note: await noteArrivals(journal, note, { plan, forged: checked.forged.length, flood, rows }), rows, left: plan.left };
 }
 
 // Ce que le dépliage note dans le journal (voir unpack) ; rend la note à jour.
-async function noteArrivals(journal, note, { plan, forged, flood }) {
+async function noteArrivals(journal, note, { plan, forged, flood, rows }) {
   const rejected = plan.rejected + forged;
   const gaps = nextGaps(note, plan);
   if (rejected || flood) gaps.suspect = nextSuspect(note.suspect, rejected, flood, nowS());
   const ended = endedAt(note, plan, nowS());
   // Nombre de clés annoncé par la SOURCE pour chaque table (voir tally.js) ; pas de clé 'tally' sans annonce.
-  const announced = nextTally(note.tally, plan.tally, note.tables.map(tb => tb.table));
+  const announced = withLate(nextTally(note.tally, plan.tally, note.tables.map(tb => tb.table)), note.tally, plan.recent, rows);
   const tally = Object.keys(announced).length ? announced : undefined;
   if (!gaps.suspect && ended === note.ended && JSON.stringify(gaps) === JSON.stringify({ missing: note.missing || {}, big: note.big || {} })
     && JSON.stringify(tally) === JSON.stringify(note.tally)) return note;
   await updateJournalNote(journal, n => ({ ...n, ...gaps, ended, tally }));
   return { ...note, ...gaps, ended, tally };
+}
+
+// Les lignes en retard (voir tally.js) de chaque table annoncée : celles que la note garde déjà (`was`) et les dernières
+// modifications des lots arrivés (`recent`) que les versions du journal (`rows`) n'ont pas rattrapées. Rien n'est lu
+// tant que ni la note ni les lots n'en parlent : un dépliage ordinaire ne coûte rien de plus.
+function withLate(announced, was = {}, recent = {}, rows = []) {
+  const tables = Object.keys(announced).filter(table => (was[table] || {}).late || (recent[table] || []).length);
+  if (!tables.length) return announced;
+  const groups = rowsByTable(rows);
+  const next = { ...announced };
+  for (const table of tables) {
+    const late = nextLate((was[table] || {}).late, recent[table] || [], groups.get(table) || []);
+    const entry = { ...next[table] };
+    delete entry.late;
+    next[table] = Object.keys(late).length ? { ...entry, late } : entry;
+  }
+  return next;
 }
 
 // Colonnes d'une table reçue, avant sa recopie : celles qui arrivent (voir receivedColumns),
@@ -593,7 +610,7 @@ async function copyTables(ctx, note, owner) {
   return note.tables.map(noted => done.get(noted.table));
 }
 
-// Manques signalés par table (voir tally.js) : { table: { expected, got, gap } }. Les comptes se lisent
+// Manques signalés par table (voir tally.js) : { table: { expected, got, gap } } ou { table: { late, keys } }. Les comptes se lisent
 // dans les versions du journal ; un manque n'est dit qu'après avoir duré (`tallySeen`, en mémoire de
 // la page). Rien quand des envois bruts attendent encore leur dépliage, en Échange, par lien public,
 // en archive, ni pour une table dont l'écart est déjà expliqué (lignes à venir, trop grosses).

@@ -3561,6 +3561,7 @@ try {
   // SOURCE ; la CIBLE dit le manque s'il dure (20 secondes ici, 10 minutes en vrai).
   const syncNow = () => widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
   const tallyText = /Contacts\s:\sla SOURCE annonce [\d\s]+ lignes, mais seules [\d\s]+ sont arrivées ici/;
+  const lateText = /Contacts\s:\s1\sligne a été modifiée dans la SOURCE, mais cette modification n.est pas arrivée ici/;
   const hookList = async () => (await api('GET', `/docs/${source.doc}/webhooks`)).webhooks;
   const setHooks = async enabled => { for (const h of await hookList()) await api('PATCH', `/docs/${source.doc}/webhooks/${h.id}`, { enabled }); };
   // Rien de perdu depuis le début du parcours : pas de fausse alerte, même après le délai.
@@ -3569,6 +3570,7 @@ try {
   await syncNow();
   await new Promise(r => setTimeout(r, 2000));
   assert.equal(await widget().getByText(tallyText).count(), 0, 'aucun manque signalé quand rien n\'est perdu');
+  assert.equal(await widget().getByText(lateText).count(), 0, 'aucune modification dite perdue quand rien n\'est perdu (modifications, renvois et Ctrl+Z du parcours compris)');
   await setHooks(false);
   await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Perdue' }]]);
   await new Promise(r => setTimeout(r, 7000)); // hors de la fenêtre d'un lot : 'Visible' part seul
@@ -3587,10 +3589,32 @@ try {
   await syncNow();
   await waitFor(async () => !(await widget().getByText(tallyText).count()), 'manque effacé une fois la ligne reçue', 30000);
   await applyActions(source.doc, [['UpdateRecord', 'Synchro', (await lotRow()).id, { Synchro_Renvoi: '' }]]);
-  const extra = (await records(source.doc, 'Contacts')).filter(r => ['Perdue', 'Visible'].includes(r.Nom)).map(r => r.id);
-  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', extra]]);
-  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => ['Perdue', 'Visible'].includes(r.Nom)), 'lignes de l\'essai effacées aussi chez le destinataire', 120000);
   step('CIBLE : un envoi perdu est signalé comme un manque après le délai (aucune fausse alerte avant), puis effacé quand la ligne est renvoyée');
+
+  // --- Modification perdue : le compte des lignes est bon (la ligne existe des deux côtés), mais la modification faite pendant que le webhook
+  // était coupé n'est jamais partie. Le lot suivant annonce les dernières modifications de la SOURCE : la ligne d'ici est plus ancienne.
+  const watched = (await records(source.doc, 'Contacts')).find(r => r.Nom === 'Visible');
+  await setHooks(false);
+  await applyActions(source.doc, [['UpdateRecord', 'Contacts', watched.id, { Nom: 'Visible modifiée' }]]);
+  await new Promise(r => setTimeout(r, 7000));
+  await setHooks(true);
+  await applyActions(source.doc, [['AddRecord', 'Contacts', null, { Nom: 'Suivante' }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Suivante'), 'ligne ajoutée après la reprise reçue', 60000);
+  assert.ok(!(await records(target.doc, 'Contacts')).some(r => r.Nom === 'Visible modifiée'), 'la modification faite pendant la coupure n\'est jamais partie');
+  await syncNow();
+  await new Promise(r => setTimeout(r, 22000));
+  await syncNow();
+  await widget().getByText(lateText).waitFor({ timeout: 20000 });
+  assert.equal(await widget().getByText(tallyText).count(), 0, 'le compte des lignes est bon : seul le retard est dit');
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', (await lotRow()).id, { Synchro_Renvoi: `ab78:0:${watched.id}` }]]);
+  await waitFor(async () => (await records(target.doc, 'Contacts')).some(r => r.Nom === 'Visible modifiée'), 'modification perdue renvoyée et reçue', 60000);
+  await syncNow();
+  await waitFor(async () => !(await widget().getByText(lateText).count()), 'retard effacé une fois la modification reçue', 30000);
+  await applyActions(source.doc, [['UpdateRecord', 'Synchro', (await lotRow()).id, { Synchro_Renvoi: '' }]]);
+  const extra = (await records(source.doc, 'Contacts')).filter(r => ['Perdue', 'Visible', 'Visible modifiée', 'Suivante'].includes(r.Nom)).map(r => r.id);
+  await applyActions(source.doc, [['BulkRemoveRecord', 'Contacts', extra]]);
+  await waitFor(async () => !(await records(target.doc, 'Contacts')).some(r => ['Perdue', 'Visible', 'Visible modifiée', 'Suivante'].includes(r.Nom)), 'lignes de l\'essai effacées aussi chez le destinataire', 120000);
+  step('CIBLE : une modification perdue (webhook coupé puis rallumé) est dite alors que le compte des lignes est bon, puis effacée quand la ligne est renvoyée');
 
   // --- File bloquée par un envoi trop gros : la CIBLE refuse un moment (colonne du journal
   // renommée), cinq gros lots attendent, Grist les regroupe en un envoi de plus de 1 Mo (413). Le

@@ -86,7 +86,9 @@ const journalMode = (note, t) => `${t(`diag.mode.${JOURNAL_MODES[note.mode] || '
 const reserveFact = (note, t) => t(note.reserve ? (note.reserved ? 'diag.reserve.set' : 'diag.reserve.waiting') : 'diag.no');
 // Une ligne par table d'une note : `{ table: valeur }` devient « table: … ».
 const perTable = (byTable, say) => Object.entries(byTable || {}).map(([table, value]) => say(table, value));
-const gapFacts = (results, t) => results.flatMap(r => perTable(r && r.tally, (table, g) => t('diag.gap', { table, got: String(g.got), expected: String(g.expected) })));
+const gapFacts = (results, t) => results.flatMap(r => perTable(r && r.tally, (table, g) => (g.late
+  ? t('diag.late', { table, late: String(g.late) })
+  : t('diag.gap', { table, got: String(g.got), expected: String(g.expected) }))));
 const suspectFact = (suspect, t) => (suspect ? t(suspect.flood ? 'diag.suspect.flood' : 'diag.suspect', { n: String(suspect.n || 0), when: when((suspect.at || 0) * 1000) }) : '');
 const errorFacts = (results, journal) => results.filter(r => r && r.error).map(r => `${r.table || journal}: ${clip(r.text || r.error)}`);
 

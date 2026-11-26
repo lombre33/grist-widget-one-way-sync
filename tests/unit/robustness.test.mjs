@@ -11,7 +11,7 @@ import { planConsolidation } from '../../js/engine/logic/consolidation.js';
 import { expandRows, parseList, parseLot, planPurge, planUnpack, recentChanges, sentColumns } from '../../js/engine/logic/journal.js';
 import { readMark } from '../../js/engine/logic/lost.js';
 import { addEvent, eventsOf, observeRows, rowsOf } from '../../js/engine/logic/notes.js';
-import { liveKeys, tallyGap } from '../../js/engine/logic/tally.js';
+import { liveKeys, nextLate, tallyGap } from '../../js/engine/logic/tally.js';
 import { docFormat, docFormatOf, formatAction, formatGap } from '../../js/engine/logic/docformat.js';
 import { columnOptions, ruleStyles, sentRules } from '../../js/engine/logic/options.js';
 import { normalizeRule, parseRule, printRule } from '../../js/engine/logic/rules.js';
@@ -58,7 +58,7 @@ function mustNotThrow(name, run) {
   }
 }
 
-const LOT = { lignes: [['a', 10, false, { Nom: 'x' }], ['b', 11, true, {}]], total: 2, tropGros: ['c'], restant: 5, bilan: { n: 3, t: 100 } };
+const LOT = { lignes: [['a', 10, false, { Nom: 'x' }], ['b', 11, true, {}]], total: 2, tropGros: ['c'], restant: 5, bilan: { n: 3, t: 100, r: [['a', 10], ['b', 11]] } };
 const LIST = { seaux: { 3: ['a', 'b'] }, t: 5, liste: { marque: 'm', n: 1, t: 5, cles: ['a'], fin: false } };
 const RAW = { id: 1, Synchro_Type: 'lot', Synchro_Export: EXPORT, Synchro_Table: 'Contacts', Synchro_Lot: JSON.stringify(LOT), Synchro_Colonnes: JSON.stringify(COLUMNS), Synchro_Ids: JSON.stringify(LIST), id_sync: '', MajLe: 5 };
 const NOTE = { exports: [{ id: ID, name: 'x', tables: [] }], invitations: [], pauses: [], historique: { [ID]: [{ at: 5, kind: 'join', who: 'x', n: 1 }] }, lignes: { [ID]: { at: 5, n: { T: 20 } } }, fichiers: {} };
@@ -85,6 +85,8 @@ test('lot, liste, lignes du journal et recopie : jamais d\'exception sur des don
     mustNotThrow('sentColumns', () => sentColumns(rows));
     mustNotThrow('liveKeys', () => liveKeys(rows.map(row => ({ row }))));
     mustNotThrow('tallyGap', () => tallyGap(spoil({ n: 3, t: 5 }), rows.map(row => ({ row }))));
+    mustNotThrow('tallyGap en retard', () => tallyGap(spoil({ n: 0, t: 5, late: { a: 12, b: 9 } }), rows));
+    mustNotThrow('nextLate', () => nextLate(spoil({ a: 12 }), [['b', 9], ['c', 3]], rows));
   }
 });
 

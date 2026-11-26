@@ -449,6 +449,20 @@ widget et clique sur **Tout renvoyer**. Pas d'alerte pendant un envoi en route, 
 lien public ; un surplus n'en est pas une. Le manque n'est vu qu'à l'arrivée d'un lot suivant : si
 plus rien n'est modifié dans la SOURCE, la CIBLE ne peut pas le deviner.
 
+Le compte des lignes ne voit pas une **modification perdue** : si quelqu'un coupe le webhook à la
+main dans les réglages de Grist, modifie une ligne, puis le rallume, Grist ne met rien en file
+pendant la coupure, la ligne reste à son ancienne valeur dans la CIBLE et le compte est bon. Chaque
+lot annonce donc aussi les douze dernières lignes modifiées de la SOURCE (le début de leur clé et
+l'heure, jamais une valeur). Quand une ligne de la CIBLE a une version plus ancienne que celle
+annoncée, et que rien n'a changé depuis 10 minutes, la carte dit « 1 ligne a été modifiée dans la
+SOURCE, mais cette modification n'est pas arrivée ici » ; **Tout renvoyer** (SOURCE) la remet.
+Même règle que pour le compte : pas d'alerte en Échange, par lien public ni en archive. Limites :
+la CIBLE doit voir un lot qui annonce la modification (une modification perdue n'est vue qu'à
+l'arrivée du lot suivant) ; au-delà de douze modifications faites avant l'arrivée de ce lot, les
+plus anciennes ne sont plus annoncées ; une annulation (Ctrl+Z) perdue n'est pas vue. **Pour
+suspendre l'envoi, utilisez « Mettre en pause » du widget, pas le bouton de Grist** : le widget
+note l'heure de la pause et renvoie à la reprise.
+
 Une valeur qui change à cause d'une autre table (le nom d'une ville renommée, affiché par une
 Référence, ou une formule) repart seule, sans toucher la ligne.
 
@@ -776,6 +790,7 @@ document en lecture seule) présente les nouveautés, puis, sur un second écran
 | Tous les envois du document SOURCE sont en retard | Un envoi en échec bloque la file | **Débloquer la file** (un envoi trop gros est débloqué seul, page du widget SOURCE ouverte) |
 | Les lignes déjà présentes ne sont pas arrivées | Le branchement n'envoie que les changements | **Tout renvoyer** |
 | La CIBLE dit « la SOURCE annonce N lignes, mais seules M sont arrivées » | Un envoi s'est perdu (Grist redémarré, file vidée), ou des lignes de la SOURCE ont la même clé | **Tout renvoyer** depuis la SOURCE ; si l'écart reste, chercher les clés en double (carte de l'export) |
+| La CIBLE dit « N lignes ont été modifiées dans la SOURCE, mais ces modifications ne sont pas arrivées » | Un webhook coupé à la main dans Grist puis rallumé (rien n'est mis en file pendant la coupure), ou un envoi perdu : la ligne existe ici mais garde son ancienne valeur | **Tout renvoyer** depuis la SOURCE ; pour suspendre un envoi, **Mettre en pause** plutôt que le bouton de Grist |
 | La CIBLE signale des lignes non arrivées | Changement trop gros pour un seul envoi, ou envoi par tranches interrompu (page du widget SOURCE fermée) | Ouvrir la page du widget dans la SOURCE (il envoie le reste seul), sinon **Tout renvoyer** |
 | Des lignes manquent dans la CIBLE alors que la SOURCE dit avoir envoyé | Rien n'est arrivé, ou ce qui est arrivé attend d'être recopié (page fermée, cachée, ou un autre onglet du même navigateur qui avance seul) | Sur la carte de la réception : **Dernier envoi arrivé** et **envois arrivés pas encore recopiés** ; **Copier l'état pour la SOURCE** donne à la personne qui envoie de quoi comprendre (ni code, ni lien, ni valeur de vos tables) |
 | La carte de l'export signale une table introuvable ou des colonnes changées | Table ou colonne renommée, supprimée ou changée de type dans la SOURCE | Lui rendre son nom, ou **Modifier** l'export et cocher de nouveau les bonnes colonnes |

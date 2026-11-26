@@ -6,8 +6,8 @@
 // envoie. Une ligne brute qui ne peut pas venir du webhook de cet export est tout de même effacée
 // sans effet et comptée, et rien de ce qui est lu ne peut servir de nom propre aux objets JavaScript.
 import {
-  APPLIED_COL, BEFORE_COL, BUCKETS, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KIND, LIST_COL, LIST_PREFIX, LOT_COL, ORDER_COL, RECEIVED_COL, RESEND_COL,
-  SCHEMA_COL, STATE_COL, TABLE_COL, TYPE_COL, chunk, groupBy, isBlank, isSafeId, isTrue, isUserTable, parseJson,
+  APPLIED_COL, BEFORE_COL, BUCKETS, DATA_COL, DELETE_COL, EXPORT_COL, KEY_COL, KEY_PREFIX, KIND, LIST_COL, LIST_PREFIX, LOT_COL, ORDER_COL, RECEIVED_COL,
+  RECENT_MAX, RESEND_COL, SCHEMA_COL, STATE_COL, TABLE_COL, TYPE_COL, chunk, groupBy, isBlank, isSafeId, isTrue, isUserTable, parseJson,
 } from './common.js';
 import { exportSchema, validColumns } from './codes.js';
 
@@ -54,12 +54,13 @@ function listBuckets(list) {
   return seaux.length && typeof list.t === 'number' ? { t: list.t, keys: new Map(seaux.map(([b, keys]) => [Number(b), new Set(keyStrings(keys))])) } : null;
 }
 
-// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, rest?, tally?, tooBig? } ; null s'il est
+// Lot reçu : { lines: [{ key, order, deleted, data }], total, big, rest?, tally?, recent?, tooBig? } ; null s'il est
 // illisible. `tooBig` : instantané public trop gros, laissé vide. `rest` : combien de lignes de la
 // table la SOURCE annonce encore à venir après ce lot de renvoi (`restant`), absent si elle ne
 // l'annonce pas (SOURCE d'avant la 0.12.4, lot ordinaire). `tally` : { n, t } le nombre de clés que la
 // SOURCE annonce avoir pour la table, et l'heure de leur dernier changement (voir tally.js), absent si
-// l'annonce manque ou est illisible. Une ligne sans clé, sans bloc de colonnes, ou dont
+// l'annonce manque ou est illisible. `recent` : [[début de clé, heure]] les dernières modifications que le
+// bilan annonce (les entrées illisibles sont écartées), absent s'il n'y en a pas. Une ligne sans clé, sans bloc de colonnes, ou dont
 // l'heure n'est ni vide ni un nombre, est écartée.
 const validLine = l => Array.isArray(l) && isKey(l[0]) && (l[1] === null || l[1] === undefined || typeof l[1] === 'number')
   && l[3] !== null && typeof l[3] === 'object' && !Array.isArray(l[3]);
@@ -71,8 +72,16 @@ export function parseLot(text) {
   const rest = Number.isInteger(lot.restant) && lot.restant >= 0 ? Math.min(lot.restant, MAX_REST) : null;
   const announced = lot.bilan;
   const tally = announced && Number.isInteger(announced.n) && announced.n >= 0 && Number.isFinite(announced.t) ? { n: announced.n, t: announced.t } : null;
-  return { lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(tally ? { tally } : {}), ...(lot.trop === true ? { tooBig: true } : {}) };
+  const recent = tally ? recentEntries(announced.r) : [];
+  return {
+    lines, total: Number(lot.total) || lines.length, big, ...(rest === null ? {} : { rest }), ...(tally ? { tally } : {}), ...(recent.length ? { recent } : {}),
+    ...(lot.trop === true ? { tooBig: true } : {}),
+  };
 }
+
+// Dernières modifications annoncées par un bilan : au plus RECENT_MAX entrées [début de clé, heure], les autres sont écartées.
+const recentEntries = list => (Array.isArray(list) ? list : []).filter(e => Array.isArray(e) && typeof e[0] === 'string' && e[0] && e[0].length <= 4 * KEY_PREFIX && Number.isFinite(e[1]))
+  .slice(0, RECENT_MAX).map(([prefix, time]) => [prefix, time]);
 
 // ---------------------------------------------------------------------------------------------
 // Dépliage
@@ -148,7 +157,7 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
   const all = journalRows.filter(r => isRaw(r) && !(exportId && r[TYPE_COL] === KIND.part && r[EXPORT_COL] === exportId)).sort((a, b) => a.id - b.id);
   const raw = all.slice(0, max);
   const added = [];
-  const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set(), tally: new Map() };
+  const gaps = { missing: new Map(), big: new Map(), arrived: new Map(), resent: new Set(), tally: new Map(), recent: new Map() };
   let rejected = 0;
   let ended;
   const limit = now + FUTURE_S;
@@ -173,7 +182,8 @@ export function planUnpack(journalRows, journalTable, { exportId = null, max = I
   const plain = map => Object.fromEntries(map);
   return {
     added, removed, actions: unpackActions(journalTable, added, removed),
-    missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], tally: plain(gaps.tally), rejected, left: all.length - raw.length,
+    missing: plain(gaps.missing), big: plain(gaps.big), arrived: plain(gaps.arrived), resent: [...gaps.resent], tally: plain(gaps.tally),
+    recent: Object.fromEntries([...gaps.recent].map(([table, byPrefix]) => [table, [...byPrefix]])), rejected, left: all.length - raw.length,
     ...(ended === undefined ? {} : { ended }),
   };
 }
@@ -198,6 +208,12 @@ function noteGaps(gaps, table, lot, resent) {
   add(gaps.arrived, lot.lines.map(l => l.key));
   const was = gaps.tally.get(table);
   if (lot.tally && (!was || lot.tally.t >= was.t)) gaps.tally.set(table, lot.tally);
+  // Les dernières modifications de tous les lots arrivés ensemble comptent, la plus récente de chaque ligne.
+  if (lot.recent) {
+    const byPrefix = gaps.recent.get(table) || new Map();
+    for (const [prefix, time] of lot.recent) byPrefix.set(prefix, Math.max(byPrefix.has(prefix) ? byPrefix.get(prefix) : -Infinity, time));
+    gaps.recent.set(table, byPrefix);
+  }
   if (resent) {
     gaps.resent.add(table);
     gaps.missing.set(table, lot.rest ?? 0);

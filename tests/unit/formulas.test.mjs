@@ -39,6 +39,13 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /if capped and rest is not None: lot\["restant"\] = rest/, 'seul un lot ordinaire annonce le reste');
   assert.match(lot, /if capped and not swap\.id:\n  tr = Synchro\.lookupOne\(Synchro_Export=\$Synchro_Export, Synchro_Table=\$Synchro_Table, Synchro_Type="suivi"\)\n  head = str\(tr\.Synchro_Ids or ""\)\.split\(":"\)\[0\]/, 'bilan : nombre de clés lu dans la ligne suivi');
   assert.match(lot, /lot\["bilan"\] = \{"n": int\(head\), "t": int\(st\["t"\]\)\}/, 'annonce : nombre de clés et heure de leur dernier changement, pas en Échange');
+  // Les dernières modifications : lues sur les lignes recalculées le plus récemment (une seule lecture de RecalculLe pour toutes les lignes),
+  // MajLe seulement sur ces lignes (la lire sur toutes coûtait plus de 100 ms par écriture à 10 000 lignes), début de clé et heure en secondes.
+  assert.match(lot, /stamped = \[\(getattr\(r, "RecalculLe", None\) or 0, r\) for r in src\.all\]\n\s+hit = \[r for x, r in stamped if x > c or r\.id in again\]/, 'la fenêtre et les dernières modifications partagent une lecture');
+  assert.match(lot, /for x, r in heapq\.nlargest\(24, stamped, key=lambda p: p\[0\]\):/, 'les 24 dernières lignes recalculées');
+  assert.match(lot, /last\.append\(\[str\(r\.id_sync\)\[:10\], int\(v\(r\.MajLe\)\)\]\)/, 'début de la clé et heure de MajLe en secondes');
+  assert.match(lot, /if last: lot\["bilan"\]\["r"\] = last\[:12\]/, 'douze annonces au plus');
+  assert.doesNotMatch(lot.slice(lot.indexOf('stamped')).replace(/for x, r in heapq.*\n/, ''), /for r in src\.all:\n\s+.*MajLe/, 'MajLe n\'est jamais lue sur toutes les lignes');
   // Variables en minuscules : une table nommée T ou D (majuscule, comme toute table Grist) ne
   // les masque pas.
   assert.doesNotMatch(lot, /\b[A-Z] = /);
@@ -50,7 +57,7 @@ test('table Synchro : ses colonnes, et des formules qui nomment les tables des e
   assert.match(lot, /if capped and n > max\(budget, room\):\n    big\.append\(r\.id_sync\)\n    continue/, 'une ligne plus grosse qu\'un envoi est signalée');
   assert.match(lot, /if capped and out and size \+ n > budget: break/, 'la première ligne part seule, même au-delà du plafond');
   assert.match(lot, /  if not capped and size > 2000000: return json\.dumps\(\{"lignes": \[\], "total": len\(rows\), "trop": True\}\)/, 'instantané public plafonné');
-  assert.match(lot, /  hit = \[r for r in src\.all if \(getattr\(r, "RecalculLe", None\) or 0\) > c or r\.id in again\]\n  hit = \[r for r in hit if r\.id_sync and keep\(r\)\]\n/,
+  assert.match(lot, /  stamped = \[\(getattr\(r, "RecalculLe", None\) or 0, r\) for r in src\.all\]\n  hit = \[r for x, r in stamped if x > c or r\.id in again\]\n  hit = \[r for r in hit if r\.id_sync and keep\(r\)\]\n/,
     'seule RecalculLe (un nombre) est lue sur toutes les lignes, clé et filtre sur les lignes recalculées ou à renvoyer');
   assert.match(lot, /if \$Synchro_Type != "lot": rows = \[r for r in src\.all if r\.id_sync and keep\(r\)\]/, 'instantané et fichiers : toutes les lignes');
   assert.match(lot, /  recent = set\(r\.id for r in touched if r\.MajLe and r\.MajLe >= cut and not \(mute and echo\(r\)\)\)/,

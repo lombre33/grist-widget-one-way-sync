@@ -24,6 +24,11 @@ if ((wanted || []).includes('horsLigne')) {
   patches['/js/grist.js'] = text => text.replace('export async function readSchema() {', "export async function readSchema() {\n  if (window.__offline) throw new TypeError('Failed to fetch');");
 }
 if (shortTimeout) patches['/js/grist.js'] = text => text.replace('const REQUEST_MS = 120000;', 'const REQUEST_MS = 8000;');
+// Le délai de grâce du bilan (10 minutes) est ramené à 20 s : l'avis « une modification manque » doit pouvoir se lire dans un relevé court.
+patches['/js/engine/logic/tally.js'] = text => {
+  if (!text.includes('TALLY_GRACE_S = 600')) throw new Error('délai du bilan introuvable dans tally.js');
+  return text.replace('TALLY_GRACE_S = 600', 'TALLY_GRACE_S = 20');
+};
 Object.assign(patches0, patches);
 // BEFORE=1 : le widget sert l'ancien texte des deux boucles (avant la correction du 25 novembre), pour voir la panne avant/après.
 if (process.env.BEFORE === '1') {
@@ -91,10 +96,20 @@ const cases = {
     log(`[hookRallume] modification après le rallumage : ${await arrives(p, 'apres-rallume@x.fr')}`);
     log(`[hookRallume] modification faite pendant la coupure : ${await arrives(p, 'pendant-coupure@x.fr', 150000)}`);
     log(`[hookRallume] ${await gap(p)}`);
-    await sleep(20000);
+    const lot = (await records(p.src.doc, 'Synchro')).find(r => r.Synchro_Type === 'lot' && r.Synchro_Table === 'Contacts');
+    log(`[hookRallume] bilan du lot de la SOURCE : ${JSON.stringify((JSON.parse(lot.Synchro_Lot || '{}')).bilan)}`);
+    await sleep(40000);
     await keepOpen(p.sv, p.src.url, 'Envoyer');
     await cards(p, 'hookRallume');
-    log(`[hookRallume] ATTENDU : une des deux cartes dit qu'une modification n'est pas arrivée (ou elle arrive seule) : ${/pendant-coupure/.test(await gap(p)) ? 'ÉCART SILENCIEUX si aucune carte ne le dit' : 'pas d\'écart'}`);
+    // Le délai de grâce se juge à chaque passage de recopie ; au repos un passage a lieu toutes les 5 minutes au plus (QUIET_MS), un clic sur
+    // « Synchroniser » en fait un tout de suite. On relève donc la carte avant, puis après ce clic.
+    const lateText = /modifi[ée]+s? dans la SOURCE, mais/;
+    const before = lateText.test(flat(await p.dv.text()));
+    await p.dv.widget().getByRole('button', { name: 'Synchroniser', exact: true }).click();
+    await sleep(6000);
+    const after = flat(await p.dv.text());
+    log(`[hookRallume] carte CIBLE après « Synchroniser » : ${(after.match(/Contacts\s:[^.]*\./) || [cut(after)])[0].slice(0, 300)}`);
+    log(`[hookRallume] ATTENDU : la carte CIBLE dit qu'une modification n'est pas arrivée : ${lateText.test(after) ? `OUI (sans clic : ${before ? 'oui' : 'pas avant le prochain passage'})` : /pendant-coupure/.test(await gap(p)) ? 'NON : ÉCART SILENCIEUX' : 'pas d\'écart'}`);
   },
 
   // Une personne remet à zéro la colonne Synchro_Ids du journal (elle y garde la note du widget, dans les options de la colonne).

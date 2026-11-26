@@ -88,6 +88,11 @@ export const PUBLIC_KEY = /^[A-Za-z0-9_-]{87}$/;
 
 // Les clés d'une table sont réparties en BUCKETS seaux selon leur CRC-32 (voir formulas.js).
 export const BUCKETS = 256;
+
+// Les dernières modifications que chaque lot annonce dans son bilan (voir tally.js) : au plus RECENT_MAX lignes, repérées
+// par les KEY_PREFIX premiers caractères de leur clé (de quoi les reconnaître sans alourdir chaque envoi).
+export const RECENT_MAX = 12;
+export const KEY_PREFIX = 10;
 export const LIST_PREFIX = 'ids:'; // liste complète d'un seul tenant (montage 0.4, lien public)
 export const RESEND_ALL = 1; // marque de renvoi : toute la table, lignes sans MajLe comprises
 

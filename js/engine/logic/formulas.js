@@ -1,14 +1,17 @@
 // SOURCE : les formules de la table Synchro, et les colonnes que le widget ajoute aux tables
 // envoyées (clé, MajLe, RecalculLe, Supprime).
 import {
-  AUTHOR_COL, BUCKETS, COL_ID, DELETE_COL, EXPORT_COL, HUB, KEY_COL, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECALC_COL, RESEND_COL, SCHEMA_COL,
-  LINK_PREFIX, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, chunk, isBlank,
+  AUTHOR_COL, BUCKETS, COL_ID, DELETE_COL, EXPORT_COL, HUB, KEY_COL, KEY_PREFIX, KIND, LIST_COL, LOT_COL, MISSING_COL, ORDER_COL, RECALC_COL, RECENT_MAX,
+  RESEND_COL, SCHEMA_COL, LINK_PREFIX, SYNC_TABLE, TABLE_COL, TRACK_COL, TYPE_COL, chunk, isBlank,
 } from './common.js';
 
 const WINDOW_S = 5; // un lot porte les lignes modifiées depuis 5 secondes
 // Au chargement du document, Grist recalcule RECALC_COL pour toutes les lignes : ce n'est pas une
 // annulation, sauf dans une petite table, renvoyée alors en entier (quelques lignes).
 const SMALL_TABLE = 20;
+// Candidats à l'annonce des dernières modifications (le bilan en garde RECENT_MAX) : les lignes recalculées le plus récemment,
+// dont certaines peuvent ne plus être dans le filtre de l'export.
+const RECENT_CANDIDATES = 24;
 // Octets d'un lot. Grist refuse un envoi de plus de 1 Mo, et un même envoi regroupe les listes des
 // clés et les lots des tables d'un export qui changent ensemble : chaque lot prend sa part de ce
 // que les listes laissent.
@@ -264,7 +267,9 @@ const lotWindowLines = () => [
   // vite) est lue sur toutes les lignes ; le reste (clé, filtre, dates, bien plus lentes à lire)
   // seulement sur les lignes recalculées depuis moins de WINDOW_S secondes et celles à renvoyer.
   '  c = v(cut)',
-  `  hit = [r for r in src.all if (getattr(r, "${RECALC_COL}", None) or 0) > c or r.id in again]`,
+  // L'heure de recalcul de chaque ligne est lue une seule fois : le bilan en tire les dernières modifications (étape 7).
+  `  stamped = [(getattr(r, "${RECALC_COL}", None) or 0, r) for r in src.all]`,
+  '  hit = [r for x, r in stamped if x > c or r.id in again]',
   `  hit = [r for r in hit if r.${KEY_COL} and keep(r)]`,
   `  touched = [r for r in hit if (getattr(r, "${RECALC_COL}", None) or 0) > c]`,
   '  def echo(r):',
@@ -324,14 +329,27 @@ const lotAnnounceLines = () => [
 ];
 
 // Étape 7, le bilan : combien de clés la table a pour cet export (lues dans la ligne 'suivi', déjà recalculée à
-// chaque changement des clés), et depuis quand. La CIBLE compare avec ce qui lui est arrivé (voir
-// tally.js). Le texte ne change que si les clés changent : pas d'envoi de plus. Pas en Échange.
+// chaque changement des clés), depuis quand (`n`, `t`), et dans `r` les RECENT_MAX dernières modifications : le début de
+// la clé de la ligne et l'heure de sa modification (MajLe, en secondes). La CIBLE compare avec ce qui lui est arrivé
+// (voir tally.js) : un webhook coupé à la main dans Grist ne laisse sinon aucune trace. Les lignes viennent des dernières
+// heures de recalcul, déjà lues pour la fenêtre : lire MajLe de toutes les lignes coûtait plus de 100 ms par écriture à
+// 10 000 lignes ; MajLe n'est lue que sur ces lignes. Le texte ne change que si les clés ou les dernières modifications
+// changent : pas d'envoi de plus. Pas en Échange.
 const lotTallyLines = () => [
   'if capped and not swap.id:',
   `  tr = ${SYNC_TABLE}.lookupOne(${EXPORT_COL}=$${EXPORT_COL}, ${TABLE_COL}=$${TABLE_COL}, ${TYPE_COL}="${KIND.track}")`,
   `  head = str(tr.${LIST_COL} or "").split(":")[0]`,
   `  st = json.loads(tr.${TRACK_COL}) if isinstance(tr.${TRACK_COL}, str) and tr.${TRACK_COL}.startswith("{") else {}`,
-  '  if tr.id and head.isdigit() and st.get("t"): lot["bilan"] = {"n": int(head), "t": int(st["t"])}',
+  '  if tr.id and head.isdigit() and st.get("t"):',
+  '    lot["bilan"] = {"n": int(head), "t": int(st["t"])}',
+  '    import heapq',
+  '    last = []',
+  `    for x, r in heapq.nlargest(${RECENT_CANDIDATES}, stamped, key=lambda p: p[0]):`,
+  '      try:',
+  `        if r.${KEY_COL} and getattr(r, "${ORDER_COL}", None) and keep(r): last.append([str(r.${KEY_COL})[:${KEY_PREFIX}], int(v(r.${ORDER_COL}))])`,
+  '      except Exception:',
+  '        pass',
+  `    if last: lot["bilan"]["r"] = last[:${RECENT_MAX}]`,
 ];
 
 // Sync_Etat (formule de déclenchement). Lignes 'suivi' : l'heure du dernier changement des clés

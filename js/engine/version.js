@@ -299,7 +299,27 @@
 //         change pour tout hôte : un passage qui échoue est réessayé de plus en plus tard (au plus toutes les 2 minutes) au lieu de
 //         toutes les 10 secondes ; un hôte dont le dessin échouait ne perd plus sa boucle. Port, tables, codes (`CODE_FORMAT` 2) et
 //         texte des formules de `Synchro` inchangés (`formulas-golden`).
-export const ENGINE_VERSION = '5.3.0';
+// 5.4.0 (26 novembre 2026, suite de l'audit de fiabilité du 25 : une modification perdue est dite) : le texte de la formule du lot change, d'où la
+//         mineure. Cas visé : un webhook coupé à la main dans Grist, une ligne modifiée, le webhook rallumé : Grist ne met rien en file pendant
+//         la coupure, la modification n'arrive jamais et rien ne le disait (le bilan ne compte que les clés). **SOURCE** : la formule du lot
+//         (ligne `lot`, hors Échange) ajoute à `bilan` la clé `r` : les `RECENT_MAX` (12) dernières lignes modifiées, `[début de clé (KEY_PREFIX,
+//         10 caractères), heure de MajLe]`, prises parmi les `RECENT_CANDIDATES` (24) lignes au `RecalculLe` le plus récent (`heapq.nlargest`) et
+//         passées au filtre de l'export ; la colonne `RecalculLe` (un nombre) est déjà lue sur toutes les lignes, `MajLe` (une date, lue cinq fois plus
+//         lentement par Grist) ne l'est que sur ces 24 lignes. **Mesuré** (vrai Grist 1.7.22, 10 000 lignes, écriture d'une cellule : 33 ms sans
+//         widget) : l'ancienne formule 50 à 58 ms, la nouvelle 59 à 60 ms (+2 à +9 ms) ; la piste d'un maximum de `MajLe` par seau de clés (lu sur toutes
+//         les lignes) ajoutait 90 à 130 ms et a été écartée (`tests/e2e/tools/probe-bilan-cost.mjs`). **CIBLE** (`logic/tally.js`) : `parseLot` lit `bilan.r`
+//         (entrées illisibles écartées, douze au plus), `planUnpack` rend `recent` par table ; `nextLate`, `lateEntries` gardent dans la note
+//         (`tally.<table>.late`, `{ début de clé: heure }`, `LATE_MAX` = 24) les lignes d'ici dont la dernière version est PLUS ANCIENNE que
+//         l'heure annoncée (jamais « différente » : une version peut dater après MajLe, Ctrl+Z, renvoi, petite table au chargement) ; une clé absente
+//         d'ici n'est pas en retard (c'est un manque, dit par le compte), une ligne partie de la SOURCE non plus ; `tallyGap` rend
+//         `{ late, keys }` quand le compte est bon, et `tallyDue` le dit au bout du même délai de grâce que le compte (`TALLY_GRACE_S`, 600 s de
+//         page ouverte). Pas d'alerte en Échange, par lien public, en archive, ni quand le bilan n'a pas de `r` (SOURCE d'avant : rien ne change
+//         pour elle ; une CIBLE d'avant ignore la clé `r`). **Pour un hôte** : `state.results.get(journal).tally[table]` peut valoir `{ late, keys }`
+//         au lieu de `{ expected, got, gap }` : le dire (syncPlus : `recv.late`). **Limites dites** : une modification perdue puis suivie de plus de
+//         douze autres avant qu'un lot n'arrive n'est vue que si un lot qui la porte arrive tant qu'elle est dans la fenêtre (elle reste ensuite dans la
+//         note) ; deux modifications d'une même ligne dans la même seconde ne se distinguent pas ; une annulation (Ctrl+Z) perdue n'est pas vue ; la
+//         détection demande la page de la CIBLE ouverte. Port, tables, codes (`CODE_FORMAT` 2) inchangés ; `formulas-golden` mis à jour.
+export const ENGINE_VERSION = '5.4.0';
 
 // Version de l'application qui fait tourner le moteur : elle est écrite dans les codes d'invitation
 // et de réponse (qui s'en servent pour avertir d'un code plus ancien ou plus récent, voir

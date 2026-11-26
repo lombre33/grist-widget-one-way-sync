@@ -292,12 +292,12 @@ async function restyleReception(group) {
   await renderTarget();
 }
 
-// Les lignes qui n'arrivent pas : manquantes (envoi en morceaux), annoncées mais pas reçues, trop grosses, instantané trop gros.
+// Les lignes qui n'arrivent pas : manquantes (envoi en morceaux), annoncées mais pas reçues ou modifiées sans que la modification soit arrivée, trop grosses, instantané trop gros.
 function gapNotes(group) {
   const { note } = group;
   return [
     Object.entries(note.missing || {}).map(([table, n]) => message('warn', t('recv.missing', { table, n }))),
-    Object.entries((state.results.get(group.journal) || {}).tally || {}).map(([table, g]) => message('warn', t('recv.tally', { table, ...g, min: TALLY_GRACE_S / 60 }))),
+    Object.entries((state.results.get(group.journal) || {}).tally || {}).map(([table, g]) => message('warn', t(g.late ? 'recv.late' : 'recv.tally', { table, ...g, min: TALLY_GRACE_S / 60 }))),
     Object.entries(note.big || {}).map(([table, keys]) => message('warn', t('recv.big', { table, n: keys.length }))),
     (note.tooBig || []).length ? message('warn', t('recv.tooBig', { tables: note.tooBig.join(', ') })) : null,
   ];

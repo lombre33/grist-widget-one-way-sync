@@ -348,6 +348,11 @@ onglets du même navigateur (`ONLY_TABS=1`).
   journal, 500 lignes reçues par passage). Une date d'arrivée hors bornes ne peut pas casser
   l'affichage, et une carte qui ne se dessine pas laisse les autres, et ses boutons « Couper le
   lien » et « Arrêter », à leur place.
+- **Bilan du lot (0.13.0, étendu en 0.31.2)** : chaque lot annonce le nombre de clés de sa table et, depuis la 0.31.2,
+  les douze dernières lignes modifiées (début de leur clé, 10 caractères d'un identifiant tiré au hasard, et
+  heure de modification, jamais une valeur). Signé avec le lot et lu par la CIBLE comme le reste du lot : un
+  bilan forgé n'est pas accepté (signature), et un bilan abîmé ne lève rien et n'invente rien. Seul effet :
+  l'avis « une modification manque » de la carte ; la CIBLE n'écrit rien dans ses tables à cause d'un bilan.
 - **Fin d'un envoi** : quand la SOURCE révoque un destinataire, supprime l'export ou arrête un
   Échange, son widget envoie d'abord une ligne « fin » à l'adresse du webhook, puis l'efface ; la
   carte de la CIBLE affiche « Coupé par la SOURCE ». Cette ligne est signée ; pour une réception
